@@ -167,6 +167,10 @@ textarea {
   line-height: 1.5;
 }
 
+.sessionLine {
+  font-weight: 700;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -200,6 +204,12 @@ textarea {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
 }
 
 .card {
@@ -242,11 +252,47 @@ textarea {
 .field {
   min-height: 38px;
   min-width: 180px;
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #ffffff;
   color: var(--text);
   padding: 8px 10px;
+}
+
+.textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.textareaCompact {
+  min-height: 58px;
+  resize: vertical;
+}
+
+.inlineField {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.notice {
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.noticeError {
+  border: 1px solid #f3b4b4;
+  background: #fff1f1;
+  color: var(--danger);
+}
+
+.noticeSuccess {
+  border: 1px solid #a9dec8;
+  background: #effaf5;
+  color: var(--success);
 }
 
 .tableWrap {
@@ -318,6 +364,158 @@ textarea {
   gap: 16px;
 }
 
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.iconTextButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.iconTextButton:disabled,
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dangerText {
+  color: var(--danger);
+}
+
+.templateList {
+  display: grid;
+  gap: 10px;
+}
+
+.templateItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.templateItem span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.stageItem {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.stageFormList,
+.stageTimeline {
+  display: grid;
+  gap: 12px;
+}
+
+.stageFormItem {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 12px;
+}
+
+.stageOptions {
+  display: grid;
+  grid-template-columns: minmax(170px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.checkControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.stageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stageMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.stageMeta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.processPicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.processPicker span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.processPickerActive {
+  border-color: var(--primary);
+  background: #e8f0fe;
+}
+
+.linkButton {
+  border: 0;
+  background: transparent;
+  color: var(--primary-strong);
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0;
+  text-align: left;
+}
+
 .panelBody {
   display: grid;
   gap: 12px;
@@ -345,6 +543,56 @@ textarea {
   padding: 24px;
 }
 
+.loginPage {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: var(--background);
+  padding: 24px;
+}
+
+.loginPanel {
+  display: grid;
+  gap: 18px;
+  width: min(440px, 100%);
+  padding: 22px;
+}
+
+.loginBrand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.loginBrand h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.loginBrand p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.loginForm {
+  display: grid;
+  gap: 12px;
+}
+
+.loginForm label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.loginAccounts {
+  display: grid;
+  gap: 10px;
+}
+
 @media (max-width: 960px) {
   .appShell {
     grid-template-columns: 1fr;
@@ -360,6 +608,7 @@ textarea {
   }
 
   .summaryGrid,
+  .formGrid,
   .integrationPanel {
     grid-template-columns: 1fr 1fr;
   }
@@ -381,7 +630,20 @@ textarea {
   }
 
   .summaryGrid,
+  .formGrid,
   .integrationPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .inlineField {
+    grid-template-columns: 1fr;
+  }
+
+  .stageGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stageOptions {
     grid-template-columns: 1fr;
   }
 

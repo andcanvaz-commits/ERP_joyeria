@@ -15,8 +15,20 @@ Abrir el frontend:
 
 ```text
 http://localhost:3000
+http://localhost:3000/login
 http://localhost:3000/produccion
 ```
+
+Cuentas locales sembradas por Docker:
+
+```text
+owner / Owner123!
+admin / Admin123!
+```
+
+Permisos:
+- `owner`: crea procesos y ejecuta produccion.
+- `admin`: revisa la pantalla de produccion en modo lectura.
 
 Abrir la documentacion interactiva de la API:
 
@@ -43,5 +55,6 @@ Notas:
 - En Docker se usa PostgreSQL 16.
 - El frontend usa Next.js y se expone en el puerto 3000.
 - `AUTO_CREATE_TABLES=true` crea tablas automaticamente solo para desarrollo local mientras no existan migraciones Alembic.
-- La autenticacion JWT sigue pendiente; algunos endpoints protegidos aun dependen del placeholder de `get_current_user`.
+- El login usa JWT y usuarios locales sembrados en PostgreSQL para desarrollo.
+- `DEV_AUTH_ENABLED=false` mantiene activo el flujo real de login.
 - La finalizacion de produccion todavia espera integracion real del modulo de inventario.

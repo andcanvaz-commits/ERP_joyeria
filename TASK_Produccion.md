@@ -397,3 +397,172 @@ Verificaciones ejecutadas:
 
 Verificaciones no ejecutadas o no completadas:
 - No se aplico `npm audit fix --force` porque proponia un cambio incompatible que bajaria Next a `9.3.3`.
+
+### 2026-06-17 - Produccion funcional sin datos falsos en frontend
+
+Que se hizo:
+- Se elimino el uso de datos demo en la pantalla de produccion.
+- Se agrego cliente HTTP frontend en `frontend/lib/api.ts`.
+- Se agrego servicio frontend de produccion en `frontend/lib/production-api.ts`.
+- Se ampliaron tipos frontend de produccion para plantillas, ordenes y etapas reales.
+- Se convirtio `ProductionDashboard` en componente cliente que consume la API real.
+- Se implemento listado real de plantillas activas desde `GET /api/production/process-templates`.
+- Se implemento listado real de ordenes desde `GET /api/production/orders`.
+- Se implemento formulario real para crear plantillas con etapas dinamicas.
+- Se implemento formulario real para crear ordenes de produccion contra plantillas existentes.
+- Se implementaron acciones reales de iniciar, pausar, reanudar y cancelar ordenes desde frontend.
+- Se agregaron estados de carga, error, exito, vacio y filtros reales en la pantalla.
+- Se agrego CORS en FastAPI configurable por `CORS_ORIGINS`.
+- Se agrego modo `DEV_AUTH_ENABLED` para que Docker levante un usuario local con permisos de produccion mientras JWT real sigue pendiente.
+- Se actualizo `docker-compose.yml` con `CORS_ORIGINS=http://localhost:3000` y `DEV_AUTH_ENABLED=true`.
+- Se actualizo `README.md` documentando el usuario local de desarrollo.
+
+Que falta:
+- Reemplazar `DEV_AUTH_ENABLED` por autenticacion JWT real antes de produccion.
+- Conectar ordenes con catalogo real de productos cuando exista el modulo correspondiente; por ahora se usa UUID de producto porque produccion no debe implementar productos ni inventario.
+- Crear formularios avanzados para configurar flags por etapa: pesos, merma, observacion obligatoria, tiempo estimado y obligatoriedad.
+- Implementar pantalla de detalle de orden y ejecucion granular de etapas desde frontend.
+- Implementar finalizacion de orden cuando inventario implemente `InventoryIntegrationPort.commit_finished_production`.
+- Agregar pruebas automatizadas frontend/backend.
+
+Archivos modificados:
+- `backend/app/main.py`
+- `backend/modules/auth/dependencies.py`
+- `backend/modules/config/settings.py`
+- `docker-compose.yml`
+- `README.md`
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/api.ts`
+- `frontend/lib/production-api.ts`
+- `frontend/types/production/index.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- La pantalla ya no simula datos; consume produccion real.
+- La finalizacion sigue bloqueada hasta que inventario provea el puerto real.
+- Produccion sigue sin actualizar stock ni crear movimientos de inventario.
+- Cuando inventario este listo, el frontend debera mostrar disponibilidad, reservas y handoff terminado usando datos reales del contrato.
+
+Docker:
+- Confirmado con rebuild completo.
+- `web`, `api` y `db` levantan con `docker-compose up --build -d`.
+- `DEV_AUTH_ENABLED=true` es solo para desarrollo Docker local.
+
+Reglas de `SKILL.md` aplicadas:
+- Se mantuvo UI operacional y escaneable.
+- Se agregaron formularios, filtros, estados de carga, error, exito y vacio.
+- No se agregaron nombres reales de procesos o etapas de joyeria como logica fija; el usuario crea plantillas desde datos.
+
+Verificaciones ejecutadas:
+- `docker-compose up --build -d`
+- `docker-compose exec web npm run build`
+- `docker-compose exec api python -m compileall backend`
+- `curl.exe -sS -o NUL -w "FRONT=%{http_code}" http://localhost:3000/produccion` devolvio `FRONT=200`.
+- `curl.exe -sS -o NUL -w "API=%{http_code}" http://localhost:8000/docs` devolvio `API=200`.
+- Prueba API real: `POST /api/production/process-templates` creo una plantilla en PostgreSQL.
+- Prueba API real: `POST /api/production/orders` creo una orden en PostgreSQL usando la plantilla creada.
+- Prueba API real: `GET /api/production/orders` devolvio ordenes persistidas.
+- Prueba CORS: `OPTIONS /api/production/orders` con origen `http://localhost:3000` devolvio `200 OK` y `access-control-allow-origin`.
+- Logs de API confirmaron `GET` reales desde el frontend a plantillas y ordenes.
+
+Verificaciones no ejecutadas o no completadas:
+- No se probo finalizacion de orden porque el adaptador de inventario todavia responde `501` por diseno.
+
+### 2026-06-17 - Ejecucion real de etapas desde frontend
+
+Que se hizo:
+- Se agregaron funciones frontend reales para `POST /api/production/stages/{stage_id}/start` y `POST /api/production/stages/{stage_id}/finish`.
+- Se agrego panel de detalle de orden en la pantalla de produccion.
+- Se permite seleccionar una orden y ver sus etapas reales persistidas.
+- Se agregaron acciones para iniciar y finalizar etapas desde el frontend.
+- Se agregaron campos operativos por etapa para peso inicial, peso final, merma y observaciones cuando aplican.
+- Se agregaron estilos responsive para el panel de etapas.
+
+Que falta:
+- Crear vista dedicada de detalle de orden con historial completo.
+- Agregar confirmaciones para cancelacion y finalizacion cuando inventario este listo.
+- Agregar validaciones frontend mas ricas segun flags de cada etapa.
+- Implementar finalizacion de orden cuando exista adaptador real de inventario.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/production-api.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- La ejecucion de etapas no toca inventario.
+- La finalizacion de orden completa sigue pendiente del puerto `InventoryIntegrationPort.commit_finished_production`.
+- La merma capturada por etapa queda en produccion; inventario debera decidir como registrar movimientos cuando se confirme produccion terminada.
+
+Docker:
+- Sin cambios adicionales de Docker en este bloque.
+- El stack siguio levantado con `web`, `api` y `db`.
+
+Reglas de `SKILL.md` aplicadas:
+- Se agrego flujo operativo real dentro de la pantalla, con acciones compactas y estados visibles.
+- Se mantuvo interfaz densa y sin datos falsos.
+
+Verificaciones ejecutadas:
+- `docker-compose exec web npm run build`
+- `docker-compose exec api python -m compileall backend`
+- `curl.exe -sS -o NUL -w "FRONT=%{http_code}" http://localhost:3000/produccion` devolvio `FRONT=200`.
+- `curl.exe -sS -o NUL -w "API=%{http_code}" http://localhost:8000/docs` devolvio `API=200`.
+- Prueba API real: se inicio una orden pendiente con `POST /api/production/orders/{order_id}/start`.
+- Prueba API real: se inicio una etapa pendiente con `POST /api/production/stages/{stage_id}/start`.
+- Prueba API real: se finalizo la etapa iniciada con `POST /api/production/stages/{stage_id}/finish`.
+- `docker-compose ps` mostro `web`, `api` y `db` arriba.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto finalizacion total de orden porque inventario aun no implementa el contrato y el endpoint responde `501` por diseno.
+
+### 2026-06-17 - Correccion de flujo: procesos y ejecucion por etapas
+
+Que se hizo:
+- Se corrigio el lenguaje de la interfaz para eliminar "plantillas" y "ordenes" como conceptos visibles.
+- Se reorganizo la pantalla en dos flujos:
+  - Crear proceso.
+  - Jefe de produccion: seleccionar proceso, introducir cantidad de materia prima e iniciar ejecucion.
+- Se implemento creacion de etapas con nombre, descripcion, requiere pesaje y tiempo de duracion en minutos.
+- Se elimino el campo visible de producto/UUID del flujo operativo; el frontend genera el identificador tecnico temporal porque aun no existe catalogo de productos/materia prima.
+- Se agrego listado de procesos creados para seleccionar rapidamente.
+- Se agrego tabla de procesos en ejecucion con materia prima, estado, etapa actual y tiempo transcurrido.
+- Se agrego panel de avance por etapas con duracion estimada, tiempo transcurrido, requerimiento de pesaje, peso, merma y observaciones.
+- Se ajusto el topbar para que la pantalla no parezca "owner", sino modulo de produccion con configuracion y ejecucion.
+
+Que falta:
+- Separar por rol real cuando exista autenticacion/RBAC completo: administrador/owner crea procesos y jefe de produccion ejecuta procesos.
+- Reemplazar el UUID tecnico generado en frontend por seleccion real de materia prima/producto cuando existan esos modulos.
+- Agregar avance automatico opcional a la siguiente etapa luego de finalizar la actual.
+- Agregar bloqueo visual por secuencia estricta si se requiere que solo una etapa pueda estar activa a la vez.
+- Crear vista dedicada para detalle historico de ejecucion.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/layout/app-shell.tsx`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- La cantidad ingresada se trata como materia prima operativa en produccion, pero no descuenta stock.
+- Cuando inventario este listo, esa cantidad debe validarse/reservarse con `InventoryIntegrationPort.check_material_availability` y `reserve_materials_for_production`.
+- La merma registrada por etapa queda preparada para que inventario la convierta en movimiento cuando se confirme la produccion.
+
+Docker:
+- Sin cambios adicionales de Docker.
+
+Reglas de `SKILL.md` aplicadas:
+- Se mantuvo una pantalla operacional, no demostrativa.
+- Se quitaron datos falsos y se priorizo flujo real de trabajo.
+- Se mantuvieron procesos y etapas como datos configurables, sin quemar nombres de joyeria.
+
+Verificaciones ejecutadas:
+- `docker-compose exec web npm run build`
+- Prueba API real: se creo proceso con etapa que requiere pesaje y duracion.
+- Prueba API real: se inicio proceso con cantidad de materia prima.
+- Prueba API real: se inicio etapa ingresando peso inicial.
+- Prueba API real: se avanzo/finalizo etapa ingresando peso final y merma.
+
+Verificaciones no ejecutadas o no completadas:
+- No se integro seleccion real de materia prima porque pertenece al modulo de inventario y no debe implementarse aqui.

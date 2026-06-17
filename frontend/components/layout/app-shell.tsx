@@ -41,8 +41,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="mainArea">
         <header className="topbar">
           <div className="topbarTitle">
-            <strong>Modulo de produccion</strong>
-            <span>Ambiente local Docker</span>
+            <strong>Produccion</strong>
+            <span>Configuracion de procesos y ejecucion operativa</span>
           </div>
         </header>
         {children}
