@@ -208,3 +208,192 @@ Verificaciones ejecutadas:
 
 Verificaciones no ejecutadas o no completadas:
 - No se ejecuto `docker-compose config` porque no se modificaron archivos Docker.
+
+### 2026-06-17 - Lectura y ciclo de vida de ordenes
+
+Que se hizo:
+- Se reviso `claude.md`, `PROMPT_AGENTE_PRODUCCION.md`, `TASK_Produccion.md`, `TASK_Inventario.md` y `backend/modules/shared/contracts/inventory.py` antes de editar.
+- Se reviso la estructura actual del proyecto y el estado de git.
+- Se detecto un directorio no rastreado `ERP_joyeria/` con una copia anidada del proyecto; no se modifico.
+- Se agregaron consultas de repositorio para obtener y listar plantillas de proceso con sus etapas precargadas.
+- Se agregaron consultas de repositorio para obtener y listar ordenes de produccion con sus etapas precargadas.
+- Se agregaron servicios de lectura/listado de plantillas y ordenes.
+- Se agrego validacion de estado al filtrar ordenes de produccion.
+- Se agregaron reglas de pausa, reanudacion y cancelacion de ordenes sin tocar inventario.
+- Se agregaron endpoints `GET /api/production/process-templates`, `GET /api/production/process-templates/{process_template_id}`, `GET /api/production/orders`, `GET /api/production/orders/{order_id}`, `POST /api/production/orders/{order_id}/pause`, `POST /api/production/orders/{order_id}/resume` y `POST /api/production/orders/{order_id}/cancel`.
+- Se normalizo el mapeo de errores de dominio para devolver `404` cuando el recurso no existe y `409` para conflictos de negocio.
+
+Que falta:
+- Crear migraciones Alembic para las tablas de produccion.
+- Implementar autenticacion JWT real y permisos RBAC reales para los permisos nuevos: `production.read`, `production.process_templates.read`, `production.pause`, `production.resume` y `production.cancel`.
+- Agregar pruebas unitarias para lectura/listado, filtro por estado, pausa, reanudacion y cancelacion.
+- Definir si se necesita auditoria especifica para pausa, reanudacion y cancelacion cuando exista el modulo de auditoria.
+- Implementar calculo de materiales desde composiciones versionadas cuando exista el modulo correspondiente.
+- Integrar disponibilidad/reserva de materiales mediante el contrato compartido, sin mutar inventario desde produccion.
+
+Archivos modificados:
+- `backend/modules/production/repository.py`
+- `backend/modules/production/service.py`
+- `backend/modules/production/router.py`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- No se agrego logica de inventario ni se modifico `backend/modules/inventory`.
+- La lectura y los cambios de estado de orden no actualizan stock ni crean movimientos.
+- La finalizacion de orden sigue dependiendo de `InventoryIntegrationPort.commit_finished_production`.
+- Cuando existan requerimientos de materiales, produccion debera usar `check_material_availability` y `reserve_materials_for_production` desde `shared`.
+
+Docker:
+- Sin cambios requeridos en archivos Docker, dependencias, variables, puertos ni comandos.
+- Se uso Docker existente para validar la API y compilar el backend dentro del contenedor.
+
+Reglas de `SKILL.md` aplicadas:
+- No aplica; no se modifico frontend.
+
+Verificaciones ejecutadas:
+- `git status -sb`
+- `git diff --name-only`
+- Revision del diff de `backend/modules/production/repository.py`, `backend/modules/production/service.py` y `backend/modules/production/router.py`.
+- `python -m compileall backend` intento local: fallo porque `python` no esta disponible en PATH.
+- `py -m compileall backend` intento local: fallo porque no hay Python instalado detectado por el launcher.
+- `docker-compose config` valido correctamente la configuracion, con warning de acceso denegado a `C:\Users\MSI I7\.docker\config.json`.
+- `docker-compose up --build -d` reconstruyo y levanto la API y PostgreSQL.
+- `docker-compose exec api python -m compileall backend` compilo correctamente el backend dentro del contenedor.
+- `docker-compose ps` mostro `api` y `db` en estado `Up`.
+- `docker-compose logs api --tail 80` mostro arranque correcto de Uvicorn y startup completo.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecutaron pruebas automatizadas porque el repositorio aun no tiene suite visible de tests para produccion.
+- No se probaron endpoints HTTP autenticados porque `get_current_user` sigue siendo placeholder hasta implementar JWT real.
+
+### 2026-06-17 - Frontend Next.js y servicio Docker web
+
+Que se hizo:
+- Se leyo `SKILL.md` completo antes de modificar frontend.
+- Se creo una app Next.js real dentro de `frontend` con TypeScript.
+- Se creo la ruta `/` redirigiendo a `/produccion`.
+- Se creo la pantalla `/produccion` con shell ERP, navegacion lateral, resumen operativo, tabla de ordenes, filtros, acciones y panel de integracion pendiente con inventario.
+- Se agregaron componentes compartidos de layout y badge de estado para reutilizacion posterior.
+- Se agregaron tipos frontend especificos de produccion.
+- Se agrego `frontend/Dockerfile` para instalar dependencias Node y correr Next en Docker.
+- Se agrego el servicio `web` a `docker-compose.yml` en el puerto 3000.
+- Se agrego `NEXT_PUBLIC_API_URL=http://localhost:8000` al servicio `web`.
+- Se actualizo `.dockerignore`, `frontend/.dockerignore`, `frontend/.gitignore` y `README.md`.
+- Se actualizo Next a `16.2.9` y ESLint a `9.39.4` despues de que npm reporto vulnerabilidad en `next@14.2.20`.
+
+Que falta:
+- Conectar la pantalla de produccion con API real cuando JWT y permisos esten implementados.
+- Crear formularios reales para nueva orden y plantillas de proceso.
+- Reemplazar datos demo de la tabla por consultas a endpoints de produccion.
+- Implementar estados de carga, error y vacio conectados a API real.
+- Agregar pruebas frontend cuando exista configuracion de test.
+
+Archivos modificados:
+- `.dockerignore`
+- `README.md`
+- `docker-compose.yml`
+- `frontend/Dockerfile`
+- `frontend/.dockerignore`
+- `frontend/.eslintrc.json`
+- `frontend/.gitignore`
+- `frontend/next-env.d.ts`
+- `frontend/next.config.mjs`
+- `frontend/package.json`
+- `frontend/tsconfig.json`
+- `frontend/app/globals.css`
+- `frontend/app/layout.tsx`
+- `frontend/app/page.tsx`
+- `frontend/app/produccion/page.tsx`
+- `frontend/components/layout/app-shell.tsx`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/components/ui/status-badge.tsx`
+- `frontend/types/production/index.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- La UI muestra el estado "Pendiente de integracion" sin implementar logica de inventario.
+- Inventario debera implementar disponibilidad, reservas y movimientos mediante los contratos compartidos.
+- El componente `StatusBadge` puede reutilizarse luego para inventario con estados compatibles.
+- El `AppShell` compartido queda preparado para que inventario use la misma navegacion y lenguaje visual.
+
+Docker:
+- Se agrego el servicio `web` para levantar Next.js en `http://localhost:3000`.
+- `docker-compose up --build -d` deberia instalar dependencias del backend y frontend dentro de contenedores.
+- No se requiere Python ni Node local para trabajar si Docker esta funcionando.
+
+Reglas de `SKILL.md` aplicadas:
+- Pantalla operacional, no landing page.
+- Sidebar y header como shell ERP integrado.
+- UI densa, escaneable y en espanol.
+- Componentes compartidos para layout y badges.
+- No se hardcodearon nombres reales de procesos, etapas, materiales o categorias de joyeria como logica de UI.
+
+Verificaciones ejecutadas:
+- `docker-compose config` valido correctamente el servicio `web`, con warning de acceso denegado a `C:\Users\MSI I7\.docker\config.json`.
+- `docker-compose up --build -d` con Next 14 levanto `web`, `api` y `db`.
+- `docker-compose exec web npm run build` compilo correctamente la ruta `/produccion` con Next 14.
+- `curl.exe -I http://localhost:3000/produccion` devolvio `200 OK` antes del upgrade de Next.
+- `curl.exe -I http://localhost:8000/docs` devolvio `200 OK`.
+- `docker-compose up --build -d web` con Next 16 llego a instalar dependencias y construir imagen `web`, pero fallo al recrear contenedores por error interno de Docker Desktop.
+
+Verificaciones no ejecutadas o no completadas:
+- No se pudo confirmar el contenedor final con Next 16 en esta maquina porque Docker Desktop entro en errores `input/output error` al recrear contenedores, leer logs y ejecutar comandos dentro de `web`.
+- `docker info` termino con permisos/daemon inconsistentes y el intento de esperar el engine fue abortado.
+- Queda pendiente ejecutar nuevamente `docker-compose up --build -d` en un Docker Desktop sano para confirmar el estado final del contenedor local.
+
+### 2026-06-17 - Docker confirmado para backend y frontend
+
+Que se hizo:
+- Se reinicio WSL con `wsl --shutdown` para recuperar Docker Desktop despues de errores `input/output error`.
+- Se inicio Docker Desktop y se espero a que el engine respondiera correctamente.
+- Se ajusto `.dockerignore` para excluir `frontend` del contexto de build del backend, evitando que cambios del front fuercen rebuilds innecesarios del API.
+- Se actualizo el volumen `frontend_node_modules` ejecutando `npm install` dentro del contenedor `web`.
+- Se agrego `frontend/app/not-found.tsx` para que `next build` con Next 16 compile correctamente.
+- Se aceptaron los ajustes automaticos de Next en `frontend/tsconfig.json`.
+- Se genero `frontend/package-lock.json` desde el contenedor para fijar dependencias del frontend.
+- Se recreo el contenedor `web` para que arranque con Next 16.2.9.
+
+Que falta:
+- Conectar datos reales del frontend con la API cuando JWT y permisos esten listos.
+- Resolver las vulnerabilidades moderadas reportadas por `npm audit` cuando Next publique una ruta de fix sin downgrade incompatible.
+
+Archivos modificados:
+- `.dockerignore`
+- `frontend/app/not-found.tsx`
+- `frontend/package-lock.json`
+- `frontend/tsconfig.json`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios de logica de inventario.
+- El Docker compartido ya levanta frontend, backend y base para que inventario pueda trabajar sobre el mismo entorno.
+
+Docker:
+- Confirmado con `docker-compose up --build -d`.
+- Servicios arriba: `web`, `api` y `db`.
+- Frontend disponible en `http://localhost:3000` y `http://localhost:3000/produccion`.
+- API disponible en `http://localhost:8000/docs`.
+- No se requiere Python ni Node local para levantar el proyecto.
+
+Reglas de `SKILL.md` aplicadas:
+- Se mantuvo pantalla operacional con shell compartido y componentes reutilizables.
+
+Verificaciones ejecutadas:
+- `wsl --shutdown`
+- Inicio de Docker Desktop.
+- Espera de Docker engine hasta `Docker engine ready`.
+- `docker-compose up --build -d`
+- `docker-compose ps`
+- `docker-compose logs web --tail 80`
+- `docker-compose logs api --tail 80`
+- `docker-compose exec web npm install`
+- `docker-compose exec web npm run build`
+- `docker-compose up -d --force-recreate web`
+- `curl.exe -I http://localhost:3000/produccion` devolvio `200 OK`.
+- `curl.exe -I http://localhost:8000/docs` devolvio `200 OK`.
+- `docker-compose exec api python -m compileall backend` compilo correctamente.
+- `docker-compose config` valido correctamente, con warning persistente de acceso denegado a `C:\Users\MSI I7\.docker\config.json`.
+- `docker-compose exec web npm audit --audit-level=high` devolvio exit code 0; solo reporto vulnerabilidades moderadas.
+
+Verificaciones no ejecutadas o no completadas:
+- No se aplico `npm audit fix --force` porque proponia un cambio incompatible que bajaria Next a `9.3.3`.

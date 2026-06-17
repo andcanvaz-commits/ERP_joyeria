@@ -64,6 +64,28 @@ class ProductionService:
         self.repository.flush()
         return ProcessTemplateRead.model_validate(process_template)
 
+    def get_process_template(self, process_template_id: UUID) -> ProcessTemplateRead:
+        process_template = self.repository.get_process_template(process_template_id)
+        if process_template is None:
+            raise ProductionDomainError("Process template not found.")
+        return ProcessTemplateRead.model_validate(process_template)
+
+    def list_process_templates(
+        self,
+        *,
+        product_id: UUID | None = None,
+        is_active: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ProcessTemplateRead]:
+        process_templates = self.repository.list_process_templates(
+            product_id=product_id,
+            is_active=is_active,
+            limit=limit,
+            offset=offset,
+        )
+        return [ProcessTemplateRead.model_validate(process_template) for process_template in process_templates]
+
     def create_order(self, payload: ProductionOrderCreate, current_user: CurrentUser) -> ProductionOrderRead:
         process_template = self.repository.get_process_template(payload.process_template_id)
         if process_template is None:
@@ -106,6 +128,30 @@ class ProductionService:
         self.repository.flush()
         return ProductionOrderRead.model_validate(order)
 
+    def get_order(self, order_id: UUID) -> ProductionOrderRead:
+        order = self.repository.get(order_id)
+        if order is None:
+            raise ProductionDomainError("Production order not found.")
+        return ProductionOrderRead.model_validate(order)
+
+    def list_orders(
+        self,
+        *,
+        status: str | None = None,
+        product_id: UUID | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ProductionOrderRead]:
+        if status is not None:
+            self._ensure_valid_order_status(status)
+        orders = self.repository.list_orders(
+            status=status,
+            product_id=product_id,
+            limit=limit,
+            offset=offset,
+        )
+        return [ProductionOrderRead.model_validate(order) for order in orders]
+
     def start_order(self, order_id: UUID, current_user: CurrentUser) -> ProductionOrderRead:
         order = self.repository.get(order_id)
         if order is None:
@@ -116,6 +162,46 @@ class ProductionService:
         order.status = ProductionOrderStatus.IN_PROGRESS
         order.started_by_user_id = current_user.id
         order.started_at = datetime.utcnow()
+        order.updated_at = datetime.utcnow()
+        return ProductionOrderRead.model_validate(order)
+
+    def pause_order(self, order_id: UUID) -> ProductionOrderRead:
+        order = self.repository.get(order_id)
+        if order is None:
+            raise ProductionDomainError("Production order not found.")
+        if order.status != ProductionOrderStatus.IN_PROGRESS:
+            raise ProductionDomainError("Only in-progress production orders can be paused.")
+
+        order.status = ProductionOrderStatus.PAUSED
+        order.updated_at = datetime.utcnow()
+        return ProductionOrderRead.model_validate(order)
+
+    def resume_order(self, order_id: UUID) -> ProductionOrderRead:
+        order = self.repository.get(order_id)
+        if order is None:
+            raise ProductionDomainError("Production order not found.")
+        if order.status != ProductionOrderStatus.PAUSED:
+            raise ProductionDomainError("Only paused production orders can be resumed.")
+
+        order.status = ProductionOrderStatus.IN_PROGRESS
+        order.updated_at = datetime.utcnow()
+        return ProductionOrderRead.model_validate(order)
+
+    def cancel_order(self, order_id: UUID) -> ProductionOrderRead:
+        order = self.repository.get(order_id)
+        if order is None:
+            raise ProductionDomainError("Production order not found.")
+        if order.status in {ProductionOrderStatus.FINISHED, ProductionOrderStatus.CANCELLED}:
+            raise ProductionDomainError("Production order cannot be cancelled from its current status.")
+        active_stages = [
+            stage
+            for stage in order.stages
+            if stage.status == ProductionStageStatus.IN_PROGRESS
+        ]
+        if active_stages:
+            raise ProductionDomainError("Production order cannot be cancelled with active stages.")
+
+        order.status = ProductionOrderStatus.CANCELLED
         order.updated_at = datetime.utcnow()
         return ProductionOrderRead.model_validate(order)
 
@@ -189,6 +275,12 @@ class ProductionService:
         stage_orders = [stage.order for stage in stages]
         if len(stage_orders) != len(set(stage_orders)):
             raise ProductionDomainError("Process template stage order values must be unique.")
+
+    @staticmethod
+    def _ensure_valid_order_status(status: str) -> None:
+        allowed_statuses = {order_status.value for order_status in ProductionOrderStatus}
+        if status not in allowed_statuses:
+            raise ProductionDomainError("Production order status is not valid.")
 
     @staticmethod
     def _build_process_snapshot(
