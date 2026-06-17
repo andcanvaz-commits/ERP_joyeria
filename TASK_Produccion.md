@@ -44,3 +44,127 @@ Puntos para integrar luego con inventario:
 - `InventoryIntegrationPort.reserve_materials_for_production` queda reservado para bloqueo o reserva futura de materiales.
 - `InventoryIntegrationPort.commit_finished_production` debe ser implementado por inventario para crear movimientos historicos, descontar consumo y registrar ingreso de producto terminado.
 - Produccion no debe escribir stock directamente ni crear movimientos de inventario fuera del contrato compartido.
+
+Verificaciones ejecutadas:
+- Se reviso `git status -sb` antes de modificar: el arbol estaba limpio en `main...origin/main`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se pudo ejecutar compilacion Python porque `python` no esta disponible en PATH.
+- No se pudo ejecutar compilacion con `py` porque el launcher reporto que no hay Python instalado.
+
+### 2026-06-17 - Continuacion modulo produccion
+
+Que se hizo:
+- Se reviso `PROMPT_AGENTE_PRODUCCION.md`, `TASK_Inventario.md` y `backend/modules/shared/contracts/inventory.py` antes de editar.
+- Se reviso la estructura actual del proyecto, el estado de git y los archivos existentes del modulo de produccion.
+- Se agregaron modelos de plantillas de proceso y etapas configurables dentro de produccion.
+- Se agregaron esquemas Pydantic para crear y leer plantillas de proceso, etapas de orden y operaciones de inicio/finalizacion de etapa.
+- Se amplio el repositorio de produccion para persistir plantillas, consultar plantillas, consultar etapas y hacer `flush` transaccional.
+- Se implemento en el servicio la creacion de plantillas con orden de etapas unico.
+- Se implemento la creacion de orden copiando etapas activas desde la plantilla como snapshot historico de la orden.
+- Se implementaron reglas base para iniciar orden, iniciar etapa, finalizar etapa y finalizar orden.
+- Se dejo la finalizacion de orden conectada solo al puerto `InventoryIntegrationPort.commit_finished_production`, sin actualizar stock ni crear movimientos.
+- Se cableo el router de produccion con sesion de base de datos existente, permisos preparados y endpoints de plantillas, ordenes y etapas.
+
+Que falta:
+- Crear migraciones Alembic para `production_process_templates` y `production_process_template_stages`.
+- Implementar autenticacion JWT real en `auth` para que `get_current_user` deje de ser placeholder.
+- Definir permisos reales en RBAC para `production.process_templates.create`, `production.create`, `production.start`, `production.finish`, `production.stages.start` y `production.stages.finish`.
+- Implementar endpoints de lectura/listado para ordenes, plantillas y etapas si el frontend los requiere.
+- Implementar calculo de materiales desde composiciones versionadas cuando exista el modulo correspondiente.
+- Integrar validacion de disponibilidad/reserva de materiales mediante el contrato compartido, sin mutar inventario desde produccion.
+- Agregar pruebas unitarias de estados, snapshots de etapas y validaciones de pesos/observaciones/merma.
+
+Archivos modificados:
+- `backend/modules/production/models.py`
+- `backend/modules/production/schemas.py`
+- `backend/modules/production/repository.py`
+- `backend/modules/production/service.py`
+- `backend/modules/production/router.py`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- `PendingInventoryIntegration` en el router es un adaptador temporal que falla con `501` cuando se intenta confirmar producto terminado.
+- Inventario debera proveer una implementacion real de `InventoryIntegrationPort.commit_finished_production`.
+- Produccion aun no invoca `check_material_availability` ni `reserve_materials_for_production` porque no existe calculo de requerimientos desde composicion.
+- Cuando existan requerimientos de materiales, produccion debe consultar disponibilidad y solicitar reserva solo por el contrato compartido.
+- La finalizacion de orden ya esta preparada para notificar producto terminado por contrato, pero inventario debe encargarse de movimientos historicos, consumo, merma e ingreso de producto terminado.
+
+Verificaciones ejecutadas:
+- `git status -sb`
+- `git diff --name-only`
+- Revision del diff de los archivos de produccion modificados.
+- Verificacion de frontera: los cambios listados por git estan en `backend/modules/production/*` y `TASK_Produccion.md`; no se modifico `backend/modules/inventory`.
+
+Verificaciones no ejecutadas o no completadas:
+- `python -m compileall backend` no pudo ejecutarse porque `python` no esta disponible en PATH.
+- `py -m compileall backend` no pudo ejecutarse porque no hay una instalacion de Python detectada por el launcher.
+- No se ejecutaron pruebas automatizadas porque el repositorio no tiene configuracion visible de pytest/requirements/pyproject y no hay Python disponible en el entorno.
+
+### 2026-06-17 - Docker de desarrollo
+
+Que se hizo:
+- Se agrego Docker para levantar la API FastAPI y PostgreSQL con `docker-compose`.
+- Se agrego `requirements.txt` con dependencias minimas del backend.
+- Se agrego `.dockerignore` para evitar copiar basura de desarrollo al build.
+- Se agrego `AUTO_CREATE_TABLES` como bandera de desarrollo para crear tablas automaticamente mientras no existan migraciones Alembic.
+- Se documento en `README.md` como levantar, revisar logs y abrir `/docs`.
+
+Que falta:
+- Reemplazar `AUTO_CREATE_TABLES` por migraciones Alembic cuando el esquema se estabilice.
+- Agregar healthcheck formal para esperar PostgreSQL antes de iniciar la API.
+- Agregar Docker del frontend cuando exista una aplicacion Next.js real y `package.json`.
+
+Archivos modificados:
+- `Dockerfile`
+- `docker-compose.yml`
+- `.dockerignore`
+- `requirements.txt`
+- `README.md`
+- `backend/app/main.py`
+- `backend/modules/config/settings.py`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- El Docker no implementa inventario; solo provee PostgreSQL para que produccion pueda probar persistencia.
+- La finalizacion de orden sigue dependiendo de una implementacion futura de `InventoryIntegrationPort`.
+
+Verificaciones ejecutadas:
+- `docker-compose config` valido correctamente la estructura del compose.
+
+Verificaciones no ejecutadas o no completadas:
+- Aun no se ejecuto `docker-compose up --build` en esta sesion.
+- `docker-compose config` mostro warning de acceso denegado a `C:\Users\MSI I7\.docker\config.json`, pero devolvio exit code 0.
+
+### 2026-06-17 - Instrucciones Docker para agentes
+
+Que se hizo:
+- Se actualizo `PROMPT_AGENTE_PRODUCCION.md` para exigir que el agente de produccion mantenga Docker actualizado si agrega dependencias, variables, puertos, servicios o comandos.
+- Se actualizo `PROMPT_AGENTE_INVENTARIO.md` con la misma regla para el agente de inventario.
+- Se actualizo `PROMPT_AGENTE_GENERICO.md` para que cualquier agente de modulo trate Docker como parte del contrato de ejecucion compartida.
+- Se actualizo `TASK_Inventario.md` con el recordatorio inicial para el agente de inventario.
+
+Que falta:
+- Cada agente debe seguir registrando en su `TASK_*.md` si Docker cambio o si no requirio cambios.
+- Si un modulo agrega dependencias o servicios, debe ejecutar `docker-compose config` y, si es razonable, `docker-compose up --build`.
+
+Archivos modificados:
+- `PROMPT_AGENTE_GENERICO.md`
+- `PROMPT_AGENTE_PRODUCCION.md`
+- `PROMPT_AGENTE_INVENTARIO.md`
+- `TASK_Inventario.md`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- El agente de inventario ya tiene instruccion explicita de mantener Docker compatible cuando implemente `InventoryIntegrationPort`.
+- La integracion futura debe seguir usando `shared` y no mezclar logica entre produccion e inventario.
+
+Docker:
+- Sin cambios tecnicos adicionales en Docker en esta sesion; se actualizaron instrucciones para que futuros cambios de modulo mantengan Docker al dia.
+
+Verificaciones ejecutadas:
+- `git status -sb`
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto `docker-compose config` por esta actualizacion de prompts porque no se modificaron archivos Docker.

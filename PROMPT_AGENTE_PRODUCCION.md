@@ -27,6 +27,7 @@ Puedes trabajar solo en:
 - `backend/modules/shared` solo si necesitas contratos, interfaces, puertos o DTOs compartidos.
 - `frontend/components/shared` solo si necesitas UI compartida.
 - `frontend/types/shared` solo si necesitas tipos compartidos.
+- `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `requirements.txt` y `README.md` solo si el cambio de produccion requiere ajustar Docker, dependencias, variables, puertos o comandos.
 - `TASK_Produccion.md`
 
 No edites estas rutas salvo autorizacion explicita del usuario:
@@ -82,12 +83,29 @@ Despues de cada cambio relevante, actualiza `TASK_Produccion.md` con:
 - que falta
 - que archivos se modificaron
 - que puntos deben integrarse luego con inventario
+- que cambios se hicieron o faltan en Docker si aplica
 
 Si el cambio toca `shared`, agrega:
 - por que fue necesario
 - que contrato se agrego o modifico
 - que parte de produccion lo consume
 - que parte de inventario debera implementarlo
+
+## Docker y ejecucion compartida
+
+Produccion debe seguir siendo ejecutable por Docker para que otros compañeros puedan probar el modulo.
+
+Actualiza Docker cuando el cambio lo requiera:
+- Si agregas una dependencia Python, actualiza `requirements.txt`.
+- Si agregas variables de entorno, actualiza `docker-compose.yml` y `README.md`.
+- Si cambias comando de arranque, puerto o forma de iniciar la API, actualiza `Dockerfile`, `docker-compose.yml` y `README.md`.
+- Si agregas archivos que no deben copiarse a la imagen, actualiza `.dockerignore`.
+- Si no hace falta tocar Docker, deja constancia en `TASK_Produccion.md` como "Docker: sin cambios requeridos".
+
+Verificaciones minimas:
+- Ejecuta `docker-compose config` si modificaste Docker.
+- Ejecuta `docker-compose up --build` si es razonable para la sesion; si no, documenta por que no se ejecuto.
+- Registra en `TASK_Produccion.md` las verificaciones Docker ejecutadas y no ejecutadas.
 
 ## Flujo de trabajo
 
@@ -98,7 +116,7 @@ Si el cambio toca `shared`, agrega:
 5. Revisa la estructura actual antes de editar.
 6. Implementa solo cambios de produccion.
 7. Actualiza `TASK_Produccion.md`.
-8. Verifica que no haya logica de inventario en produccion ni logica de produccion en inventario.
-9. Ejecuta pruebas o validaciones disponibles.
-10. Al final, resume lo realizado y cualquier verificacion que no pudo ejecutarse.
-
+8. Actualiza Docker si el cambio de produccion agrego dependencias, variables, puertos, servicios o comandos.
+9. Verifica que no haya logica de inventario en produccion ni logica de produccion en inventario.
+10. Ejecuta pruebas o validaciones disponibles, incluyendo `docker-compose config` si tocaste Docker.
+11. Al final, resume lo realizado y cualquier verificacion que no pudo ejecutarse.

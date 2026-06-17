@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     jwt_refresh_secret_key: str = "change-me"
     cors_origins: str = ""
     redis_url: str | None = None
+    auto_create_tables: bool = False
 
 
 settings = Settings()
