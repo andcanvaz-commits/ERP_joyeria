@@ -23,6 +23,8 @@ services:
       AUTO_CREATE_TABLES: "true"
       JWT_SECRET_KEY: dev-change-me
       JWT_REFRESH_SECRET_KEY: dev-change-me
+      CORS_ORIGINS: http://localhost:3000
+      DEV_AUTH_ENABLED: "true"
     ports:
       - "8000:8000"
     volumes:
