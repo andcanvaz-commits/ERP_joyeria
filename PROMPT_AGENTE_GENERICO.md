@@ -2,7 +2,7 @@
 
 Lee primero `claude.md` completo y respeta todas sus reglas tecnicas, de arquitectura, seguridad y separacion modular.
 
-Antes de modificar archivos, revisa la estructura actual del proyecto, el estado de git y los archivos `TASK_*.md` existentes para entender el trabajo previo y los puntos de integracion pendientes.
+Antes de modificar archivos, revisa la estructura actual del proyecto, el estado de git y los archivos `TASK_*.md` existentes para entender el trabajo previo y los puntos de integracion pendientes. Si vas a modificar frontend, lee tambien `SKILL.md`.
 
 ## Contexto
 
@@ -83,6 +83,7 @@ Archivos o carpetas permitidos:
 - `shared` solo si necesitas contratos, interfaces o tipos compartidos.
 - `documents` solo si aplica directamente al modulo asignado.
 - `security` o `auth` solo si el modulo requiere permisos o dependencias de autenticacion.
+- `frontend/components/shared`, `frontend/components/ui`, `frontend/components/layout`, `frontend/hooks` y `frontend/lib` solo si necesitas piezas frontend compartidas alineadas con `SKILL.md`.
 - El archivo TASK del modulo activo.
 - Archivos de entorno Docker solo si el cambio del modulo lo requiere: `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `requirements.txt` y `README.md`.
 
@@ -116,12 +117,30 @@ Despues de cada cambio relevante, actualiza el archivo TASK del modulo activo co
 - que archivos se modificaron
 - que puntos deben integrarse luego con otros modulos
 - que cambios se hicieron o faltan en Docker si aplica
+- que reglas de `SKILL.md` se aplicaron si hubo frontend
 
 Si el cambio toca `shared`, documenta:
 - por que fue necesario
 - que contrato se agrego o modifico
 - que modulo lo consume
 - que modulo debera implementarlo despues
+
+## Frontend y diseno global
+
+Todo cambio frontend debe usar `SKILL.md` como fuente global de diseno y funcionalidad del ERP.
+
+Antes de tocar frontend:
+- Lee `SKILL.md` completo.
+- Revisa si ya existe una pieza compartida para layout, tablas, filtros, badges, estados vacios, carga, errores, dialogs, drawers o toasts.
+- Crea componentes compartidos solo cuando puedan reutilizarse por mas de un modulo.
+- Mantén produccion e inventario como flujos visual y funcionalmente integrados.
+- Usa componentes de modulo solo para comportamiento especifico del modulo activo.
+- No hardcodees procesos, etapas, materiales ni categorias de joyeria en UI; deben venir como datos.
+
+Si creas o modificas UI compartida, registra en el TASK del modulo activo:
+- por que es compartida
+- que modulo la consume ahora
+- que modulo deberia reutilizarla luego
 
 ## Docker y ejecucion compartida
 
@@ -146,14 +165,15 @@ Verificaciones minimas relacionadas:
 2. Identifica el modulo activo desde el mensaje del usuario.
 3. Lee el archivo TASK del modulo activo.
 4. Lee los `TASK_*.md` de modulos con los que debas integrarte.
-5. Revisa la estructura actual antes de editar.
-6. Define o confirma los limites del modulo.
-7. Implementa cambios pequenos y coherentes.
-8. Actualiza el archivo TASK del modulo activo.
-9. Actualiza Docker si el cambio del modulo agrego dependencias, servicios, variables, puertos o comandos.
-10. Verifica que no haya logica cruzada entre modulos.
-11. Ejecuta pruebas o validaciones disponibles, incluyendo `docker-compose config` si tocaste Docker.
-12. Al final, resume solo lo realizado y cualquier verificacion que no pudo ejecutarse.
+5. Lee `SKILL.md` si la sesion incluye frontend.
+6. Revisa la estructura actual antes de editar.
+7. Define o confirma los limites del modulo.
+8. Implementa cambios pequenos y coherentes.
+9. Actualiza el archivo TASK del modulo activo.
+10. Actualiza Docker si el cambio del modulo agrego dependencias, servicios, variables, puertos o comandos.
+11. Verifica que no haya logica cruzada entre modulos.
+12. Ejecuta pruebas o validaciones disponibles, incluyendo `docker-compose config` si tocaste Docker.
+13. Al final, resume solo lo realizado y cualquier verificacion que no pudo ejecutarse.
 
 ## Reglas especificas para produccion e inventario
 
@@ -170,4 +190,4 @@ Cuando el modulo activo sea `inventory`:
 
 ## Prompt corto para iniciar sesion
 
-Lee `claude.md` y `PROMPT_AGENTE_GENERICO.md`. Identifica el modulo activo desde mi solicitud de esta sesion. Trabaja solo en las rutas permitidas para ese modulo. Revisa su archivo `TASK_*.md` y los `TASK_*.md` relacionados antes de editar. No mezcles logica entre modulos; usa `shared` unicamente para contratos o interfaces de integracion. Si agregas dependencias, variables, servicios, puertos o comandos, actualiza Docker y documentalo. Actualiza el TASK del modulo activo despues de cada cambio relevante.
+Lee `claude.md`, `PROMPT_AGENTE_GENERICO.md` y `SKILL.md` si trabajaras frontend. Identifica el modulo activo desde mi solicitud de esta sesion. Trabaja solo en las rutas permitidas para ese modulo. Revisa su archivo `TASK_*.md` y los `TASK_*.md` relacionados antes de editar. No mezcles logica entre modulos; usa `shared` unicamente para contratos o interfaces de integracion. Mantén el frontend integrado bajo el diseno global de `SKILL.md`. Si agregas dependencias, variables, servicios, puertos o comandos, actualiza Docker y documentalo. Actualiza el TASK del modulo activo despues de cada cambio relevante.

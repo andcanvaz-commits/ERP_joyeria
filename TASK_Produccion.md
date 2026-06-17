@@ -168,3 +168,43 @@ Verificaciones ejecutadas:
 
 Verificaciones no ejecutadas o no completadas:
 - No se ejecuto `docker-compose config` por esta actualizacion de prompts porque no se modificaron archivos Docker.
+
+### 2026-06-17 - Skill global de frontend
+
+Que se hizo:
+- Se normalizo `SKILL.md` como skill global de diseno web para todo el ERP.
+- Se agregaron reglas de interfaz integrada para que produccion e inventario compartan lenguaje visual, estados, tablas, formularios, componentes y patrones de flujo.
+- Se actualizo `PROMPT_AGENTE_PRODUCCION.md` para exigir leer `SKILL.md` antes de cualquier cambio frontend.
+- Se actualizo `PROMPT_AGENTE_INVENTARIO.md` para que el agente de inventario use el mismo skill global.
+- Se actualizo `PROMPT_AGENTE_GENERICO.md` para que cualquier modulo frontend use `SKILL.md`.
+
+Que falta:
+- Cuando se implemente frontend de produccion, crear o reutilizar componentes compartidos siguiendo `SKILL.md`.
+- Cuando inventario implemente su frontend, reutilizar los mismos componentes compartidos siempre que aplique.
+- Definir package/scripts frontend reales cuando exista una app Next.js funcional.
+
+Archivos modificados:
+- `SKILL.md`
+- `PROMPT_AGENTE_GENERICO.md`
+- `PROMPT_AGENTE_PRODUCCION.md`
+- `PROMPT_AGENTE_INVENTARIO.md`
+- `TASK_Produccion.md`
+- `TASK_Inventario.md`
+
+Puntos para integrar luego con inventario:
+- Produccion e inventario deben usar componentes compartidos para tablas, filtros, badges, estados vacios, carga, errores, dialogs, drawers y layout.
+- Produccion debe mostrar puntos de integracion con inventario sin implementar logica de inventario.
+- Inventario debe mostrar puntos de integracion con produccion sin implementar logica de produccion.
+
+Docker:
+- Sin cambios requeridos por esta actualizacion; solo se modificaron instrucciones y el skill global.
+
+Reglas de `SKILL.md` aplicadas:
+- Se establecio un diseno ERP SaaS integrado, operacional y consistente.
+- Se priorizo frontend compartido para patrones reutilizables entre modulos.
+
+Verificaciones ejecutadas:
+- `git status -sb`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto `docker-compose config` porque no se modificaron archivos Docker.

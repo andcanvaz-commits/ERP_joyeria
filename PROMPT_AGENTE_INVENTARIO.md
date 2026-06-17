@@ -7,6 +7,7 @@ Antes de modificar archivos, revisa:
 - El estado de git.
 - `TASK_Inventario.md`.
 - `TASK_Produccion.md`.
+- `SKILL.md` si vas a crear o modificar frontend.
 - `backend/modules/shared/contracts/inventory.py`.
 
 ## Objetivo
@@ -26,6 +27,7 @@ Puedes trabajar solo en:
 - `backend/modules/shared` solo si necesitas contratos, interfaces, puertos o DTOs compartidos.
 - `frontend/components/shared` solo si necesitas UI compartida.
 - `frontend/types/shared` solo si necesitas tipos compartidos.
+- `frontend/components/ui`, `frontend/components/layout`, `frontend/hooks` y `frontend/lib` solo si necesitas piezas frontend compartidas alineadas con `SKILL.md`.
 - `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `requirements.txt` y `README.md` solo si el cambio de inventario requiere ajustar Docker, dependencias, variables, puertos o comandos.
 - `TASK_Inventario.md`
 
@@ -80,12 +82,30 @@ Despues de cada cambio relevante, actualiza `TASK_Inventario.md` con:
 - que archivos se modificaron
 - que puntos deben integrarse luego con produccion
 - que cambios se hicieron o faltan en Docker si aplica
+- que reglas de `SKILL.md` se aplicaron si hubo frontend
 
 Si el cambio toca `shared`, agrega:
 - por que fue necesario
 - que contrato se agrego o modifico
 - que parte de inventario lo implementa
 - que parte de produccion lo consumira
+
+## Frontend y diseno global
+
+Todo frontend de inventario debe usar `SKILL.md` como fuente comun de diseno y funcionalidad.
+
+Antes de tocar frontend:
+- Lee `SKILL.md` completo.
+- Revisa si ya existe un componente compartido para layout, tablas, filtros, badges, estados vacios, carga, errores, dialogs, drawers o toasts.
+- Usa `frontend/components/shared`, `frontend/components/ui` o `frontend/components/layout` para piezas reutilizables por inventario y produccion.
+- Usa `frontend/components/inventory` solo para comportamiento especifico de inventario.
+- Mantener nombres, estados visuales, densidad, formularios, tablas y acciones consistentes con produccion.
+- No hardcodear procesos, etapas, materiales o categorias de joyeria en la UI; deben venir como datos.
+
+Si creas un componente compartido, documenta en `TASK_Inventario.md`:
+- por que es compartido
+- que parte de inventario lo usa
+- que parte de produccion deberia reutilizarlo luego
 
 ## Docker y ejecucion compartida
 
@@ -110,10 +130,11 @@ Verificaciones minimas:
 2. Lee este archivo.
 3. Lee `TASK_Inventario.md`.
 4. Lee `TASK_Produccion.md`.
-5. Revisa la estructura actual antes de editar.
-6. Implementa solo cambios de inventario.
-7. Actualiza `TASK_Inventario.md`.
-8. Actualiza Docker si el cambio de inventario agrego dependencias, variables, puertos, servicios o comandos.
-9. Verifica que no haya logica de produccion en inventario ni logica de inventario en produccion.
-10. Ejecuta pruebas o validaciones disponibles, incluyendo `docker-compose config` si tocaste Docker.
-11. Al final, resume lo realizado y cualquier verificacion que no pudo ejecutarse.
+5. Lee `SKILL.md` si la sesion incluye frontend.
+6. Revisa la estructura actual antes de editar.
+7. Implementa solo cambios de inventario.
+8. Actualiza `TASK_Inventario.md`.
+9. Actualiza Docker si el cambio de inventario agrego dependencias, variables, puertos, servicios o comandos.
+10. Verifica que no haya logica de produccion en inventario ni logica de inventario en produccion.
+11. Ejecuta pruebas o validaciones disponibles, incluyendo `docker-compose config` si tocaste Docker.
+12. Al final, resume lo realizado y cualquier verificacion que no pudo ejecutarse.
