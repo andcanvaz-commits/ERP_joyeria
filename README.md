@@ -22,13 +22,11 @@ http://localhost:3000/produccion
 Cuentas locales sembradas por Docker:
 
 ```text
-owner / Owner123!
 admin / Admin123!
 ```
 
 Permisos:
-- `owner`: crea procesos y ejecuta produccion.
-- `admin`: revisa la pantalla de produccion en modo lectura.
+- `admin`: accede a mantenimiento de produccion y crea procesos con etapas.
 
 Abrir la documentacion interactiva de la API:
 
@@ -57,4 +55,4 @@ Notas:
 - `AUTO_CREATE_TABLES=true` crea tablas automaticamente solo para desarrollo local mientras no existan migraciones Alembic.
 - El login usa JWT y usuarios locales sembrados en PostgreSQL para desarrollo.
 - `DEV_AUTH_ENABLED=false` mantiene activo el flujo real de login.
-- La finalizacion de produccion todavia espera integracion real del modulo de inventario.
+- El mantenimiento de produccion solo crea procesos y etapas. La ejecucion operativa y la integracion con inventario se implementaran despues.

@@ -13,6 +13,9 @@ class AuthUser(Base):
 
     id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(180), unique=True, index=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(220), nullable=False)
     role: Mapped[str] = mapped_column(String(40), nullable=False)
     permissions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TokenPair(BaseModel):
@@ -21,5 +21,32 @@ class AuthUserRead(BaseModel):
 
     id: str
     username: str
+    first_name: str
+    last_name: str
+    email: str
     role: str
     permissions: list[str]
+    is_active: bool = True
+
+
+class AuthUserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str = Field(min_length=1, max_length=120)
+    last_name: str = Field(min_length=1, max_length=120)
+    role: str = Field(default="Admin", min_length=3, max_length=40)
+
+
+class AuthUserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str = Field(min_length=1, max_length=120)
+    last_name: str = Field(min_length=1, max_length=120)
+    role: str = Field(default="Admin", min_length=3, max_length=40)
+
+
+class AuthUserCredentialRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user: AuthUserRead
+    temporary_password: str

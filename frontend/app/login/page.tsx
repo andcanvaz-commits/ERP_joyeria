@@ -5,8 +5,8 @@ import { LockKeyhole, LogIn } from "lucide-react";
 import { login } from "@/lib/auth-api";
 
 export default function LoginPage() {
-  const [username, setUsername] = useState("owner");
-  const [password, setPassword] = useState("Owner123!");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("Admin123!");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -63,24 +63,13 @@ export default function LoginPage() {
           <button
             className="processPicker"
             onClick={() => {
-              setUsername("owner");
-              setPassword("Owner123!");
-            }}
-            type="button"
-          >
-            <strong>Owner</strong>
-            <span>crear procesos y ejecutar</span>
-          </button>
-          <button
-            className="processPicker"
-            onClick={() => {
               setUsername("admin");
               setPassword("Admin123!");
             }}
             type="button"
           >
             <strong>Admin</strong>
-            <span>solo revision</span>
+            <span>mantenimiento de produccion</span>
           </button>
         </div>
       </section>

@@ -17,17 +17,15 @@ class CurrentUser:
 
 DEV_PRODUCTION_PERMISSIONS = frozenset(
     {
-        "production.read",
-        "production.create",
-        "production.start",
-        "production.pause",
-        "production.resume",
-        "production.finish",
-        "production.cancel",
-        "production.stages.start",
-        "production.stages.finish",
-        "production.process_templates.read",
-        "production.process_templates.create",
+        "production.processes.read",
+        "production.processes.create",
+        "production.processes.update",
+        "production.processes.delete",
+        "inventory.read",
+        "inventory.items.create",
+        "inventory.items.update",
+        "inventory.items.delete",
+        "inventory.movements.create",
     }
 )
 
@@ -40,7 +38,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         return CurrentUser(
             id=UUID(settings.dev_user_id),
             username=settings.dev_username,
-            role="dev",
+            role="admin",
             permissions=DEV_PRODUCTION_PERMISSIONS,
         )
     if credentials is None:

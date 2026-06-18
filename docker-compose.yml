@@ -25,8 +25,6 @@ services:
       JWT_REFRESH_SECRET_KEY: dev-change-me
       CORS_ORIGINS: http://localhost:3000
       DEV_AUTH_ENABLED: "false"
-      SEED_OWNER_USERNAME: owner
-      SEED_OWNER_PASSWORD: Owner123!
       SEED_ADMIN_USERNAME: admin
       SEED_ADMIN_PASSWORD: Admin123!
     ports:

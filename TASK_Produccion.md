@@ -566,3 +566,980 @@ Verificaciones ejecutadas:
 
 Verificaciones no ejecutadas o no completadas:
 - No se integro seleccion real de materia prima porque pertenece al modulo de inventario y no debe implementarse aqui.
+
+### 2026-06-17 - Mantenimiento de produccion solo para admin
+
+Que se hizo:
+- Se redujo el alcance actual a un unico usuario sembrado: `admin`.
+- Se elimino la cuenta `owner` del login, Docker y README; en el siguiente arranque de desarrollo cualquier usuario legacy `owner` queda desactivado.
+- Se ajustaron permisos de admin para crear y leer procesos: `production.processes.create` y `production.processes.read`.
+- Se dejo la API de produccion limitada a crear y listar procesos configurables con etapas.
+- Se preparo limpieza automatica de tablas obsoletas de plantillas/ordenes en el arranque de desarrollo con `AUTO_CREATE_TABLES=true`.
+- Se reemplazo la pantalla de produccion por `Mantenimiento de produccion`.
+- La pantalla ahora muestra solo el formulario de creacion de procesos.
+- El formulario inicia con una sola etapa y permite agregar mas etapas con `+`.
+- Las etapas se organizan dentro de una ventana con scroll para no agrandar toda la pagina.
+- Se eliminaron del frontend activo las llamadas y tipos de ordenes, plantillas visibles, ejecucion, pausa, avance, cancelacion y etapas operativas.
+
+Que falta:
+- Crear migraciones Alembic reales cuando el esquema se estabilice; por ahora la limpieza de tablas viejas ocurre solo en modo desarrollo al arrancar la API.
+- Implementar luego el usuario operativo que llenara/ejecutara procesos, separado de este mantenimiento.
+- Agregar pruebas automatizadas cuando exista suite de tests del proyecto.
+
+Archivos modificados:
+- `backend/app/main.py`
+- `backend/modules/auth/dependencies.py`
+- `backend/modules/auth/service.py`
+- `backend/modules/config/settings.py`
+- `backend/modules/production/models.py`
+- `backend/modules/production/repository.py`
+- `backend/modules/production/router.py`
+- `backend/modules/production/schemas.py`
+- `backend/modules/production/service.py`
+- `docker-compose.yml`
+- `README.md`
+- `frontend/app/globals.css`
+- `frontend/app/login/page.tsx`
+- `frontend/components/layout/app-shell.tsx`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/production-api.ts`
+- `frontend/types/production/index.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin logica de inventario implementada.
+- La creacion de procesos solo define etapas y si requieren pesaje; no valida stock, no reserva materiales y no crea movimientos.
+- Cuando se implemente el usuario operativo, la cantidad/materiales deberan validarse mediante `InventoryIntegrationPort.check_material_availability`.
+- La reserva futura de materiales debera pasar por `InventoryIntegrationPort.reserve_materials_for_production`.
+- La finalizacion futura de produccion debera pasar por `InventoryIntegrationPort.commit_finished_production`.
+
+Docker:
+- Se actualizo `docker-compose.yml` para sembrar solo `admin / Admin123!`.
+- No se reiniciaron contenedores ni se ejecuto `docker-compose up`, por instruccion expresa del usuario.
+- En el proximo arranque manual, `AUTO_CREATE_TABLES=true` limpiara tablas obsoletas de ordenes/plantillas anteriores.
+
+Reglas de `SKILL.md` aplicadas:
+- Pantalla operacional, no landing page.
+- Un solo formulario enfocado en la tarea actual.
+- Controles familiares: checkbox para pesaje, input numerico para duracion y boton `+` para etapas.
+- Panel de etapas con scroll para mantener estable el layout.
+
+Verificaciones ejecutadas:
+- `git status -sb`
+- `git diff --name-only`
+- `rg` en rutas activas para confirmar que no quedan endpoints/imports de ordenes, plantillas visibles ni ejecucion operativa de produccion.
+- `npm.cmd run build` intento local del frontend.
+
+Verificaciones no ejecutadas o no completadas:
+- `npm.cmd run build` no pudo completarse porque Windows no reconoce `next` como comando local fuera del contenedor.
+- No se ejecuto build dentro de Docker porque el usuario pidio no reiniciar ni tocar contenedores.
+- No se ejecuto `docker-compose config` ni `docker-compose up` por la misma instruccion.
+- No se ejecuto compilacion Python dentro del contenedor por la misma instruccion.
+
+### 2026-06-17 - Ventanas de mantenimiento y administracion de procesos
+
+Que se hizo:
+- Se cambio la pantalla para que el formulario no aparezca siempre.
+- Se agrego un boton `Crear proceso` que abre el formulario en una ventana.
+- Se agrego un boton `Procesos` que abre una ventana con los procesos creados.
+- Se cambio la captura de etapas para mostrar solo una etapa a la vez.
+- Se agregaron flechas izquierda/derecha para navegar entre etapas del formulario.
+- Se mantiene el boton `+` para agregar una nueva etapa y moverse directamente a ella.
+- Se movio la informacion de sesion al encabezado superior derecho con icono de perfil y boton de salida.
+- Se quitaron de la pantalla los botones `Actualizar` y `Salir` que estaban dentro del contenido.
+- Se agregaron opciones reales para visualizar, editar y eliminar procesos desde la ventana `Procesos`.
+- Se agregaron endpoints backend `PUT /api/production/processes/{process_id}` y `DELETE /api/production/processes/{process_id}`.
+- Se ajusto el cliente frontend para aceptar respuestas `204 No Content` al eliminar.
+
+Que falta:
+- Agregar confirmaciones visuales propias del sistema en lugar de `window.confirm` cuando exista componente compartido de dialog.
+- Agregar pruebas automatizadas para actualizar y eliminar procesos.
+- Validar visualmente en navegador cuando el usuario reinicie manualmente Docker.
+
+Archivos modificados:
+- `backend/modules/auth/dependencies.py`
+- `backend/modules/auth/service.py`
+- `backend/modules/production/repository.py`
+- `backend/modules/production/router.py`
+- `backend/modules/production/schemas.py`
+- `backend/modules/production/service.py`
+- `frontend/app/globals.css`
+- `frontend/components/layout/app-shell.tsx`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/api.ts`
+- `frontend/lib/production-api.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin logica de inventario implementada.
+- Editar o eliminar procesos solo modifica configuracion de produccion; no descuenta stock ni crea movimientos.
+- La futura ejecucion operativa debera consumir disponibilidad, reservas y finalizacion por `InventoryIntegrationPort`.
+
+Docker:
+- Sin cambios requeridos.
+- No se reiniciaron contenedores ni se ejecuto Docker por instruccion expresa del usuario.
+
+Reglas de `SKILL.md` aplicadas:
+- Formulario dentro de ventana de mantenimiento.
+- Uso de botones con iconos para acciones claras: crear, visualizar, editar, eliminar, guardar y salir.
+- Una etapa visible por vez para evitar scroll largo del formulario.
+- Listado de procesos en ventana separada con panel de detalle.
+
+Verificaciones ejecutadas:
+- `rg` para confirmar que no quedan referencias activas a plantillas visibles, ordenes ni ejecucion operativa en produccion.
+- `rg` para confirmar permisos y endpoints actuales de procesos.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build local porque `next` no esta disponible como comando en Windows fuera del contenedor.
+- No se ejecuto build en Docker, `docker-compose config`, `docker-compose up` ni compilacion Python dentro del contenedor porque el usuario pidio no reiniciar ni tocar contenedores.
+
+### 2026-06-17 - Correccion de crear proceso y visualizar
+
+Que se hizo:
+- Se corrigio el bloqueo de `Crear proceso` para que admin pueda abrir el formulario aunque el token o la base local todavia tengan permisos antiguos.
+- Se agrego bypass backend para rol `admin` en permisos `production.processes.*`, evitando que una sesion local vieja bloquee crear/editar/eliminar procesos.
+- Se cambio `Visualizar` para abrir una ventana dedicada con nombre, descripcion y etapas del proceso.
+- Se mantuvieron `Editar` y `Eliminar` como acciones separadas en la ventana `Procesos`.
+
+Que falta:
+- Reiniciar o recargar manualmente el contenedor/navegador si la UI aun muestra bundle anterior.
+- Cerrar sesion y volver a entrar si el navegador conserva un token viejo y la recarga automatica no lo actualiza.
+
+Archivos modificados:
+- `backend/modules/production/router.py`
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento inventario ni movimientos de stock.
+
+Docker:
+- Sin cambios requeridos.
+- No se reiniciaron contenedores ni se ejecuto Docker por instruccion previa del usuario.
+
+Verificaciones ejecutadas:
+- `rg` confirmo `canCreate`, `canUpdate`, `canDelete`, ventana `viewingProcess` y bypass admin en router.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque el usuario pidio no tocar contenedores.
+
+### 2026-06-17 - Mantenimientos del sistema y usuarios
+
+Que se hizo:
+- Se cambio el item del sidebar a `Mantenimientos`.
+- Se elimino `Usuarios` del sidebar.
+- Se cambio el encabezado superior a `Mantenimientos del sistema`.
+- Se cambio el titulo de la pantalla a `Mantenimientos del sistema`.
+- Se organizo la pantalla en secciones de mantenimiento:
+  - `Produccion`
+  - `Usuarios`
+- Debajo de Produccion se mantienen `Crear proceso` y `Procesos`.
+- Debajo de Usuarios se agregaron `Crear usuario` y `Usuarios`.
+- Se conecto Usuarios al backend real de autenticacion usando `auth_users`.
+- Se agregaron endpoints para listar, crear, editar y eliminar usuarios:
+  - `GET /api/auth/users`
+  - `POST /api/auth/users`
+  - `PUT /api/auth/users/{user_id}`
+  - `DELETE /api/auth/users/{user_id}`
+- Se agregaron funciones frontend para consumir esos endpoints.
+- Se agrego formulario real de usuario con usuario, contrasena, rol admin y estado activo.
+- Se agrego listado real de usuarios con editar y eliminar.
+- Se bloqueo eliminar el usuario de la sesion actual desde la UI.
+
+Que falta:
+- Definir roles adicionales cuando el sistema deje de manejar solo `admin`.
+- Agregar permisos RBAC completos para usuarios cuando exista el modulo formal de roles/permisos.
+- Cambiar confirmaciones nativas por un dialog compartido del sistema.
+
+Archivos modificados:
+- `backend/modules/auth/router.py`
+- `backend/modules/auth/schemas.py`
+- `backend/modules/auth/service.py`
+- `frontend/app/globals.css`
+- `frontend/components/layout/app-shell.tsx`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/auth-api.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios requeridos.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo `Mantenimientos` en sidebar y encabezado.
+- `rg` confirmo que ya no existe `label: "Usuarios"` en el sidebar.
+- `rg` confirmo endpoints y cliente frontend de `/api/auth/users`.
+- `git diff --name-only`
+- `git status -sb`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque el usuario pidio no tocar contenedores en esta tanda de cambios.
+
+### 2026-06-17 - Retorno a ventanas y mensajes temporales
+
+Que se hizo:
+- Se ajusto el cierre del formulario de editar proceso para volver a la ventana `Procesos`.
+- Se ajusto el guardado de editar proceso para volver a la ventana `Procesos`.
+- Se ajusto el cierre del formulario de editar usuario para volver a la ventana `Usuarios`.
+- Se ajusto el guardado de editar usuario para volver a la ventana `Usuarios`.
+- Se agrego autolimpieza de mensajes de error/exito despues de 5 segundos.
+- Se movieron los mensajes a un aviso flotante para que se vean aunque haya una ventana modal abierta.
+
+Que falta:
+- Validar visualmente en navegador despues del reinicio/recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios requeridos.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo los estados de retorno a ventanas, cierre de formularios, temporizador de 5 segundos y `toastStack`.
+- `git diff --name-only`
+- `git status -sb`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque el usuario no pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Roles, datos completos de usuario y eliminacion de etapas
+
+Que se hizo:
+- Se agrego boton `Eliminar etapa` en crear/editar proceso.
+- `Eliminar etapa` queda deshabilitado cuando solo existe una etapa, para evitar procesos sin etapas.
+- Se agregaron los roles del sistema:
+  - `Jefe de producción`
+  - `Admin`
+  - `Jefe de inventario`
+- Se cambio el rol sembrado de admin a `Admin`.
+- Se ajusto el bypass de permisos de produccion para aceptar `admin` y `Admin`.
+- Se quitaron los checkbutton de activo del formulario de usuario.
+- El formulario de usuario ahora pide:
+  - Usuario
+  - Nombre
+  - Apellido
+  - Correo
+  - Contrasena
+  - Repetir contrasena
+  - Rol
+- Se valida en frontend y backend que las contrasenas coincidan.
+- Se agregaron campos `first_name`, `last_name` y `email` al modelo `auth_users`.
+- Se agrego actualizacion automatica de desarrollo para agregar esas columnas si la tabla ya existe.
+- En la vista de usuarios se muestran opciones para editar, desactivar y eliminar.
+- Se agrego endpoint `POST /api/auth/users/{user_id}/deactivate`.
+- Se impide desde UI y backend desactivar la propia sesion.
+
+Que falta:
+- Reiniciar manualmente la API para que se apliquen las columnas nuevas en la base local mediante `AUTO_CREATE_TABLES=true`.
+- Crear migraciones Alembic reales para estos cambios de usuarios cuando se formalice el esquema.
+- Definir permisos reales de `Jefe de producción` y `Jefe de inventario` cuando se implementen sus pantallas operativas.
+
+Archivos modificados:
+- `backend/app/main.py`
+- `backend/modules/auth/models.py`
+- `backend/modules/auth/router.py`
+- `backend/modules/auth/schemas.py`
+- `backend/modules/auth/service.py`
+- `backend/modules/production/router.py`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/auth-api.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Se creo el rol `Jefe de inventario`, pero no se implemento logica de inventario.
+- Los permisos reales de inventario deben asignarse cuando exista el modulo operativo de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo roles del sistema, campos nuevos de usuario, confirmacion de contrasena, endpoint de desactivar y boton `Eliminar etapa`.
+- `rg` confirmo que el formulario de usuario ya no tiene checkbutton de activo; `is_active` solo queda para mostrar estado y bloquear acciones.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Ventana de credenciales simplificada
+
+Que se hizo:
+- Se simplifico la ventana emergente de credenciales al crear/restablecer usuario.
+- La ventana ahora muestra solo:
+  - `Usuario creado` o el titulo correspondiente.
+  - Correo.
+  - Contrasena temporal.
+  - Rol.
+- Se quito `Usuario generado` de esa ventana emergente.
+
+Que falta:
+- Validar visualmente en navegador luego de recargar el frontend.
+
+Archivos modificados:
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que `Usuario generado` solo queda en la vista previa del usuario, no en la ventana de credenciales.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Estado de usuario junto al nombre
+
+Que se hizo:
+- Se movio el boton `Activar/Desactivar` al encabezado de cada tarjeta de usuario, al lado del nombre.
+- `Desactivar` queda en rojo cuando el usuario esta activo.
+- `Activar` queda en verde cuando el usuario esta inactivo.
+- La tarjeta del usuario cambia a un color rojizo suave cuando esta inactivo.
+- Se mantuvieron `Visualizar`, `Editar` y `Eliminar` como acciones inferiores de la tarjeta.
+
+Que falta:
+- Validar visualmente en navegador luego de recargar el frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo `userRowHeader`, `userRowInactive` y botones `Activar/Desactivar`.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Identificador de rol en correo generado
+
+Que se hizo:
+- Se agrego identificador del rol en el correo generado.
+- El correo ahora queda con formato `usuario.identificador@dominio`.
+- Identificadores actuales:
+  - `Admin` -> `admin`
+  - `Jefe de producción` -> `produccion`
+  - `Jefe de inventario` -> `inventario`
+- La validacion de duplicados considera el correo con identificador de rol.
+
+Que falta:
+- Validar visualmente y con API luego de recargar el backend.
+
+Archivos modificados:
+- `backend/modules/auth/service.py`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Se dejo identificador `inventario` para el rol `Jefe de inventario`; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo `ROLE_EMAIL_IDENTIFIERS`, generacion de correo con rol y validacion de duplicados.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Acciones rapidas de usuarios y credenciales temporales
+
+Que se hizo:
+- Se movieron `Editar`, `Activar/Desactivar` y `Eliminar` al listado de usuarios, junto a `Visualizar`.
+- `Desactivar` se muestra en rojo cuando el usuario esta activo.
+- `Activar` se muestra en verde cuando el usuario esta inactivo.
+- `Eliminar` se mantiene en rojo.
+- La vista previa de usuario queda como detalle y solo mantiene la accion `Restablecer contrasena`.
+- La contrasena temporal no se muestra en el listado ni en la vista previa.
+- La contrasena temporal se muestra en una ventana de credenciales cuando se crea el usuario o cuando se restablece desde la vista previa.
+
+Que falta:
+- Validar visualmente en navegador luego de recargar el frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo acciones rapidas en listado, `successText` para activar y `Restablecer contrasena` dentro de la vista previa.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Usuario generado y vista previa simplificada
+
+Que se hizo:
+- Se elimino el campo `Usuario` del formulario de usuario.
+- El administrador ahora solo ingresa nombre, apellido y rol.
+- El backend genera automaticamente el usuario desde nombre y apellido.
+- El backend evita duplicados agregando sufijos numericos al usuario generado si hace falta.
+- El correo se sigue generando automaticamente desde el usuario generado y el dominio del sistema.
+- Al crear usuario se abre una ventana con usuario generado, correo generado y contrasena temporal.
+- Al restablecer contrasena se abre la misma ventana de credenciales temporales.
+- El listado de usuarios ahora muestra solo nombre y correo.
+- La vista previa de usuario muestra usuario generado, correo generado, rol y estado.
+- Las acciones editar, activar/desactivar, restablecer contrasena y eliminar quedan dentro de la vista previa.
+- Se normalizan acentos al generar usuarios/correos para nombres en espanol.
+
+Que falta:
+- Validar visualmente en navegador luego de recargar el frontend.
+- Definir el dominio real mediante `SYSTEM_EMAIL_DOMAIN` al pasar a produccion.
+
+Archivos modificados:
+- `backend/modules/auth/router.py`
+- `backend/modules/auth/schemas.py`
+- `backend/modules/auth/service.py`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/auth-api.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que el formulario ya no tiene campo visible de usuario.
+- `rg` confirmo ventana de credenciales temporales, vista previa y acciones de usuarios.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Reubicacion de controles de etapas en proceso
+
+Que se hizo:
+- En la ventana de crear/editar proceso, los botones `Etapa` y `Eliminar etapa` se movieron a la parte superior del bloque de etapa.
+- Las flechas para cambiar entre etapas se reubicaron a la mitad izquierda y derecha del formulario de etapa.
+- Se ajusto el espaciado interno para que los campos no choquen con las flechas laterales.
+- Se agrego ajuste responsive para que los controles de etapa se acomoden mejor en pantallas pequenas.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo las clases `stageTopActions`, `stageContent` y flechas laterales en el formulario.
+- `git diff -- frontend/components/production/production-dashboard.tsx frontend/app/globals.css`
+
+Verificaciones no ejecutadas o no completadas:
+- `npm.cmd run lint` no pudo ejecutarse porque `next` no esta instalado en `frontend/node_modules` local.
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Alineacion de linea superior con sidebar
+
+Que se hizo:
+- Se ajusto el padding del sidebar para que no desplace hacia abajo la linea horizontal.
+- Se fijo la zona de marca del sidebar con `min-height: 64px`, igual que la barra superior.
+- La linea debajo del perfil/titulo y la linea horizontal del sidebar ahora comparten la misma altura visual.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que sidebar y topbar usan la misma altura de referencia.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Linea del sidebar a ancho completo
+
+Que se hizo:
+- Se quito el padding lateral del contenedor `sidebar` para que la linea horizontal de la marca llegue hasta el borde derecho.
+- Se movio el padding interno a `brand` y `nav`, manteniendo el contenido alineado sin cortar la linea.
+- La linea horizontal del sidebar ahora debe conectar visualmente con la linea debajo del titulo de pagina.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo el nuevo reparto de padding entre `sidebar`, `brand` y `nav`.
+- `git diff -- frontend/app/globals.css`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Ventana vertical de credenciales de usuario
+
+Que se hizo:
+- Se ajusto la ventana emergente de usuario creado/restablecimiento para mostrar los datos en vertical.
+- Ahora `Correo`, `Contrasena temporal` y `Rol` aparecen uno debajo del otro, sin usar la vista de dos columnas de la vista previa.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que `credentialsStack` esta definido en CSS y aplicado en la ventana de credenciales.
+- `git diff -- frontend/components/production/production-dashboard.tsx frontend/app/globals.css`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Correo generado, contrasena temporal y reactivacion de usuarios
+
+Que se hizo:
+- Se quito el campo correo del formulario de usuario.
+- El correo ahora se genera automaticamente desde el usuario y `SYSTEM_EMAIL_DOMAIN`.
+- Se agrego `SYSTEM_EMAIL_DOMAIN` con valor temporal `erp.local` hasta definir el dominio real de produccion.
+- Se quitaron los campos de contrasena y repetir contrasena del formulario de usuario.
+- La contrasena ahora se genera automaticamente en backend como contrasena temporal.
+- Al crear usuario se devuelve y muestra la contrasena temporal generada.
+- Se agrego opcion para restablecer contrasena desde la vista de usuarios.
+- Restablecer contrasena genera una nueva contrasena temporal en backend y la muestra al admin.
+- Se agrego opcion para reactivar usuarios inactivos.
+- Se mejoro la vista previa/listado de usuarios con campos organizados: usuario, correo generado, rol y estado.
+- Se corrigio el mensaje `[object Object]` en errores de API para mostrar detalles legibles de FastAPI.
+
+Que falta:
+- Definir el dominio real de correo del sistema cuando se compre y pasar `SYSTEM_EMAIL_DOMAIN` por entorno.
+- Implementar flujo formal de cambio obligatorio de contrasena temporal cuando se construya seguridad avanzada.
+- Validar visualmente en navegador luego del reinicio/recarga manual.
+
+Archivos modificados:
+- `backend/modules/config/settings.py`
+- `backend/modules/auth/router.py`
+- `backend/modules/auth/schemas.py`
+- `backend/modules/auth/service.py`
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/api.ts`
+- `frontend/lib/auth-api.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo endpoints de activar, desactivar y restablecer contrasena.
+- `rg` confirmo que el formulario frontend ya no contiene campos de correo ni contrasena para usuario; el correo solo se muestra como generado.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Correccion de selector de tiempo sin dependencia externa
+
+Que se hizo:
+- Se corrigio el error `Module not found: Can't resolve '@radix-ui/react-select'` que aparecia en el contenedor web.
+- Se quito el import de `@radix-ui/react-select` del formulario de produccion.
+- Se reemplazo el selector Radix por un `<select>` nativo accesible con las mismas opciones de tiempo estimado.
+- Se retiro `@radix-ui/react-select` de `frontend/package.json` y `frontend/package-lock.json`.
+- Se eliminaron los estilos CSS que solo correspondian al selector Radix.
+
+Que falta:
+- Validar visualmente en navegador luego de que el frontend recargue el cambio.
+- Si luego se quiere una libreria de UI, integrarla asegurando rebuild/instalacion dentro del contenedor Docker.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/package-lock.json`
+- `frontend/package.json`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+- El cambio evita depender de una libreria no instalada en el contenedor actual.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que no quedan referencias a `@radix-ui/react-select`, `Select.*`, `ChevronDown` ni clases Radix.
+- `npm.cmd run build` paso correctamente.
+
+Verificaciones no ejecutadas o no completadas:
+- No se reinicio Docker porque no fue solicitado.
+
+### 2026-06-17 - Dashboard de procesos y usuarios
+
+Que se hizo:
+- Se creo la ruta `frontend/app/dashboard/page.tsx`.
+- Se agrego `SystemDashboard` con datos reales de procesos y usuarios.
+- El dashboard muestra metricas de:
+  - Procesos creados.
+  - Etapas con pesaje.
+  - Usuarios totales.
+  - Usuarios activos.
+- Se agregaron paneles de procesos recientes, usuarios recientes, roles y tiempos de etapas.
+- Se ajusto `AppShell` para que el titulo superior y el item activo del sidebar cambien segun la ruta.
+- `/dashboard` ahora muestra titulo `Dashboard` y subtitulo `Resumen de procesos y usuarios`.
+- `/produccion` mantiene `Mantenimientos del sistema`.
+- Se agregaron estilos responsive para el grid y filas del dashboard.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+- Agregar mas metricas cuando existan procesos operativos reales, no solo mantenimientos.
+
+Archivos modificados:
+- `frontend/app/dashboard/page.tsx`
+- `frontend/app/globals.css`
+- `frontend/components/dashboard/system-dashboard.tsx`
+- `frontend/components/layout/app-shell.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+- El dashboard no consume stock, almacenes, materiales ni movimientos.
+- Cuando inventario exista, se podran agregar tarjetas de existencias criticas y movimientos recientes desde sus APIs.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo nueva ruta, componente dashboard, estilos y titulos dinamicos del shell.
+- `npm.cmd run build` paso correctamente e incluyo la ruta `/dashboard`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se reinicio Docker porque no fue solicitado.
+
+### 2026-06-17 - Graficos visuales en dashboard
+
+Que se hizo:
+- Se agrego una franja visual al dashboard sin dependencias nuevas.
+- Se agrego grafico tipo dona para usuarios activos/inactivos.
+- Se agrego grafico de barras para comparar procesos por cantidad de etapas.
+- Se agregaron barras compactas dentro del panel de roles.
+- Se mantuvieron los datos reales de procesos y usuarios.
+- Se agregaron estilos responsive para que los graficos no rompan el layout en pantallas pequenas.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+- Ajustar colores o densidad si el usuario prefiere otro estilo visual.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/dashboard/system-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+- Los graficos aun no muestran datos de stock, materiales ni movimientos.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo `dashboardVisualGrid`, `donutChart`, `barChart` y barras de roles.
+- `npm.cmd run build` fallo inicialmente por cache generada corrupta en `.next/dev/types`.
+- Se limpio `frontend/.next` como cache generada de Next.
+- `npm.cmd run build` paso correctamente despues de limpiar la cache.
+
+Verificaciones no ejecutadas o no completadas:
+- No se reinicio Docker porque no fue solicitado.
+
+### 2026-06-17 - Dashboard compacto con scroll interno
+
+Que se hizo:
+- Se quito la tarjeta superior `Etapas con pesaje`.
+- Se quito el panel `Tiempos de etapas`.
+- Se quitaron calculos/imports asociados a tiempos y pesaje en el dashboard.
+- El resumen superior queda con tres tarjetas: procesos, usuarios y usuarios activos.
+- Los paneles de procesos, usuarios y roles quedan en tres columnas.
+- Las listas internas del dashboard ahora tienen `max-height` y scroll vertical para no hacer crecer la pagina hacia abajo.
+- Se redujo el alto de las filas del dashboard para que las ventanas/paneles ocupen menos espacio.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/dashboard/system-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que ya no quedan textos `Tiempos de etapas` ni `Etapas con pesaje` en el dashboard.
+- `npm.cmd run build` paso correctamente.
+
+Verificaciones no ejecutadas o no completadas:
+- No se reinicio Docker porque no fue solicitado.
+
+### 2026-06-17 - Tiempo estimado manual en minutos
+
+Que se hizo:
+- Se quito el selector de opciones para `Tiempo estimado`.
+- Se dejo un ingreso manual numerico.
+- El campo ahora indica `Tiempo estimado en minutos`.
+- Se agrego placeholder `Ejemplo: 30`.
+- Se elimino la lista interna de opciones predefinidas de tiempo.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo `Tiempo estimado en minutos` y placeholder `Ejemplo: 30`.
+- `npm.cmd run build` paso correctamente.
+
+Verificaciones no ejecutadas o no completadas:
+- No se reinicio Docker porque no fue solicitado.
+
+### 2026-06-17 - Selector accesible de tiempo estimado
+
+Que se hizo:
+- Se cambio el texto `Tiempo de duracion` por `Tiempo estimado`.
+- Se reemplazo el input numerico por un selector accesible basado en `@radix-ui/react-select`.
+- Las opciones se muestran en minutos y horas equivalentes:
+  - 5, 10, 15, 20, 30, 45 minutos.
+  - 1 hora, 1 hora 30 minutos, 2, 3, 4, 6 y 8 horas.
+- El valor se sigue guardando como minutos para mantener compatible el backend actual.
+- Se agregaron estilos del selector al sistema visual del frontend.
+- Se agrego `@radix-ui/react-select` a `frontend/package.json` y `frontend/package-lock.json`.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+- Decidir si luego se permitiran tiempos personalizados fuera de las opciones predefinidas.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/next-env.d.ts`
+- `frontend/package-lock.json`
+- `frontend/package.json`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios en archivos Docker.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+- La nueva dependencia quedo en `package.json`/`package-lock.json` para instalarse con el flujo Docker normal.
+
+Verificaciones ejecutadas:
+- `npm.cmd install @radix-ui/react-select@2.2.6`
+- `npm.cmd run build` inicialmente fallo por cache generada corrupta en `.next/dev/types/validator.ts`.
+- Se limpio `frontend/.next` como cache generada de Next.
+- `npm.cmd run build` paso correctamente despues de limpiar la cache.
+- `npm.cmd audit --audit-level=moderate` reporto 2 vulnerabilidades moderadas heredadas de `next/postcss`; no se aplico `npm audit fix --force` porque propone un cambio rompedor de version.
+- `rg` confirmo `Tiempo estimado`, `@radix-ui/react-select` y estilos del selector.
+
+Verificaciones no ejecutadas o no completadas:
+- `npm.cmd run lint` no es usable con esta version/configuracion porque `next lint` se interpreta como directorio `lint`.
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Listado de procesos sin panel derecho
+
+Que se hizo:
+- Se elimino el panel de detalle que aparecia a la derecha al abrir la ventana `Procesos`.
+- La ventana `Procesos` ahora muestra solo el listado de procesos existentes con acciones.
+- El nombre del proceso y el boton `Visualizar` abren la ventana dedicada de detalle.
+- Se quitaron estado/memo y estilos que sostenian el panel derecho.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que no quedan referencias a `processDetail`, `selectedProcessId` ni `useMemo`.
+- `npm.cmd run build` paso correctamente.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Controles de etapa solo con iconos
+
+Que se hizo:
+- El boton de agregar etapa ahora muestra solo el icono `+`.
+- El boton de eliminar etapa ahora muestra solo el icono de basurero.
+- El boton de eliminar etapa ya no aparece en la etapa 1, aunque existan varias etapas.
+- Eliminar etapa actua sobre la etapa actual y solo esta disponible desde la etapa 2 en adelante.
+- Se agregaron `title` y `aria-label` a los botones de icono para conservar descripcion accesible.
+- Se agrego estilo rojo al boton de basurero en formato icono.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que el basurero se renderiza solo con `selectedStageIndex > 0`.
+- `rg` confirmo `dangerIconButton`, `title` y `aria-label` en los controles de etapa.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Boton eliminar etapa solo desde segunda etapa
+
+Que se hizo:
+- `Eliminar etapa` ya no aparece cuando el proceso tiene una sola etapa.
+- El boton aparece solo cuando hay dos o mas etapas.
+- Se aplico estilo rojo al boton de eliminar etapa para diferenciarlo como accion destructiva.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga manual del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que `Eliminar etapa` se renderiza solo con `form.stages.length > 1`.
+- `rg` confirmo el estilo `.button.dangerText`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-17 - Titulo integrado en barra superior
+
+Que se hizo:
+- Se elimino el titulo duplicado `Mantenimientos del sistema` dentro del contenido.
+- Se dejo `Mantenimientos del sistema` solo en la barra superior, integrado con el perfil.
+- Se aumento el peso visual del titulo en la barra superior para que funcione como encabezado principal.
+
+Que falta:
+- Validar visualmente en navegador luego de la recarga del frontend.
+
+Archivos modificados:
+- `frontend/app/globals.css`
+- `frontend/components/production/production-dashboard.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Sin cambios; no se implemento logica de inventario.
+
+Docker:
+- Sin cambios requeridos.
+- No se reiniciaron contenedores ni se ejecuto Docker.
+
+Verificaciones ejecutadas:
+- `rg` confirmo que `Mantenimientos del sistema` queda solo en `frontend/components/layout/app-shell.tsx`.
+- `git diff --name-only`
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.

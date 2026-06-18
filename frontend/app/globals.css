@@ -52,15 +52,16 @@ textarea {
 .sidebar {
   border-right: 1px solid var(--border);
   background: #ffffff;
-  padding: 20px 14px;
+  padding: 0 0 20px;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 8px 18px;
+  min-height: 64px;
   border-bottom: 1px solid var(--border);
+  padding: 0 22px;
 }
 
 .brandMark {
@@ -93,6 +94,7 @@ textarea {
   display: grid;
   gap: 4px;
   margin-top: 18px;
+  padding: 0 14px;
 }
 
 .navItem {
@@ -132,12 +134,35 @@ textarea {
 }
 
 .topbarTitle strong {
-  font-size: 15px;
+  font-size: 22px;
+  line-height: 1.2;
 }
 
 .topbarTitle span {
   color: var(--muted);
+  font-size: 14px;
+}
+
+.profileMenu {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.profileText {
+  display: grid;
+  gap: 1px;
+  text-align: right;
+}
+
+.profileText strong {
   font-size: 13px;
+}
+
+.profileText span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .content {
@@ -200,9 +225,32 @@ textarea {
   color: #ffffff;
 }
 
+.iconOnlyButton {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.iconOnlyButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.dangerIconButton {
+  border-color: #efb8b8;
+  background: #fff2f2;
+  color: var(--danger);
+}
+
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -210,6 +258,278 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
+}
+
+.maintenanceForm {
+  max-width: 920px;
+}
+
+.maintenanceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 320px));
+  gap: 14px;
+}
+
+.maintenanceSection {
+  display: grid;
+  gap: 12px;
+}
+
+.maintenanceSection h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.maintenanceTile {
+  display: grid;
+  gap: 8px;
+  min-height: 140px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  padding: 18px;
+  text-align: left;
+  box-shadow: var(--shadow);
+}
+
+.maintenanceTile strong {
+  font-size: 16px;
+}
+
+.maintenanceTile span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.maintenanceTile:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.dashboardVisualGrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  gap: 14px;
+}
+
+.dashboardGridCompact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboardVisualGridCompact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboardVisualGridCompact .chartPanel,
+.dashboardGridCompact .panelBody {
+  min-height: 0;
+}
+
+.dashboardVisualGridCompact .chartPanel {
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 12px;
+  height: 214px;
+}
+
+.dashboardVisualGridCompact .barChartList {
+  max-height: 118px;
+}
+
+.dashboardVisualGridCompact .donutWrap {
+  justify-content: space-between;
+}
+
+.dashboardVisualGridCompact .donutChart {
+  width: 104px;
+  height: 104px;
+}
+
+.dashboardGridCompact .panelBody {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 250px;
+}
+
+.chartPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 190px;
+  padding: 16px;
+}
+
+.donutWrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.donutChart {
+  display: grid;
+  width: 116px;
+  height: 116px;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, #ffffff 0 54%, transparent 55%),
+    conic-gradient(var(--primary) var(--donut-value), #dfe6f1 0);
+}
+
+.donutChart strong {
+  align-self: end;
+  font-size: 24px;
+}
+
+.donutChart span {
+  align-self: start;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chartLegend {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chartLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.chartLegend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.legendActive {
+  background: var(--primary);
+}
+
+.legendInactive {
+  background: #dfe6f1;
+}
+
+.barChartList {
+  display: grid;
+  gap: 10px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.barChartRow {
+  display: grid;
+  grid-template-columns: minmax(82px, 142px) minmax(80px, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+}
+
+.barChartRow span {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.barChartRow small {
+  color: var(--muted);
+  text-align: right;
+}
+
+.barTrack,
+.miniBarTrack {
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7edf5;
+}
+
+.barTrack {
+  height: 12px;
+}
+
+.barFill,
+.miniBarFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), #2f7dd5);
+}
+
+.dashboardList {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.dashboardGridCompact .dashboardList {
+  max-height: none;
+  min-height: 0;
+}
+
+.dashboardRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  min-height: 58px;
+  padding: 9px 10px;
+}
+
+.dashboardRow div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboardRow strong,
+.dashboardRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboardRow span,
+.dashboardRow small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dashboardRowMuted {
+  border-color: #f1c8c8;
+  background: #fff7f7;
+}
+
+.dashboardRoleRow {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.miniBarTrack {
+  width: 100%;
+  height: 8px;
 }
 
 .card {
@@ -223,6 +543,12 @@ textarea {
   display: grid;
   gap: 8px;
   padding: 16px;
+}
+
+.summaryGrid .metric {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 76px;
 }
 
 .metricLabel {
@@ -260,6 +586,14 @@ textarea {
   padding: 8px 10px;
 }
 
+.fieldGroup {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .textarea {
   min-height: 82px;
   resize: vertical;
@@ -293,6 +627,16 @@ textarea {
   border: 1px solid #a9dec8;
   background: #effaf5;
   color: var(--success);
+}
+
+.toastStack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 80;
+  display: grid;
+  gap: 10px;
+  width: min(420px, calc(100vw - 32px));
 }
 
 .tableWrap {
@@ -364,6 +708,236 @@ textarea {
   gap: 16px;
 }
 
+.inventoryShell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.inventoryPanel {
+  min-height: 0;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px;
+}
+
+.segmentedControl button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.segmentedControl .segmentActive {
+  background: #e8f0fe;
+  color: var(--primary-strong);
+}
+
+.searchField {
+  max-width: 260px;
+}
+
+.inventoryList,
+.movementList {
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.inventoryList {
+  max-height: 520px;
+}
+
+.movementList {
+  max-height: 604px;
+}
+
+.movementHistoryWindow {
+  width: min(960px, 100%);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.movementHistoryEntries {
+  max-height: 490px;
+}
+
+.movementHistoryLayout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.movementCalendarPanel,
+.movementDateDetail {
+  display: grid;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.movementCalendarPanel {
+  align-content: start;
+  gap: 12px;
+}
+
+.movementDateDetail {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.movementDateDetail h3,
+.movementDateDetail p {
+  margin: 0;
+}
+
+.movementDateDetail h3 {
+  font-size: 15px;
+  text-transform: capitalize;
+}
+
+.movementDateDetail p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.movementCalendarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.movementCalendarHeader strong {
+  text-transform: capitalize;
+}
+
+.movementCalendarWeekdays,
+.movementCalendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.movementCalendarWeekdays span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.movementCalendarEmpty,
+.movementCalendarDay {
+  min-height: 42px;
+}
+
+.movementCalendarDay {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.movementCalendarDay strong {
+  min-width: 18px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: var(--primary-strong);
+  font-size: 10px;
+  line-height: 18px;
+}
+
+.movementCalendarHasMovements {
+  border-color: #9db7f0;
+  background: #f6f9ff;
+}
+
+.movementCalendarSelected {
+  border-color: var(--primary);
+  background: #e8f0fe;
+  box-shadow: 0 0 0 2px rgba(47, 96, 171, 0.16);
+}
+
+.inventoryItemRow,
+.movementRow {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.inventoryItemRow {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.movementRow {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+}
+
+.inventoryItemRow div,
+.movementRow div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.inventoryItemRow strong,
+.inventoryItemRow span,
+.movementRow strong,
+.movementRow span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventoryItemRow span,
+.movementRow span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.inventoryItemInactive {
+  border-color: #f1c8c8;
+  background: #fff7f7;
+}
+
+.stockPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: var(--primary-strong);
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .rowActions {
   display: flex;
   flex-wrap: wrap;
@@ -395,24 +969,13 @@ textarea {
   color: var(--danger);
 }
 
-.templateList {
-  display: grid;
-  gap: 10px;
+.button.dangerText {
+  border-color: #efb8b8;
+  background: #fff2f2;
 }
 
-.templateItem {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-.templateItem span {
-  color: var(--muted);
-  font-size: 13px;
+.successText {
+  color: var(--success);
 }
 
 .stageItem {
@@ -429,6 +992,17 @@ textarea {
   gap: 12px;
 }
 
+.stagesWindow {
+  display: grid;
+  gap: 12px;
+  max-height: 430px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
 .stageFormItem {
   display: grid;
   gap: 10px;
@@ -436,6 +1010,48 @@ textarea {
   border-radius: 8px;
   background: #fbfdff;
   padding: 12px;
+}
+
+.stageSingleWindow {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
+.stageTopActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stageNavigator {
+  position: relative;
+  min-height: 230px;
+}
+
+.stageContent {
+  display: grid;
+  gap: 12px;
+  padding: 0 54px;
+}
+
+.stageArrow {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+}
+
+.stageArrowLeft {
+  left: 0;
+}
+
+.stageArrowRight {
+  right: 0;
 }
 
 .stageOptions {
@@ -522,6 +1138,13 @@ textarea {
   padding: 16px;
 }
 
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .panelTitle {
   margin: 0;
   font-size: 16px;
@@ -541,6 +1164,173 @@ textarea {
   color: var(--muted);
   text-align: center;
   padding: 24px;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgba(23, 32, 51, 0.42);
+  padding: 24px;
+}
+
+.modalWindow {
+  display: grid;
+  gap: 14px;
+  width: min(920px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 22px 48px rgba(19, 32, 54, 0.24);
+  padding: 18px;
+}
+
+.processFormWindow {
+  width: min(720px, 100%);
+  overflow-y: auto;
+}
+
+.processesWindow {
+  width: min(1080px, 100%);
+}
+
+.processViewWindow {
+  width: min(680px, 100%);
+  overflow-y: auto;
+}
+
+.modalHeader,
+.modalActions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modalHeader p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.modalActions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.processesLayout {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
+.processList {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  max-height: 560px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.processRow {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.processRow span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.userRowHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.userRowInactive {
+  border-color: #f1c8c8;
+  background: #fff7f7;
+}
+
+.userRowInactive span {
+  color: #7b5960;
+}
+
+.userPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.userPreviewGrid span {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 8px;
+}
+
+.userPreviewGrid strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.credentialsStack {
+  display: grid;
+  gap: 10px;
+}
+
+.credentialsStack span {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.credentialsStack strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.stageSummaryList {
+  display: grid;
+  gap: 10px;
+}
+
+.stageSummary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.stageSummary span,
+.stageSummary small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .loginPage {
@@ -608,8 +1398,17 @@ textarea {
   }
 
   .summaryGrid,
+  .dashboardGrid,
+  .dashboardVisualGrid,
   .formGrid,
+  .maintenanceGrid,
+  .inventoryShell,
   .integrationPanel {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dashboardVisualGridCompact,
+  .dashboardGridCompact {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -630,9 +1429,52 @@ textarea {
   }
 
   .summaryGrid,
+  .dashboardGrid,
+  .dashboardVisualGrid,
   .formGrid,
+  .maintenanceGrid,
+  .inventoryShell,
   .integrationPanel {
     grid-template-columns: 1fr;
+  }
+
+  .dashboardVisualGridCompact,
+  .dashboardGridCompact {
+    grid-template-columns: 1fr;
+  }
+
+  .inventoryItemRow,
+  .movementRow {
+    grid-template-columns: 1fr;
+  }
+
+  .movementHistoryLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .searchField {
+    max-width: none;
+  }
+
+  .chartPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .donutWrap {
+    justify-content: space-between;
+  }
+
+  .profileText {
+    display: none;
+  }
+
+  .stageTopActions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stageContent {
+    padding: 0 42px;
   }
 
   .inlineField {

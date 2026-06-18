@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+import re
 import secrets
+import unicodedata
 from uuid import UUID
 
 import jwt
@@ -13,24 +15,44 @@ from backend.modules.auth.models import AuthUser
 from backend.modules.config.settings import settings
 
 
-OWNER_PERMISSIONS = [
-    "production.read",
-    "production.create",
-    "production.start",
-    "production.pause",
-    "production.resume",
-    "production.finish",
-    "production.cancel",
-    "production.stages.start",
-    "production.stages.finish",
-    "production.process_templates.read",
-    "production.process_templates.create",
-]
+ROLE_ADMIN = "Admin"
+ROLE_PRODUCTION_MANAGER = "Jefe de producción"
+ROLE_INVENTORY_MANAGER = "Jefe de inventario"
+SYSTEM_ROLES = (ROLE_PRODUCTION_MANAGER, ROLE_ADMIN, ROLE_INVENTORY_MANAGER)
 
 ADMIN_PERMISSIONS = [
-    "production.read",
-    "production.process_templates.read",
+    "production.processes.read",
+    "production.processes.create",
+    "production.processes.update",
+    "production.processes.delete",
+    "inventory.read",
+    "inventory.items.create",
+    "inventory.items.update",
+    "inventory.items.delete",
+    "inventory.movements.create",
 ]
+PRODUCTION_MANAGER_PERMISSIONS = ["production.processes.read"]
+INVENTORY_MANAGER_PERMISSIONS = [
+    "inventory.read",
+    "inventory.items.create",
+    "inventory.items.update",
+    "inventory.items.delete",
+    "inventory.movements.create",
+]
+
+ROLE_PERMISSIONS = {
+    ROLE_ADMIN: ADMIN_PERMISSIONS,
+    "admin": ADMIN_PERMISSIONS,
+    ROLE_PRODUCTION_MANAGER: PRODUCTION_MANAGER_PERMISSIONS,
+    ROLE_INVENTORY_MANAGER: INVENTORY_MANAGER_PERMISSIONS,
+}
+
+ROLE_EMAIL_IDENTIFIERS = {
+    ROLE_ADMIN: "admin",
+    "admin": "admin",
+    ROLE_PRODUCTION_MANAGER: "produccion",
+    ROLE_INVENTORY_MANAGER: "inventario",
+}
 
 
 class AuthError(ValueError):
@@ -57,6 +79,27 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
     candidate = hash_password(password, salt).split("$", 2)[2]
     return hmac.compare_digest(candidate, expected_digest)
+
+
+def generate_temporary_password() -> str:
+    return secrets.token_urlsafe(9)
+
+
+def role_email_identifier(role: str) -> str:
+    return ROLE_EMAIL_IDENTIFIERS.get(role, "usuario")
+
+
+def generate_system_email(username: str, role: str) -> str:
+    normalized_username = username.strip().lower().replace(" ", ".")
+    return f"{normalized_username}.{role_email_identifier(role)}@{settings.system_email_domain}"
+
+
+def generate_username_base(first_name: str, last_name: str) -> str:
+    raw_username = f"{first_name.strip()}.{last_name.strip()}".lower()
+    raw_username = unicodedata.normalize("NFKD", raw_username).encode("ascii", "ignore").decode("ascii")
+    username = re.sub(r"[^a-z0-9.]+", "", raw_username.replace(" ", "."))
+    username = re.sub(r"\.+", ".", username).strip(".")
+    return username or "usuario"
 
 
 def create_access_token(user: AuthUser) -> str:
@@ -103,23 +146,145 @@ class AuthService:
     def get_user(self, user_id: UUID) -> AuthUser | None:
         return self.session.get(AuthUser, user_id)
 
+    def list_users(self) -> list[AuthUser]:
+        statement = select(AuthUser).order_by(AuthUser.username.asc())
+        return list(self.session.execute(statement).scalars().all())
+
+    def create_user(
+        self,
+        *,
+        first_name: str,
+        last_name: str,
+        role: str,
+    ) -> tuple[AuthUser, str]:
+        self._ensure_role(role)
+        username = self._generate_available_username(first_name, last_name, role)
+        email = generate_system_email(username, role)
+
+        temporary_password = generate_temporary_password()
+        user = AuthUser(
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            password_hash=hash_password(temporary_password),
+            role=role,
+            permissions=self._permissions_for_role(role),
+            is_active=True,
+        )
+        self.session.add(user)
+        self.session.flush()
+        return user, temporary_password
+
+    def update_user(
+        self,
+        user_id: UUID,
+        *,
+        first_name: str,
+        last_name: str,
+        role: str,
+    ) -> AuthUser:
+        self._ensure_role(role)
+        username = self._generate_available_username(first_name, last_name, role, exclude_user_id=user_id)
+        email = generate_system_email(username, role)
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+
+        user.username = username
+        user.first_name = first_name
+        user.last_name = last_name
+        user.email = email
+        user.role = role
+        user.permissions = self._permissions_for_role(role)
+        user.updated_at = datetime.utcnow()
+        self.session.flush()
+        return user
+
+    def delete_user(self, user_id: UUID) -> None:
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+        self.session.delete(user)
+
+    def deactivate_user(self, user_id: UUID) -> AuthUser:
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+        user.is_active = False
+        user.updated_at = datetime.utcnow()
+        self.session.flush()
+        return user
+
+    def activate_user(self, user_id: UUID) -> AuthUser:
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+        user.is_active = True
+        user.updated_at = datetime.utcnow()
+        self.session.flush()
+        return user
+
+    def reset_user_password(self, user_id: UUID) -> tuple[AuthUser, str]:
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+        temporary_password = generate_temporary_password()
+        user.password_hash = hash_password(temporary_password)
+        user.updated_at = datetime.utcnow()
+        self.session.flush()
+        return user, temporary_password
+
+    @staticmethod
+    def _ensure_role(role: str) -> None:
+        if role not in SYSTEM_ROLES:
+            raise AuthError("Rol invalido.")
+
+    @staticmethod
+    def _permissions_for_role(role: str) -> list[str]:
+        return ROLE_PERMISSIONS.get(role, [])
+
+    def _generate_available_username(
+        self,
+        first_name: str,
+        last_name: str,
+        role: str,
+        exclude_user_id: UUID | None = None,
+    ) -> str:
+        base_username = generate_username_base(first_name, last_name)
+        candidate = base_username
+        suffix = 2
+        while self._username_or_email_exists(candidate, role, exclude_user_id):
+            candidate = f"{base_username}{suffix}"
+            suffix += 1
+        return candidate
+
+    def _username_or_email_exists(self, username: str, role: str, exclude_user_id: UUID | None) -> bool:
+        email = generate_system_email(username, role)
+        statement = select(AuthUser).where((AuthUser.username == username) | (AuthUser.email == email))
+        if exclude_user_id is not None:
+            statement = statement.where(AuthUser.id != exclude_user_id)
+        return self.session.execute(statement).scalar_one_or_none() is not None
+
 
 def seed_default_users(session: Session) -> None:
-    seed_user(
-        session,
-        username=settings.seed_owner_username,
-        password=settings.seed_owner_password,
-        role="owner",
-        permissions=OWNER_PERMISSIONS,
-    )
+    disable_removed_users(session, usernames=("owner",))
     seed_user(
         session,
         username=settings.seed_admin_username,
         password=settings.seed_admin_password,
-        role="admin",
+        role=ROLE_ADMIN,
         permissions=ADMIN_PERMISSIONS,
     )
     session.commit()
+
+
+def disable_removed_users(session: Session, *, usernames: tuple[str, ...]) -> None:
+    for username in usernames:
+        user = session.execute(select(AuthUser).where(AuthUser.username == username)).scalar_one_or_none()
+        if user is not None:
+            user.is_active = False
+            user.updated_at = datetime.utcnow()
 
 
 def seed_user(session: Session, *, username: str, password: str, role: str, permissions: list[str]) -> None:
@@ -128,6 +293,9 @@ def seed_user(session: Session, *, username: str, password: str, role: str, perm
         session.add(
             AuthUser(
                 username=username,
+                first_name="Admin",
+                last_name="Sistema",
+                email=generate_system_email(username, role),
                 password_hash=hash_password(password),
                 role=role,
                 permissions=permissions,
@@ -138,5 +306,8 @@ def seed_user(session: Session, *, username: str, password: str, role: str, perm
 
     user.role = role
     user.permissions = permissions
+    user.first_name = user.first_name or "Admin"
+    user.last_name = user.last_name or "Sistema"
+    user.email = user.email or generate_system_email(username, role)
     user.is_active = True
     user.updated_at = datetime.utcnow()
