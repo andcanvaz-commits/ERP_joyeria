@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, ChevronLeft, ChevronRight, Download, Eye, Pencil, Plus, Save, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Save, Upload, X } from "lucide-react";
 import { getAccessToken } from "@/lib/api";
 import { getCurrentUser, listUsers, type CurrentUser, type ManagedUser } from "@/lib/auth-api";
 import {
@@ -178,6 +178,7 @@ function parseInvoiceDetails(content: string) {
 
 export function InventoryDashboard() {
   const xmlInputRef = useRef<HTMLInputElement | null>(null);
+  const entryMenuRef = useRef<HTMLDivElement | null>(null);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
@@ -191,6 +192,7 @@ export function InventoryDashboard() {
   const [success, setSuccess] = useState<string | null>(null);
   const [isItemFormOpen, setIsItemFormOpen] = useState(false);
   const [isMovementFormOpen, setIsMovementFormOpen] = useState(false);
+  const [isEntryMenuOpen, setIsEntryMenuOpen] = useState(false);
   const [isMovementHistoryOpen, setIsMovementHistoryOpen] = useState(false);
   const [historyMonth, setHistoryMonth] = useState(() => monthKey(new Date()));
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => dateKey(new Date()));
@@ -242,6 +244,19 @@ export function InventoryDashboard() {
     return () => window.clearTimeout(timeout);
   }, [error, success]);
 
+  useEffect(() => {
+    if (!isEntryMenuOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && entryMenuRef.current?.contains(target)) return;
+      setIsEntryMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isEntryMenuOpen]);
+
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
     return items.filter((item) => {
@@ -267,6 +282,11 @@ export function InventoryDashboard() {
   const canSeeMovementAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const editingItem = editingItemId ? items.find((item) => item.id === editingItemId) ?? null : null;
   const isEditingXmlItem = editingItem ? isXmlInvoiceItem(editingItem) : false;
+  const movementItemType: InventoryItemType = movementForm.movement_type === "SALIDA" ? "FINISHED_PRODUCT" : "RAW_MATERIAL";
+  const movementItems = useMemo(
+    () => items.filter((item) => item.item_type === movementItemType),
+    [items, movementItemType],
+  );
   const sortedMovements = useMemo(
     () => [...movements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [movements],
@@ -338,6 +358,24 @@ export function InventoryDashboard() {
     setEditingItemId(null);
     setItemForm(emptyItemForm());
     setIsItemFormOpen(true);
+  }
+
+  function openManualEntry() {
+    const firstRawMaterial = items.find((item) => item.item_type === "RAW_MATERIAL");
+    setMovementForm({ ...emptyMovementForm(), item_id: firstRawMaterial?.id || "", movement_type: "ENTRADA" });
+    setIsMovementFormOpen(true);
+    setIsEntryMenuOpen(false);
+  }
+
+  function openFinishedProductExit() {
+    const firstFinishedProduct = items.find((item) => item.item_type === "FINISHED_PRODUCT");
+    setMovementForm({ ...emptyMovementForm(), item_id: firstFinishedProduct?.id || "", movement_type: "SALIDA" });
+    setIsMovementFormOpen(true);
+  }
+
+  function openXmlInvoiceInput() {
+    setIsEntryMenuOpen(false);
+    xmlInputRef.current?.click();
   }
 
   function openEditItem(item: InventoryItem) {
@@ -515,32 +553,55 @@ export function InventoryDashboard() {
           <div className="panelHeader">
             <div>
               <h2 className="panelTitle">Inventario actual</h2>
-              <p className="panelText">Ingresos manuales y facturas XML de materia prima</p>
+              <p className="panelText">
+                {itemFilter === "RAW_MATERIAL"
+                  ? "Ingresos manuales y facturas XML de materia prima"
+                  : itemFilter === "FINISHED_PRODUCT"
+                    ? "Salidas comerciales de productos terminados"
+                    : "Seguimiento de productos en proceso"}
+              </p>
             </div>
             <div className="rowActions">
-              <button className="button" onClick={() => {
-                setMovementForm({ ...emptyMovementForm(), movement_type: "ENTRADA" });
-                setIsMovementFormOpen(true);
-              }} type="button">
-                <Plus aria-hidden="true" size={17} />
-                Entrada
-              </button>
-              <button className="button" onClick={() => {
-                setMovementForm({ ...emptyMovementForm(), movement_type: "SALIDA" });
-                setIsMovementFormOpen(true);
-              }} type="button">
-                <Plus aria-hidden="true" size={17} />
-                Salida
-              </button>
-              <button className="button" onClick={() => xmlInputRef.current?.click()} type="button">
-                <Plus aria-hidden="true" size={17} />
-                Factura XML
-              </button>
+              {itemFilter === "RAW_MATERIAL" ? (
+                <>
+                  <div className="actionMenu" ref={entryMenuRef}>
+                    <button className="button" onClick={() => setIsEntryMenuOpen((current) => !current)} type="button">
+                      <Plus aria-hidden="true" size={17} />
+                      Entrada
+                      <ChevronDown aria-hidden="true" size={15} />
+                    </button>
+                    {isEntryMenuOpen ? (
+                      <div className="actionMenuPanel">
+                        <button onClick={openManualEntry} type="button">
+                          <Plus aria-hidden="true" size={16} />
+                          <span>
+                            <strong>Manual</strong>
+                            <small>Registrar ingreso directo</small>
+                          </span>
+                        </button>
+                        <button onClick={openXmlInvoiceInput} type="button">
+                          <Upload aria-hidden="true" size={16} />
+                          <span>
+                            <strong>Factura XML</strong>
+                            <small>Importar lineas de compra</small>
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <button className="button buttonPrimary" onClick={openCreateItem} type="button">
+                    <Plus aria-hidden="true" size={17} />
+                    Materia prima
+                  </button>
+                </>
+              ) : null}
+              {itemFilter === "FINISHED_PRODUCT" ? (
+                <button className="button" onClick={openFinishedProductExit} type="button">
+                  <Minus aria-hidden="true" size={17} />
+                  Salida
+                </button>
+              ) : null}
               <input accept=".xml,text/xml" hidden onChange={handleXmlInvoice} ref={xmlInputRef} type="file" />
-              <button className="button buttonPrimary" onClick={openCreateItem} type="button">
-                <Plus aria-hidden="true" size={17} />
-                Materia prima
-              </button>
             </div>
           </div>
 
@@ -550,7 +611,10 @@ export function InventoryDashboard() {
                 <button
                   className={itemFilter === type.value ? "segmentActive" : ""}
                   key={type.value}
-                  onClick={() => setItemFilter(type.value)}
+                  onClick={() => {
+                    setIsEntryMenuOpen(false);
+                    setItemFilter(type.value);
+                  }}
                   type="button"
                 >
                   {type.label}
@@ -768,8 +832,8 @@ export function InventoryDashboard() {
           <form className="modalWindow processFormWindow" onSubmit={handleCreateMovement}>
             <div className="modalHeader">
               <div>
-                <h2>Registrar ingreso</h2>
-                <p>Todo ingreso manual queda trazado como movimiento</p>
+                <h2>{movementForm.movement_type === "SALIDA" ? "Registrar salida" : "Registrar ingreso"}</h2>
+                <p>Todo movimiento manual queda trazado en inventario</p>
               </div>
               <button className="iconOnlyButton" onClick={() => setIsMovementFormOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -779,7 +843,7 @@ export function InventoryDashboard() {
               <span>Item</span>
               <select className="field" onChange={(event) => setMovementForm((current) => ({ ...current, item_id: event.target.value }))} value={movementForm.item_id}>
                 <option value="">Seleccionar item</option>
-                {items.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
+                {movementItems.map((item) => (
                   <option key={item.id} value={item.id}>{item.name} - {item.sku}</option>
                 ))}
               </select>

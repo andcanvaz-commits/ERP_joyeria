@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BarChart3, Boxes, FileText, LayoutDashboard, LogOut, Settings, Shield, UserCircle } from "lucide-react";
+import { BarChart3, Boxes, Factory, FileText, LayoutDashboard, LogOut, Shield, UserCircle, Wrench } from "lucide-react";
 import { clearAccessToken, getAccessToken } from "@/lib/api";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth-api";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/produccion", label: "Mantenimientos", icon: Settings },
+  { href: "/produccion", label: "Produccion", icon: Factory },
+  { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/reportes", label: "Reportes", icon: BarChart3 },
   { href: "/documentos", label: "Documentos", icon: FileText },
@@ -22,8 +23,12 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Resumen de procesos y usuarios",
   },
   "/produccion": {
-    title: "Mantenimientos del sistema",
-    subtitle: "Administracion de configuraciones base",
+    title: "Produccion",
+    subtitle: "Ejecucion de procesos y seguimiento de etapas",
+  },
+  "/mantenimientos": {
+    title: "Mantenimientos",
+    subtitle: "Procesos, usuarios y configuraciones del sistema",
   },
   "/inventario": {
     title: "Inventario",

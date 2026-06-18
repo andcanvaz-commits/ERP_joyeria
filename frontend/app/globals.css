@@ -275,6 +275,93 @@ textarea {
   gap: 12px;
 }
 
+.productionOpsGrid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr);
+  gap: 14px;
+}
+
+.productionStartPanel,
+.productionTimelinePanel {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+}
+
+.productionMaterialPreview,
+.productionStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.productionMaterialPreview span,
+.productionStats span {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.productionMaterialPreview strong,
+.productionStats strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.runTimeline {
+  display: grid;
+  gap: 10px;
+  max-height: 390px;
+  overflow-y: auto;
+}
+
+.runStage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border-left: 4px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.runStage > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.runStage span,
+.runStage small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.runStageEN_PROCESO {
+  border-left-color: var(--primary);
+  background: #f8fbff;
+}
+
+.runStageFINALIZADA {
+  border-left-color: var(--success);
+}
+
+.stageFinishBox {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.stageFinishBox .field {
+  width: 150px;
+}
+
 .maintenanceSection h2 {
   margin: 0;
   font-size: 17px;
@@ -944,6 +1031,56 @@ textarea {
   gap: 8px;
 }
 
+.actionMenu {
+  position: relative;
+}
+
+.actionMenuPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 230px;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+.actionMenuPanel button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.actionMenuPanel button:hover {
+  background: var(--surface-muted);
+}
+
+.actionMenuPanel span {
+  display: grid;
+  gap: 2px;
+}
+
+.actionMenuPanel strong {
+  font-size: 13px;
+}
+
+.actionMenuPanel small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .iconTextButton {
   display: inline-flex;
   align-items: center;
@@ -1402,6 +1539,7 @@ textarea {
   .dashboardVisualGrid,
   .formGrid,
   .maintenanceGrid,
+  .productionOpsGrid,
   .inventoryShell,
   .integrationPanel {
     grid-template-columns: 1fr 1fr;
@@ -1433,6 +1571,9 @@ textarea {
   .dashboardVisualGrid,
   .formGrid,
   .maintenanceGrid,
+  .productionOpsGrid,
+  .productionMaterialPreview,
+  .productionStats,
   .inventoryShell,
   .integrationPanel {
     grid-template-columns: 1fr;
@@ -1444,7 +1585,8 @@ textarea {
   }
 
   .inventoryItemRow,
-  .movementRow {
+  .movementRow,
+  .runStage {
     grid-template-columns: 1fr;
   }
 

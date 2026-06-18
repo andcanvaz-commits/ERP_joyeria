@@ -68,6 +68,106 @@ Verificaciones ejecutadas:
 Verificaciones no ejecutadas o no completadas:
 - No se ejecuto `docker-compose config` porque no se modificaron archivos Docker.
 
+### 2026-06-18 - Acciones por tipo de inventario
+
+Que se hizo:
+- Se ajustaron las acciones visibles segun el menu de inventario seleccionado.
+- En `Materia prima` se muestran solo `Entrada` y `Materia prima`.
+- En `Producto terminado` se muestra solo `Salida`.
+- En `Producto en proceso` no se muestran acciones manuales de entrada, salida ni creacion de materia prima.
+- El formulario de salida ahora lista productos terminados, no materia prima.
+- El menu de `Entrada` se cierra al cambiar de seccion.
+
+Que falta:
+- Implementar mas adelante la salida/consumo de materia prima desde el flujo de produccion, sin hacerlo desde esta pantalla.
+- Definir luego el flujo operativo de productos en proceso cuando se construya la ventana correspondiente.
+
+Archivos modificados:
+- `frontend/components/inventory/inventory-dashboard.tsx`
+- `TASK_Inventario.md`
+
+Puntos para integrar luego con produccion:
+- La salida de materia prima debe nacer del inicio o avance de un proceso de produccion en una ventana futura.
+- `Producto en proceso` queda sin acciones manuales porque debe alimentarse desde el flujo productivo y contratos compartidos.
+- Las salidas manuales actuales quedan acotadas a productos terminados.
+
+Docker:
+- Sin cambios requeridos; no se agregaron dependencias, variables, puertos ni comandos.
+
+Reglas de `SKILL.md` aplicadas:
+- Se mantuvieron acciones contextuales y compactas para reducir ruido visual.
+- Se evito exponer acciones que pertenecen a otro flujo operativo.
+
+Verificaciones ejecutadas:
+- `npm.cmd run build` en `frontend`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto `docker-compose config` porque no se modificaron archivos Docker.
+
+### 2026-06-18 - Cierre de menu de entrada
+
+Que se hizo:
+- El menu desplegable de `Entrada` ahora se cierra al hacer clic fuera del menu.
+- Se mantuvo activo el clic interno para seleccionar `Manual` o `Factura XML` sin cerrar antes de ejecutar la accion.
+
+Que falta:
+- Sin pendientes para este ajuste puntual.
+
+Archivos modificados:
+- `frontend/components/inventory/inventory-dashboard.tsx`
+- `TASK_Inventario.md`
+
+Puntos para integrar luego con produccion:
+- Sin cambios nuevos de integracion; se mantiene como comportamiento de UI de inventario.
+
+Docker:
+- Sin cambios requeridos; no se agregaron dependencias, variables, puertos ni comandos.
+
+Reglas de `SKILL.md` aplicadas:
+- Se mantuvo un control compacto y predecible para acciones de inventario.
+- No se crearon componentes compartidos porque el comportamiento es especifico del menu de entrada de inventario.
+
+Verificaciones ejecutadas:
+- `npm.cmd run build` en `frontend`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto `docker-compose config` porque no se modificaron archivos Docker.
+
+### 2026-06-18 - Acciones de entrada y salida en inventario
+
+Que se hizo:
+- Se redujo la saturacion de acciones en el panel de inventario actual.
+- Se reemplazo el boton separado de `Factura XML` por un menu desplegable bajo `Entrada`.
+- El boton `Entrada` ahora despliega dos opciones: `Manual` y `Factura XML`.
+- El boton `Salida` ahora usa icono de menos en lugar de icono de mas.
+- El modal de movimiento ahora muestra `Registrar salida` cuando el movimiento es de salida.
+
+Que falta:
+- Evaluar cerrar el menu de entrada al hacer clic fuera si el flujo lo requiere.
+- Mantener la integracion de factura XML limitada a inventario y sin mezclar logica de produccion.
+
+Archivos modificados:
+- `frontend/components/inventory/inventory-dashboard.tsx`
+- `frontend/app/globals.css`
+
+Puntos para integrar luego con produccion:
+- La importacion por factura XML registra entradas de inventario; produccion debera consumir disponibilidad y movimientos mediante contratos compartidos, no desde esta UI.
+- Las salidas manuales siguen siendo movimientos de inventario; consumo de produccion debe integrarse despues desde el contrato del backend.
+
+Docker:
+- Sin cambios requeridos; no se agregaron dependencias, variables, puertos ni comandos.
+
+Reglas de `SKILL.md` aplicadas:
+- Se uso un menu compacto para opciones de entrada y se redujo la cantidad de botones visibles.
+- Se mantuvo el estilo operacional SaaS, con controles compactos y consistentes.
+
+Verificaciones ejecutadas:
+- `npm.cmd run build` en `frontend`.
+- Revision de diff de `frontend/components/inventory/inventory-dashboard.tsx` y `frontend/app/globals.css`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se ejecuto `docker-compose config` porque no se modificaron archivos Docker.
+
 ### 2026-06-17 - Mantenimiento y visualizacion inicial de inventario
 
 Que se hizo:

@@ -98,6 +98,48 @@ class InventoryService(InventoryIntegrationPort):
         self.repository.flush()
         return InventoryMovementRead.model_validate(movement)
 
+    def ensure_production_item(self, *, item_type: str, name: str, unit_code: str) -> InventoryItem:
+        existing = next(
+            (
+                item
+                for item in self.repository.list_items(item_type)
+                if item.name.strip().lower() == name.strip().lower()
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+
+        item = InventoryItem(
+            item_type=item_type,
+            name=name,
+            sku=self._generate_sku(item_type),
+            description="Creado automaticamente desde produccion.",
+            unit_code=unit_code.strip(),
+            minimum_stock=None,
+        )
+        self.repository.add_item(item)
+        self.repository.flush()
+        return item
+
+    def consume_material_for_production(
+        self,
+        *,
+        item_id: UUID,
+        quantity: Decimal,
+        production_run_id: UUID,
+        user_id: UUID | None,
+    ) -> InventoryMovementRead:
+        payload = InventoryMovementCreate(
+            item_id=item_id,
+            movement_type="CONSUMO_PRODUCCION",
+            quantity=quantity,
+            reason="Consumo de materia prima por inicio de produccion.",
+            reference_type="production_run",
+            reference_id=production_run_id,
+        )
+        return self.create_movement(payload, user_id=user_id)
+
     def list_movements(self, item_id: UUID | None = None) -> list[InventoryMovementRead]:
         return [InventoryMovementRead.model_validate(movement) for movement in self.repository.list_movements(item_id)]
 

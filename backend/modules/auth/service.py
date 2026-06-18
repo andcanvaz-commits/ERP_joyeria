@@ -306,6 +306,7 @@ def seed_user(session: Session, *, username: str, password: str, role: str, perm
 
     user.role = role
     user.permissions = permissions
+    user.password_hash = hash_password(password)
     user.first_name = user.first_name or "Admin"
     user.last_name = user.last_name or "Sistema"
     user.email = user.email or generate_system_email(username, role)

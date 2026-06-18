@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, Factory, Pencil, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Clock, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { getAccessToken } from "@/lib/api";
 import {
   activateUser,
@@ -15,8 +15,10 @@ import {
   resetUserPassword,
   updateUser,
 } from "@/lib/auth-api";
-import { createProcess, deleteProcess, listProcesses, updateProcess } from "@/lib/production-api";
-import type { ProductionProcess } from "@/types/production";
+import { listInventoryItems } from "@/lib/inventory-api";
+import { createProcess, createProductionRun, deleteProcess, finishProductionRunStage, listProcesses, listProductionRuns, updateProcess } from "@/lib/production-api";
+import type { InventoryItem } from "@/types/inventory";
+import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 
 type StageForm = {
   name: string;
@@ -28,6 +30,10 @@ type StageForm = {
 type ProcessForm = {
   name: string;
   description: string;
+  rawMaterialItemId: string;
+  rawMaterialQuantityPerUnit: string;
+  rawMaterialUnitCode: string;
+  wasteLimitPercent: string;
   stages: StageForm[];
 };
 
@@ -46,6 +52,10 @@ const emptyStage = (): StageForm => ({
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
+  rawMaterialItemId: "",
+  rawMaterialQuantityPerUnit: "",
+  rawMaterialUnitCode: "g",
+  wasteLimitPercent: "5",
   stages: [emptyStage()],
 });
 
@@ -60,6 +70,10 @@ function processToForm(process: ProductionProcess): ProcessForm {
   return {
     name: process.name,
     description: process.description ?? "",
+    rawMaterialItemId: process.raw_material_item_id ?? "",
+    rawMaterialQuantityPerUnit: process.raw_material_quantity_per_unit ?? "",
+    rawMaterialUnitCode: process.raw_material_unit_code ?? "g",
+    wasteLimitPercent: process.waste_limit_percent ?? "5",
     stages: stages.length > 0 ? stages.map((stage) => ({
       name: stage.name,
       description: stage.description ?? "",
@@ -69,9 +83,11 @@ function processToForm(process: ProductionProcess): ProcessForm {
   };
 }
 
-export function ProductionDashboard() {
+export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
   const [form, setForm] = useState<ProcessForm>(emptyProcessForm);
   const [processes, setProcesses] = useState<ProductionProcess[]>([]);
+  const [runs, setRuns] = useState<ProductionRun[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<InventoryItem[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,6 +114,9 @@ export function ProductionDashboard() {
     role: string;
     temporaryPassword: string;
   } | null>(null);
+  const [selectedProcessId, setSelectedProcessId] = useState("");
+  const [runQuantity, setRunQuantity] = useState("1");
+  const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
 
   const selectedStage = form.stages[selectedStageIndex] ?? form.stages[0];
   async function loadData() {
@@ -108,10 +127,19 @@ export function ProductionDashboard() {
         window.location.href = "/login";
         return;
       }
-      const [user, nextProcesses, nextUsers] = await Promise.all([getCurrentUser(), listProcesses(), listUsers()]);
+      const [user, nextProcesses, nextUsers, nextRuns, nextRawMaterials] = await Promise.all([
+        getCurrentUser(),
+        listProcesses(),
+        listUsers(),
+        listProductionRuns(),
+        listInventoryItems("RAW_MATERIAL"),
+      ]);
       setCurrentUser(user);
       setProcesses(nextProcesses);
       setUsers(nextUsers);
+      setRuns(nextRuns);
+      setRawMaterials(nextRawMaterials);
+      setSelectedProcessId((current) => current || nextProcesses.find((process) => process.is_active)?.id || "");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo cargar produccion.");
     } finally {
@@ -136,6 +164,37 @@ export function ProductionDashboard() {
   const canCreate = isAdmin || currentUser?.permissions.includes("production.processes.create") === true;
   const canUpdate = isAdmin || currentUser?.permissions.includes("production.processes.update") === true;
   const canDelete = isAdmin || currentUser?.permissions.includes("production.processes.delete") === true;
+  const showProductionContent = variant === "production";
+  const showMaintenanceContent = variant === "maintenance";
+  const activeProcesses = processes.filter((process) => process.is_active);
+  const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
+  const selectedMaterial = rawMaterials.find((item) => item.id === selectedProcess?.raw_material_item_id) ?? null;
+  const requiredMaterial = selectedProcess?.raw_material_quantity_per_unit && runQuantity
+    ? Number(selectedProcess.raw_material_quantity_per_unit) * Number(runQuantity)
+    : 0;
+  const activeRun = runs.find((run) => run.status === "EN_PROCESO") ?? null;
+  const currentRunStage = activeRun?.stages.find((stage) => stage.status === "EN_PROCESO") ?? null;
+
+  function numericText(value: string | number | null | undefined) {
+    if (value === null || value === undefined || value === "") return "0";
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
+  }
+
+  function timeLabel(value: string | null) {
+    if (!value) return "Pendiente";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Pendiente";
+    return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function stageTimingLabel(stage: ProductionRunStage) {
+    if (stage.status === "FINALIZADA") return "Finalizada";
+    if (stage.status === "PENDIENTE") return "Pendiente";
+    if (!stage.scheduled_finish_at) return "En proceso";
+    const delay = Math.ceil((Date.now() - new Date(stage.scheduled_finish_at).getTime()) / 60000);
+    return delay > 0 ? `Retrasada ${delay} min` : "A tiempo";
+  }
 
   function openCreateForm() {
     setForm(emptyProcessForm());
@@ -245,11 +304,18 @@ export function ProductionDashboard() {
     if (stages.some((stage) => stage.estimatedMinutes && Number(stage.estimatedMinutes) < 1)) {
       throw new Error("El tiempo de duracion de cada etapa debe ser mayor a cero.");
     }
+    if (!form.rawMaterialItemId || !form.rawMaterialQuantityPerUnit || Number(form.rawMaterialQuantityPerUnit) <= 0) {
+      throw new Error("Selecciona la materia prima y la cantidad por unidad del proceso.");
+    }
 
     return {
       name: processName,
       description: form.description.trim() || null,
       version: 1,
+      raw_material_item_id: form.rawMaterialItemId,
+      raw_material_quantity_per_unit: form.rawMaterialQuantityPerUnit,
+      raw_material_unit_code: form.rawMaterialUnitCode || "g",
+      waste_limit_percent: form.wasteLimitPercent || "5",
       is_active: true,
       stages: stages.map((stage, index) => ({
         name: stage.name,
@@ -301,6 +367,55 @@ export function ProductionDashboard() {
       await loadData();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo eliminar el proceso.");
+    }
+  }
+
+  async function handleStartRun() {
+    if (!selectedProcess) {
+      setError("Selecciona un proceso para producir.");
+      return;
+    }
+    if (!runQuantity || Number(runQuantity) <= 0) {
+      setError("Ingresa una cantidad valida para fabricar.");
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      await createProductionRun({ process_id: selectedProcess.id, quantity: runQuantity });
+      setSuccess("Produccion iniciada. Inventario registro el consumo de materia prima.");
+      await loadData();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar produccion.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleFinishStage(stage: ProductionRunStage, confirmEarlyFinish = false) {
+    setError(null);
+    setSuccess(null);
+    try {
+      const finalWeight = stageWeights[stage.id]?.trim() || null;
+      await finishProductionRunStage(stage.id, {
+        final_weight: finalWeight,
+        confirm_early_finish: confirmEarlyFinish,
+      });
+      setStageWeights((current) => ({ ...current, [stage.id]: "" }));
+      setSuccess("Etapa registrada correctamente.");
+      await loadData();
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "No se pudo finalizar la etapa.";
+      if (message.includes("antes del tiempo estimado")) {
+        const confirmed = window.confirm(`${message}\n\nDeseas confirmar de todos modos?`);
+        if (confirmed) {
+          await handleFinishStage(stage, true);
+          return;
+        }
+      }
+      setError(message);
     }
   }
 
@@ -427,42 +542,140 @@ export function ProductionDashboard() {
         </div>
       ) : null}
 
-      <section className="maintenanceSection" aria-label="Mantenimientos de produccion">
-        <h2>Produccion</h2>
-        <div className="maintenanceGrid">
-          <button className="maintenanceTile" disabled={!canCreate || isLoading} onClick={openCreateForm} type="button">
-            <Factory aria-hidden="true" size={22} />
-            <strong>Crear proceso</strong>
-            <span>Nombre del proceso y etapas configurables.</span>
-          </button>
-          <button
-            className="maintenanceTile"
-            disabled={isLoading}
-            onClick={() => setIsProcessesOpen(true)}
-            type="button"
-          >
-            <Eye aria-hidden="true" size={22} />
-            <strong>Procesos</strong>
-            <span>{processes.length} procesos creados.</span>
-          </button>
-        </div>
-      </section>
+      {showProductionContent ? (
+        <section className="productionOpsGrid" aria-label="Operacion de produccion">
+          <article className="card panelBody productionStartPanel">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Produccion</h2>
+                <p className="panelText">Procesos creados en mantenimiento listos para fabricar</p>
+              </div>
+              <Play aria-hidden="true" size={22} />
+            </div>
+            <label className="fieldGroup">
+              <span>Proceso</span>
+              <select className="field" onChange={(event) => setSelectedProcessId(event.target.value)} value={selectedProcess?.id ?? ""}>
+                {activeProcesses.map((process) => (
+                  <option key={process.id} value={process.id}>{process.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="fieldGroup">
+              <span>Cantidad a fabricar</span>
+              <input className="field" min="0.0001" onChange={(event) => setRunQuantity(event.target.value)} step="0.0001" type="number" value={runQuantity} />
+            </label>
+            <div className="productionMaterialPreview">
+              <span>
+                <strong>Materia prima</strong>
+                {selectedMaterial?.name ?? "Sin materia prima configurada"}
+              </span>
+              <span>
+                <strong>Consumo total</strong>
+                {numericText(requiredMaterial)} {selectedProcess?.raw_material_unit_code ?? selectedMaterial?.unit_code ?? ""}
+              </span>
+              <span>
+                <strong>Stock disponible</strong>
+                {selectedMaterial ? `${numericText(selectedMaterial.current_stock)} ${selectedMaterial.unit_code}` : "0"}
+              </span>
+            </div>
+            <button className="button buttonPrimary" disabled={isSaving || !selectedProcess} onClick={() => void handleStartRun()} type="button">
+              <Play aria-hidden="true" size={17} />
+              Empezar
+            </button>
+          </article>
 
-      <section className="maintenanceSection" aria-label="Mantenimientos de usuarios">
-        <h2>Usuarios</h2>
-        <div className="maintenanceGrid">
-          <button className="maintenanceTile" onClick={openCreateUserForm} type="button">
-            <UserPlus aria-hidden="true" size={22} />
-            <strong>Crear usuario</strong>
-            <span>Registro de usuarios del sistema.</span>
-          </button>
-          <button className="maintenanceTile" onClick={() => setIsUsersOpen(true)} type="button">
-            <Users aria-hidden="true" size={22} />
-            <strong>Usuarios</strong>
-            <span>{users.length} usuarios creados.</span>
-          </button>
-        </div>
-      </section>
+          <article className="card panelBody productionTimelinePanel">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Linea de tiempo</h2>
+                <p className="panelText">{activeRun ? `${activeRun.process_name} iniciado ${timeLabel(activeRun.started_at)}` : "Sin produccion activa"}</p>
+              </div>
+              <Clock aria-hidden="true" size={22} />
+            </div>
+            {activeRun ? (
+              <div className="runTimeline">
+                {activeRun.stages.map((stage) => (
+                  <div className={`runStage runStage${stage.status}`} key={stage.id}>
+                    <div>
+                      <strong>{stage.stage_order}. {stage.stage_name}</strong>
+                      <span>{timeLabel(stage.scheduled_start_at)} - {timeLabel(stage.scheduled_finish_at)}</span>
+                      <small>{stageTimingLabel(stage)}</small>
+                    </div>
+                    {stage.id === currentRunStage?.id ? (
+                      <div className="stageFinishBox">
+                        {stage.requires_weighing ? (
+                          <input
+                            className="field"
+                            min="0"
+                            onChange={(event) => setStageWeights((current) => ({ ...current, [stage.id]: event.target.value }))}
+                            placeholder="Nuevo pesaje"
+                            step="0.0001"
+                            type="number"
+                            value={stageWeights[stage.id] ?? ""}
+                          />
+                        ) : null}
+                        <button className="button" onClick={() => void handleFinishStage(stage)} type="button">
+                          Etapa terminada
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="emptyState">Selecciona un proceso y pulsa Empezar.</div>
+            )}
+            {runs.filter((run) => run.status === "FINALIZADA").slice(0, 1).map((run) => (
+              <div className="productionStats" key={run.id}>
+                <span><strong>Ultimo proceso</strong>{run.process_name}</span>
+                <span><strong>Merma</strong>{numericText(run.waste_weight)} {run.raw_material_unit_code} / {numericText(run.waste_percent)}%</span>
+                <span><strong>Resultado</strong>{Number(run.waste_percent ?? 0) <= Number(run.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}</span>
+              </div>
+            ))}
+          </article>
+        </section>
+      ) : null}
+
+      {showMaintenanceContent ? (
+        <>
+          <section className="maintenanceSection" aria-label="Mantenimientos de produccion">
+            <h2>Procesos</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" disabled={!canCreate || isLoading} onClick={openCreateForm} type="button">
+                <Factory aria-hidden="true" size={22} />
+                <strong>Crear proceso</strong>
+                <span>Nombre del proceso y etapas configurables.</span>
+              </button>
+              <button
+                className="maintenanceTile"
+                disabled={isLoading}
+                onClick={() => setIsProcessesOpen(true)}
+                type="button"
+              >
+                <Eye aria-hidden="true" size={22} />
+                <strong>Procesos</strong>
+                <span>{processes.length} procesos creados.</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="maintenanceSection" aria-label="Mantenimientos de usuarios">
+            <h2>Usuarios</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={openCreateUserForm} type="button">
+                <UserPlus aria-hidden="true" size={22} />
+                <strong>Crear usuario</strong>
+                <span>Registro de usuarios del sistema.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setIsUsersOpen(true)} type="button">
+                <Users aria-hidden="true" size={22} />
+                <strong>Usuarios</strong>
+                <span>{users.length} usuarios creados.</span>
+              </button>
+            </div>
+          </section>
+        </>
+      ) : null}
 
       {isFormOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Formulario de proceso">
@@ -498,6 +711,58 @@ export function ProductionDashboard() {
                 value={form.description}
               />
             </label>
+
+            <div className="formGrid">
+              <label className="fieldGroup">
+                <span>Materia prima por unidad</span>
+                <select
+                  className="field"
+                  disabled={isSaving}
+                  onChange={(event) => {
+                    const material = rawMaterials.find((item) => item.id === event.target.value);
+                    setForm((current) => ({
+                      ...current,
+                      rawMaterialItemId: event.target.value,
+                      rawMaterialUnitCode: material?.unit_code ?? current.rawMaterialUnitCode,
+                    }));
+                  }}
+                  value={form.rawMaterialItemId}
+                >
+                  <option value="">Seleccionar materia prima</option>
+                  {rawMaterials.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} - {item.current_stock} {item.unit_code}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Cantidad usada por unidad</span>
+                <input
+                  className="field"
+                  disabled={isSaving}
+                  min="0.0001"
+                  onChange={(event) => setForm((current) => ({ ...current, rawMaterialQuantityPerUnit: event.target.value }))}
+                  step="0.0001"
+                  type="number"
+                  value={form.rawMaterialQuantityPerUnit}
+                />
+              </label>
+              <label className="fieldGroup">
+                <span>Unidad de materia prima</span>
+                <input className="field" disabled value={form.rawMaterialUnitCode} />
+              </label>
+              <label className="fieldGroup">
+                <span>Limite de merma %</span>
+                <input
+                  className="field"
+                  disabled={isSaving}
+                  min="0"
+                  onChange={(event) => setForm((current) => ({ ...current, wasteLimitPercent: event.target.value }))}
+                  step="0.01"
+                  type="number"
+                  value={form.wasteLimitPercent}
+                />
+              </label>
+            </div>
 
             <section className="stageSingleWindow">
               <div className="stageTopActions">

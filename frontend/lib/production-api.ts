@@ -1,10 +1,14 @@
 import { apiRequest } from "@/lib/api";
-import type { ProductionProcess } from "@/types/production";
+import type { ProductionProcess, ProductionRun } from "@/types/production";
 
 export type CreateProductionProcessPayload = {
   name: string;
   description?: string | null;
   version?: number;
+  raw_material_item_id?: string | null;
+  raw_material_quantity_per_unit?: string | null;
+  raw_material_unit_code?: string | null;
+  waste_limit_percent?: string;
   is_active?: boolean;
   stages: Array<{
     name: string;
@@ -37,5 +41,26 @@ export function updateProcess(processId: string, payload: CreateProductionProces
 export function deleteProcess(processId: string) {
   return apiRequest<void>(`/api/production/processes/${processId}`, {
     method: "DELETE",
+  });
+}
+
+export function listProductionRuns() {
+  return apiRequest<ProductionRun[]>("/api/production/runs");
+}
+
+export function createProductionRun(payload: { process_id: string; quantity: string }) {
+  return apiRequest<ProductionRun>("/api/production/runs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function finishProductionRunStage(
+  stageId: string,
+  payload: { initial_weight?: string | null; final_weight?: string | null; confirm_early_finish?: boolean },
+) {
+  return apiRequest<ProductionRun>(`/api/production/runs/stages/${stageId}/finish`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
