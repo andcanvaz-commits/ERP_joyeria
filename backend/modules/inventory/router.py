@@ -108,10 +108,11 @@ def create_movement(
     service: InventoryService = Depends(get_inventory_service),
 ) -> InventoryMovementRead:
     ensure_permission(current_user, "inventory.movements.create")
-    if payload.movement_type != "ENTRADA":
+    # Allow both ENTRY and EXIT movements for raw materials inventory
+    if payload.movement_type not in {"ENTRADA", "SALIDA"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Por ahora solo se permiten ingresos manuales de inventario.",
+            detail="Solo se permiten ingresos y salidas manuales de inventario de materia prima.",
         )
     try:
         return service.create_movement(payload, user_id=current_user.id)

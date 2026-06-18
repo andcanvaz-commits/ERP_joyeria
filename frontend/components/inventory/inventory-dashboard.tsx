@@ -18,7 +18,6 @@ import {
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType, InventorySummary } from "@/types/inventory";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS"; label: string }> = [
-  { value: "TODOS", label: "Todos" },
   { value: "RAW_MATERIAL", label: "Materia prima" },
   { value: "WORK_IN_PROGRESS", label: "Producto en proceso" },
   { value: "FINISHED_PRODUCT", label: "Producto terminado" },
@@ -184,7 +183,7 @@ export function InventoryDashboard() {
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS">("TODOS");
+  const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS">("RAW_MATERIAL");
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -388,7 +387,6 @@ export function InventoryDashboard() {
     try {
       await createInventoryMovement({
         ...movementForm,
-        movement_type: "ENTRADA",
         unit_cost: null,
         reference_type: null,
         reference_id: null,
@@ -520,9 +518,19 @@ export function InventoryDashboard() {
               <p className="panelText">Ingresos manuales y facturas XML de materia prima</p>
             </div>
             <div className="rowActions">
-              <button className="button" onClick={() => setIsMovementFormOpen(true)} type="button">
+              <button className="button" onClick={() => {
+                setMovementForm({ ...emptyMovementForm(), movement_type: "ENTRADA" });
+                setIsMovementFormOpen(true);
+              }} type="button">
                 <Plus aria-hidden="true" size={17} />
-                Ingreso
+                Entrada
+              </button>
+              <button className="button" onClick={() => {
+                setMovementForm({ ...emptyMovementForm(), movement_type: "SALIDA" });
+                setIsMovementFormOpen(true);
+              }} type="button">
+                <Plus aria-hidden="true" size={17} />
+                Salida
               </button>
               <button className="button" onClick={() => xmlInputRef.current?.click()} type="button">
                 <Plus aria-hidden="true" size={17} />
