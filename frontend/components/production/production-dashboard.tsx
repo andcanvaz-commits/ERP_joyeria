@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Clock, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Clock, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { getAccessToken } from "@/lib/api";
 import {
   activateUser,
@@ -55,7 +55,7 @@ const emptyProcessForm = (): ProcessForm => ({
   rawMaterialItemId: "",
   rawMaterialQuantityPerUnit: "",
   rawMaterialUnitCode: "g",
-  wasteLimitPercent: "5",
+  wasteLimitPercent: "1",
   stages: [emptyStage()],
 });
 
@@ -73,7 +73,7 @@ function processToForm(process: ProductionProcess): ProcessForm {
     rawMaterialItemId: process.raw_material_item_id ?? "",
     rawMaterialQuantityPerUnit: process.raw_material_quantity_per_unit ?? "",
     rawMaterialUnitCode: process.raw_material_unit_code ?? "g",
-    wasteLimitPercent: process.waste_limit_percent ?? "5",
+    wasteLimitPercent: process.waste_limit_percent ?? "1",
     stages: stages.length > 0 ? stages.map((stage) => ({
       name: stage.name,
       description: stage.description ?? "",
@@ -117,6 +117,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [selectedProcessId, setSelectedProcessId] = useState("");
   const [runQuantity, setRunQuantity] = useState("1");
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
+  const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
+  const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
+  const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
+  const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historyMonth, setHistoryMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [hasInitializedHistory, setHasInitializedHistory] = useState(false);
 
   const selectedStage = form.stages[selectedStageIndex] ?? form.stages[0];
   async function loadData() {
@@ -139,6 +147,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setUsers(nextUsers);
       setRuns(nextRuns);
       setRawMaterials(nextRawMaterials);
+      setSelectedRunForStages((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
+      setSelectedStatsRun((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
       setSelectedProcessId((current) => current || nextProcesses.find((process) => process.is_active)?.id || "");
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo cargar produccion.");
@@ -164,8 +174,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const canCreate = isAdmin || currentUser?.permissions.includes("production.processes.create") === true;
   const canUpdate = isAdmin || currentUser?.permissions.includes("production.processes.update") === true;
   const canDelete = isAdmin || currentUser?.permissions.includes("production.processes.delete") === true;
-  const showProductionContent = variant === "production";
-  const showMaintenanceContent = variant === "maintenance";
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
   const selectedMaterial = rawMaterials.find((item) => item.id === selectedProcess?.raw_material_item_id) ?? null;
@@ -174,6 +182,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     : 0;
   const activeRun = runs.find((run) => run.status === "EN_PROCESO") ?? null;
   const currentRunStage = activeRun?.stages.find((stage) => stage.status === "EN_PROCESO") ?? null;
+  const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO" || run.status === "PAUSADA");
+  const finishedRuns = runs.filter((run) => run.status === "FINALIZADA");
+  const recentFinishedRuns = finishedRuns.slice(0, 3);
+
+  useEffect(() => {
+    if (finishedRuns.length === 0 || hasInitializedHistory) {
+      return;
+    }
+
+    const latestRun = finishedRuns[0];
+    const nextDate = (latestRun.finished_at ?? "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+    setHistoryMonth(nextDate.slice(0, 7));
+    setSelectedHistoryDate(nextDate);
+    setHasInitializedHistory(true);
+  }, [finishedRuns, hasInitializedHistory]);
 
   function numericText(value: string | number | null | undefined) {
     if (value === null || value === undefined || value === "") return "0";
@@ -188,6 +211,58 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
+  function buildCalendarDays(monthKey: string) {
+    const [yearText, monthText] = monthKey.split("-");
+    const year = Number(yearText);
+    const month = Number(monthText);
+
+    if (!Number.isFinite(year) || !Number.isFinite(month)) {
+      return [];
+    }
+
+    const firstDay = new Date(year, month - 1, 1);
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const leadingDays = (firstDay.getDay() + 6) % 7;
+    const totalSlots = Math.ceil((leadingDays + daysInMonth) / 7) * 7;
+
+    return Array.from({ length: totalSlots }, (_, index) => {
+      const dayNumber = index - leadingDays + 1;
+      const isValid = dayNumber > 0 && dayNumber <= daysInMonth;
+      const dayKey = isValid
+        ? `${year}-${String(month).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`
+        : `empty-${index}`;
+      return {
+        key: dayKey,
+        label: isValid ? String(dayNumber) : "",
+        isValid,
+      };
+    });
+  }
+
+  function moveHistoryMonth(step: number) {
+    if (!historyMonth) return;
+    const [yearText, monthText] = historyMonth.split("-");
+    const year = Number(yearText);
+    const month = Number(monthText);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return;
+
+    const nextDate = new Date(year, month - 1 + step, 1);
+    const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}`;
+    const matchingRun = finishedRuns.find((run) => (run.finished_at ?? "").slice(0, 7) === nextMonth);
+    const nextDay = matchingRun
+      ? (matchingRun.finished_at ?? "").slice(0, 10)
+      : `${nextMonth}-01`;
+    setHistoryMonth(nextMonth);
+    setSelectedHistoryDate(nextDay);
+  }
+
+  function monthLabel(monthKey: string) {
+    if (!monthKey) return "Historial";
+    const date = new Date(`${monthKey}-01T00:00:00`);
+    if (Number.isNaN(date.getTime())) return "Historial";
+    return date.toLocaleDateString("es-EC", { month: "long", year: "numeric" });
+  }
+
   function stageTimingLabel(stage: ProductionRunStage) {
     if (stage.status === "FINALIZADA") return "Finalizada";
     if (stage.status === "PENDIENTE") return "Pendiente";
@@ -195,6 +270,40 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     const delay = Math.ceil((Date.now() - new Date(stage.scheduled_finish_at).getTime()) / 60000);
     return delay > 0 ? `Retrasada ${delay} min` : "A tiempo";
   }
+
+  function canManageStage(stage: ProductionRunStage, index: number, stages: ProductionRunStage[]) {
+    if (stage.status === "FINALIZADA" || stage.status === "EN_PROCESO") {
+      return stage.status === "EN_PROCESO";
+    }
+    const previousStages = stages.slice(0, index);
+    return previousStages.every((previousStage) => previousStage.status === "FINALIZADA");
+  }
+
+  function openRunStagesModal(run: ProductionRun) {
+    setSelectedRunForStages(run);
+    setIsRunStagesOpen(true);
+  }
+
+  function closeRunStagesModal() {
+    setIsRunStagesOpen(false);
+    setSelectedRunForStages(null);
+  }
+
+  function openStatsModal(run: ProductionRun) {
+    setSelectedStatsRun(run);
+    setIsStatsModalOpen(true);
+  }
+
+  function closeStatsModal() {
+    setIsStatsModalOpen(false);
+    setSelectedStatsRun(null);
+  }
+
+  const currentHistoryMonth = historyMonth || (new Date().toISOString().slice(0, 7));
+  const historyDays = buildCalendarDays(currentHistoryMonth);
+  const selectedDateRuns = selectedHistoryDate
+    ? finishedRuns.filter((run) => (run.finished_at ?? "").slice(0, 10) === selectedHistoryDate)
+    : [];
 
   function openCreateForm() {
     setForm(emptyProcessForm());
@@ -315,7 +424,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       raw_material_item_id: form.rawMaterialItemId,
       raw_material_quantity_per_unit: form.rawMaterialQuantityPerUnit,
       raw_material_unit_code: form.rawMaterialUnitCode || "g",
-      waste_limit_percent: form.wasteLimitPercent || "5",
+      waste_limit_percent: "1",
       is_active: true,
       stages: stages.map((stage, index) => ({
         name: stage.name,
@@ -397,6 +506,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   async function handleFinishStage(stage: ProductionRunStage, confirmEarlyFinish = false) {
     setError(null);
     setSuccess(null);
+    setIsSaving(true);
     try {
       const finalWeight = stageWeights[stage.id]?.trim() || null;
       await finishProductionRunStage(stage.id, {
@@ -416,6 +526,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         }
       }
       setError(message);
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -542,101 +654,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </div>
       ) : null}
 
-      {showProductionContent ? (
-        <section className="productionOpsGrid" aria-label="Operacion de produccion">
-          <article className="card panelBody productionStartPanel">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Produccion</h2>
-                <p className="panelText">Procesos creados en mantenimiento listos para fabricar</p>
-              </div>
-              <Play aria-hidden="true" size={22} />
-            </div>
-            <label className="fieldGroup">
-              <span>Proceso</span>
-              <select className="field" onChange={(event) => setSelectedProcessId(event.target.value)} value={selectedProcess?.id ?? ""}>
-                {activeProcesses.map((process) => (
-                  <option key={process.id} value={process.id}>{process.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="fieldGroup">
-              <span>Cantidad a fabricar</span>
-              <input className="field" min="0.0001" onChange={(event) => setRunQuantity(event.target.value)} step="0.0001" type="number" value={runQuantity} />
-            </label>
-            <div className="productionMaterialPreview">
-              <span>
-                <strong>Materia prima</strong>
-                {selectedMaterial?.name ?? "Sin materia prima configurada"}
-              </span>
-              <span>
-                <strong>Consumo total</strong>
-                {numericText(requiredMaterial)} {selectedProcess?.raw_material_unit_code ?? selectedMaterial?.unit_code ?? ""}
-              </span>
-              <span>
-                <strong>Stock disponible</strong>
-                {selectedMaterial ? `${numericText(selectedMaterial.current_stock)} ${selectedMaterial.unit_code}` : "0"}
-              </span>
-            </div>
-            <button className="button buttonPrimary" disabled={isSaving || !selectedProcess} onClick={() => void handleStartRun()} type="button">
-              <Play aria-hidden="true" size={17} />
-              Empezar
-            </button>
-          </article>
-
-          <article className="card panelBody productionTimelinePanel">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Linea de tiempo</h2>
-                <p className="panelText">{activeRun ? `${activeRun.process_name} iniciado ${timeLabel(activeRun.started_at)}` : "Sin produccion activa"}</p>
-              </div>
-              <Clock aria-hidden="true" size={22} />
-            </div>
-            {activeRun ? (
-              <div className="runTimeline">
-                {activeRun.stages.map((stage) => (
-                  <div className={`runStage runStage${stage.status}`} key={stage.id}>
-                    <div>
-                      <strong>{stage.stage_order}. {stage.stage_name}</strong>
-                      <span>{timeLabel(stage.scheduled_start_at)} - {timeLabel(stage.scheduled_finish_at)}</span>
-                      <small>{stageTimingLabel(stage)}</small>
-                    </div>
-                    {stage.id === currentRunStage?.id ? (
-                      <div className="stageFinishBox">
-                        {stage.requires_weighing ? (
-                          <input
-                            className="field"
-                            min="0"
-                            onChange={(event) => setStageWeights((current) => ({ ...current, [stage.id]: event.target.value }))}
-                            placeholder="Nuevo pesaje"
-                            step="0.0001"
-                            type="number"
-                            value={stageWeights[stage.id] ?? ""}
-                          />
-                        ) : null}
-                        <button className="button" onClick={() => void handleFinishStage(stage)} type="button">
-                          Etapa terminada
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="emptyState">Selecciona un proceso y pulsa Empezar.</div>
-            )}
-            {runs.filter((run) => run.status === "FINALIZADA").slice(0, 1).map((run) => (
-              <div className="productionStats" key={run.id}>
-                <span><strong>Ultimo proceso</strong>{run.process_name}</span>
-                <span><strong>Merma</strong>{numericText(run.waste_weight)} {run.raw_material_unit_code} / {numericText(run.waste_percent)}%</span>
-                <span><strong>Resultado</strong>{Number(run.waste_percent ?? 0) <= Number(run.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}</span>
-              </div>
-            ))}
-          </article>
-        </section>
-      ) : null}
-
-      {showMaintenanceContent ? (
+      {variant === "maintenance" ? (
         <>
           <section className="maintenanceSection" aria-label="Mantenimientos de produccion">
             <h2>Procesos</h2>
@@ -675,6 +693,308 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </section>
         </>
+      ) : (
+        <>
+          <section className="productionOpsGrid" aria-label="Operacion de produccion">
+            <article className="card panelBody productionStartPanel">
+              <div className="panelHeader">
+                <div>
+                  <h2 className="panelTitle">Produccion</h2>
+                  <p className="panelText">Procesos creados en mantenimiento listos para fabricar</p>
+                </div>
+                <Play aria-hidden="true" size={22} />
+              </div>
+              <label className="fieldGroup">
+                <span>Proceso</span>
+                <select className="field" onChange={(event) => setSelectedProcessId(event.target.value)} value={selectedProcess?.id ?? ""}>
+                  {activeProcesses.map((process) => (
+                    <option key={process.id} value={process.id}>{process.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Cantidad a fabricar</span>
+                <input className="field" min="0.0001" onChange={(event) => setRunQuantity(event.target.value)} step="0.0001" type="number" value={runQuantity} />
+              </label>
+              <div className="productionMaterialPreview">
+                <span>
+                  <strong>Materia prima</strong>
+                  {selectedMaterial?.name ?? "Sin materia prima configurada"}
+                </span>
+                <span>
+                  <strong>Consumo total</strong>
+                  {numericText(requiredMaterial)} {selectedProcess?.raw_material_unit_code ?? selectedMaterial?.unit_code ?? ""}
+                </span>
+                <span>
+                  <strong>Stock disponible</strong>
+                  {selectedMaterial ? `${numericText(selectedMaterial.current_stock)} ${selectedMaterial.unit_code}` : "0"}
+                </span>
+              </div>
+              <button className="button buttonPrimary" disabled={isSaving || !selectedProcess} onClick={() => void handleStartRun()} type="button">
+                <Play aria-hidden="true" size={17} />
+                Empezar
+              </button>
+            </article>
+
+            <article className="card panelBody productionTimelinePanel">
+              <div className="panelHeader">
+                <div>
+                  <h2 className="panelTitle">Procesos en transcurso</h2>
+                  <p className="panelText">{inProgressRuns.length} procesos activos</p>
+                </div>
+                <Clock aria-hidden="true" size={22} />
+              </div>
+              {inProgressRuns.length > 0 ? (
+                <div className="productionRunningList">
+                  {inProgressRuns.map((run) => {
+                    const currentStage = run.stages.find((stage) => stage.status === "EN_PROCESO") ?? run.stages.find((stage) => stage.status === "PENDIENTE") ?? null;
+                    return (
+                      <article className="productionCard productionCardCompact" key={run.id}>
+                        <div className="productionCardHeader">
+                          <div>
+                            <strong>{run.process_name}</strong>
+                            <span>{run.quantity} unidades</span>
+                          </div>
+                          <span className="statusPill">{run.status === "PAUSADA" ? "Pausado" : "En curso"}</span>
+                        </div>
+                        <p className="panelText">{currentStage ? `Etapa actual: ${currentStage.stage_name}` : "Proceso listo para continuar"}</p>
+                        <div className="productionCardMeta">
+                          <span>Inicio: {timeLabel(run.started_at)}</span>
+                          <span>Material: {numericText(run.total_required_material)} {run.raw_material_unit_code}</span>
+                        </div>
+                        <div className="rowActions">
+                          <button className="button buttonPrimary" onClick={() => openRunStagesModal(run)} type="button">
+                            Ver etapas
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="emptyState">No hay procesos en transcurso.</div>
+              )}
+            </article>
+          </section>
+
+          <section className="productionOpsGrid" aria-label="Historial de produccion">
+            <article className="card panelBody productionTimelinePanel">
+              <div className="panelHeader">
+                <div>
+                  <h2 className="panelTitle">Historial de procesos</h2>
+                  <p className="panelText">Últimos procesos finalizados</p>
+                </div>
+                <button
+                  aria-label="Ver historial completo"
+                  className="iconOnlyButton"
+                  disabled={finishedRuns.length === 0}
+                  onClick={() => setIsHistoryOpen(true)}
+                  title="Historial completo"
+                  type="button"
+                >
+                  <Eye aria-hidden="true" size={22} />
+                </button>
+              </div>
+              {recentFinishedRuns.length > 0 ? (
+                <div className="productionHistoryList">
+                  {recentFinishedRuns.map((run) => (
+                    <article className="productionCard productionCardCompact" key={run.id}>
+                      <div className="productionCardHeader">
+                        <div>
+                          <strong>{run.process_name}</strong>
+                          <span>{run.quantity} unidades</span>
+                        </div>
+                        <button className="iconOnlyButton" onClick={() => setIsHistoryOpen(true)} type="button" aria-label="Ver historial de procesos">
+                          <Eye aria-hidden="true" size={18} />
+                        </button>
+                      </div>
+                      <p className="panelText">Finalizado: {timeLabel(run.finished_at)}</p>
+                      <div className="productionCardMeta">
+                        <span>Merma: {numericText(run.waste_weight)} {run.raw_material_unit_code}</span>
+                        <span>{numericText(run.waste_percent)}%</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="emptyState">No hay historial disponible.</div>
+              )}
+            </article>
+          </section>
+        </>
+      )}
+
+      {isRunStagesOpen && selectedRunForStages ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Etapas del proceso">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>{selectedRunForStages.process_name}</h2>
+                <p>{selectedRunForStages.quantity} unidades</p>
+              </div>
+              <button className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="stageSummaryList">
+              {selectedRunForStages.stages.map((stage, index, stages) => {
+                const canManage = canManageStage(stage, index, stages);
+                return (
+                  <div className="stageSummary" key={stage.id}>
+                    <div>
+                      <strong>{stage.stage_order}. {stage.stage_name}</strong>
+                      <span>{stageTimingLabel(stage)}</span>
+                    </div>
+                    <small>{timeLabel(stage.scheduled_start_at)} - {timeLabel(stage.scheduled_finish_at)}</small>
+                    {canManage ? (
+                      <div className="stageFinishBox">
+                        {stage.requires_weighing ? (
+                          <input
+                            className="field"
+                            min="0"
+                            onChange={(event) => setStageWeights((current) => ({ ...current, [stage.id]: event.target.value }))}
+                            placeholder="Peso final"
+                            step="0.0001"
+                            type="number"
+                            value={stageWeights[stage.id] ?? ""}
+                          />
+                        ) : null}
+                        <button className="button" onClick={() => void handleFinishStage(stage)} type="button">
+                          {stage.status === "PENDIENTE" ? "Iniciar y terminar etapa" : "Finalizar etapa"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isStatsModalOpen && selectedStatsRun ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Estadisticas del proceso">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>{selectedStatsRun.process_name}</h2>
+                <p>{selectedStatsRun.quantity} unidades</p>
+              </div>
+              <button className="iconOnlyButton" onClick={closeStatsModal} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="userPreviewGrid">
+              <span>
+                <strong>Estado</strong>
+                {selectedStatsRun.status}
+              </span>
+              <span>
+                <strong>Inicio</strong>
+                {timeLabel(selectedStatsRun.started_at)}
+              </span>
+              <span>
+                <strong>Fin</strong>
+                {timeLabel(selectedStatsRun.finished_at)}
+              </span>
+              <span>
+                <strong>Merma</strong>
+                {numericText(selectedStatsRun.waste_weight)} {selectedStatsRun.raw_material_unit_code}
+              </span>
+              <span>
+                <strong>% merma</strong>
+                {numericText(selectedStatsRun.waste_percent)}%
+              </span>
+              <span>
+                <strong>Resultado</strong>
+                {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
+              </span>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isHistoryOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de procesos">
+          <section className="modalWindow movementHistoryWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Historial de procesos</h2>
+                <p>{finishedRuns.length} procesos registrados</p>
+              </div>
+              <button className="iconOnlyButton" onClick={() => setIsHistoryOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="movementHistoryLayout">
+              <section className="movementCalendarPanel" aria-label="Calendario de procesos">
+                <div className="movementCalendarHeader">
+                  <button className="iconOnlyButton" onClick={() => moveHistoryMonth(-1)} type="button">
+                    <ChevronLeft aria-hidden="true" size={18} />
+                  </button>
+                  <strong>{monthLabel(currentHistoryMonth)}</strong>
+                  <button className="iconOnlyButton" onClick={() => moveHistoryMonth(1)} type="button">
+                    <ChevronRight aria-hidden="true" size={18} />
+                  </button>
+                </div>
+                <div className="movementCalendarWeekdays">
+                  <span>Lu</span>
+                  <span>Ma</span>
+                  <span>Mi</span>
+                  <span>Ju</span>
+                  <span>Vi</span>
+                  <span>Sa</span>
+                  <span>Do</span>
+                </div>
+                <div className="movementCalendarGrid">
+                  {historyDays.map((day) => {
+                    if (!day.isValid) {
+                      return <span className="movementCalendarEmpty" key={day.key} />;
+                    }
+                    const count = finishedRuns.filter((run) => (run.finished_at ?? "").slice(0, 10) === day.key).length;
+                    const isSelected = day.key === selectedHistoryDate;
+                    return (
+                      <button
+                        className={`movementCalendarDay ${isSelected ? "movementCalendarSelected" : ""} ${count > 0 ? "movementCalendarHasMovements" : ""}`}
+                        key={day.key}
+                        onClick={() => setSelectedHistoryDate(day.key)}
+                        type="button"
+                      >
+                        <span>{day.label}</span>
+                        {count > 0 ? <strong>{count}</strong> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+              <section className="movementDateDetail">
+                <div>
+                  <h3>{selectedHistoryDate ? new Date(`${selectedHistoryDate}T00:00:00`).toLocaleDateString("es-EC", { weekday: "long", day: "numeric", month: "long" }) : "Sin fecha"}</h3>
+                  <p>{selectedDateRuns.length} procesos registrados</p>
+                </div>
+                <div className="movementList movementHistoryEntries">
+                  {selectedDateRuns.map((run) => (
+                    <article className="movementRow" key={run.id}>
+                      <div>
+                        <strong>{run.process_name}</strong>
+                        <span>{timeLabel(run.finished_at)}</span>
+                      </div>
+                      <div>
+                        <strong>{run.quantity} unidades</strong>
+                        <span>{numericText(run.waste_percent)}% merma</span>
+                        <span>{numericText(run.waste_weight)} {run.raw_material_unit_code}</span>
+                      </div>
+                      <button className="button buttonSecondary" onClick={() => openStatsModal(run)} type="button">
+                        Ver estadisticas
+                      </button>
+                    </article>
+                  ))}
+                  {selectedDateRuns.length === 0 ? <div className="emptyState">No hay procesos en esta fecha.</div> : null}
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {isFormOpen ? (
@@ -749,18 +1069,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <label className="fieldGroup">
                 <span>Unidad de materia prima</span>
                 <input className="field" disabled value={form.rawMaterialUnitCode} />
-              </label>
-              <label className="fieldGroup">
-                <span>Limite de merma %</span>
-                <input
-                  className="field"
-                  disabled={isSaving}
-                  min="0"
-                  onChange={(event) => setForm((current) => ({ ...current, wasteLimitPercent: event.target.value }))}
-                  step="0.01"
-                  type="number"
-                  value={form.wasteLimitPercent}
-                />
               </label>
             </div>
 

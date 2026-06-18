@@ -279,11 +279,13 @@ textarea {
   display: grid;
   grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr);
   gap: 14px;
+  align-items: start;
 }
 
 .productionStartPanel,
 .productionTimelinePanel {
   align-content: start;
+  align-self: start;
   display: grid;
   gap: 14px;
 }
@@ -311,6 +313,73 @@ textarea {
 .productionStats strong {
   color: var(--text);
   font-size: 12px;
+}
+
+.productionCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.productionRunningList,
+.productionHistoryList {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.productionCard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.productionCardCompact {
+  gap: 8px;
+}
+
+.productionCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.productionCardHeader strong {
+  display: block;
+  font-size: 14px;
+}
+
+.productionCardHeader span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.productionCardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.productionCardMeta span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.statusPill {
+  border: 1px solid var(--primary-light);
+  border-radius: 999px;
+  background: #f4f8ff;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  white-space: nowrap;
 }
 
 .runTimeline {

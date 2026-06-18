@@ -9,8 +9,8 @@ import { getCurrentUser, type CurrentUser } from "@/lib/auth-api";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/produccion", label: "Produccion", icon: Factory },
   { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
+  { href: "/produccion", label: "Produccion", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/reportes", label: "Reportes", icon: BarChart3 },
   { href: "/documentos", label: "Documentos", icon: FileText },

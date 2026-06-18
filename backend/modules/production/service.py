@@ -233,7 +233,7 @@ class ProductionService:
         run = stage.run
         if run.status != ProductionRunStatus.IN_PROGRESS:
             raise ProductionDomainError("La produccion ya no esta en proceso.")
-        if stage.status != ProductionRunStageStatus.IN_PROGRESS:
+        if stage.status not in (ProductionRunStageStatus.PENDING, ProductionRunStageStatus.IN_PROGRESS):
             raise ProductionDomainError("Solo se puede finalizar la etapa en curso.")
         if stage.requires_weighing and payload.final_weight is None:
             raise ProductionDomainError("Esta etapa requiere registrar el nuevo pesaje.")
@@ -242,6 +242,10 @@ class ProductionService:
         scheduled_finish_at = stage.scheduled_finish_at.replace(tzinfo=None) if stage.scheduled_finish_at else None
         if scheduled_finish_at and now < scheduled_finish_at and not payload.confirm_early_finish:
             raise ProductionDomainError("La etapa esta terminando antes del tiempo estimado. Confirma para continuar.")
+
+        if stage.status == ProductionRunStageStatus.PENDING:
+            stage.status = ProductionRunStageStatus.IN_PROGRESS
+            stage.started_at = now
 
         stage.initial_weight = payload.initial_weight
         stage.final_weight = payload.final_weight

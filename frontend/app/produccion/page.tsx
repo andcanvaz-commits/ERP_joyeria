@@ -4,7 +4,7 @@ import { ProductionDashboard } from "@/components/production/production-dashboar
 export default function ProductionPage() {
   return (
     <AppShell>
-      <ProductionDashboard />
+      <ProductionDashboard variant="production" />
     </AppShell>
   );
 }
