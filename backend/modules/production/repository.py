@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.modules.production.models import ProductionProcess, ProductionRun, ProductionRunStage
+from backend.modules.production.models import ProductionProcess, ProductionProcessStage, ProductionProcessStageIngredient, ProductionRun, ProductionRunStage
 
 
 class ProductionProcessRepository:
@@ -19,7 +19,9 @@ class ProductionProcessRepository:
     def get(self, process_id: UUID) -> ProductionProcess | None:
         statement = (
             select(ProductionProcess)
-            .options(selectinload(ProductionProcess.stages))
+            .options(
+                selectinload(ProductionProcess.stages).selectinload(ProductionProcessStage.ingredients)
+            )
             .where(ProductionProcess.id == process_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
@@ -27,7 +29,9 @@ class ProductionProcessRepository:
     def list(self) -> list[ProductionProcess]:
         statement = (
             select(ProductionProcess)
-            .options(selectinload(ProductionProcess.stages))
+            .options(
+                selectinload(ProductionProcess.stages).selectinload(ProductionProcessStage.ingredients)
+            )
             .order_by(ProductionProcess.name.asc(), ProductionProcess.version.desc())
         )
         return list(self.session.execute(statement).scalars().all())
@@ -56,9 +60,18 @@ class ProductionProcessRepository:
         statement = (
             select(ProductionRun)
             .options(selectinload(ProductionRun.stages))
-            .order_by(ProductionRun.started_at.desc())
+            .order_by(ProductionRun.requested_at.desc())
         )
         return list(self.session.execute(statement).scalars().all())
+
+    def count_runs_this_year(self, year: int) -> int:
+        from sqlalchemy import extract, func
+        result = self.session.execute(
+            select(func.count(ProductionRun.id)).where(
+                extract("year", ProductionRun.requested_at) == year
+            )
+        ).scalar_one_or_none()
+        return int(result or 0)
 
     def has_processes(self) -> bool:
         return self.session.execute(select(ProductionProcess.id).limit(1)).first() is not None
@@ -68,3 +81,19 @@ class ProductionProcessRepository:
 
     def delete(self, process: ProductionProcess) -> None:
         self.session.delete(process)
+
+    def delete_orphan_runs(self) -> int:
+        """Remove production runs whose process no longer exists (old/test data)."""
+        valid_process_ids = select(ProductionProcess.id)
+        orphan_runs = list(
+            self.session.execute(
+                select(ProductionRun)
+                .options(selectinload(ProductionRun.stages))
+                .where(ProductionRun.process_id.not_in(valid_process_ids))
+            )
+            .scalars()
+            .all()
+        )
+        for run in orphan_runs:
+            self.session.delete(run)
+        return len(orphan_runs)

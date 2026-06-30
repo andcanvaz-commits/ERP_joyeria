@@ -1,11 +1,23 @@
+export interface StageIngredient {
+  id: string;
+  inventory_item_id: string;
+  quantity: string;
+  unit_code: string;
+}
+
 export type ProductionProcessStage = {
   id: string;
   name: string;
   description: string | null;
+  phase_name: string | null;
+  stage_type: string;
+  quality_check: string | null;
+  rework_action: string | null;
   stage_order: number;
   estimated_minutes: number | null;
   requires_weighing: boolean;
   is_active: boolean;
+  ingredients?: StageIngredient[];
 };
 
 export type ProductionProcess = {
@@ -25,6 +37,11 @@ export type ProductionRunStage = {
   id: string;
   source_stage_id: string;
   stage_name: string;
+  stage_code?: string | null;
+  phase_name: string | null;
+  stage_type: string;
+  quality_check: string | null;
+  rework_action: string | null;
   stage_order: number;
   estimated_minutes: number | null;
   requires_weighing: boolean;
@@ -41,8 +58,15 @@ export type ProductionRun = {
   id: string;
   process_id: string;
   process_name: string;
+  production_code?: string | null;
   quantity: string;
-  status: "EN_PROCESO" | "FINALIZADA" | "CANCELADA";
+  status:
+    | "PENDIENTE_INVENTARIO"
+    | "MATERIALES_APROBADOS"
+    | "EN_PROCESO"
+    | "PENDIENTE_RECEPCION"
+    | "RECIBIDA"
+    | "CANCELADA";
   raw_material_item_id: string;
   raw_material_quantity_per_unit: string;
   raw_material_unit_code: string;
@@ -53,7 +77,11 @@ export type ProductionRun = {
   waste_weight: string | null;
   waste_percent: string | null;
   created_by_user_id: string;
-  started_at: string;
+  created_by_name?: string | null;
+  requested_at: string;
+  materials_approved_at: string | null;
+  started_at: string | null;
   finished_at: string | null;
+  received_at: string | null;
   stages: ProductionRunStage[];
 };

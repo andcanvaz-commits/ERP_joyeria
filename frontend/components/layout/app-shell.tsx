@@ -34,6 +34,18 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     title: "Inventario",
     subtitle: "Materia prima, productos en proceso y productos terminados",
   },
+  "/reportes": {
+    title: "Reportes",
+    subtitle: "Resumenes y salidas de informacion",
+  },
+  "/documentos": {
+    title: "Documentos",
+    subtitle: "Actas y comprobantes operativos",
+  },
+  "/seguridad": {
+    title: "Seguridad",
+    subtitle: "Permisos y controles de acceso",
+  },
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -84,8 +96,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="profileMenu">
             <UserCircle aria-hidden="true" size={28} />
             <div className="profileText">
-              <strong>{currentUser?.username ?? "admin"}</strong>
-              <span>{currentUser?.role ?? "admin"}</span>
+              <strong>{currentUser?.email ?? currentUser?.username ?? ""}</strong>
+              <span>({currentUser?.role ?? ""})</span>
             </div>
             <button
               className="iconOnlyButton"

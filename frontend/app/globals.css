@@ -766,11 +766,31 @@ textarea {
   gap: 10px;
 }
 
+@keyframes toastSlideIn {
+  from { transform: translateX(calc(100% + 32px)); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes toastProgressShrink {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+
 .notice {
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 10px;
+  padding: 13px 16px 0;
   font-size: 14px;
   font-weight: 700;
+  line-height: 1.4;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(10, 20, 40, 0.14);
+  animation: toastSlideIn 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.noticeInner {
+  display: block;
+  padding-bottom: 20px;
 }
 
 .noticeError {
@@ -785,14 +805,32 @@ textarea {
   color: var(--success);
 }
 
+.toastProgressBar {
+  display: block;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 0 0 10px 10px;
+  animation: toastProgressShrink 5s linear forwards;
+}
+
+.noticeError .toastProgressBar  { background: var(--danger); }
+.noticeSuccess .toastProgressBar { background: var(--success); }
+
 .toastStack {
   position: fixed;
-  bottom: 24px;
+  top: 24px;
   right: 24px;
-  z-index: 80;
+  z-index: 200;
   display: grid;
   gap: 10px;
-  width: min(420px, calc(100vw - 32px));
+  width: min(400px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toastStack > * {
+  pointer-events: auto;
 }
 
 .tableWrap {
@@ -915,11 +953,13 @@ textarea {
 }
 
 .inventoryList {
-  max-height: 520px;
+  max-height: 460px;
+  overflow-y: auto;
 }
 
 .movementList {
-  max-height: 604px;
+  max-height: 460px;
+  overflow-y: auto;
 }
 
 .movementHistoryWindow {
@@ -1383,6 +1423,10 @@ textarea {
   padding: 24px;
 }
 
+.modalBackdropTop {
+  z-index: 60;
+}
+
 .modalWindow {
   display: grid;
   gap: 14px;
@@ -1537,6 +1581,21 @@ textarea {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.stageSummaryPhase {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stageSummary .stageSummaryCheck {
+  color: #1d4ed8;
+}
+
+.stageSummary .stageSummaryRework {
+  color: #b45309;
 }
 
 .loginPage {
@@ -1703,4 +1762,874 @@ textarea {
   .nav {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Process flow visualization ───────────────────────────────────── */
+
+.processFlowWindow {
+  width: min(860px, 100%);
+  overflow-y: auto;
+}
+
+.processFlowInfoBar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 14px 16px;
+}
+
+.processFlowMeta {
+  display: grid;
+  gap: 3px;
+}
+
+.processFlowMeta strong {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.processFlowMeta span {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.processFlowList {
+  display: grid;
+  gap: 0;
+  padding: 4px 0;
+}
+
+.processFlowPhaseHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 6px;
+}
+
+.processFlowPhaseLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #c7d7f5;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: var(--primary-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  padding: 4px 14px;
+  text-transform: uppercase;
+}
+
+.processFlowConnector {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 26px;
+  color: var(--muted);
+  font-size: 16px;
+  position: relative;
+}
+
+.processFlowConnector::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+  transform: translateX(-50%);
+  z-index: 0;
+}
+
+.processFlowConnector span {
+  position: relative;
+  z-index: 1;
+  background: var(--background);
+  padding: 0 3px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.processFlowStage {
+  display: grid;
+  gap: 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  border-left-width: 4px;
+  background: #ffffff;
+  padding: 14px 16px;
+  transition: box-shadow 0.15s;
+}
+
+.processFlowStage:hover {
+  box-shadow: 0 4px 16px rgba(19, 32, 54, 0.09);
+}
+
+.processFlowStagePROCESS  { border-left-color: #6366f1; }
+.processFlowStageTHERMAL  { border-left-color: #ef4444; }
+.processFlowStageCHEMICAL { border-left-color: #f59e0b; }
+.processFlowStageCONTROL  { border-left-color: #10b981; }
+.processFlowStageDECISION { border-left-color: #8b5cf6; }
+
+.processFlowStageHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.processFlowStageTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.processFlowStageOrder {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.processFlowStagePROCESS  .processFlowStageOrder { background: #6366f1; }
+.processFlowStageTHERMAL  .processFlowStageOrder { background: #ef4444; }
+.processFlowStageCHEMICAL .processFlowStageOrder { background: #f59e0b; }
+.processFlowStageCONTROL  .processFlowStageOrder { background: #10b981; }
+.processFlowStageDECISION .processFlowStageOrder { background: #8b5cf6; }
+
+.processFlowStageName {
+  font-size: 14px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.processFlowTypeBadge {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.processFlowStagePROCESS  .processFlowTypeBadge { background: #ede9fe; color: #4338ca; }
+.processFlowStageTHERMAL  .processFlowTypeBadge { background: #fee2e2; color: #b91c1c; }
+.processFlowStageCHEMICAL .processFlowTypeBadge { background: #fef3c7; color: #92400e; }
+.processFlowStageCONTROL  .processFlowTypeBadge { background: #d1fae5; color: #065f46; }
+.processFlowStageDECISION .processFlowTypeBadge { background: #f3e8ff; color: #5b21b6; }
+
+.processFlowStageDesc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.processFlowCallout {
+  border-radius: 0 8px 8px 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  display: grid;
+  gap: 3px;
+}
+
+.processFlowCallout strong {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.processFlowCalloutCheck {
+  border-left: 3px solid #10b981;
+  background: #f0fdf4;
+}
+
+.processFlowCalloutCheck strong { color: #065f46; }
+
+.processFlowCalloutRework {
+  border-left: 3px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.processFlowCalloutRework strong { color: #92400e; }
+
+.processFlowStageFoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.processFlowTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── Confirm dialog ───────────────────────────────────────────────── */
+
+.confirmBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 20, 40, 0.52);
+  padding: 24px;
+}
+
+.confirmDialog {
+  display: grid;
+  gap: 20px;
+  width: min(440px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 24px 56px rgba(10, 20, 40, 0.22);
+  padding: 26px 24px 22px;
+}
+
+.confirmDialog h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.confirmDialog p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.confirmDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.buttonDanger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
+}
+
+/* ── Production integration cards (used in inventory module) ─────── */
+
+.productionRequestsList {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.productionRequestCard {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #c7d7f5;
+  border-radius: 10px;
+  background: #f6f9ff;
+  padding: 12px 14px;
+}
+
+.productionRequestCard strong {
+  font-size: 14px;
+}
+
+.productionRequestMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.productionRequestMeta span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.receptionRequestCard {
+  border-color: #a7f3d0;
+  background: #f0fdf4;
+}
+
+@media (max-width: 680px) {
+  .processFlowInfoBar {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Production redesign ─────────────────────────────────────── */
+
+.productionStatsRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.productionStatCard {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.productionStatCard strong {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.productionStatCard span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.productionStatCardBlue { }
+.productionStatCardGreen { }
+
+.productionMainGrid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
+  gap: 14px;
+  align-items: start;
+}
+
+/* Both production panels always the same fixed height — never resize */
+.productionMainGrid > article {
+  height: 340px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Runs vertical list fills remaining height but items are NOT stretched */
+.productionMainGrid > article .productionRunsVertical {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  align-items: start;
+  align-content: start;
+}
+
+.productionCreatePanel {
+  display: grid;
+  gap: 14px;
+}
+
+.productionCarouselPanel {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.carouselHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.carouselHeader h2 { margin: 0; font-size: 16px; }
+.carouselHeader p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+
+.carouselNav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.carouselCounter {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 46px;
+  text-align: center;
+}
+
+.carouselWindow {
+  overflow: hidden;
+  padding: 16px;
+  min-height: 240px;
+}
+
+@keyframes slideFromRight {
+  from { transform: translateX(36px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes slideFromLeft {
+  from { transform: translateX(-36px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.slideFromRight { animation: slideFromRight 0.24s ease-out; }
+.slideFromLeft { animation: slideFromLeft 0.24s ease-out; }
+
+.runCard {
+  display: grid;
+  gap: 14px;
+}
+
+.runCardTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.runCardTitle strong { font-size: 17px; }
+
+.runCardQuantityRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.timingDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.timingOnTime, .timingDone { background: #10b981; }
+.timingWarning { background: #f59e0b; }
+.timingLate { background: #ef4444; }
+.timingPending, .timingIdle { background: var(--muted); }
+
+.progressTrack {
+  height: 7px;
+  border-radius: 999px;
+  background: #e7edf5;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), #3b82f6);
+}
+
+.progressFillWarning { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.progressFillLate { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+.runCurrentStage {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 10px 12px;
+}
+
+.runCurrentStage > strong {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.runCurrentStageName {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.runStageTimingPill {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.timingOnTime.runStageTimingPill, .timingDone.runStageTimingPill {
+  background: #d1fae5; color: #065f46;
+}
+.timingWarning.runStageTimingPill { background: #fef3c7; color: #92400e; }
+.timingLate.runStageTimingPill { background: #fee2e2; color: #b91c1c; }
+.timingPending.runStageTimingPill { background: #f1f5f9; color: var(--muted); }
+
+.runStageMiniBar {
+  margin-top: 4px;
+}
+
+.readyToStartList {
+  display: grid;
+  gap: 10px;
+}
+
+.readyToStartRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.readyToStartInfo {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.readyToStartInfo strong { font-size: 14px; }
+
+.readyToStartInfo span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stage timeline in run stages modal */
+.stageTimelineList {
+  display: grid;
+  gap: 10px;
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.stageTimelineItem {
+  display: grid;
+  gap: 8px;
+  border: 1.5px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.stageTimelineItemEN_PROCESO {
+  border-left-color: var(--primary);
+  background: #f8fbff;
+}
+
+.stageTimelineItemFINALIZADA {
+  border-left-color: #10b981;
+  background: #fafffe;
+}
+
+.stageTimelineItemPENDIENTE {
+  border-left-color: var(--border);
+}
+
+.stageTimelineHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stageTimelineLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stageTimelineLeft > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stageTimelineLeft strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageTimelineLeft span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stageTimelineNum {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.stageTimelineNumActive {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.stageTimelineNumDone {
+  border-color: #10b981;
+  background: #10b981;
+  color: #fff;
+}
+
+/* ── Solicitudes badge (inventory) ───────────────────────────── */
+
+.solicitudesButton {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #c7d7f5;
+  border-radius: 10px;
+  background: #e8f0fe;
+  color: var(--primary-strong);
+  cursor: pointer;
+  padding: 9px 16px;
+  font-weight: 800;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+}
+
+.solicitudesBadge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0 5px;
+}
+
+.solicitudesModal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.solicitudCard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 14px;
+  cursor: pointer;
+  transition: box-shadow 0.12s;
+  user-select: none;
+}
+
+.solicitudCard:hover { box-shadow: 0 4px 14px rgba(19,32,54,0.09); }
+
+.solicitudCardOpen {
+  border-color: var(--primary);
+  background: #f6f9ff;
+}
+
+.solicitudCardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.solicitudCardDetail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  animation: slideFromRight 0.18s ease-out;
+}
+
+.solicitudDetailItem {
+  display: grid;
+  gap: 3px;
+}
+
+.solicitudDetailItem strong {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+.solicitudDetailItem span { font-size: 13px; font-weight: 700; }
+
+.solicitudCardToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0;
+}
+.solicitudCardToggle:hover { color: var(--primary); }
+
+/* ── Vertical runs list ──────────────────────────────────────── */
+.productionRunsVertical {
+  display: grid;
+  gap: 7px;
+  align-items: start;
+  align-content: start;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.productionRunListRow {
+  display: grid;
+  gap: 5px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #ffffff;
+}
+
+.productionRunListRowHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.productionRunListRowMeta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+/* Compact "Ver" button inside the run list row heading */
+.runInlineBtn {
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  line-height: 1.5;
+}
+
+/* ── Horizontal runs scroll (kept for reference) ─────────────── */
+.productionRunsScroll {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x mandatory;
+}
+.productionRunsScroll::-webkit-scrollbar {
+  height: 5px;
+}
+.productionRunsScroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border);
+}
+.productionRunCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 260px;
+  max-width: 300px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 14px;
+  scroll-snap-align: start;
+}
+
+/* Stage carousel in modal */
+.stageCarouselNav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.stageCarouselCard {
+  display: grid;
+  gap: 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 16px;
+}
+.stageCarouselCard.stageTimelineEN_PROCESO {
+  border-color: var(--primary);
+  background: #f8fbff;
+}
+.stageCarouselCard.stageTimelineFINALIZADA {
+  border-color: #10b981;
+  background: #fafffe;
+}
+.stageCarouselHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+@media (max-width: 680px) {
+  .productionStatsRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .productionMainGrid { grid-template-columns: 1fr; }
 }

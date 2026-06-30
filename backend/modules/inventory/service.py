@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -17,6 +18,29 @@ from backend.modules.shared.contracts.inventory import (
     InventoryIntegrationPort,
     ProductionMaterialRequirement,
 )
+
+
+def _resolve_user_names(session, user_ids: list) -> dict:
+    if not user_ids:
+        return {}
+    from sqlalchemy import select
+    from backend.modules.auth.models import AuthUser
+    unique_ids = list({uid for uid in user_ids if uid})
+    if not unique_ids:
+        return {}
+    users = session.execute(select(AuthUser).where(AuthUser.id.in_(unique_ids))).scalars().all()
+    result = {}
+    for user in users:
+        name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        result[str(user.id)] = name or user.username
+    return result
+
+
+def _generate_lot_code(repository: "InventoryRepository", item_name: str, item_id, year: int) -> str:
+    prefix = "".join(c for c in item_name.upper() if c.isalpha())[:2] or "XX"
+    year_short = str(year)[-2:]
+    seq = repository.count_entrada_movements_for_item_this_year(item_id, year) + 1
+    return f"LOT-{prefix}-{year_short}{seq:04d}"
 
 
 class InventoryDomainError(ValueError):
@@ -93,6 +117,13 @@ class InventoryService(InventoryIntegrationPort):
             source_file_content=payload.source_file_content,
             created_by=user_id,
         )
+        if payload.movement_type == "ENTRADA":
+            movement.lot_code = _generate_lot_code(
+                self.repository,
+                item.name,
+                item.id,
+                datetime.utcnow().year,
+            )
         item.current_stock = next_stock
         self.repository.add_movement(movement)
         self.repository.flush()
@@ -141,7 +172,15 @@ class InventoryService(InventoryIntegrationPort):
         return self.create_movement(payload, user_id=user_id)
 
     def list_movements(self, item_id: UUID | None = None) -> list[InventoryMovementRead]:
-        return [InventoryMovementRead.model_validate(movement) for movement in self.repository.list_movements(item_id)]
+        movements = self.repository.list_movements(item_id)
+        user_names = _resolve_user_names(self.repository.session, [m.created_by for m in movements if m.created_by])
+        result = []
+        for movement in movements:
+            read = InventoryMovementRead.model_validate(movement)
+            if movement.created_by:
+                read.created_by_name = user_names.get(str(movement.created_by))
+            result.append(read)
+        return result
 
     def get_movement_source_file(self, movement_id: UUID) -> tuple[str, str, str]:
         movement = self.repository.get_movement(movement_id)

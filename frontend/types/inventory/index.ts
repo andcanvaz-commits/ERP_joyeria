@@ -27,11 +27,13 @@ export type InventoryMovement = {
   quantity: string;
   unit_code: string;
   unit_cost: string | null;
+  lot_code?: string | null;
   reason: string;
   reference_type: string | null;
   reference_id: string | null;
   source_file_name: string | null;
   created_by: string | null;
+  created_by_name?: string | null;
   created_at: string;
   item: InventoryItem;
 };

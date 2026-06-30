@@ -44,5 +44,17 @@ class InventoryRepository:
             statement = statement.where(InventoryMovement.item_id == item_id)
         return list(self.session.execute(statement).scalars().all())
 
+    def count_entrada_movements_for_item_this_year(self, item_id, year: int) -> int:
+        from sqlalchemy import extract, func
+        from backend.modules.inventory.models import InventoryMovement
+        result = self.session.execute(
+            select(func.count(InventoryMovement.id)).where(
+                InventoryMovement.item_id == item_id,
+                InventoryMovement.movement_type == "ENTRADA",
+                extract("year", InventoryMovement.created_at) == year,
+            )
+        ).scalar_one_or_none()
+        return int(result or 0)
+
     def flush(self) -> None:
         self.session.flush()

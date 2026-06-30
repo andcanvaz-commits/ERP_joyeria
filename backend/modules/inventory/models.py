@@ -39,6 +39,7 @@ class InventoryMovement(Base):
     reason: Mapped[str] = mapped_column(String(240), nullable=False)
     reference_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     reference_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    lot_code: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     source_file_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
     source_file_mime: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source_file_content: Mapped[str | None] = mapped_column(Text, nullable=True)

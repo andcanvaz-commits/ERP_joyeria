@@ -38,6 +38,11 @@ def get_production_service():
 
 
 def ensure_permission(current_user: CurrentUser, permission: str) -> None:
+    inventory_run_permissions = {"production.runs.read", "production.runs.update"}
+    if current_user.role == "Jefe de inventario" and permission in inventory_run_permissions:
+        return
+    if current_user.role in {"admin", "Admin", "Jefe de producción"} and permission.startswith("production."):
+        return
     if current_user.role in {"admin", "Admin", "Jefe de produccion", "Jefe de producción"} and permission.startswith("production."):
         return
     try:
@@ -108,6 +113,36 @@ def list_runs(
     return service.list_runs()
 
 
+@router.post("/runs/{run_id}/approve-materials", response_model=ProductionRunRead)
+def approve_run_materials(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.approve_materials(run_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/start", response_model=ProductionRunRead)
+def start_run(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.start_run(run_id)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/runs/stages/{stage_id}/finish", response_model=ProductionRunRead)
 def finish_run_stage(
     stage_id: UUID,
@@ -118,6 +153,21 @@ def finish_run_stage(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.finish_stage(stage_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/receive-finished", response_model=ProductionRunRead)
+def receive_finished_product(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.receive_finished_product(run_id)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

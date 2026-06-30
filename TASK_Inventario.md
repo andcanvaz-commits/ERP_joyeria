@@ -431,6 +431,47 @@ Verificaciones ejecutadas:
 Verificaciones no ejecutadas o no completadas:
 - Pendiente validar en navegador porque no se solicito reiniciar Docker ni abrir servidor.
 
+### 2026-06-29 - Integracion con flujo operativo de produccion
+
+Que se hizo:
+- Se ajusto el contrato con produccion para que la creacion de una orden no descuente materia prima inmediatamente.
+- La salida de materia prima queda separada en una aprobacion de Inventario.
+- Al aprobar materiales, Inventario registra el consumo con movimiento `CONSUMO_PRODUCCION`.
+- El ingreso de producto terminado queda separado hasta la recepcion de Inventario.
+- Se agregaron permisos para que `Jefe de inventario` pueda leer ordenes de produccion y aprobar/recibir sin permisos de mantenimiento.
+
+Que falta:
+- Crear una bandeja propia dentro de Inventario para revisar solicitudes de consumo y recepciones pendientes, en vez de operarlas desde la pantalla de Produccion.
+- Definir e implementar el formato imprimible de acta de entrega/recepcion cuando el usuario envie el diseno.
+- Formalizar una tabla de solicitudes/documentos de inventario si se requiere trazabilidad documental mas completa.
+
+Archivos modificados:
+- `backend/modules/auth/dependencies.py`
+- `backend/modules/auth/service.py`
+- `backend/modules/production/router.py`
+- `backend/modules/production/service.py`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/production-api.ts`
+- `frontend/types/production/index.ts`
+- `TASK_Inventario.md`
+
+Puntos para integrar luego con produccion:
+- Produccion debe crear la orden y esperar `PENDIENTE_INVENTARIO`.
+- Inventario aprueba la salida y recien ahi se descuenta materia prima.
+- Produccion solo debe iniciar cuando la orden pase a `MATERIALES_APROBADOS`.
+- Inventario debe recibir el producto terminado cuando produccion deje la orden en `PENDIENTE_RECEPCION`.
+
+Verificaciones ejecutadas:
+- `npm.cmd run build` paso correctamente en frontend.
+- `docker-compose ps` confirmo que los contenedores `api`, `db` y `web` estan arriba; no se levanto Docker.
+- `docker-compose exec -T api python -B -c "... ast.parse ..."` valido sintaxis backend y devolvio `PY_AST_OK`; no levanto ni reinicio contenedores.
+- `git diff --check` no reporto errores de whitespace.
+
+Verificaciones no ejecutadas o no completadas:
+- `npm.cmd run lint` no se pudo completar porque el script actual usa `next lint` y Next 16 lo interpreta como directorio `frontend/lint`.
+- No se ejecuto prueba funcional backend contra base de datos.
+- No se valido el flujo en navegador con clicks reales.
+
 ### 2026-06-17 - Historial completo de movimientos en modal
 
 Que se hizo:

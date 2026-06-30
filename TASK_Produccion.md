@@ -2,6 +2,139 @@
 
 ## Registro de cambios
 
+### 2026-06-29 (3) - Rediseno completo produccion: carousel, tiempo visual, solicitudes badge
+
+Que se hizo:
+- **Rediseno del dashboard de produccion**:
+  - Barra de metricas con 4 stats: "Esperando inventario", "Listas para iniciar", "En proceso", "Finalizadas".
+  - Layout principal en 2 columnas: crear orden (izquierda) + carousel de ordenes en proceso (derecha).
+  - El carousel muestra UNA orden a la vez con animacion de deslizamiento al navegar (izquierda/derecha).
+    - Keyframe `slideFromRight` / `slideFromLeft`; se activa con `carouselKey` + `carouselDir`.
+    - Muestra: nombre de proceso, unidades, tiempo transcurrido, barra de progreso de etapas, indicador de timing.
+  - Control visual del tiempo: punto de color (verde=a tiempo, ambar=por vencer, rojo=retrasada) + pill de texto + barra de progreso de la etapa actual con porcentaje basado en `scheduled_start_at`/`scheduled_finish_at`.
+  - Seccion "Listas para iniciar" como filas compactas horizontales (no cards apiladas).
+  - Seccion "Historial reciente" compacta con boton para abrir historial completo.
+  - Modal de etapas rediseniado: timeline vertical con numero de etapa como circulo de color, pill de timing por etapa, barra de progreso individual para etapas EN_PROCESO, tiempos de inicio y fin estimado.
+  - Helpers nuevos: `getRunProgress`, `getRunTimingStatus`, `getElapsedLabel`, `getStageTimingStatus`, `nextCarouselRun`, `prevCarouselRun`.
+- **Solicitudes como badge en inventario**:
+  - Reemplazada la seccion condicional inline de inventario por un boton "Solicitudes de produccion" con badge rojo de conteo (estilo notificacion de app).
+  - Al hacer clic abre modal con dos secciones: salidas de materia prima (PENDIENTE_INVENTARIO) y recepciones de producto terminado (PENDIENTE_RECEPCION).
+  - Cada solicitud es expandible con clic o icono de ojo para ver detalle y boton de accion.
+- **Productos en proceso**: Las ordenes con status `EN_PROCESO` ahora aparecen en la vista "Producto en proceso" del modulo de inventario (con fondo azul claro para distinguirlas de items de inventario estaticos).
+- **CSS nuevo**: `.productionStatsRow`, `.productionStatCard`, `.productionMainGrid`, `.productionCarouselPanel`, `.carouselHeader`, `.carouselNav`, `.carouselCounter`, `.carouselWindow`, `@keyframes slideFromRight/Left`, `.slideFromRight`, `.slideFromLeft`, `.runCard`, `.runCardTitle`, `.runCardQuantityRow`, `.timingDot`, `.timingOnTime`, `.timingWarning`, `.timingLate`, `.timingPending`, `.progressTrack`, `.progressFill`, `.progressFillWarning`, `.progressFillLate`, `.runCurrentStage`, `.runCurrentStageName`, `.runStageTimingPill`, `.runStageMiniBar`, `.readyToStartList`, `.readyToStartRow`, `.readyToStartInfo`, `.stageTimelineList`, `.stageTimelineItem`, `.stageTimeline{STATUS}`, `.stageTimelineHead`, `.stageTimelineLeft`, `.stageTimelineNum`, `.stageTimelineNumActive`, `.stageTimelineNumDone`, `.solicitudesButton`, `.solicitudesBadge`, `.solicitudesModal`, `.solicitudCard`, `.solicitudCardOpen`, `.solicitudCardHead`, `.solicitudCardDetail`, `.solicitudDetailItem`.
+
+Archivos modificados (2026-06-29 tercera iteracion):
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/components/inventory/inventory-dashboard.tsx`
+- `frontend/app/globals.css`
+- `TASK_Produccion.md`
+
+Verificaciones:
+- `npm run build` en `frontend`: OK, TypeScript limpio, todas las rutas compiladas.
+- No se levanto Docker (el usuario lo ejecuta manualmente).
+
+Pendiente:
+- Validar en navegador: carousel animado, indicadores de tiempo, badge de solicitudes.
+- Los indicadores de tiempo dependen de `scheduled_start_at`/`scheduled_finish_at` en las etapas; si el backend no los rellena al iniciar etapas, los calculos de timing caen a "no_time"/"En proceso" (comportamiento seguro). Se deberia verificar que el backend llena esos campos correctamente.
+
+---
+
+### 2026-06-29 (2) - Separacion de inventario, dialogo de confirmacion, flujo visual de procesos
+
+Que se hizo:
+- **Separacion de responsabilidades**: Las acciones de inventario dentro del modulo de produccion fueron eliminadas y movidas al modulo de inventario.
+  - Removido del modulo de produccion: panel "Solicitudes para Inventario" (aprobar salida de materia prima) y panel "Recepcion de producto terminado".
+  - Agregado al modulo de inventario: seccion dinamica "Solicitudes de materia prima" y "Recepcion de producto terminado" que aparece automaticamente cuando hay ordenes pendientes. El Jefe de Inventario ve y gestiona ambas desde `/inventario`.
+  - Las funciones `handleApproveMaterials` y `handleReceiveFinishedProduct` fueron movidas a `inventory-dashboard.tsx`.
+  - El modulo de produccion ahora solo cubre: crear orden, ver ordenes listas para iniciar (MATERIALES_APROBADOS), ejecutar etapas e historial.
+- **Sin alerts nativos**: Los tres `window.confirm()` fueron reemplazados por un dialogo modal emergente (`confirmDialog` state + `showConfirm()` helper):
+  - Eliminar proceso (`handleDelete`)
+  - Finalizar etapa antes del tiempo estimado (`handleFinishStage`)
+  - Eliminar usuario (`handleDeleteUser`)
+  - El dialogo tiene titulo, mensaje explicativo y botones "Cancelar" / "Confirmar" (o "Eliminar") con variantes peligro/primario.
+- **Visualizacion de proceso rediseniada** (modal "Visualizar" en mantenimientos):
+  - Reemplazado el listado plano por un flujo visual vertical estilo diagrama.
+  - Encabezado del proceso: materia prima, cantidad por unidad, limite de merma.
+  - Cada etapa es una tarjeta con borde lateral de color segun su tipo (indigo=Proceso, rojo=Termico, ambar=Quimico, verde=Control, purpura=Decision).
+  - Numero de etapa en circulo de color, nombre y badge de tipo.
+  - Caja verde para "Control de calidad" si existe, caja ambar para "Si no cumple / reproceso" si existe.
+  - Footer con chips de pesaje y duracion.
+  - Cabecera de fase como etiqueta pill cuando cambia la fase.
+  - Flecha conectora entre etapas.
+  - Modal mas ancho (860px) con scroll vertical.
+- **CSS nuevo**:
+  - Estilos del flujo visual: `.processFlowWindow`, `.processFlowList`, `.processFlowStage`, `.processFlowStage{TYPE}`, `.processFlowCallout{Check,Rework}`, etc.
+  - Estilos del dialogo de confirmacion: `.confirmBackdrop`, `.confirmDialog`, `.confirmDialogActions`, `.buttonDanger`.
+  - Estilos de cards de produccion en inventario: `.productionRequestsList`, `.productionRequestCard`, `.receptionRequestCard`.
+
+Archivos modificados (2026-06-29 segunda iteracion):
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/components/inventory/inventory-dashboard.tsx`
+- `frontend/app/globals.css`
+- `TASK_Produccion.md`
+
+Verificaciones:
+- `npm run build` en `frontend`: OK, TypeScript limpio, todas las rutas compiladas.
+- No se levanto Docker (el usuario lo ejecuta manualmente).
+
+Pendiente:
+- Validar en navegador despues de reiniciar Docker que los paneles de produccion aparecen en inventario y que la visualizacion de procesos luce correcta.
+- Considerar permisos por rol en los paneles de inventario: actualmente cualquier usuario autenticado con acceso al modulo de inventario puede aprobar salidas y recibir productos; la restriccion deberia limitar esas acciones al Jefe de Inventario (pendiente de implementar RBAC completo en frontend/backend).
+
+---
+
+### 2026-06-29 - Mantenimiento de procesos dinamico y siembra de procesos reales
+
+Que se hizo:
+- Se hizo dinamico el mantenimiento "Crear proceso" para soportar TODOS los procesos de los documentos e imagenes (cadenas, monedas, medallas y casting).
+- Cada etapa del formulario ahora captura, ademas de nombre/descripcion/pesaje/tiempo:
+  - Tipo de etapa: Proceso, Proceso termico, Proceso quimico, Control/Revision y Decision (control con reproceso).
+  - Fase (opcional) para agrupar etapas por fases del flujo (ej. "Fase 2 - Fabricacion").
+  - Control de calidad / pregunta (opcional) para puntos de revision.
+  - Accion si no cumple / reproceso (opcional) para describir el retorno del flujo.
+- Estos campos ya existian en el modelo backend (`phase_name`, `stage_type`, `quality_check`, `rework_action`); solo faltaba exponerlos en el formulario y en el payload del frontend. No se quemo ninguna logica de procesos: todo sigue siendo dato configurable.
+- La ventana "Visualizar" del proceso ahora muestra tipo de etapa, fase, control y reproceso por etapa.
+- Se reemplazo `seed_demo_processes` (2 procesos demo de 3 etapas genericas) por `seed_example_processes`, que siembra 4 procesos de ejemplo reales con sus etapas, fases y controles tomados de los documentos:
+  - Cadenas de Oro (14 etapas, incluye decisiones de laminado, amoniaco, soldado y diamantado).
+  - Monedas (11 etapas, incluye revision de peso y revision de calidad).
+  - Medallas (17 etapas en 4 fases, con baño/esmaltado/secado).
+  - Casting de Joyas (Oro) (16 etapas en 4 fases, ceras, revestimiento, casting y acabado).
+- Limpieza de datos antiguos en el arranque (idempotente):
+  - Se eliminan procesos demo viejos por nombre ("Monedas de oro", "Cadenas de oro") o por firma de 3 etapas genericas ("Preparacion/Trabajo principal/Control final").
+  - Se eliminan ordenes de produccion huerfanas (`production_runs`) que apuntaban a procesos ya eliminados, via `ProductionProcessRepository.delete_orphan_runs()`.
+  - La siembra solo crea un proceso de ejemplo si no existe por nombre, asi se respetan ediciones del usuario en arranques posteriores.
+- El item de materia prima de ejemplo paso a llamarse "Oro 18K" con stock inicial 5000 g.
+
+Que falta:
+- El item de inventario antiguo "Oro 18K demo" queda sin uso tras la limpieza; se puede borrar manualmente desde inventario si se desea (no se elimino por seguridad de movimientos historicos).
+- Implementar codificacion de orden/lote/etapa (OP-AAAA-####, LOT-XX-AA####, COD-OP####-##) sugerida en el documento de codificacion, cuando se formalice la trazabilidad documental.
+- Modelar control de calidad/reprocesos como movimientos historicos (nunca borrar, solo agregar) cuando se construya el modulo de calidad.
+
+Archivos modificados:
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/production-api.ts`
+- `frontend/app/globals.css`
+- `backend/modules/production/service.py`
+- `backend/modules/production/repository.py`
+- `backend/app/main.py`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- La limpieza solo afecta procesos/ordenes de produccion; no toca stock ni movimientos de inventario.
+- El item "Oro 18K demo" antiguo permanece para no romper movimientos historicos de inventario.
+
+Docker:
+- No se levanto ni reinicio Docker (el usuario lo ejecuta manualmente).
+- La limpieza y siembra corren en el arranque con `AUTO_CREATE_TABLES=true`; en el proximo `docker-compose up` se aplicaran automaticamente.
+
+Verificaciones ejecutadas:
+- `python -m py_compile` sobre `service.py`, `repository.py` y `main.py`: OK.
+- `npm run build` en `frontend`: compilo correctamente con TypeScript, incluida la ruta `/mantenimientos` y `/produccion`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se valido en navegador ni se corrio Docker (lo ejecuta el usuario manualmente).
+- No se probo el flujo de creacion/edicion de proceso con los nuevos campos contra la base real.
+
 ### 2026-06-17
 
 Que se hizo:
@@ -872,6 +1005,94 @@ Verificaciones ejecutadas:
 
 Verificaciones no ejecutadas o no completadas:
 - No se ejecuto build ni pruebas en Docker porque no se pidio reiniciar/ejecutar contenedores.
+
+### 2026-06-29 - Produccion separada de mantenimientos y flujo con Inventario
+
+Que se hizo:
+- Se separo el uso de `/produccion` como ventana operativa y `/mantenimientos` como ventana de configuracion de procesos/usuarios.
+- La ventana operativa de Produccion ahora crea una orden en estado `PENDIENTE_INVENTARIO`.
+- El sistema calcula la materia prima total requerida con la cantidad a fabricar y la cantidad por unidad del proceso.
+- Se agrego el paso `Aprobar salida` para que Inventario descuente materia prima antes de iniciar.
+- Se agrego el paso `Iniciar produccion` solo cuando los materiales ya estan aprobados.
+- Las etapas productivas se habilitan solo en estado `EN_PROCESO`.
+- Al terminar la ultima etapa, la orden queda en `PENDIENTE_RECEPCION` y no ingresa automaticamente producto terminado.
+- Se agrego `Recibir en Inventario` para registrar el ingreso final y dejar la orden en `RECIBIDA`.
+- Se agregaron endpoints para aprobar materiales, iniciar orden y recibir producto terminado.
+- Se actualizaron los estados, fechas y tipos del flujo de produccion.
+- Se agregaron columnas de compatibilidad en arranque para `requested_at`, `materials_approved_at` y `received_at`.
+
+Que falta:
+- Crear la bandeja visual definitiva de Inventario para aprobar solicitudes y recibir terminado desde `/inventario`.
+- Implementar el formato imprimible de acta cuando el usuario envie el diseno.
+- Modelar documentos/actas como entidad propia si se necesita auditoria formal.
+- Cargar procesos de ejemplo mas fieles a los documentos: cadenas, monedas, medallas y casting, con sus etapas y controles.
+- Validar visualmente el flujo completo en navegador con datos reales.
+
+Archivos modificados:
+- `backend/app/main.py`
+- `backend/modules/auth/dependencies.py`
+- `backend/modules/auth/service.py`
+- `backend/modules/production/models.py`
+- `backend/modules/production/repository.py`
+- `backend/modules/production/router.py`
+- `backend/modules/production/schemas.py`
+- `backend/modules/production/service.py`
+- `frontend/components/production/production-dashboard.tsx`
+- `frontend/lib/production-api.ts`
+- `frontend/types/production/index.ts`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Las solicitudes `PENDIENTE_INVENTARIO` deben mostrarse como trabajo propio de Inventario.
+- Las ordenes `PENDIENTE_RECEPCION` deben mostrarse en productos terminados para registrar ingreso.
+- La impresion parcial debe generarse al aprobar salida y la impresion completa al recibir producto terminado.
+- Los movimientos de inventario deben mantener referencia a la orden de produccion para abrir historial directo.
+
+Docker:
+- No se levanto Docker.
+- `docker-compose ps` indico que `api`, `db` y `web` ya estaban arriba.
+
+Verificaciones ejecutadas:
+- `npm.cmd run build` paso correctamente.
+- `git diff --check` no reporto errores de whitespace.
+- `docker-compose ps` se uso solo para consultar estado.
+- `docker-compose exec -T api python -B -c "... ast.parse ..."` valido sintaxis backend y devolvio `PY_AST_OK`; no se levanto ni reinicio Docker.
+
+Verificaciones no ejecutadas o no completadas:
+- `npm.cmd run lint` fallo por la configuracion actual de Next 16: `next lint` se interpreta como directorio `frontend/lint`.
+- No se ejecuto prueba funcional backend contra base de datos ni reinicio de contenedores.
+- No se hizo prueba manual en navegador.
+
+### 2026-06-29 - Rutas faltantes del sidebar
+
+Que se hizo:
+- Se agregaron paginas base para las rutas del sidebar que caian en 404: `/reportes`, `/documentos` y `/seguridad`.
+- Se agregaron titulos y subtitulos de barra superior para esas rutas.
+- Se confirmo que el texto `Ir a produccion` venia de `not-found`, no de la pantalla de Produccion.
+
+Que falta:
+- Implementar la funcionalidad real de Reportes, Documentos y Seguridad cuando se defina su alcance.
+
+Archivos modificados:
+- `frontend/app/reportes/page.tsx`
+- `frontend/app/documentos/page.tsx`
+- `frontend/app/seguridad/page.tsx`
+- `frontend/components/layout/app-shell.tsx`
+- `TASK_Produccion.md`
+
+Puntos para integrar luego con inventario:
+- Documentos debera listar/imprimir actas de entrega de materia prima y recepcion de producto terminado.
+- Reportes debera consumir datos de produccion e inventario cuando existan los endpoints finales.
+
+Docker:
+- No se levanto ni reinicio Docker.
+- Si la app se ve desde el contenedor actual, puede requerir reconstruccion manual para tomar estas rutas nuevas.
+
+Verificaciones ejecutadas:
+- `npm.cmd run build` paso correctamente y listo las rutas `/documentos`, `/reportes` y `/seguridad`.
+
+Verificaciones no ejecutadas o no completadas:
+- No se valido en navegador ni se reinicio el contenedor web.
 
 ### 2026-06-17 - Ventana de credenciales simplificada
 

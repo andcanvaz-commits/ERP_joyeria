@@ -25,14 +25,25 @@ ADMIN_PERMISSIONS = [
     "production.processes.create",
     "production.processes.update",
     "production.processes.delete",
+    "production.runs.read",
+    "production.runs.create",
+    "production.runs.update",
     "inventory.read",
     "inventory.items.create",
     "inventory.items.update",
     "inventory.items.delete",
     "inventory.movements.create",
 ]
-PRODUCTION_MANAGER_PERMISSIONS = ["production.processes.read"]
+PRODUCTION_MANAGER_PERMISSIONS = [
+    "production.processes.read",
+    "production.runs.read",
+    "production.runs.create",
+    "production.runs.update",
+]
 INVENTORY_MANAGER_PERMISSIONS = [
+    "production.processes.read",
+    "production.runs.read",
+    "production.runs.update",
     "inventory.read",
     "inventory.items.create",
     "inventory.items.update",

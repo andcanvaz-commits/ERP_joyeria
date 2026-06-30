@@ -15,7 +15,13 @@ import {
   type CreateInventoryMovementPayload,
   type SaveInventoryItemPayload,
 } from "@/lib/inventory-api";
+import {
+  approveProductionRunMaterials,
+  listProductionRuns,
+  receiveProductionRunFinishedProduct,
+} from "@/lib/production-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType, InventorySummary } from "@/types/inventory";
+import type { ProductionRun } from "@/types/production";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
@@ -200,6 +206,10 @@ export function InventoryDashboard() {
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
+  const [productionRuns, setProductionRuns] = useState<ProductionRun[]>([]);
+  const [isSavingProduction, setIsSavingProduction] = useState(false);
+  const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
+  const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
 
   async function loadInventory() {
     if (!getAccessToken()) {
@@ -212,17 +222,19 @@ export function InventoryDashboard() {
     try {
       const nextCurrentUser = await getCurrentUser();
       const canSeeAudit = nextCurrentUser.role === "admin" || nextCurrentUser.role === "Admin";
-      const [nextSummary, nextItems, nextMovements, nextUsers] = await Promise.all([
+      const [nextSummary, nextItems, nextMovements, nextUsers, nextRuns] = await Promise.all([
         getInventorySummary(),
         listInventoryItems(),
         listInventoryMovements(),
         canSeeAudit ? listUsers() : Promise.resolve([]),
+        listProductionRuns(),
       ]);
       setCurrentUser(nextCurrentUser);
       setUsers(nextUsers);
       setSummary(nextSummary);
       setItems(nextItems);
       setMovements(nextMovements);
+      setProductionRuns(nextRuns);
       setMovementForm((current) => ({ ...current, item_id: current.item_id || nextItems[0]?.id || "" }));
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo cargar inventario.");
@@ -345,6 +357,56 @@ export function InventoryDashboard() {
     const firstMovementDate = sortedMovements.find((movement) => movementDateKey(movement)?.startsWith(nextMonth));
     setSelectedHistoryDate(firstMovementDate ? movementDateKey(firstMovementDate) ?? `${nextMonth}-01` : `${nextMonth}-01`);
   }
+
+  function productionTimeLabel(value: string | null | undefined) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  async function handleApproveMaterials(run: ProductionRun) {
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      await approveProductionRunMaterials(run.id);
+      setSuccess("Salida de materia prima aprobada. Produccion ya puede iniciar.");
+      const nextRuns = await listProductionRuns();
+      setProductionRuns(nextRuns);
+      const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
+      if (remaining === 0) {
+        setIsSolicitudesOpen(false);
+      }
+      void loadInventory();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
+    } finally {
+      setIsSavingProduction(false);
+    }
+  }
+
+  async function handleReceiveFinishedProduct(run: ProductionRun) {
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      await receiveProductionRunFinishedProduct(run.id);
+      setSuccess("Producto terminado recibido en inventario.");
+      const nextRuns = await listProductionRuns();
+      setProductionRuns(nextRuns);
+      const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
+      if (remaining === 0) {
+        setIsSolicitudesOpen(false);
+      }
+      void loadInventory();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
+    } finally {
+      setIsSavingProduction(false);
+    }
+  }
+
+  const pendingInventoryRuns = productionRuns.filter((run) => run.status === "PENDIENTE_INVENTARIO");
+  const pendingReceptionRuns = productionRuns.filter((run) => run.status === "PENDIENTE_RECEPCION");
 
   function openMovementHistory() {
     const firstMovement = sortedMovements[0];
@@ -524,11 +586,34 @@ export function InventoryDashboard() {
   return (
     <div className="content">
       {(error || success) ? (
-        <div className="toastStack">
-          {error ? <div className="notice noticeError">{error}</div> : null}
-          {success ? <div className="notice noticeSuccess">{success}</div> : null}
+        <div className="toastStack" aria-live="polite" aria-atomic="true">
+          {error ? (
+            <div className="notice noticeError" key={error}>
+              <span className="noticeInner">{error}</span>
+              <span className="toastProgressBar" aria-hidden="true" />
+            </div>
+          ) : null}
+          {success ? (
+            <div className="notice noticeSuccess" key={success}>
+              <span className="noticeInner">{success}</span>
+              <span className="toastProgressBar" aria-hidden="true" />
+            </div>
+          ) : null}
         </div>
       ) : null}
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          className="solicitudesButton"
+          onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+          type="button"
+        >
+          Solicitudes de produccion
+          {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
+            <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
+          ) : null}
+        </button>
+      </div>
 
       <section className="summaryGrid" aria-label="Resumen de inventario">
         <article className="card metric">
@@ -655,7 +740,21 @@ export function InventoryDashboard() {
                 </div>
               </article>
             ))}
-            {!isLoading && filteredItems.length === 0 ? <div className="emptyState">No hay items para este filtro.</div> : null}
+            {itemFilter === "WORK_IN_PROGRESS" ? (
+              productionRuns.filter((r) => r.status === "EN_PROCESO").map((run) => (
+                <div className="inventoryItemRow" key={`run-${run.id}`} style={{ borderColor: "#c7d7f5", background: "#f6f9ff" }}>
+                  <div>
+                    <strong>{run.process_name}</strong>
+                    <span>Orden en proceso · {run.quantity} unidades</span>
+                  </div>
+                  <span className="stockPill" style={{ background: "#e8f0fe" }}>{run.quantity} und</span>
+                  <button className="iconOnlyButton" onClick={() => { /* handled externally */ }} type="button" aria-label="Ver etapas" disabled>
+                    <Eye aria-hidden="true" size={16} />
+                  </button>
+                </div>
+              ))
+            ) : null}
+            {!isLoading && filteredItems.length === 0 && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.filter((r) => r.status === "EN_PROCESO").length > 0) ? <div className="emptyState">No hay items para este filtro.</div> : null}
             {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
           </div>
         </article>
@@ -682,12 +781,15 @@ export function InventoryDashboard() {
               <div className="movementRow" key={movement.id}>
                 <div>
                   <strong>{movementTypeLabel(movement.movement_type)}</strong>
+                  {movement.lot_code ? (
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary)", fontWeight: 700 }}>{movement.lot_code}</span>
+                  ) : null}
                   <span>{movementDateLabel(movement.created_at)} - {movement.item.name}</span>
                 </div>
                 <div>
                   <strong>{numericText(movement.quantity)} {movement.unit_code}</strong>
                   <span>{movementTimeLabel(movement.created_at)}{movement.reason ? ` - ${movement.reason}` : ""}</span>
-                  {canSeeMovementAudit ? <span>Registrado por: {movementActorName(movement.created_by)}</span> : null}
+                  {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
                   {movement.source_file_name ? (
                     <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
                       <Download aria-hidden="true" size={15} />
@@ -762,12 +864,15 @@ export function InventoryDashboard() {
                     <div className="movementRow" key={movement.id}>
                       <div>
                         <strong>{movementTypeLabel(movement.movement_type)}</strong>
+                        {movement.lot_code ? (
+                          <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary)", fontWeight: 700 }}>{movement.lot_code}</span>
+                        ) : null}
                         <span>{movementTimeLabel(movement.created_at)} - {movement.item.name}</span>
                       </div>
                       <div>
                         <strong>{numericText(movement.quantity)} {movement.unit_code}</strong>
                         <span>{movement.reason || "Sin motivo registrado"}</span>
-                        {canSeeMovementAudit ? <span>Registrado por: {movementActorName(movement.created_by)}</span> : null}
+                        {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
                         {movement.source_file_name ? (
                           <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
                             <Download aria-hidden="true" size={15} />
@@ -884,6 +989,130 @@ export function InventoryDashboard() {
               <span><strong>Identificador</strong>{viewingItem.sku}</span>
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
+          </section>
+        </div>
+      ) : null}
+
+      {isSolicitudesOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Solicitudes de produccion">
+          <section className="modalWindow solicitudesModal">
+            <div className="modalHeader">
+              <div>
+                <h2>Solicitudes de produccion</h2>
+                <p>{pendingInventoryRuns.length + pendingReceptionRuns.length} solicitudes pendientes</p>
+              </div>
+              <button className="iconOnlyButton" onClick={() => setIsSolicitudesOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+
+            {pendingInventoryRuns.length > 0 ? (
+              <>
+                <h3 style={{ margin: "4px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
+                  Salida de materia prima ({pendingInventoryRuns.length})
+                </h3>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {pendingInventoryRuns.map((run) => (
+                    <div className="solicitudCard" key={run.id}>
+                      <div className="solicitudCardHead">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>{run.process_name}</strong>
+                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
+                            {numericText(run.total_required_material)} {run.raw_material_unit_code} · {productionTimeLabel(run.requested_at)}
+                          </span>
+                        </div>
+                        <button
+                          className="button buttonPrimary"
+                          disabled={isSavingProduction}
+                          onClick={() => void handleApproveMaterials(run)}
+                          type="button"
+                          style={{ flexShrink: 0 }}
+                        >
+                          Aprobar
+                        </button>
+                      </div>
+                      <button
+                        className="solicitudCardToggle"
+                        onClick={() => setExpandedSolicitudId(expandedSolicitudId === run.id ? null : run.id)}
+                        type="button"
+                        aria-label="Ver detalle"
+                      >
+                        <Eye aria-hidden="true" size={14} />
+                        {expandedSolicitudId === run.id ? "Ocultar detalle" : "Ver detalle"}
+                      </button>
+                      {expandedSolicitudId === run.id ? (
+                        <div className="solicitudCardDetail">
+                          <div className="solicitudDetailItem">
+                            <strong>Solicitado</strong>
+                            <span>{productionTimeLabel(run.requested_at)}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Cantidad</strong>
+                            <span>{numericText(run.quantity)} unidades</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Material requerido</strong>
+                            <span>{numericText(run.total_required_material)} {run.raw_material_unit_code}</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {pendingReceptionRuns.length > 0 ? (
+              <>
+                <h3 style={{ margin: "12px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
+                  Recepcion de producto terminado ({pendingReceptionRuns.length})
+                </h3>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {pendingReceptionRuns.map((run) => (
+                    <div className="solicitudCard receptionRequestCard" key={run.id}>
+                      <div className="solicitudCardHead">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>{run.process_name}</strong>
+                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
+                            {numericText(run.quantity)} unidades · Merma: {run.waste_percent ?? 0}%
+                          </span>
+                        </div>
+                        <button
+                          className="button buttonPrimary"
+                          disabled={isSavingProduction}
+                          onClick={() => void handleReceiveFinishedProduct(run)}
+                          type="button"
+                          style={{ flexShrink: 0 }}
+                        >
+                          Recibir
+                        </button>
+                      </div>
+                      <button
+                        className="solicitudCardToggle"
+                        onClick={() => setExpandedSolicitudId(expandedSolicitudId === `recv-${run.id}` ? null : `recv-${run.id}`)}
+                        type="button"
+                        aria-label="Ver detalle"
+                      >
+                        <Eye aria-hidden="true" size={14} />
+                        {expandedSolicitudId === `recv-${run.id}` ? "Ocultar detalle" : "Ver detalle"}
+                      </button>
+                      {expandedSolicitudId === `recv-${run.id}` ? (
+                        <div className="solicitudCardDetail">
+                          <div className="solicitudDetailItem">
+                            <strong>Finalizado</strong>
+                            <span>{productionTimeLabel(run.finished_at)}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Merma</strong>
+                            <span>{numericText(run.waste_percent)}%</span>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </section>
         </div>
       ) : null}

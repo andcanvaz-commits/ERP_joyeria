@@ -45,7 +45,7 @@ def create_dev_tables() -> None:
             ProductionService(
                 repository=ProductionProcessRepository(session),
                 inventory_service=InventoryService(repository=InventoryRepository(session)),
-            ).seed_demo_processes()
+            ).seed_example_processes()
             session.commit()
         finally:
             session.close()
@@ -80,6 +80,7 @@ def upgrade_inventory_movements_table() -> None:
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS source_file_name VARCHAR(240)",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS source_file_mime VARCHAR(120)",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS source_file_content TEXT",
+        "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS lot_code VARCHAR(30)",
     )
     with engine.begin() as connection:
         for statement in statements:
@@ -92,6 +93,25 @@ def upgrade_production_tables() -> None:
         "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS raw_material_quantity_per_unit NUMERIC(14, 4)",
         "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS raw_material_unit_code VARCHAR(20)",
         "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS waste_limit_percent NUMERIC(7, 4) NOT NULL DEFAULT 5",
+        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS phase_name VARCHAR(120)",
+        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS stage_type VARCHAR(40) NOT NULL DEFAULT 'PROCESS'",
+        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS quality_check TEXT",
+        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS rework_action TEXT",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ",
+        "UPDATE production_runs SET requested_at = COALESCE(requested_at, started_at, NOW())",
+        "ALTER TABLE production_runs ALTER COLUMN requested_at SET NOT NULL",
+        "ALTER TABLE production_runs ALTER COLUMN requested_at SET DEFAULT NOW()",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS materials_approved_at TIMESTAMPTZ",
+        "ALTER TABLE production_runs ALTER COLUMN started_at DROP NOT NULL",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS phase_name VARCHAR(120)",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS stage_type VARCHAR(40) NOT NULL DEFAULT 'PROCESS'",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS quality_check TEXT",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS rework_action TEXT",
+        "CREATE TABLE IF NOT EXISTS production_process_stage_ingredients (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), stage_id UUID NOT NULL REFERENCES production_process_stages(id) ON DELETE CASCADE, inventory_item_id UUID NOT NULL, quantity NUMERIC(14,4) NOT NULL, unit_code VARCHAR(20) NOT NULL)",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS production_code VARCHAR(30)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_production_runs_production_code ON production_runs (production_code) WHERE production_code IS NOT NULL",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS stage_code VARCHAR(40)",
     )
     with engine.begin() as connection:
         for statement in statements:

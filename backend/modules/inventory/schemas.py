@@ -75,11 +75,13 @@ class InventoryMovementRead(BaseModel):
     quantity: Decimal
     unit_code: str
     unit_cost: Decimal | None = None
+    lot_code: str | None = None
     reason: str
     reference_type: str | None = None
     reference_id: UUID | None = None
     source_file_name: str | None = None
     created_by: UUID | None = None
+    created_by_name: str | None = None
     created_at: datetime
     item: InventoryItemRead
 

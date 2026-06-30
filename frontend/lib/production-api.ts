@@ -13,10 +13,19 @@ export type CreateProductionProcessPayload = {
   stages: Array<{
     name: string;
     description?: string | null;
+    phase_name?: string | null;
+    stage_type?: string;
+    quality_check?: string | null;
+    rework_action?: string | null;
     order: number;
     estimated_minutes?: number | null;
     requires_weighing: boolean;
     is_active?: boolean;
+    ingredients?: Array<{
+      inventory_item_id: string;
+      quantity: string;
+      unit_code: string;
+    }>;
   }>;
 };
 
@@ -55,6 +64,18 @@ export function createProductionRun(payload: { process_id: string; quantity: str
   });
 }
 
+export function approveProductionRunMaterials(runId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/approve-materials`, {
+    method: "POST",
+  });
+}
+
+export function startProductionRun(runId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/start`, {
+    method: "POST",
+  });
+}
+
 export function finishProductionRunStage(
   stageId: string,
   payload: { initial_weight?: string | null; final_weight?: string | null; confirm_early_finish?: boolean },
@@ -62,5 +83,11 @@ export function finishProductionRunStage(
   return apiRequest<ProductionRun>(`/api/production/runs/stages/${stageId}/finish`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function receiveProductionRunFinishedProduct(runId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/receive-finished`, {
+    method: "POST",
   });
 }
