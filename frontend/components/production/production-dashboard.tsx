@@ -962,7 +962,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             <span className={`timingDot ${timingColorClass}`} aria-hidden="true" />
                             <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>{timingLabel}</span>
                             <button className="button buttonPrimary runInlineBtn" onClick={() => openRunStagesModal(run)} type="button">
-                              Ver
+                              Gestionar
                             </button>
                           </div>
                         </div>
@@ -1048,8 +1048,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <strong>{run.process_name}</strong>
                       <span>{run.quantity} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)}{run.created_by_name ? ` · Por: ${run.created_by_name}` : ""}</span>
                     </div>
-                    <button className="button" onClick={() => openStatsModal(run)} type="button">
-                      <Eye aria-hidden="true" size={15} />
+                    <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+                      <Eye aria-hidden="true" size={14} />
                       Ver
                     </button>
                   </div>
@@ -1348,7 +1348,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <span>{numericText(run.waste_weight)} {run.raw_material_unit_code}</span>
                       </div>
                       <button
-                        className="button"
+                        className="iconTextButton"
                         onClick={() => openStatsModal(run)}
                         type="button"
                       >
