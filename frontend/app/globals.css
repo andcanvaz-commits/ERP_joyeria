@@ -972,6 +972,30 @@ textarea {
   min-height: 0;
 }
 
+/* Panel de inventario: alto FIJO siempre (haya o no items) */
+.inventoryShell > .inventoryPanel:first-child {
+  height: 580px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Panel de historial/movimientos: crece con el contenido hasta el tope del
+   panel de inventario; si hay más, scroll. */
+.inventoryShell > .inventoryPanel:last-child {
+  max-height: 580px;
+  display: flex;
+  flex-direction: column;
+}
+
+.inventoryShell > .inventoryPanel:first-child > .inventoryList,
+.inventoryShell > .inventoryPanel:last-child > .movementList {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  align-content: start;
+  overflow-y: auto;
+}
+
 .segmentedControl {
   display: inline-flex;
   flex-wrap: wrap;
@@ -2689,11 +2713,152 @@ textarea {
 }
 .stageCarouselCard {
   display: grid;
+  align-content: start;
   gap: 12px;
   border: 1.5px solid var(--border);
   border-radius: 12px;
   background: #ffffff;
   padding: 16px;
+}
+
+/* Modal anclado arriba: crece hacia abajo sin reubicarse (flechas fijas en Y) */
+.modalBackdropAnchor {
+  align-items: start;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Pestaña de Reportes (informe estratégico, no dashboard)
+   ════════════════════════════════════════════════════════════════ */
+
+.reportEyebrow {
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.reportSummary {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.reportSummaryHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.reportSummaryHead strong {
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.reportFigures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reportFigure {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.reportFigure > span:first-child {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reportFigure > strong {
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+
+.reportDelta {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.reportDeltaUp { color: var(--success); }
+.reportDeltaDown { color: var(--danger); }
+.reportDeltaFlat { color: var(--muted); }
+
+.insightGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.insightTile {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.insightTile strong {
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.insightDetail {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.insightProduct { border-left-color: var(--primary); }
+.insightWaste { border-left-color: var(--danger); }
+.insightStage { border-left-color: var(--warning); }
+
+.reportSection {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.reportSection .panelHeader {
+  padding: 16px 18px 12px;
+}
+
+@media (max-width: 960px) {
+  .reportFigures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .insightGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
+  .reportFigures { grid-template-columns: 1fr; }
+}
+
+/* Etiqueta del código de orden de producción (reutiliza el id, no inventa otro) */
+.orderCodeTag {
+  display: inline-block;
+  margin-right: 8px;
+  border-radius: 5px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  vertical-align: middle;
 }
 .stageCarouselCard.stageTimelineEN_PROCESO {
   border-color: var(--primary);
@@ -2948,4 +3113,458 @@ textarea:disabled {
   align-self: stretch;
   width: 100%;
   min-height: 44px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Documento "Orden de Producción" (comprobante imprimible)
+   Facsímil de talonario: tinta azul sobre blanco, landscape.
+   Independiente del tema oro del ERP.
+   ════════════════════════════════════════════════════════════════ */
+
+.documentosLayout {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.documentosList {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.documentosPreview {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.documentosActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.documentosPreviewFrame {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #e9eef5;
+  padding: 16px;
+}
+
+.documentosPrintModal {
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+/* ── Decisión / control de calidad en etapas ─────────────────── */
+.stageRejectBox {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  flex: 1 1 100%;
+}
+
+.stageRejectInput {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 8px 10px;
+}
+
+.stageChoiceGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.stageChoiceHint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stageChoice {
+  display: grid;
+  gap: 3px;
+  border: 1.5px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  padding: 10px 12px;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.stageChoice strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.stageChoice span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.stageChoiceYes {
+  border-left-color: var(--success);
+}
+
+.stageChoiceNo {
+  border-left-color: var(--danger);
+}
+
+.stageChoice:hover {
+  background: var(--surface-muted);
+}
+
+.stageChoiceYes.stageChoiceActive {
+  border-color: var(--success);
+  background: #effaf3;
+  box-shadow: 0 0 0 2px rgba(47, 125, 91, 0.18);
+}
+
+.stageChoiceYes.stageChoiceActive strong {
+  color: var(--success);
+}
+
+.stageChoiceNo.stageChoiceActive {
+  border-color: var(--danger);
+  background: #fdeeee;
+  box-shadow: 0 0 0 2px rgba(178, 59, 59, 0.18);
+}
+
+.stageChoiceNo.stageChoiceActive strong {
+  color: var(--danger);
+}
+
+.stageRejectHint {
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stageDecisions {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.stageDecisionRow {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 8px 10px;
+}
+
+.stageDecisionRow strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stageDecisionRow span {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.stageDecisionRow small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stageDecisionApprove {
+  border-left-color: var(--success);
+}
+
+.stageDecisionApprove strong {
+  color: var(--success);
+}
+
+.stageDecisionReject {
+  border-left-color: var(--danger);
+}
+
+.stageDecisionReject strong {
+  color: var(--danger);
+}
+
+/* ── El documento ─────────────────────────────────────────────── */
+:root {
+  --doc-ink: #1c3f7a;
+  --doc-ink-strong: #14305d;
+  --doc-red: #c0392b;
+  --doc-line: #9fb1cc;
+}
+
+.opDocWrap {
+  --doc-pad: 10mm;
+}
+
+.opDoc {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 720px;
+  background: #ffffff;
+  color: var(--doc-ink);
+  font-family: var(--font-sans, Arial), Arial, sans-serif;
+  border: 1.5px solid var(--doc-ink);
+  border-radius: 4px;
+  padding: 14px 16px 18px;
+  position: relative;
+}
+
+.opHeader {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.opTitleBar {
+  background: var(--doc-ink);
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  font-size: 18px;
+  border-radius: 8px;
+  padding: 8px 16px;
+}
+
+.opCategoryBar {
+  min-width: 120px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eaf0f8;
+  border: 1.5px solid var(--doc-ink);
+  border-radius: 8px;
+  color: var(--doc-ink-strong);
+  font-weight: 700;
+  padding: 4px 14px;
+}
+
+.opFolio {
+  color: var(--doc-red);
+  font-weight: 800;
+  font-size: 16px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.opResponsable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--doc-line);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.opResponsable > span:first-of-type {
+  border-bottom: 1px solid var(--doc-line);
+  min-width: 220px;
+  font-weight: 800;
+}
+
+.opCantidad {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.opBody {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.opDivider {
+  background: var(--doc-ink);
+  width: 1px;
+}
+
+.opCol {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.opColHead {
+  background: var(--doc-ink);
+  color: #ffffff;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 14px;
+}
+
+.opColMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.opColMeta strong {
+  font-weight: 800;
+}
+
+.opTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.opTable th,
+.opTable td {
+  border: 1px solid var(--doc-line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.opTable th {
+  background: #eaf0f8;
+  color: var(--doc-ink-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+
+.opThFecha { width: 22%; }
+.opThGramos { width: 22%; }
+
+.opTable td {
+  height: 26px;
+}
+
+.opTdGramos {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.opSubtotalRow td {
+  border-top: 2px solid var(--doc-ink);
+  font-weight: 800;
+  background: #f4f7fc;
+}
+
+.opSubtotalRow td:last-child {
+  color: var(--doc-ink-strong);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.opTotal {
+  text-align: right;
+  font-weight: 800;
+  font-size: 14px;
+  border-top: 2px solid var(--doc-ink);
+  padding-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.opStamp {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  font-size: 52px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  border: 4px solid #111;
+  color: #111;
+  border-radius: 10px;
+  padding: 6px 26px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ── Modos de impresión (controlan tinta vía visibility) ──────── */
+.opMode-entrega .opRecepcionData {
+  visibility: hidden;
+}
+
+.opMode-recepcion .opDoc * {
+  visibility: hidden;
+}
+
+.opMode-recepcion .opRecepcionData,
+.opMode-recepcion .opRecepcionData * {
+  visibility: visible;
+}
+
+/* ── Área de impresión (portal a body) ────────────────────────── */
+.printArea {
+  display: none;
+}
+
+.printArea .opDoc {
+  border: none;
+  min-width: 0;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  /* Ocultar toda la app; mostrar solo el portal de impresión (hermano en body) */
+  body > *:not(.printArea) {
+    display: none !important;
+  }
+
+  .printArea {
+    display: block !important;
+    background: #ffffff;
+  }
+
+  .printArea .opDoc {
+    width: 100%;
+    min-width: 0;
+    color: var(--doc-ink);
+  }
+
+  /* Forzar impresión de fondos y colores (barras azules, cabeceras, totales) */
+  .opDoc,
+  .opDoc * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .documentosLayout {
+    grid-template-columns: 1fr;
+  }
 }

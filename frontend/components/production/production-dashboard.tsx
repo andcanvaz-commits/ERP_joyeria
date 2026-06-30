@@ -37,6 +37,7 @@ type StageForm = {
   stageType: string;
   qualityCheck: string;
   reworkAction: string;
+  reworkTargetOrder: string;
   requiresWeighing: boolean;
   estimatedMinutes: string;
   ingredients: Array<{ inventoryItemId: string; quantity: string; unitCode: string }>;
@@ -75,6 +76,7 @@ const emptyStage = (): StageForm => ({
   stageType: "PROCESS",
   qualityCheck: "",
   reworkAction: "",
+  reworkTargetOrder: "",
   requiresWeighing: false,
   estimatedMinutes: "",
   ingredients: [],
@@ -112,6 +114,7 @@ function processToForm(process: ProductionProcess): ProcessForm {
       stageType: stage.stage_type ?? "PROCESS",
       qualityCheck: stage.quality_check ?? "",
       reworkAction: stage.rework_action ?? "",
+      reworkTargetOrder: stage.rework_target_order ? String(stage.rework_target_order) : "",
       requiresWeighing: stage.requires_weighing,
       estimatedMinutes: stage.estimated_minutes ? String(stage.estimated_minutes) : "",
       ingredients: (stage.ingredients ?? []).map((ing) => ({
@@ -157,6 +160,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [selectedProcessId, setSelectedProcessId] = useState("");
   const [runQuantity, setRunQuantity] = useState("1");
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
+  const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
+  const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
@@ -262,6 +267,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "Pendiente";
     return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function hourLabel(value: string | null) {
+    if (!value) return "Pendiente";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Pendiente";
+    return date.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
   }
 
   function runStatusLabel(status: ProductionRun["status"]) {
@@ -558,6 +570,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         stage_type: stage.stageType || "PROCESS",
         quality_check: stage.qualityCheck.trim() || null,
         rework_action: stage.reworkAction.trim() || null,
+        rework_target_order: stage.reworkTargetOrder ? Number(stage.reworkTargetOrder) : null,
         order: index + 1,
         estimated_minutes: stage.estimatedMinutes ? Number(stage.estimatedMinutes) : null,
         requires_weighing: stage.requiresWeighing,
@@ -659,7 +672,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  async function handleFinishStage(stage: ProductionRunStage, confirmEarlyFinish = false) {
+  async function handleFinishStage(
+    stage: ProductionRunStage,
+    options: { confirmEarlyFinish?: boolean; decision?: "APPROVED" | "REJECTED"; justification?: string } = {}
+  ) {
     setError(null);
     setSuccess(null);
     setIsSaving(true);
@@ -667,13 +683,31 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       const finalWeight = stageWeights[stage.id]?.trim() || null;
       await finishProductionRunStage(stage.id, {
         final_weight: finalWeight,
-        confirm_early_finish: confirmEarlyFinish,
+        confirm_early_finish: options.confirmEarlyFinish ?? false,
+        decision: options.decision,
+        justification: options.justification,
       });
       setStageWeights((current) => ({ ...current, [stage.id]: "" }));
-      setSuccess("Etapa registrada correctamente.");
+      setStageChoice((current) => {
+        const next = { ...current };
+        delete next[stage.id];
+        return next;
+      });
+      setRejectJustification("");
+      setSuccess(
+        options.decision === "REJECTED"
+          ? "Etapa rechazada. La produccion regreso a la etapa correspondiente."
+          : "Etapa registrada correctamente."
+      );
       await loadData();
-      // Auto-advance to the next stage in the carousel
-      if (selectedRunForStages && selectedRunForStages.stages.length > 1) {
+      if (options.decision === "REJECTED") {
+        // Volver en pantalla a la tarjeta de la etapa destino.
+        const targetOrder = stage.rework_target_order ?? (stage.stage_order > 1 ? stage.stage_order - 1 : stage.stage_order);
+        setStageModalDir("left");
+        setStageModalKey((k) => k + 1);
+        setStageModalIndex(Math.max(0, targetOrder - 1));
+      } else if (selectedRunForStages && selectedRunForStages.stages.length > 1) {
+        // Auto-avanzar a la siguiente etapa.
         const total = selectedRunForStages.stages.length;
         const next = Math.min(stageModalIndex + 1, total - 1);
         if (next !== stageModalIndex) {
@@ -689,7 +723,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         showConfirm(
           "Finalizar antes del tiempo estimado",
           `${message} ¿Deseas confirmar igualmente?`,
-          () => void handleFinishStage(stage, true),
+          () => void handleFinishStage(stage, { ...options, confirmEarlyFinish: true }),
           false,
           "Confirmar igualmente"
         );
@@ -699,6 +733,69 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function stageRequiresDecision(stage: ProductionRunStage) {
+    return stage.stage_type === "DECISION" || stage.stage_type === "CONTROL" || Boolean(stage.quality_check);
+  }
+
+  // Peso de referencia: el peso final de la etapa pesada anterior, o el material total.
+  function stageReferenceWeight(stage: ProductionRunStage): number {
+    const run = selectedRunForStages;
+    if (!run) return 0;
+    const prior = run.stages
+      .filter((s) => s.stage_order < stage.stage_order && s.final_weight !== null)
+      .sort((a, b) => a.stage_order - b.stage_order);
+    const last = prior[prior.length - 1];
+    if (last?.final_weight) return Number(last.final_weight);
+    return Number(run.total_required_material ?? 0);
+  }
+
+  // ¿El peso registrado incumple la condición (pérdida sobre el límite de merma)?
+  function stageWeightFailsCondition(stage: ProductionRunStage): { fails: boolean; reason: string } {
+    if (!stage.requires_weighing) return { fails: false, reason: "" };
+    const current = Number(stageWeights[stage.id]);
+    const reference = stageReferenceWeight(stage);
+    const limit = Number(selectedRunForStages?.waste_limit_percent ?? 0);
+    if (!(reference > 0) || !Number.isFinite(current) || current < 0) return { fails: false, reason: "" };
+    const loss = ((reference - current) / reference) * 100;
+    if (loss > limit) {
+      return { fails: true, reason: `Peso ${current} implica una pérdida de ${loss.toFixed(2)}% (supera el límite ${limit.toFixed(2)}%).` };
+    }
+    return { fails: false, reason: "" };
+  }
+
+  function selectStageChoice(stage: ProductionRunStage, choice: "PASS" | "REJECT") {
+    if (choice === "REJECT") {
+      setRejectJustification(stageWeightFailsCondition(stage).reason);
+    }
+    setStageChoice((current) => ({ ...current, [stage.id]: choice }));
+  }
+
+  function clearStageChoice(stageId: string) {
+    setStageChoice((current) => {
+      const next = { ...current };
+      delete next[stageId];
+      return next;
+    });
+    setRejectJustification("");
+  }
+
+  // Aprobar/finalizar; si el peso no cumple la condición, confirmar el override.
+  function approveStage(stage: ProductionRunStage, decision?: "APPROVED") {
+    const check = stageWeightFailsCondition(stage);
+    const run = () => void handleFinishStage(stage, decision ? { decision } : {});
+    if (check.fails) {
+      showConfirm(
+        "Peso fuera de la condición",
+        `${check.reason} ¿Deseas pasar la etapa igualmente? Quedará registrado.`,
+        run,
+        false,
+        "Pasar igualmente"
+      );
+      return;
+    }
+    run();
   }
 
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
@@ -957,10 +1054,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         {/* Title row: name + code left, timing + button right */}
                         <div className="productionRunListRowHead">
                           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
-                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
                             {run.production_code ? (
                               <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
                             ) : null}
+                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
                             <span className={`timingDot ${timingColorClass}`} aria-hidden="true" />
@@ -976,7 +1073,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           {currentStage ? <span aria-hidden="true">·</span> : null}
                           <span>{numericText(run.quantity)} und</span>
                           <span aria-hidden="true">·</span>
-                          <span>{timeLabel(run.started_at)}</span>
+                          <span>Inició {hourLabel(run.started_at)}</span>
                         </div>
                         {/* Progress: bar + fraction inline */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1049,7 +1146,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 {recentFinishedRuns.map((run) => (
                   <div className="readyToStartRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
                     <div className="readyToStartInfo">
-                      <strong>{run.process_name}</strong>
+                      <strong>
+                        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                        {run.process_name}
+                      </strong>
                       <span>{run.quantity} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)}{run.created_by_name ? ` · Por: ${run.created_by_name}` : ""}</span>
                     </div>
                     <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); openStatsModal(run); }} type="button">
@@ -1067,15 +1167,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       )}
 
       {isRunStagesOpen && selectedRunForStages ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true">
+        <div className="modalBackdrop modalBackdropAnchor" role="dialog" aria-modal="true">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
                 <h2>
-                  {selectedRunForStages.process_name}
                   {selectedRunForStages.production_code ? (
-                    <span style={{ display: "inline-block", marginLeft: 10, fontFamily: "monospace", fontSize: 13, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 5, padding: "2px 8px" }}>{selectedRunForStages.production_code}</span>
+                    <span style={{ display: "inline-block", marginRight: 10, fontFamily: "monospace", fontSize: 13, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 5, padding: "2px 8px" }}>{selectedRunForStages.production_code}</span>
                   ) : null}
+                  {selectedRunForStages.process_name}
                 </h2>
                 <p>{numericText(selectedRunForStages.quantity)} unidades · {runStatusLabel(selectedRunForStages.status)}</p>
               </div>
@@ -1151,46 +1251,68 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <span className={`runStageTimingPill ${timingColorClass}`}>{stageTimingLabel(stage)}</span>
                     </div>
 
-                    {stage.quality_check ? (
-                      <div className="processFlowCallout processFlowCalloutCheck">
-                        <strong>Control de calidad</strong>{stage.quality_check}
+                    {canManage && stage.status === "EN_PROCESO" && stageRequiresDecision(stage) ? (
+                      <div className="stageChoiceGroup">
+                        <span className="stageChoiceHint">Selecciona una condición para continuar:</span>
+                        <button
+                          className={`stageChoice stageChoiceYes ${stageChoice[stage.id] === "PASS" ? "stageChoiceActive" : ""}`}
+                          onClick={() => selectStageChoice(stage, "PASS")}
+                          type="button"
+                        >
+                          <strong>Sí, cumple</strong>
+                          <span>{stage.quality_check || "La etapa cumple la condición."}</span>
+                        </button>
+                        <button
+                          className={`stageChoice stageChoiceNo ${stageChoice[stage.id] === "REJECT" ? "stageChoiceActive" : ""}`}
+                          onClick={() => selectStageChoice(stage, "REJECT")}
+                          type="button"
+                        >
+                          <strong>No cumple</strong>
+                          <span>{stage.rework_action || "No cumple; el flujo regresa a la etapa indicada."}</span>
+                        </button>
                       </div>
-                    ) : null}
+                    ) : (
+                      <>
+                        {stage.quality_check ? (
+                          <div className="processFlowCallout processFlowCalloutCheck">
+                            <strong>Control de calidad</strong>{stage.quality_check}
+                          </div>
+                        ) : null}
+                        {stage.rework_action ? (
+                          <div className="processFlowCallout processFlowCalloutRework">
+                            <strong>Si no cumple</strong>{stage.rework_action}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
 
-                    {stage.rework_action ? (
-                      <div className="processFlowCallout processFlowCalloutRework">
-                        <strong>Si no cumple</strong>{stage.rework_action}
-                      </div>
-                    ) : null}
-
-                    {stage.scheduled_finish_at && stage.status === "EN_PROCESO" ? (
-                      <div>
-                        {(() => {
-                          const now = Date.now();
-                          const start = stage.scheduled_start_at ? new Date(stage.scheduled_start_at).getTime() : now;
-                          const finish = new Date(stage.scheduled_finish_at).getTime();
-                          const total = finish - start;
-                          const elapsed = now - start;
-                          const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((elapsed / total) * 100))) : 0;
-                          return (
-                            <>
-                              <div className="progressTrack">
-                                <div className={`progressFill ${ts === "late" ? "progressFillLate" : ts === "warning" ? "progressFillWarning" : ""}`} style={{ width: `${pct}%` }} />
-                              </div>
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
-                                <span>Inicio: {timeLabel(stage.scheduled_start_at)}</span>
-                                <span>Fin est.: {timeLabel(stage.scheduled_finish_at)}</span>
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
 
                     {stage.started_at ? (
                       <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                        Iniciada: {timeLabel(stage.started_at)}
-                        {stage.finished_at ? ` · Finalizada: ${timeLabel(stage.finished_at)}` : ""}
+                        Inició {hourLabel(stage.started_at)}
+                        {stage.finished_at ? ` · Finalizó ${hourLabel(stage.finished_at)}` : ""}
+                        {stage.finished_at && stage.finished_by_name ? ` · por ${stage.finished_by_name}` : ""}
+                      </div>
+                    ) : null}
+
+                    {stage.decisions && stage.decisions.length > 0 ? (
+                      <div className="stageDecisions">
+                        {stage.decisions.map((decision, decisionIndex) => (
+                          <div
+                            className={`stageDecisionRow ${decision.decision === "REJECTED" ? "stageDecisionReject" : "stageDecisionApprove"}`}
+                            key={decisionIndex}
+                          >
+                            <strong>
+                              {decision.decision === "REJECTED" ? "Rechazo" : "Aprobación"} · intento {decision.attempt_no}
+                            </strong>
+                            {decision.justification ? <span>{decision.justification}</span> : null}
+                            <small>
+                              {decision.decided_by_name ?? ""}
+                              {decision.decided_at ? ` · ${timeLabel(decision.decided_at)}` : ""}
+                              {decision.returned_to_order ? ` · regresó a etapa ${decision.returned_to_order}` : ""}
+                            </small>
+                          </div>
+                        ))}
                       </div>
                     ) : null}
 
@@ -1201,43 +1323,63 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             className="field"
                             min="0"
                             onChange={(e) => setStageWeights((c) => ({ ...c, [stage.id]: e.target.value }))}
-                            placeholder="Peso final"
+                            placeholder="Peso"
                             step="0.0001"
                             type="number"
                             value={stageWeights[stage.id] ?? ""}
                           />
                         ) : null}
-                        {stage.stage_type === "DECISION" ? (
-                          <div style={{ display: "flex", gap: 8 }}>
+                        {stageRequiresDecision(stage) ? (
+                          stageChoice[stage.id] === "REJECT" ? (
+                            <div className="stageRejectBox">
+                              <textarea
+                                className="stageRejectInput"
+                                onChange={(e) => setRejectJustification(e.target.value)}
+                                placeholder="Justificación (opcional)"
+                                value={rejectJustification}
+                              />
+                              <span className="stageRejectHint">
+                                {stage.rework_target_order
+                                  ? `La producción regresará a la etapa ${stage.rework_target_order}.`
+                                  : "La producción regresará a la etapa anterior."}
+                              </span>
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <button
+                                  className="button"
+                                  disabled={isSaving}
+                                  onClick={() => clearStageChoice(stage.id)}
+                                  style={{ flex: 1 }}
+                                  type="button"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  className="button buttonDanger"
+                                  disabled={isSaving}
+                                  onClick={() => void handleFinishStage(stage, { decision: "REJECTED", justification: rejectJustification.trim() || undefined })}
+                                  style={{ flex: 1 }}
+                                  type="button"
+                                >
+                                  Confirmar rechazo
+                                </button>
+                              </div>
+                            </div>
+                          ) : stageChoice[stage.id] === "PASS" ? (
                             <button
                               className="button buttonPrimary"
                               disabled={isSaving}
-                              onClick={() => void handleFinishStage(stage)}
+                              onClick={() => approveStage(stage, "APPROVED")}
                               type="button"
-                              style={{ flex: 1 }}
                             >
-                              ✓ Aprobado
+                              Finalizar etapa
                             </button>
-                            <button
-                              className="button buttonDanger"
-                              disabled={isSaving}
-                              onClick={() =>
-                                showConfirm(
-                                  "Reproceso requerido",
-                                  `La pieza no cumple el control de calidad.${stage.rework_action ? ` Acción: ${stage.rework_action}` : ""} La etapa se marcará como completada. ¿Confirmar y continuar?`,
-                                  () => void handleFinishStage(stage),
-                                  false,
-                                  "Confirmar"
-                                )
-                              }
-                              type="button"
-                              style={{ flex: 1 }}
-                            >
-                              ✗ No cumple
+                          ) : (
+                            <button className="button" disabled type="button" title="Selecciona una condición arriba">
+                              Selecciona una condición
                             </button>
-                          </div>
+                          )
                         ) : (
-                          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleFinishStage(stage)} type="button">
+                          <button className="button buttonPrimary" disabled={isSaving} onClick={() => approveStage(stage)} type="button">
                             {stage.status === "PENDIENTE" ? "Iniciar y finalizar" : "Finalizar etapa"}
                           </button>
                         )}
@@ -1284,7 +1426,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="userPreviewGrid">
               <span>
                 <strong>Estado</strong>
-                {selectedStatsRun.status}
+                {runStatusLabel(selectedStatsRun.status)}
               </span>
               <span>
                 <strong>Inicio</strong>
@@ -1591,6 +1733,24 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       value={selectedStage.reworkAction}
                     />
                   </label>
+                  {selectedStage.stageType === "DECISION" || selectedStage.stageType === "CONTROL" || selectedStage.qualityCheck.trim() ? (
+                    <label className="fieldGroup">
+                      <span>Volver a esta etapa si se rechaza</span>
+                      <select
+                        className="field"
+                        disabled={isSaving}
+                        onChange={(event) => updateStage("reworkTargetOrder", event.target.value)}
+                        value={selectedStage.reworkTargetOrder}
+                      >
+                        <option value="">Etapa anterior (por defecto)</option>
+                        {form.stages.slice(0, selectedStageIndex).map((earlier, earlierIndex) => (
+                          <option key={earlierIndex} value={String(earlierIndex + 1)}>
+                            {earlierIndex + 1}. {earlier.name.trim() || `Etapa ${earlierIndex + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <div className="stageOptions">
                     <label className="checkControl">
                       <input

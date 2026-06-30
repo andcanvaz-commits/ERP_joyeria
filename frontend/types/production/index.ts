@@ -13,6 +13,7 @@ export type ProductionProcessStage = {
   stage_type: string;
   quality_check: string | null;
   rework_action: string | null;
+  rework_target_order?: number | null;
   stage_order: number;
   estimated_minutes: number | null;
   requires_weighing: boolean;
@@ -52,6 +53,20 @@ export type ProductionRunStage = {
   finished_at: string | null;
   initial_weight: string | null;
   final_weight: string | null;
+  finished_by_name?: string | null;
+  rework_target_order?: number | null;
+  decisions?: StageDecision[];
+};
+
+export type StageDecision = {
+  decision: "APPROVED" | "REJECTED";
+  justification: string | null;
+  weight_based: boolean;
+  final_weight: string | null;
+  returned_to_order: number | null;
+  decided_by_name?: string | null;
+  decided_at: string;
+  attempt_no: number;
 };
 
 export type ProductionRun = {
@@ -78,6 +93,9 @@ export type ProductionRun = {
   waste_percent: string | null;
   created_by_user_id: string;
   created_by_name?: string | null;
+  started_by_name?: string | null;
+  materials_approved_by_name?: string | null;
+  received_by_name?: string | null;
   requested_at: string;
   materials_approved_at: string | null;
   started_at: string | null;

@@ -78,7 +78,13 @@ export function startProductionRun(runId: string) {
 
 export function finishProductionRunStage(
   stageId: string,
-  payload: { initial_weight?: string | null; final_weight?: string | null; confirm_early_finish?: boolean },
+  payload: {
+    initial_weight?: string | null;
+    final_weight?: string | null;
+    confirm_early_finish?: boolean;
+    decision?: "APPROVED" | "REJECTED";
+    justification?: string | null;
+  },
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/stages/${stageId}/finish`, {
     method: "POST",

@@ -136,7 +136,7 @@ def start_run(
 ) -> ProductionRunRead:
     ensure_permission(current_user, "production.runs.update")
     try:
-        return service.start_run(run_id)
+        return service.start_run(run_id, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
@@ -152,7 +152,7 @@ def finish_run_stage(
 ) -> ProductionRunRead:
     ensure_permission(current_user, "production.runs.update")
     try:
-        return service.finish_stage(stage_id, payload)
+        return service.finish_stage(stage_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
@@ -167,7 +167,7 @@ def receive_finished_product(
 ) -> ProductionRunRead:
     ensure_permission(current_user, "production.runs.update")
     try:
-        return service.receive_finished_product(run_id)
+        return service.receive_finished_product(run_id, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

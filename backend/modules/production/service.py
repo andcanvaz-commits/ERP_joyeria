@@ -11,9 +11,12 @@ from backend.modules.production.models import (
     ProductionProcessStageIngredient,
     ProductionRun,
     ProductionRunStage,
+    ProductionRunStageDecision,
     ProductionRunStageStatus,
     ProductionRunStatus,
 )
+
+DECISION_STAGE_TYPES = {"DECISION", "CONTROL"}
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
     ProductionProcessCreate,
@@ -39,6 +42,40 @@ def _resolve_run_user_names(session, user_ids: list) -> dict:
         name = f"{user.first_name or ''} {user.last_name or ''}".strip()
         result[str(user.id)] = name or user.username
     return result
+
+
+def _populate_run_names(session, reads: list, runs: list) -> None:
+    """Resuelve los nombres de las cuentas que actuaron sobre cada orden y etapa
+    (creo / inicio / aprobo / recibio / finalizo etapa) y los asigna a los reads."""
+    ids: list = []
+    for run in runs:
+        ids.extend([
+            run.created_by_user_id,
+            run.started_by_user_id,
+            run.materials_approved_by_user_id,
+            run.received_by_user_id,
+        ])
+        for stage in run.stages:
+            ids.append(stage.finished_by_user_id)
+            for decision in stage.decisions:
+                ids.append(decision.decided_by_user_id)
+    names = _resolve_run_user_names(session, [i for i in ids if i])
+
+    def name_for(value):
+        return names.get(str(value)) if value else None
+
+    for read, run in zip(reads, runs):
+        read.created_by_name = name_for(run.created_by_user_id)
+        read.started_by_name = name_for(run.started_by_user_id)
+        read.materials_approved_by_name = name_for(run.materials_approved_by_user_id)
+        read.received_by_name = name_for(run.received_by_user_id)
+        stages_by_id = {str(stage.id): stage for stage in run.stages}
+        for stage_read in read.stages:
+            stage = stages_by_id.get(str(stage_read.id))
+            if stage is not None:
+                stage_read.finished_by_name = name_for(stage.finished_by_user_id)
+                for decision_read, decision in zip(stage_read.decisions, stage.decisions):
+                    decision_read.decided_by_name = name_for(decision.decided_by_user_id)
 
 
 # Procesos de ejemplo tomados de los documentos de la joyeria (cadenas, monedas,
@@ -289,6 +326,7 @@ class ProductionService:
                 stage_type=stage_data.stage_type,
                 quality_check=stage_data.quality_check,
                 rework_action=stage_data.rework_action,
+                rework_target_order=stage_data.rework_target_order,
                 stage_order=stage_data.order,
                 estimated_minutes=stage_data.estimated_minutes,
                 requires_weighing=stage_data.requires_weighing,
@@ -346,6 +384,7 @@ class ProductionService:
                 stage_type=stage_data.stage_type,
                 quality_check=stage_data.quality_check,
                 rework_action=stage_data.rework_action,
+                rework_target_order=stage_data.rework_target_order,
                 stage_order=stage_data.order,
                 estimated_minutes=stage_data.estimated_minutes,
                 requires_weighing=stage_data.requires_weighing,
@@ -476,6 +515,7 @@ class ProductionService:
                     stage_type=stage.stage_type,
                     quality_check=stage.quality_check,
                     rework_action=stage.rework_action,
+                    rework_target_order=stage.rework_target_order,
                     stage_order=stage.stage_order,
                     estimated_minutes=stage.estimated_minutes,
                     requires_weighing=stage.requires_weighing,
@@ -507,15 +547,17 @@ class ProductionService:
                 quantity=run.total_required_material,
                 production_run_id=run.id,
                 user_id=current_user.id,
+                production_code=run.production_code,
             )
         except InventoryDomainError as exc:
             raise ProductionDomainError(str(exc)) from exc
         run.status = ProductionRunStatus.MATERIALS_APPROVED
         run.materials_approved_at = datetime.utcnow()
+        run.materials_approved_by_user_id = current_user.id
         self.repository.flush()
-        return ProductionRunRead.model_validate(run)
+        return self._read_with_names(run)
 
-    def start_run(self, run_id: UUID) -> ProductionRunRead:
+    def start_run(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
@@ -525,6 +567,7 @@ class ProductionService:
         started_at = datetime.utcnow()
         run.status = ProductionRunStatus.IN_PROGRESS
         run.started_at = started_at
+        run.started_by_user_id = current_user.id
 
         next_start = started_at
         ordered_stages = sorted(run.stages, key=lambda item: item.stage_order)
@@ -538,19 +581,20 @@ class ProductionService:
             next_start = next_finish
 
         self.repository.flush()
-        return ProductionRunRead.model_validate(run)
+        return self._read_with_names(run)
+
+    def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
+        read = ProductionRunRead.model_validate(run)
+        _populate_run_names(self.repository.session, [read], [run])
+        return read
 
     def list_runs(self) -> list[ProductionRunRead]:
         runs = self.repository.list_runs()
-        user_names = _resolve_run_user_names(self.repository.session, [r.created_by_user_id for r in runs if r.created_by_user_id])
-        result = []
-        for run in runs:
-            read = ProductionRunRead.model_validate(run)
-            read.created_by_name = user_names.get(str(run.created_by_user_id))
-            result.append(read)
-        return result
+        reads = [ProductionRunRead.model_validate(run) for run in runs]
+        _populate_run_names(self.repository.session, reads, runs)
+        return reads
 
-    def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish) -> ProductionRunRead:
+    def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para finalizar produccion.")
         stage = self.repository.get_run_stage(stage_id)
@@ -569,13 +613,79 @@ class ProductionService:
         if scheduled_finish_at and now < scheduled_finish_at and not payload.confirm_early_finish:
             raise ProductionDomainError("La etapa esta terminando antes del tiempo estimado. Confirma para continuar.")
 
+        requires_decision = stage.stage_type in DECISION_STAGE_TYPES or bool(stage.quality_check)
+
+        # Condición de peso: comparar el peso nuevo contra el peso de referencia
+        # (la etapa pesada anterior, o el material total) frente al límite de merma.
+        weight_based = False
+        auto_justification: str | None = None
+        if stage.requires_weighing and payload.final_weight is not None:
+            reference = self._previous_stage_weight(run, stage)
+            if reference and reference > 0:
+                loss_pct = (reference - payload.final_weight) / reference * Decimal("100")
+                if loss_pct > run.waste_limit_percent:
+                    weight_based = True
+                    auto_justification = (
+                        f"Peso {payload.final_weight} implica una pérdida de {loss_pct:.2f}% "
+                        f"que supera el límite permitido {run.waste_limit_percent:.2f}%."
+                    )
+
+        if requires_decision and payload.decision is None:
+            raise ProductionDomainError("Selecciona aprobar o rechazar esta etapa.")
+
+        attempt_no = len(stage.decisions) + 1
+
         if stage.status == ProductionRunStageStatus.PENDING:
             stage.status = ProductionRunStageStatus.IN_PROGRESS
-            stage.started_at = now
-
+            stage.started_at = stage.started_at or now
         stage.initial_weight = payload.initial_weight
         stage.final_weight = payload.final_weight
+
+        # ── Rechazo: registrar intento y devolver el flujo ──────────────
+        if requires_decision and payload.decision == "REJECTED":
+            justification = (payload.justification or "").strip() or auto_justification
+
+            target_order = stage.rework_target_order
+            if not target_order or target_order < 1:
+                target_order = stage.stage_order - 1 if stage.stage_order > 1 else stage.stage_order
+
+            self._record_decision(
+                run, stage, "REJECTED", justification, weight_based,
+                payload.final_weight, target_order, current_user, attempt_no,
+            )
+
+            target_stage = None
+            for candidate in sorted(run.stages, key=lambda item: item.stage_order):
+                if candidate.stage_order < target_order:
+                    continue
+                candidate.status = ProductionRunStageStatus.PENDING
+                if candidate.stage_order > target_order:
+                    candidate.started_at = None
+                    candidate.finished_at = None
+                    candidate.initial_weight = None
+                    candidate.final_weight = None
+                else:
+                    target_stage = candidate
+            if target_stage is not None:
+                target_stage.status = ProductionRunStageStatus.IN_PROGRESS
+                target_stage.started_at = now
+                target_stage.finished_at = None
+
+            self.repository.flush()
+            return self._read_with_names(run)
+
+        # ── Aprobación / etapa normal: finalizar y avanzar ──────────────
+        # Registrar si es etapa de decisión, o si se pasó pese a que el peso no
+        # cumple la condición (queda constancia del override del usuario).
+        if requires_decision or weight_based:
+            note = (payload.justification or "").strip() or auto_justification
+            self._record_decision(
+                run, stage, "APPROVED", note,
+                weight_based, payload.final_weight, None, current_user, attempt_no,
+            )
+
         stage.finished_at = now
+        stage.finished_by_user_id = current_user.id
         stage.status = ProductionRunStageStatus.FINISHED
 
         next_stage = next(
@@ -590,11 +700,49 @@ class ProductionService:
             next_stage.status = ProductionRunStageStatus.IN_PROGRESS
             next_stage.started_at = now
             self.repository.flush()
-            return ProductionRunRead.model_validate(run)
+            return self._read_with_names(run)
 
         self._finish_run(run, payload.final_weight)
         self.repository.flush()
-        return ProductionRunRead.model_validate(run)
+        return self._read_with_names(run)
+
+    def _previous_stage_weight(self, run: ProductionRun, stage: ProductionRunStage) -> Decimal | None:
+        """Peso de referencia para validar una etapa: el peso final de la etapa pesada
+        anterior; si no hay, el material total requerido de la orden."""
+        prior = [
+            candidate
+            for candidate in run.stages
+            if candidate.stage_order < stage.stage_order and candidate.final_weight is not None
+        ]
+        if prior:
+            prior.sort(key=lambda item: item.stage_order)
+            return prior[-1].final_weight
+        return run.total_required_material
+
+    def _record_decision(
+        self,
+        run: ProductionRun,
+        stage: ProductionRunStage,
+        decision: str,
+        justification: str | None,
+        weight_based: bool,
+        final_weight: Decimal | None,
+        returned_to_order: int | None,
+        current_user: CurrentUser,
+        attempt_no: int,
+    ) -> None:
+        stage.decisions.append(
+            ProductionRunStageDecision(
+                run_id=run.id,
+                decision=decision,
+                justification=justification,
+                weight_based=weight_based,
+                final_weight=final_weight,
+                returned_to_order=returned_to_order,
+                decided_by_user_id=current_user.id,
+                attempt_no=attempt_no,
+            )
+        )
 
     def _finish_run(self, run: ProductionRun, final_weight: Decimal | None) -> None:
         run.status = ProductionRunStatus.PENDING_RECEPTION
@@ -605,7 +753,7 @@ class ProductionService:
             run.waste_weight = waste
             run.waste_percent = (waste / run.expected_finished_weight * Decimal("100")) if run.expected_finished_weight else Decimal("0")
 
-    def receive_finished_product(self, run_id: UUID) -> ProductionRunRead:
+    def receive_finished_product(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para recibir producto terminado.")
         run = self.repository.get_run(run_id)
@@ -614,20 +762,18 @@ class ProductionService:
         if run.status != ProductionRunStatus.PENDING_RECEPTION:
             raise ProductionDomainError("Solo se puede recibir una produccion finalizada y pendiente de recepcion.")
 
-        finished_item = self.inventory_service.ensure_production_item(
-            item_type="FINISHED_PRODUCT",
+        self.inventory_service.create_finished_product_lot(
             name=run.process_name,
             unit_code="und",
-        )
-        self.inventory_service.commit_finished_production(
             production_order_id=run.id,
-            finished_product_id=finished_item.id,
-            finished_quantity=run.quantity,
+            production_code=run.production_code,
+            quantity=run.quantity,
         )
         run.status = ProductionRunStatus.RECEIVED
         run.received_at = datetime.utcnow()
+        run.received_by_user_id = current_user.id
         self.repository.flush()
-        return ProductionRunRead.model_validate(run)
+        return self._read_with_names(run)
 
     @staticmethod
     def _ensure_unique_stage_order(stages: list) -> None:

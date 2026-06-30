@@ -95,7 +95,9 @@ class InventoryService(InventoryIntegrationPort):
     def list_items(self, item_type: str | None = None) -> list[InventoryItemRead]:
         return [InventoryItemRead.model_validate(item) for item in self.repository.list_items(item_type)]
 
-    def create_movement(self, payload: InventoryMovementCreate, user_id: UUID | None) -> InventoryMovementRead:
+    def create_movement(
+        self, payload: InventoryMovementCreate, user_id: UUID | None, lot_code: str | None = None
+    ) -> InventoryMovementRead:
         item = self._get_item_or_raise(payload.item_id)
 
         delta = self._movement_delta(payload.movement_type, payload.quantity)
@@ -117,7 +119,10 @@ class InventoryService(InventoryIntegrationPort):
             source_file_content=payload.source_file_content,
             created_by=user_id,
         )
-        if payload.movement_type == "ENTRADA":
+        if lot_code:
+            # Reusar el código de la orden de producción (no inventar otro).
+            movement.lot_code = lot_code
+        elif payload.movement_type == "ENTRADA":
             movement.lot_code = _generate_lot_code(
                 self.repository,
                 item.name,
@@ -160,6 +165,7 @@ class InventoryService(InventoryIntegrationPort):
         quantity: Decimal,
         production_run_id: UUID,
         user_id: UUID | None,
+        production_code: str | None = None,
     ) -> InventoryMovementRead:
         payload = InventoryMovementCreate(
             item_id=item_id,
@@ -169,7 +175,7 @@ class InventoryService(InventoryIntegrationPort):
             reference_type="production_run",
             reference_id=production_run_id,
         )
-        return self.create_movement(payload, user_id=user_id)
+        return self.create_movement(payload, user_id=user_id, lot_code=production_code)
 
     def list_movements(self, item_id: UUID | None = None) -> list[InventoryMovementRead]:
         movements = self.repository.list_movements(item_id)
@@ -240,11 +246,47 @@ class InventoryService(InventoryIntegrationPort):
         if not availability.has_enough_stock:
             raise InventoryDomainError("No hay stock suficiente para reservar materiales.")
 
+    def create_finished_product_lot(
+        self,
+        *,
+        name: str,
+        unit_code: str,
+        production_order_id: UUID,
+        production_code: str | None,
+        quantity: Decimal,
+    ) -> InventoryItem:
+        """Crea un producto terminado POR ORDEN (lote), identificado por el código OP,
+        y registra su ingreso. No se agrega por nombre: cada orden es su propio lote."""
+        sku = (production_code or "").strip() or self._generate_sku("FINISHED_PRODUCT")
+        if self.repository.get_item_by_sku(sku) is not None:
+            sku = self._generate_sku("FINISHED_PRODUCT")
+        item = InventoryItem(
+            item_type="FINISHED_PRODUCT",
+            name=name,
+            sku=sku,
+            description="Producto terminado de produccion.",
+            unit_code=unit_code.strip(),
+            minimum_stock=None,
+        )
+        self.repository.add_item(item)
+        self.repository.flush()
+        payload = InventoryMovementCreate(
+            item_id=item.id,
+            movement_type="INGRESO_PRODUCCION",
+            quantity=quantity,
+            reason="Ingreso de producto terminado desde produccion.",
+            reference_type="production_order",
+            reference_id=production_order_id,
+        )
+        self.create_movement(payload, user_id=None, lot_code=production_code)
+        return item
+
     def commit_finished_production(
         self,
         production_order_id: UUID,
         finished_product_id: UUID,
         finished_quantity: Decimal,
+        production_code: str | None = None,
     ) -> None:
         item = self._get_item_or_raise(finished_product_id)
         payload = InventoryMovementCreate(
@@ -255,7 +297,7 @@ class InventoryService(InventoryIntegrationPort):
             reference_type="production_order",
             reference_id=production_order_id,
         )
-        self.create_movement(payload, user_id=None)
+        self.create_movement(payload, user_id=None, lot_code=production_code)
 
     def _generate_sku(self, item_type: str) -> str:
         prefix = ITEM_TYPE_PREFIXES.get(item_type, "INV")

@@ -112,6 +112,24 @@ def upgrade_production_tables() -> None:
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS production_code VARCHAR(30)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_production_runs_production_code ON production_runs (production_code) WHERE production_code IS NOT NULL",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS stage_code VARCHAR(40)",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS started_by_user_id UUID",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS materials_approved_by_user_id UUID",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS received_by_user_id UUID",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS finished_by_user_id UUID",
+        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS rework_target_order INTEGER",
+        "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS rework_target_order INTEGER",
+        "CREATE TABLE IF NOT EXISTS production_run_stage_decisions ("
+        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+        "run_id UUID NOT NULL, "
+        "run_stage_id UUID NOT NULL REFERENCES production_run_stages(id) ON DELETE CASCADE, "
+        "decision VARCHAR(20) NOT NULL, "
+        "justification TEXT, "
+        "weight_based BOOLEAN NOT NULL DEFAULT FALSE, "
+        "final_weight NUMERIC(14,4), "
+        "returned_to_order INTEGER, "
+        "decided_by_user_id UUID, "
+        "decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), "
+        "attempt_no INTEGER NOT NULL DEFAULT 1)",
     )
     with engine.begin() as connection:
         for statement in statements:

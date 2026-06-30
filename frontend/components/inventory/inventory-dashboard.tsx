@@ -1,9 +1,12 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Save, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Printer, Save, Upload, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { getAccessToken } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
+import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
+import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers, type CurrentUser, type ManagedUser } from "@/lib/auth-api";
 import {
   createInventoryItem,
@@ -204,6 +207,9 @@ export function InventoryDashboard() {
   const [historyMonth, setHistoryMonth] = useState(() => monthKey(new Date()));
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => dateKey(new Date()));
   const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
+  const [viewingRun, setViewingRun] = useState<ProductionRun | null>(null);
+  const [printPreview, setPrintPreview] = useState<{ run: ProductionRun; mode: DocMode } | null>(null);
+  const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -371,7 +377,7 @@ export function InventoryDashboard() {
     setError(null);
     setIsSavingProduction(true);
     try {
-      await approveProductionRunMaterials(run.id);
+      const updated = await approveProductionRunMaterials(run.id);
       setSuccess("Salida de materia prima aprobada. Produccion ya puede iniciar.");
       const nextRuns = await listProductionRuns();
       setProductionRuns(nextRuns);
@@ -380,6 +386,7 @@ export function InventoryDashboard() {
         setIsSolicitudesOpen(false);
       }
       void loadInventory();
+      setPrintPreview({ run: updated, mode: "entrega" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
     } finally {
@@ -391,7 +398,7 @@ export function InventoryDashboard() {
     setError(null);
     setIsSavingProduction(true);
     try {
-      await receiveProductionRunFinishedProduct(run.id);
+      const updated = await receiveProductionRunFinishedProduct(run.id);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
       setProductionRuns(nextRuns);
@@ -400,6 +407,7 @@ export function InventoryDashboard() {
         setIsSolicitudesOpen(false);
       }
       void loadInventory();
+      setPrintPreview({ run: updated, mode: "recepcion" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
     } finally {
@@ -409,6 +417,17 @@ export function InventoryDashboard() {
 
   const pendingInventoryRuns = productionRuns.filter((run) => run.status === "PENDIENTE_INVENTARIO");
   const pendingReceptionRuns = productionRuns.filter((run) => run.status === "PENDIENTE_RECEPCION");
+
+  const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
+
+  useEffect(() => {
+    if (!printingMode) return;
+    const timer = setTimeout(() => {
+      window.print();
+      setPrintingMode(null);
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [printingMode]);
 
   function openMovementHistory() {
     const firstMovement = sortedMovements[0];
@@ -604,19 +623,6 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          className="solicitudesButton"
-          onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
-          type="button"
-        >
-          Solicitudes de produccion
-          {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
-            <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
-          ) : null}
-        </button>
-      </div>
-
       <section className="summaryGrid" aria-label="Resumen de inventario">
         <article className="card metric">
           <Boxes aria-hidden="true" size={22} />
@@ -634,6 +640,19 @@ export function InventoryDashboard() {
           <strong className="metricValue">{summary?.finished_products ?? 0}</strong>
         </article>
       </section>
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          className="solicitudesButton"
+          onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+          type="button"
+        >
+          Solicitudes de produccion
+          {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
+            <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
+          ) : null}
+        </button>
+      </div>
 
       <section className="inventoryShell">
         <article className="card panelBody inventoryPanel">
@@ -744,19 +763,23 @@ export function InventoryDashboard() {
             ))}
             {itemFilter === "WORK_IN_PROGRESS" ? (
               productionRuns.filter((r) => r.status === "EN_PROCESO").map((run) => (
-                <div className="inventoryItemRow" key={`run-${run.id}`} style={{ borderColor: "#e3cfa6", background: "#faf6ee" }}>
+                <div className="inventoryItemRow" key={`run-${run.id}`} style={{ borderColor: "#e3cfa6", background: "#faf6ee" }} {...openableProps(() => setViewingRun(run), `Ver avance de ${run.process_name}`)}>
                   <div>
-                    <strong>{run.process_name}</strong>
+                    <strong>
+                      {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                      {run.process_name}
+                    </strong>
                     <span>Orden en proceso · {run.quantity} unidades</span>
                   </div>
                   <span className="stockPill" style={{ background: "#f3e9d6" }}>{run.quantity} und</span>
-                  <button className="iconOnlyButton" onClick={() => { /* handled externally */ }} type="button" aria-label="Ver etapas" disabled>
-                    <Eye aria-hidden="true" size={16} />
+                  <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
+                    <Eye aria-hidden="true" size={15} />
+                    Visualizar
                   </button>
                 </div>
               ))
             ) : null}
-            {!isLoading && filteredItems.length === 0 && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.filter((r) => r.status === "EN_PROCESO").length > 0) ? <div className="emptyState">No hay items para este filtro.</div> : null}
+            {!isLoading && filteredItems.length === 0 && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.some((r) => r.status === "EN_PROCESO")) ? <div className="emptyState">No hay items para este filtro.</div> : null}
             {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
           </div>
         </article>
@@ -1013,7 +1036,7 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>{movementTypeLabel(viewingMovement.movement_type)}</h2>
-                <p>{viewingMovement.item.name} - {viewingMovement.item.sku}</p>
+                <p>{viewingMovement.item.name}{viewingMovement.lot_code ? ` · ${viewingMovement.lot_code}` : ""}</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingMovement(null)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -1040,6 +1063,90 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
+      {viewingRun ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Avance de produccion">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>
+                  {viewingRun.production_code ? <span className="orderCodeTag">{viewingRun.production_code}</span> : null}
+                  {viewingRun.process_name}
+                </h2>
+                <p>{numericText(viewingRun.quantity)} unidades en proceso</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            {(() => {
+              const stages = [...viewingRun.stages].sort((a, b) => a.stage_order - b.stage_order);
+              const current = stages.find((s) => s.status === "EN_PROCESO") ?? stages.find((s) => s.status === "PENDIENTE") ?? null;
+              const done = stages.filter((s) => s.status === "FINALIZADA").length;
+              return (
+                <>
+                  <div className="userPreviewGrid">
+                    <span><strong>Etapa actual</strong>{current ? `${current.stage_order}. ${current.stage_name}` : "—"}</span>
+                    <span><strong>Avance</strong>{done} de {stages.length} etapas</span>
+                  </div>
+                  <div className="stageTimelineList">
+                    {stages.map((stage) => (
+                      <div className={`stageTimelineItem stageTimelineItem${stage.status}`} key={stage.id}>
+                        <div className="stageTimelineHead">
+                          <div className="stageTimelineLeft">
+                            <span className={`stageTimelineNum ${stage.status === "FINALIZADA" ? "stageTimelineNumDone" : stage.status === "EN_PROCESO" ? "stageTimelineNumActive" : ""}`}>{stage.stage_order}</span>
+                            <div>
+                              <strong>{stage.stage_name}</strong>
+                              <span>{stage.status === "FINALIZADA" ? "Finalizada" : stage.status === "EN_PROCESO" ? "En proceso" : "Pendiente"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </section>
+        </div>
+      ) : null}
+
+      {printPreview ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante">
+          <section className="modalWindow documentosPrintModal">
+            <div className="modalHeader">
+              <div>
+                <h2>Comprobante de orden</h2>
+                <p>{printPreview.mode === "entrega" ? "Mitad de entrega de materiales" : "Mitad de recepción de producto terminado"}</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setPrintPreview(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="documentosPreviewFrame">
+              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.run, docItemNames)} mode="completo" />
+            </div>
+            <div className="modalActions">
+              <button className="button" onClick={() => setPrintPreview(null)} type="button">
+                Cerrar
+              </button>
+              <button className="button buttonPrimary" onClick={() => setPrintingMode(printPreview.mode)} type="button">
+                <Printer aria-hidden="true" size={16} />
+                Imprimir {printPreview.mode === "entrega" ? "entrega" : "recepción"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {printingMode && printPreview
+        ? createPortal(
+            <div className="printArea">
+              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.run, docItemNames)} mode={printingMode} />
+            </div>,
+            document.body
+          )
+        : null}
+
       {isSolicitudesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Solicitudes de produccion">
           <section className="modalWindow solicitudesModal">
@@ -1063,7 +1170,10 @@ export function InventoryDashboard() {
                     <div className="solicitudCard" key={run.id}>
                       <div className="solicitudCardHead">
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>{run.process_name}</strong>
+                          <strong>
+                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                            {run.process_name}
+                          </strong>
                           <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
                             {numericText(run.total_required_material)} {run.raw_material_unit_code} · {productionTimeLabel(run.requested_at)}
                           </span>
@@ -1119,7 +1229,10 @@ export function InventoryDashboard() {
                     <div className="solicitudCard receptionRequestCard" key={run.id}>
                       <div className="solicitudCardHead">
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>{run.process_name}</strong>
+                          <strong>
+                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                            {run.process_name}
+                          </strong>
                           <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
                             {numericText(run.quantity)} unidades · Merma: {run.waste_percent ?? 0}%
                           </span>

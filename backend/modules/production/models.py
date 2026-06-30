@@ -45,6 +45,7 @@ class ProductionProcessStage(Base):
     stage_type: Mapped[str] = mapped_column(String(40), nullable=False, default="PROCESS")
     quality_check: Mapped[str | None] = mapped_column(Text, nullable=True)
     rework_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rework_target_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requires_weighing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -107,6 +108,9 @@ class ProductionRun(Base):
     waste_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
     production_code: Mapped[str | None] = mapped_column(String(30), nullable=True, unique=True, index=True)
     created_by_user_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    started_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    materials_approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    received_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     materials_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -131,6 +135,7 @@ class ProductionRunStage(Base):
     stage_type: Mapped[str] = mapped_column(String(40), nullable=False, default="PROCESS")
     quality_check: Mapped[str | None] = mapped_column(Text, nullable=True)
     rework_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rework_target_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stage_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -140,7 +145,36 @@ class ProductionRunStage(Base):
     scheduled_finish_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    rework_target_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     initial_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     final_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
 
     run: Mapped[ProductionRun] = relationship(back_populates="stages")
+    decisions: Mapped[list["ProductionRunStageDecision"]] = relationship(
+        back_populates="stage",
+        cascade="all, delete-orphan",
+        order_by="ProductionRunStageDecision.attempt_no",
+    )
+
+
+class ProductionRunStageDecision(Base):
+    __tablename__ = "production_run_stage_decisions"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    run_stage_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_run_stages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weight_based: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    final_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    returned_to_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decided_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    stage: Mapped["ProductionRunStage"] = relationship(back_populates="decisions")

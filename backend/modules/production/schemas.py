@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +32,7 @@ class ProductionProcessStageCreate(BaseModel):
     stage_type: str = Field(default="PROCESS", max_length=40)
     quality_check: str | None = Field(default=None, max_length=1000)
     rework_action: str | None = Field(default=None, max_length=1000)
+    rework_target_order: int | None = Field(default=None, ge=1)
     order: int = Field(ge=1)
     estimated_minutes: int | None = Field(default=None, ge=1)
     requires_weighing: bool = False
@@ -76,6 +78,7 @@ class ProductionProcessStageRead(BaseModel):
     stage_type: str
     quality_check: str | None = None
     rework_action: str | None = None
+    rework_target_order: int | None = None
     stage_order: int
     estimated_minutes: int | None = None
     requires_weighing: bool
@@ -111,6 +114,21 @@ class ProductionRunStageFinish(BaseModel):
     initial_weight: Decimal | None = Field(default=None, ge=0)
     final_weight: Decimal | None = Field(default=None, ge=0)
     confirm_early_finish: bool = False
+    decision: Literal["APPROVED", "REJECTED"] | None = None
+    justification: str | None = Field(default=None, max_length=1000)
+
+
+class StageDecisionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    decision: str
+    justification: str | None = None
+    weight_based: bool = False
+    final_weight: Decimal | None = None
+    returned_to_order: int | None = None
+    decided_by_name: str | None = None
+    decided_at: datetime
+    attempt_no: int
 
 
 class ProductionRunStageRead(BaseModel):
@@ -124,6 +142,7 @@ class ProductionRunStageRead(BaseModel):
     stage_type: str
     quality_check: str | None = None
     rework_action: str | None = None
+    rework_target_order: int | None = None
     stage_order: int
     estimated_minutes: int | None = None
     requires_weighing: bool
@@ -134,6 +153,8 @@ class ProductionRunStageRead(BaseModel):
     finished_at: datetime | None = None
     initial_weight: Decimal | None = None
     final_weight: Decimal | None = None
+    finished_by_name: str | None = None
+    decisions: list[StageDecisionRead] = Field(default_factory=list)
 
 
 class ProductionRunRead(BaseModel):
@@ -156,6 +177,9 @@ class ProductionRunRead(BaseModel):
     waste_percent: Decimal | None = None
     created_by_user_id: UUID
     created_by_name: str | None = None
+    started_by_name: str | None = None
+    materials_approved_by_name: str | None = None
+    received_by_name: str | None = None
     requested_at: datetime
     materials_approved_at: datetime | None = None
     started_at: datetime | None = None
