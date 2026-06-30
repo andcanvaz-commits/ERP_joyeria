@@ -1,17 +1,27 @@
 :root {
-  --background: #f5f7fb;
+  --background: #faf8f4;
   --surface: #ffffff;
-  --surface-muted: #f1f5f9;
-  --border: #d8e0ea;
-  --text: #172033;
-  --muted: #62708a;
-  --primary: #174ea6;
-  --primary-strong: #123a7a;
-  --success: #0f7b55;
-  --warning: #9a5b00;
-  --danger: #ad2f2f;
-  --pending: #516071;
-  --shadow: 0 8px 22px rgba(19, 32, 54, 0.08);
+  --surface-muted: #f3efe8;
+  --border: #e7dfd2;
+  --text: #1c1a17;
+  --muted: #7a7166;
+  --primary: #b8893a;
+  --primary-strong: #8a6427;
+  --primary-light: #e3cfa6;
+  --primary-soft: #f3e9d6;
+  --success: #2f7d5b;
+  --warning: #9a6b1e;
+  --danger: #b23b3b;
+  --pending: #6e665b;
+  --shadow: 0 8px 22px rgba(28, 26, 23, 0.08);
+
+  /* Sidebar — grafito (bandeja de joyero) */
+  --sidebar-bg: #1c1a17;
+  --sidebar-surface: #24211d;
+  --sidebar-text: #c9c0b2;
+  --sidebar-muted: #8f867a;
+  --sidebar-active-bg: rgba(184, 137, 58, 0.16);
+  --sidebar-border: rgba(255, 255, 255, 0.07);
 }
 
 * {
@@ -27,8 +37,14 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans, "Segoe UI"), "Segoe UI", Arial, sans-serif;
   letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 a {
@@ -50,49 +66,59 @@ textarea {
 }
 
 .sidebar {
-  border-right: 1px solid var(--border);
-  background: #ffffff;
+  border-right: 1px solid var(--sidebar-border);
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
   padding: 0 0 20px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   min-height: 64px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--sidebar-border);
   padding: 0 22px;
 }
 
 .brandMark {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   place-items: center;
-  border-radius: 8px;
-  background: #123a7a;
-  color: #ffffff;
+  border-radius: 9px;
+  background: linear-gradient(150deg, #d8ad5e 0%, #b8893a 52%, #8a6427 100%);
+  color: #1c1a17;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 17px;
   font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 .brandText {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .brandName {
-  font-size: 15px;
-  font-weight: 700;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #f1ebdf;
 }
 
 .brandMeta {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
 }
 
 .nav {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   margin-top: 18px;
   padding: 0 14px;
 }
@@ -100,17 +126,30 @@ textarea {
 .navItem {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   border-radius: 8px;
-  color: var(--muted);
+  border-left: 2px solid transparent;
+  color: var(--sidebar-muted);
   padding: 10px 12px;
   font-size: 14px;
+  transition: color 0.15s, background 0.15s;
 }
 
-.navItemActive {
-  background: #e8f0fe;
-  color: var(--primary-strong);
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--sidebar-text);
+}
+
+.navItemActive,
+.navItemActive:hover {
+  background: var(--sidebar-active-bg);
+  border-left-color: var(--primary);
+  color: #f1ebdf;
   font-weight: 700;
+}
+
+.navItemActive svg {
+  color: var(--primary);
 }
 
 .mainArea {
@@ -124,18 +163,22 @@ textarea {
   gap: 16px;
   min-height: 64px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(250, 248, 244, 0.9);
+  backdrop-filter: blur(6px);
   padding: 0 28px;
 }
 
 .topbarTitle {
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
 .topbarTitle strong {
-  font-size: 22px;
-  line-height: 1.2;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.2px;
 }
 
 .topbarTitle span {
@@ -180,8 +223,11 @@ textarea {
 
 .pageHeader h1 {
   margin: 0;
-  font-size: 26px;
-  line-height: 1.2;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.2px;
 }
 
 .pageHeader p {
@@ -220,9 +266,15 @@ textarea {
 }
 
 .buttonPrimary {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: #ffffff;
+  border-color: var(--primary-strong);
+  background: linear-gradient(160deg, #c79a48 0%, #b8893a 60%, #a87c30 100%);
+  color: #211c12;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  background: var(--primary-strong);
+  color: #fbf6ec;
 }
 
 .iconOnlyButton {
@@ -374,8 +426,8 @@ textarea {
 .statusPill {
   border: 1px solid var(--primary-light);
   border-radius: 999px;
-  background: #f4f8ff;
-  color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
   font-size: 12px;
   font-weight: 700;
   padding: 4px 8px;
@@ -412,7 +464,7 @@ textarea {
 
 .runStageEN_PROCESO {
   border-left-color: var(--primary);
-  background: #f8fbff;
+  background: #fcf9f2;
 }
 
 .runStageFINALIZADA {
@@ -540,12 +592,15 @@ textarea {
   border-radius: 50%;
   background:
     radial-gradient(circle at center, #ffffff 0 54%, transparent 55%),
-    conic-gradient(var(--primary) var(--donut-value), #dfe6f1 0);
+    conic-gradient(var(--primary) var(--donut-value), #e7dfd2 0);
 }
 
 .donutChart strong {
   align-self: end;
-  font-size: 24px;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .donutChart span {
@@ -579,7 +634,7 @@ textarea {
 }
 
 .legendInactive {
-  background: #dfe6f1;
+  background: #e7dfd2;
 }
 
 .barChartList {
@@ -615,7 +670,7 @@ textarea {
 .miniBarTrack {
   overflow: hidden;
   border-radius: 999px;
-  background: #e7edf5;
+  background: #ece4d6;
 }
 
 .barTrack {
@@ -626,7 +681,7 @@ textarea {
 .miniBarFill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--primary), #2f7dd5);
+  background: linear-gradient(90deg, var(--primary-strong), #d8ad5e);
 }
 
 .dashboardList {
@@ -713,8 +768,11 @@ textarea {
 }
 
 .metricValue {
-  font-size: 24px;
-  font-weight: 800;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
 }
 
 .toolbar {
@@ -851,6 +909,7 @@ textarea {
   text-align: left;
   vertical-align: middle;
   font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
 
 .table th {
@@ -872,12 +931,12 @@ textarea {
 }
 
 .statusPending {
-  background: #eef2f7;
+  background: #efeae1;
   color: var(--pending);
 }
 
 .statusProgress {
-  background: #e8f0fe;
+  background: #f3e9d6;
   color: var(--primary-strong);
 }
 
@@ -936,7 +995,7 @@ textarea {
 }
 
 .segmentedControl .segmentActive {
-  background: #e8f0fe;
+  background: #f3e9d6;
   color: var(--primary-strong);
 }
 
@@ -1059,21 +1118,21 @@ textarea {
 .movementCalendarDay strong {
   min-width: 18px;
   border-radius: 999px;
-  background: #e8f0fe;
+  background: #f3e9d6;
   color: var(--primary-strong);
   font-size: 10px;
   line-height: 18px;
 }
 
 .movementCalendarHasMovements {
-  border-color: #9db7f0;
-  background: #f6f9ff;
+  border-color: #dcc79a;
+  background: #faf6ee;
 }
 
 .movementCalendarSelected {
   border-color: var(--primary);
-  background: #e8f0fe;
-  box-shadow: 0 0 0 2px rgba(47, 96, 171, 0.16);
+  background: #f3e9d6;
+  box-shadow: 0 0 0 2px rgba(184, 137, 58, 0.2);
 }
 
 .inventoryItemRow,
@@ -1127,7 +1186,7 @@ textarea {
   align-items: center;
   min-height: 30px;
   border-radius: 999px;
-  background: #e8f0fe;
+  background: #f3e9d6;
   color: var(--primary-strong);
   padding: 5px 10px;
   font-size: 13px;
@@ -1257,7 +1316,7 @@ textarea {
   gap: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fbfdff;
+  background: #fdfbf6;
   padding: 12px;
 }
 
@@ -1368,7 +1427,7 @@ textarea {
 
 .processPickerActive {
   border-color: var(--primary);
-  background: #e8f0fe;
+  background: #f3e9d6;
 }
 
 .linkButton {
@@ -1396,7 +1455,10 @@ textarea {
 
 .panelTitle {
   margin: 0;
-  font-size: 16px;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .panelText {
@@ -1439,7 +1501,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 22px 48px rgba(19, 32, 54, 0.24);
+  box-shadow: 0 22px 48px rgba(28, 26, 23, 0.26);
   padding: 18px;
 }
 
@@ -1467,7 +1529,10 @@ textarea {
 
 .modalHeader h2 {
   margin: 0;
-  font-size: 18px;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .modalHeader p {
@@ -1594,7 +1659,7 @@ textarea {
 }
 
 .stageSummary .stageSummaryCheck {
-  color: #1d4ed8;
+  color: var(--primary-strong);
 }
 
 .stageSummary .stageSummaryRework {
@@ -1605,7 +1670,10 @@ textarea {
   display: grid;
   min-height: 100vh;
   place-items: center;
-  background: var(--background);
+  background:
+    radial-gradient(900px 520px at 50% -10%, rgba(184, 137, 58, 0.16), transparent 70%),
+    radial-gradient(700px 480px at 50% 120%, rgba(184, 137, 58, 0.08), transparent 70%),
+    var(--background);
   padding: 24px;
 }
 
@@ -1613,18 +1681,22 @@ textarea {
   display: grid;
   gap: 18px;
   width: min(440px, 100%);
-  padding: 22px;
+  padding: 30px 28px;
+  border-top: 3px solid var(--primary);
 }
 
 .loginBrand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 13px;
 }
 
 .loginBrand h1 {
   margin: 0;
-  font-size: 22px;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .loginBrand p {
@@ -1819,9 +1891,9 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #c7d7f5;
+  border: 1px solid #e3cfa6;
   border-radius: 999px;
-  background: #e8f0fe;
+  background: #f3e9d6;
   color: var(--primary-strong);
   font-size: 11px;
   font-weight: 800;
@@ -1874,10 +1946,10 @@ textarea {
 }
 
 .processFlowStage:hover {
-  box-shadow: 0 4px 16px rgba(19, 32, 54, 0.09);
+  box-shadow: 0 4px 16px rgba(28, 26, 23, 0.1);
 }
 
-.processFlowStagePROCESS  { border-left-color: #6366f1; }
+.processFlowStagePROCESS  { border-left-color: #5b6470; }
 .processFlowStageTHERMAL  { border-left-color: #ef4444; }
 .processFlowStageCHEMICAL { border-left-color: #f59e0b; }
 .processFlowStageCONTROL  { border-left-color: #10b981; }
@@ -1909,7 +1981,7 @@ textarea {
   flex-shrink: 0;
 }
 
-.processFlowStagePROCESS  .processFlowStageOrder { background: #6366f1; }
+.processFlowStagePROCESS  .processFlowStageOrder { background: #5b6470; }
 .processFlowStageTHERMAL  .processFlowStageOrder { background: #ef4444; }
 .processFlowStageCHEMICAL .processFlowStageOrder { background: #f59e0b; }
 .processFlowStageCONTROL  .processFlowStageOrder { background: #10b981; }
@@ -1932,7 +2004,7 @@ textarea {
   flex-shrink: 0;
 }
 
-.processFlowStagePROCESS  .processFlowTypeBadge { background: #ede9fe; color: #4338ca; }
+.processFlowStagePROCESS  .processFlowTypeBadge { background: #eceef1; color: #3f4753; }
 .processFlowStageTHERMAL  .processFlowTypeBadge { background: #fee2e2; color: #b91c1c; }
 .processFlowStageCHEMICAL .processFlowTypeBadge { background: #fef3c7; color: #92400e; }
 .processFlowStageCONTROL  .processFlowTypeBadge { background: #d1fae5; color: #065f46; }
@@ -2056,9 +2128,9 @@ textarea {
 .productionRequestCard {
   display: grid;
   gap: 8px;
-  border: 1px solid #c7d7f5;
+  border: 1px solid #e3cfa6;
   border-radius: 10px;
-  background: #f6f9ff;
+  background: #faf6ee;
   padding: 12px 14px;
 }
 
@@ -2107,8 +2179,10 @@ textarea {
 }
 
 .productionStatCard strong {
-  font-size: 30px;
-  font-weight: 800;
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 38px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
@@ -2219,7 +2293,11 @@ textarea {
   gap: 10px;
 }
 
-.runCardTitle strong { font-size: 17px; }
+.runCardTitle strong {
+  font-family: var(--font-serif, Georgia), Georgia, serif;
+  font-size: 22px;
+  font-weight: 600;
+}
 
 .runCardQuantityRow {
   display: flex;
@@ -2245,14 +2323,14 @@ textarea {
 .progressTrack {
   height: 7px;
   border-radius: 999px;
-  background: #e7edf5;
+  background: #ece4d6;
   overflow: hidden;
 }
 
 .progressFill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--primary), #3b82f6);
+  background: linear-gradient(90deg, var(--primary-strong), #d8ad5e);
 }
 
 .progressFillWarning { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
@@ -2298,7 +2376,7 @@ textarea {
 }
 .timingWarning.runStageTimingPill { background: #fef3c7; color: #92400e; }
 .timingLate.runStageTimingPill { background: #fee2e2; color: #b91c1c; }
-.timingPending.runStageTimingPill { background: #f1f5f9; color: var(--muted); }
+.timingPending.runStageTimingPill { background: #efeae1; color: var(--muted); }
 
 .runStageMiniBar {
   margin-top: 4px;
@@ -2357,7 +2435,7 @@ textarea {
 
 .stageTimelineItemEN_PROCESO {
   border-left-color: var(--primary);
-  background: #f8fbff;
+  background: #fcf9f2;
 }
 
 .stageTimelineItemFINALIZADA {
@@ -2434,9 +2512,9 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #c7d7f5;
+  border: 1px solid #e3cfa6;
   border-radius: 10px;
-  background: #e8f0fe;
+  background: #f3e9d6;
   color: var(--primary-strong);
   cursor: pointer;
   padding: 9px 16px;
@@ -2480,7 +2558,7 @@ textarea {
 
 .solicitudCardOpen {
   border-color: var(--primary);
-  background: #f6f9ff;
+  background: #faf6ee;
 }
 
 .solicitudCardHead {
@@ -2619,7 +2697,7 @@ textarea {
 }
 .stageCarouselCard.stageTimelineEN_PROCESO {
   border-color: var(--primary);
-  background: #f8fbff;
+  background: #fcf9f2;
 }
 .stageCarouselCard.stageTimelineFINALIZADA {
   border-color: #10b981;
@@ -2635,4 +2713,239 @@ textarea {
 @media (max-width: 680px) {
   .productionStatsRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .productionMainGrid { grid-template-columns: 1fr; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Accesibilidad y usabilidad
+   (CSS global; sin cambios de lógica)
+   ════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Texto de acento legible sobre superficies tintadas en oro (WCAG AA) */
+  --accent-deep: #5f3f12;
+}
+
+/* ── Foco visible consistente ─────────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Controles de formulario: foco con borde oro + halo */
+.field:focus,
+.field:focus-visible,
+.processPicker:focus-visible,
+.checkControl input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(184, 137, 58, 0.22);
+}
+
+/* Foco sobre fondo oscuro del sidebar: halo claro para que se vea */
+.navItem:focus-visible {
+  outline-color: #e3cfa6;
+  outline-offset: -2px;
+}
+
+/* Checkboxes / radios / inputs con color de marca */
+input,
+textarea,
+select {
+  accent-color: var(--primary);
+}
+
+/* ── Retroalimentación al pasar el cursor ─────────────────────── */
+/* Botones secundarios (fondo claro): tinte oro muy suave */
+.button:hover:not(:disabled):not(.buttonPrimary):not(.buttonDanger),
+.iconTextButton:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+/* Botón primario: hover sutil, sin salto de contraste (oro un poco mas profundo) */
+.buttonPrimary:hover:not(:disabled) {
+  background: linear-gradient(160deg, #bd9140 0%, #a87c30 60%, #98702a 100%);
+  color: #211c12;
+}
+
+/* Botón peligro: hover sutil, mismo tono mas profundo */
+.buttonDanger:hover:not(:disabled) {
+  background: #9d3232;
+  border-color: #9d3232;
+  color: #ffffff;
+}
+
+.iconOnlyButton:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.dangerIconButton:hover:not(:disabled),
+.button.dangerText:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: #fde8e8;
+  color: var(--danger);
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.processPicker:hover {
+  border-color: var(--primary);
+}
+
+.maintenanceTile:hover:not(:disabled),
+.card:hover {
+  /* sutil: no mover layout, solo elevar */
+}
+
+.maintenanceTile:not(:disabled):hover {
+  border-color: var(--primary-light);
+  box-shadow: 0 6px 18px rgba(28, 26, 23, 0.12);
+}
+
+/* Filas de tabla: resaltado para seguir la línea con la vista */
+.table tbody tr:hover {
+  background: #fcf9f2;
+}
+
+/* Filas/tarjetas de lista interactivas */
+.inventoryItemRow:hover,
+.movementRow:hover,
+.dashboardRow:hover,
+.readyToStartRow:hover,
+.processRow:hover {
+  border-color: var(--primary-light);
+}
+
+/* Contenedores que abren una ventana emergente al clic (tactil) */
+[role="button"].inventoryItemRow,
+[role="button"].processRow,
+[role="button"].productionRunListRow,
+[role="button"].readyToStartRow,
+[role="button"].movementRow {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+[role="button"].inventoryItemRow:hover,
+[role="button"].processRow:hover,
+[role="button"].productionRunListRow:hover,
+[role="button"].readyToStartRow:hover,
+[role="button"].movementRow:hover {
+  border-color: var(--primary);
+  background: #fcf9f2;
+}
+
+
+/* Cursor correcto en todo lo accionable */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary,
+label.checkControl {
+  cursor: pointer;
+}
+
+/* Indicar visualmente lo deshabilitado en cualquier control nativo */
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Contraste: texto sobre superficies tintadas en oro ───────── */
+.statusProgress,
+.stockPill,
+.statusPill,
+.segmentedControl .segmentActive,
+.solicitudesButton {
+  color: var(--accent-deep);
+}
+
+/* ── Objetivos táctiles: mínimo cómodo en controles compactos ── */
+.iconTextButton {
+  min-height: 30px;
+}
+
+.segmentedControl button {
+  min-height: 34px;
+}
+
+.runInlineBtn {
+  min-height: 28px;
+}
+
+/* ── Scroll: barras discretas y consistentes ──────────────────── */
+.inventoryList,
+.movementList,
+.productionRunsVertical,
+.runTimeline,
+.stageTimelineList,
+.dashboardList,
+.processList,
+.barChartList {
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary-light) transparent;
+}
+
+.inventoryList::-webkit-scrollbar,
+.movementList::-webkit-scrollbar,
+.productionRunsVertical::-webkit-scrollbar,
+.runTimeline::-webkit-scrollbar,
+.stageTimelineList::-webkit-scrollbar,
+.dashboardList::-webkit-scrollbar,
+.processList::-webkit-scrollbar,
+.barChartList::-webkit-scrollbar {
+  width: 8px;
+}
+
+.inventoryList::-webkit-scrollbar-thumb,
+.movementList::-webkit-scrollbar-thumb,
+.productionRunsVertical::-webkit-scrollbar-thumb,
+.runTimeline::-webkit-scrollbar-thumb,
+.stageTimelineList::-webkit-scrollbar-thumb,
+.dashboardList::-webkit-scrollbar-thumb,
+.processList::-webkit-scrollbar-thumb,
+.barChartList::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--primary-light);
+}
+
+/* ── Lectores de pantalla: utilidad para texto solo-audio ─────── */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* ── Movimiento reducido: respetar preferencia del sistema ────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Panel "Nueva orden": boton centrado vertical, ancho completo ── */
+.productionCreatePanel > .button {
+  margin-top: auto;
+  margin-bottom: auto;
+  align-self: stretch;
+  width: 100%;
+  min-height: 44px;
 }

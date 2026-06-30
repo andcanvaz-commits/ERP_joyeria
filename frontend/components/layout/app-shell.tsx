@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { BarChart3, Boxes, Factory, FileText, LayoutDashboard, LogOut, Shield, UserCircle, Wrench } from "lucide-react";
 import { clearAccessToken, getAccessToken } from "@/lib/api";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth-api";
+import { useModalA11y } from "@/hooks/use-modal-a11y";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -53,6 +54,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const currentPage = pageTitles[pathname] ?? pageTitles["/dashboard"];
 
+  useModalA11y();
+
   useEffect(() => {
     if (!getAccessToken()) return;
     getCurrentUser()
@@ -64,10 +67,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="appShell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brandMark">ERP</div>
+          <div className="brandMark">Au</div>
           <div className="brandText">
-            <span className="brandName">Joyeria</span>
-            <span className="brandMeta">Operacion interna</span>
+            <span className="brandName">Fenix Global</span>
+            <span className="brandMeta">Joyeria</span>
           </div>
         </div>
         <nav className="nav" aria-label="Navegacion principal">
@@ -100,6 +103,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span>({currentUser?.role ?? ""})</span>
             </div>
             <button
+              aria-label="Cerrar sesion"
               className="iconOnlyButton"
               onClick={() => {
                 clearAccessToken();

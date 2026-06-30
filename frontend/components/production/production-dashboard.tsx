@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { getAccessToken } from "@/lib/api";
+import { openableProps, stopClick } from "@/lib/a11y";
 import {
   activateUser,
   createUser,
@@ -402,6 +403,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   function openRunStagesModal(run: ProductionRun) {
     setSelectedRunForStages(run);
+    const activeIndex = run.stages.findIndex((s) => s.status !== "FINALIZADA");
+    setStageModalIndex(activeIndex >= 0 ? activeIndex : 0);
+    setStageModalKey(0);
     setIsRunStagesOpen(true);
   }
 
@@ -949,16 +953,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     const timingBarClass = timing === "late" ? "progressFillLate" : timing === "warning" ? "progressFillWarning" : "";
                     const timingLabel = timing === "late" ? "Retrasada" : timing === "warning" ? "Por vencer" : timing === "no_time" ? "En proceso" : "A tiempo";
                     return (
-                      <div className="productionRunListRow" key={run.id}>
+                      <div className="productionRunListRow" key={run.id} {...openableProps(() => openRunStagesModal(run), `Gestionar orden ${run.process_name}`)}>
                         {/* Title row: name + code left, timing + button right */}
                         <div className="productionRunListRowHead">
                           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
                             <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
                             {run.production_code ? (
-                              <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary)", fontWeight: 700, background: "#e8f0fe", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
+                              <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
                             ) : null}
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
                             <span className={`timingDot ${timingColorClass}`} aria-hidden="true" />
                             <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>{timingLabel}</span>
                             <button className="button buttonPrimary runInlineBtn" onClick={() => openRunStagesModal(run)} type="button">
@@ -1043,14 +1047,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             {recentFinishedRuns.length > 0 ? (
               <div className="readyToStartList">
                 {recentFinishedRuns.map((run) => (
-                  <div className="readyToStartRow" key={run.id}>
+                  <div className="readyToStartRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
                     <div className="readyToStartInfo">
                       <strong>{run.process_name}</strong>
                       <span>{run.quantity} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)}{run.created_by_name ? ` · Por: ${run.created_by_name}` : ""}</span>
                     </div>
-                    <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+                    <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); openStatsModal(run); }} type="button">
                       <Eye aria-hidden="true" size={14} />
-                      Ver
+                      Visualizar
                     </button>
                   </div>
                 ))}
@@ -1070,12 +1074,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>
                   {selectedRunForStages.process_name}
                   {selectedRunForStages.production_code ? (
-                    <span style={{ display: "inline-block", marginLeft: 10, fontFamily: "monospace", fontSize: 13, color: "var(--primary)", fontWeight: 700, background: "#e8f0fe", borderRadius: 5, padding: "2px 8px" }}>{selectedRunForStages.production_code}</span>
+                    <span style={{ display: "inline-block", marginLeft: 10, fontFamily: "monospace", fontSize: 13, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 5, padding: "2px 8px" }}>{selectedRunForStages.production_code}</span>
                   ) : null}
                 </h2>
                 <p>{numericText(selectedRunForStages.quantity)} unidades · {runStatusLabel(selectedRunForStages.status)}</p>
               </div>
-              <button className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1203,9 +1207,40 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             value={stageWeights[stage.id] ?? ""}
                           />
                         ) : null}
-                        <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleFinishStage(stage)} type="button">
-                          {stage.status === "PENDIENTE" ? "Iniciar y finalizar" : "Finalizar etapa"}
-                        </button>
+                        {stage.stage_type === "DECISION" ? (
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              className="button buttonPrimary"
+                              disabled={isSaving}
+                              onClick={() => void handleFinishStage(stage)}
+                              type="button"
+                              style={{ flex: 1 }}
+                            >
+                              ✓ Aprobado
+                            </button>
+                            <button
+                              className="button buttonDanger"
+                              disabled={isSaving}
+                              onClick={() =>
+                                showConfirm(
+                                  "Reproceso requerido",
+                                  `La pieza no cumple el control de calidad.${stage.rework_action ? ` Acción: ${stage.rework_action}` : ""} La etapa se marcará como completada. ¿Confirmar y continuar?`,
+                                  () => void handleFinishStage(stage),
+                                  false,
+                                  "Confirmar"
+                                )
+                              }
+                              type="button"
+                              style={{ flex: 1 }}
+                            >
+                              ✗ No cumple
+                            </button>
+                          </div>
+                        ) : (
+                          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleFinishStage(stage)} type="button">
+                            {stage.status === "PENDIENTE" ? "Iniciar y finalizar" : "Finalizar etapa"}
+                          </button>
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -1242,7 +1277,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{selectedStatsRun.process_name}</h2>
                 <p>{selectedStatsRun.quantity} unidades</p>
               </div>
-              <button className="iconOnlyButton" onClick={closeStatsModal} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1284,18 +1319,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>Historial de procesos</h2>
                 <p>{finishedRuns.length} procesos registrados</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsHistoryOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsHistoryOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
             <div className="movementHistoryLayout">
               <section className="movementCalendarPanel" aria-label="Calendario de procesos">
                 <div className="movementCalendarHeader">
-                  <button className="iconOnlyButton" onClick={() => moveHistoryMonth(-1)} type="button">
+                  <button aria-label="Mes anterior" className="iconOnlyButton" onClick={() => moveHistoryMonth(-1)} type="button">
                     <ChevronLeft aria-hidden="true" size={18} />
                   </button>
                   <strong>{monthLabel(currentHistoryMonth)}</strong>
-                  <button className="iconOnlyButton" onClick={() => moveHistoryMonth(1)} type="button">
+                  <button aria-label="Mes siguiente" className="iconOnlyButton" onClick={() => moveHistoryMonth(1)} type="button">
                     <ChevronRight aria-hidden="true" size={18} />
                   </button>
                 </div>
@@ -1336,7 +1371,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </div>
                 <div className="movementList movementHistoryEntries">
                   {selectedDateRuns.map((run) => (
-                    <article className="movementRow" key={run.id}>
+                    <article className="movementRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
                       <div>
                         <strong>{run.process_name}</strong>
                         <span>{timeLabel(run.finished_at)}</span>
@@ -1349,11 +1384,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </div>
                       <button
                         className="iconTextButton"
-                        onClick={() => openStatsModal(run)}
+                        onClick={(event) => { event.stopPropagation(); openStatsModal(run); }}
                         type="button"
                       >
                         <Eye aria-hidden="true" size={14} />
-                        Ver
+                        Visualizar
                       </button>
                     </article>
                   ))}
@@ -1373,7 +1408,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{formMode === "edit" ? "Editar proceso" : "Crear proceso"}</h2>
                 <p>Etapa {selectedStageIndex + 1} de {form.stages.length}</p>
               </div>
-              <button className="iconOnlyButton" onClick={closeProcessForm} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeProcessForm} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1676,7 +1711,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>Procesos</h2>
                 <p>{processes.length} procesos creados</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsProcessesOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsProcessesOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1684,7 +1719,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="processesLayout">
               <div className="processList">
                 {processes.map((process) => (
-                  <article className="processRow" key={process.id}>
+                  <article className="processRow" key={process.id} {...openableProps(() => setViewingProcess(process), `Ver proceso ${process.name}`)}>
                     <button
                       className="linkButton"
                       onClick={() => {
@@ -1695,7 +1730,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       {process.name}
                     </button>
                     <span>{process.stages.length} etapas</span>
-                    <div className="rowActions">
+                    <div className="rowActions" onClick={stopClick}>
                       <button
                         className="iconTextButton"
                         onClick={() => {
@@ -1738,7 +1773,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{viewingProcess.name}</h2>
                 <p>{viewingProcess.stages.length} etapas · v{viewingProcess.version ?? 1}</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setViewingProcess(null)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingProcess(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1831,7 +1866,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{userFormMode === "edit" ? "Editar usuario" : "Crear usuario"}</h2>
                 <p>Mantenimiento de usuarios</p>
               </div>
-              <button className="iconOnlyButton" onClick={closeUserForm} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeUserForm} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1885,14 +1920,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>Usuarios</h2>
                 <p>Mantenimiento de usuarios</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsUsersOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsUsersOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
             <div className="processList">
               {users.map((user) => (
-                <article className={`processRow userRow ${!user.is_active ? "userRowInactive" : ""}`} key={user.id}>
-                  <div className="userRowHeader">
+                <article className={`processRow userRow ${!user.is_active ? "userRowInactive" : ""}`} key={user.id} {...openableProps(() => setViewingUser(user), `Ver usuario ${user.first_name} ${user.last_name}`)}>
+                  <div className="userRowHeader" onClick={stopClick}>
                     <strong>{user.first_name} {user.last_name}</strong>
                     {user.is_active ? (
                       <button
@@ -1912,7 +1947,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     )}
                   </div>
                   <span>{user.email}</span>
-                  <div className="rowActions">
+                  <div className="rowActions" onClick={stopClick}>
                     <button className="iconTextButton" onClick={() => setViewingUser(user)} type="button">
                       <Eye aria-hidden="true" size={15} />
                       Visualizar
@@ -1947,7 +1982,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{viewingUser.first_name} {viewingUser.last_name}</h2>
                 <p>Vista previa del usuario</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setViewingUser(null)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingUser(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1987,7 +2022,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{generatedCredentials.title}</h2>
               <p>{generatedCredentials.role}</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setGeneratedCredentials(null)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setGeneratedCredentials(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>

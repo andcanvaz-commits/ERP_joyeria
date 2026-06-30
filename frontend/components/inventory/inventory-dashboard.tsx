@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Save, Upload, X } from "lucide-react";
 import { getAccessToken } from "@/lib/api";
+import { openableProps, stopClick } from "@/lib/a11y";
 import { getCurrentUser, listUsers, type CurrentUser, type ManagedUser } from "@/lib/auth-api";
 import {
   createInventoryItem,
@@ -202,6 +203,7 @@ export function InventoryDashboard() {
   const [isMovementHistoryOpen, setIsMovementHistoryOpen] = useState(false);
   const [historyMonth, setHistoryMonth] = useState(() => monthKey(new Date()));
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => dateKey(new Date()));
+  const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -716,7 +718,7 @@ export function InventoryDashboard() {
 
           <div className="inventoryList">
             {filteredItems.map((item) => (
-              <article className="inventoryItemRow" key={item.id}>
+              <article className="inventoryItemRow" key={item.id} {...openableProps(() => setViewingItem(item), `Ver detalle de ${item.name}`)}>
                 <div>
                   <strong>{item.name}</strong>
                   <span>{item.sku} - {itemTypeLabel(item.item_type)}</span>
@@ -724,7 +726,7 @@ export function InventoryDashboard() {
                 <div className="stockPill">
                   {numericText(item.current_stock)} {item.unit_code}
                 </div>
-                <div className="rowActions">
+                <div className="rowActions" onClick={stopClick}>
                   <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
                     <Eye aria-hidden="true" size={15} />
                     Visualizar
@@ -742,12 +744,12 @@ export function InventoryDashboard() {
             ))}
             {itemFilter === "WORK_IN_PROGRESS" ? (
               productionRuns.filter((r) => r.status === "EN_PROCESO").map((run) => (
-                <div className="inventoryItemRow" key={`run-${run.id}`} style={{ borderColor: "#c7d7f5", background: "#f6f9ff" }}>
+                <div className="inventoryItemRow" key={`run-${run.id}`} style={{ borderColor: "#e3cfa6", background: "#faf6ee" }}>
                   <div>
                     <strong>{run.process_name}</strong>
                     <span>Orden en proceso · {run.quantity} unidades</span>
                   </div>
-                  <span className="stockPill" style={{ background: "#e8f0fe" }}>{run.quantity} und</span>
+                  <span className="stockPill" style={{ background: "#f3e9d6" }}>{run.quantity} und</span>
                   <button className="iconOnlyButton" onClick={() => { /* handled externally */ }} type="button" aria-label="Ver etapas" disabled>
                     <Eye aria-hidden="true" size={16} />
                   </button>
@@ -778,11 +780,11 @@ export function InventoryDashboard() {
           </div>
           <div className="movementList">
             {lastMonthMovements.map((movement) => (
-              <div className="movementRow" key={movement.id}>
+              <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                 <div>
                   <strong>{movementTypeLabel(movement.movement_type)}</strong>
                   {movement.lot_code ? (
-                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary)", fontWeight: 700 }}>{movement.lot_code}</span>
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{movement.lot_code}</span>
                   ) : null}
                   <span>{movementDateLabel(movement.created_at)} - {movement.item.name}</span>
                 </div>
@@ -790,14 +792,20 @@ export function InventoryDashboard() {
                   <strong>{numericText(movement.quantity)} {movement.unit_code}</strong>
                   <span>{movementTimeLabel(movement.created_at)}{movement.reason ? ` - ${movement.reason}` : ""}</span>
                   {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
-                  {movement.source_file_name ? (
-                    <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
-                      <Download aria-hidden="true" size={15} />
-                      XML
+                  <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
+                    {movement.source_file_name ? (
+                      <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
+                        <Download aria-hidden="true" size={15} />
+                        XML
+                      </button>
+                    ) : null}
+                    <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
+                      <Eye aria-hidden="true" size={15} />
+                      Visualizar
                     </button>
-                  ) : null}
+                  </span>
                 </div>
-              </div>
+              </article>
             ))}
             {!isLoading && movements.length === 0 ? <div className="emptyState">No hay movimientos registrados.</div> : null}
             {!isLoading && movements.length > 0 && lastMonthMovements.length === 0 ? (
@@ -816,18 +824,18 @@ export function InventoryDashboard() {
                 <h2>Historial de movimientos</h2>
                 <p>Selecciona una fecha para revisar sus movimientos</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsMovementHistoryOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsMovementHistoryOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
             <div className="movementHistoryLayout">
               <section className="movementCalendarPanel" aria-label="Calendario de movimientos">
                 <div className="movementCalendarHeader">
-                  <button className="iconOnlyButton" onClick={() => moveHistoryMonth(-1)} type="button">
+                  <button aria-label="Mes anterior" className="iconOnlyButton" onClick={() => moveHistoryMonth(-1)} type="button">
                     <ChevronLeft aria-hidden="true" size={18} />
                   </button>
                   <strong>{historyMonthLabel}</strong>
-                  <button className="iconOnlyButton" onClick={() => moveHistoryMonth(1)} type="button">
+                  <button aria-label="Mes siguiente" className="iconOnlyButton" onClick={() => moveHistoryMonth(1)} type="button">
                     <ChevronRight aria-hidden="true" size={18} />
                   </button>
                 </div>
@@ -861,11 +869,11 @@ export function InventoryDashboard() {
                 </div>
                 <div className="movementList movementHistoryEntries">
                   {selectedDateMovements.map((movement) => (
-                    <div className="movementRow" key={movement.id}>
+                    <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                       <div>
                         <strong>{movementTypeLabel(movement.movement_type)}</strong>
                         {movement.lot_code ? (
-                          <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary)", fontWeight: 700 }}>{movement.lot_code}</span>
+                          <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{movement.lot_code}</span>
                         ) : null}
                         <span>{movementTimeLabel(movement.created_at)} - {movement.item.name}</span>
                       </div>
@@ -873,14 +881,20 @@ export function InventoryDashboard() {
                         <strong>{numericText(movement.quantity)} {movement.unit_code}</strong>
                         <span>{movement.reason || "Sin motivo registrado"}</span>
                         {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
-                        {movement.source_file_name ? (
-                          <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
-                            <Download aria-hidden="true" size={15} />
-                            XML
+                        <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
+                          {movement.source_file_name ? (
+                            <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
+                              <Download aria-hidden="true" size={15} />
+                              XML
+                            </button>
+                          ) : null}
+                          <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
+                            <Eye aria-hidden="true" size={15} />
+                            Visualizar
                           </button>
-                        ) : null}
+                        </span>
                       </div>
-                    </div>
+                    </article>
                   ))}
                   {selectedDateMovements.length === 0 ? <div className="emptyState">No hay movimientos en esta fecha.</div> : null}
                 </div>
@@ -898,7 +912,7 @@ export function InventoryDashboard() {
                 <h2>{editingItemId ? "Editar item" : "Crear item"}</h2>
                 <p>Mantenimiento de inventario</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsItemFormOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsItemFormOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -940,7 +954,7 @@ export function InventoryDashboard() {
                 <h2>{movementForm.movement_type === "SALIDA" ? "Registrar salida" : "Registrar ingreso"}</h2>
                 <p>Todo movimiento manual queda trazado en inventario</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsMovementFormOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsMovementFormOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -979,7 +993,7 @@ export function InventoryDashboard() {
                 <h2>{viewingItem.name}</h2>
                 <p>{viewingItem.sku} - {itemTypeLabel(viewingItem.item_type)}</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setViewingItem(null)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingItem(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -993,6 +1007,39 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
+      {viewingMovement ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de movimiento">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>{movementTypeLabel(viewingMovement.movement_type)}</h2>
+                <p>{viewingMovement.item.name} - {viewingMovement.item.sku}</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingMovement(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="userPreviewGrid">
+              <span><strong>Cantidad</strong>{numericText(viewingMovement.quantity)} {viewingMovement.unit_code}</span>
+              {viewingMovement.unit_cost ? <span><strong>Costo unitario</strong>{numericText(viewingMovement.unit_cost)}</span> : null}
+              {viewingMovement.lot_code ? <span><strong>Lote</strong>{viewingMovement.lot_code}</span> : null}
+              <span><strong>Fecha</strong>{movementDateLabel(viewingMovement.created_at)} - {movementTimeLabel(viewingMovement.created_at)}</span>
+              {viewingMovement.created_by_name ? <span><strong>Registrado por</strong>{viewingMovement.created_by_name}</span> : null}
+              {viewingMovement.source_file_name ? <span><strong>Archivo</strong>{viewingMovement.source_file_name}</span> : null}
+            </div>
+            <p className="panelText">{viewingMovement.reason || "Sin motivo registrado"}</p>
+            {viewingMovement.source_file_name ? (
+              <div className="modalActions">
+                <button className="button" onClick={() => void handleDownloadMovementSourceFile(viewingMovement)} type="button">
+                  <Download aria-hidden="true" size={16} />
+                  Descargar XML
+                </button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+
       {isSolicitudesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Solicitudes de produccion">
           <section className="modalWindow solicitudesModal">
@@ -1001,7 +1048,7 @@ export function InventoryDashboard() {
                 <h2>Solicitudes de produccion</h2>
                 <p>{pendingInventoryRuns.length + pendingReceptionRuns.length} solicitudes pendientes</p>
               </div>
-              <button className="iconOnlyButton" onClick={() => setIsSolicitudesOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsSolicitudesOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>

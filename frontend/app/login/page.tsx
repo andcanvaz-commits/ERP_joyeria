@@ -32,8 +32,8 @@ export default function LoginPage() {
             <LockKeyhole aria-hidden="true" size={18} />
           </div>
           <div>
-            <h1>ERP Joyeria</h1>
-            <p>Ingreso operativo</p>
+            <h1>Fenix Global</h1>
+            <p>Joyeria · Ingreso operativo</p>
           </div>
         </div>
 
@@ -42,13 +42,21 @@ export default function LoginPage() {
         <form className="loginForm" onSubmit={handleSubmit}>
           <label>
             <span>Usuario</span>
-            <input className="field" onChange={(event) => setUsername(event.target.value)} value={username} />
+            <input
+              autoComplete="username"
+              className="field"
+              onChange={(event) => setUsername(event.target.value)}
+              required
+              value={username}
+            />
           </label>
           <label>
             <span>Contraseña</span>
             <input
+              autoComplete="current-password"
               className="field"
               onChange={(event) => setPassword(event.target.value)}
+              required
               type="password"
               value={password}
             />
