@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Boxes, Factory, Users } from "lucide-react";
-import { getAccessToken } from "@/lib/api";
+import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, listUsers, type ManagedUser } from "@/lib/auth-api";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import { listProcesses } from "@/lib/production-api";
@@ -49,7 +49,7 @@ export function SystemDashboard() {
 
   useEffect(() => {
     async function loadDashboard() {
-      if (!getAccessToken()) {
+      if (!isAuthenticated()) {
         window.location.href = "/login";
         return;
       }

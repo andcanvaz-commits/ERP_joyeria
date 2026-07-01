@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BarChart3, Boxes, Factory, FileText, Hash, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
-import { clearAccessToken, getAccessToken } from "@/lib/api";
-import { getCurrentUser, type CurrentUser } from "@/lib/auth-api";
+import { isAuthenticated } from "@/lib/api";
+import { getCurrentUser, logout, type CurrentUser } from "@/lib/auth-api";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
 
 const navItems = [
@@ -61,7 +61,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useModalA11y();
 
   useEffect(() => {
-    if (!getAccessToken()) return;
+    if (!isAuthenticated()) return;
     getCurrentUser()
       .then(setCurrentUser)
       .catch(() => setCurrentUser(null));
@@ -110,8 +110,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="Cerrar sesion"
               className="iconOnlyButton"
               onClick={() => {
-                clearAccessToken();
-                window.location.href = "/login";
+                void logout().finally(() => {
+                  window.location.href = "/login";
+                });
               }}
               title="Salir"
               type="button"

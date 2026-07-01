@@ -1,4 +1,4 @@
-import { apiRequest, saveAccessToken } from "@/lib/api";
+import { apiRequest, clearAuthenticated, markAuthenticated } from "@/lib/api";
 
 export type LoginResponse = {
   access_token: string;
@@ -36,8 +36,17 @@ export async function login(username: string, password: string) {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-  saveAccessToken(tokenPair.access_token);
+  // El token viaja en cookie HttpOnly (Set-Cookie). Solo marcamos la bandera de UI.
+  markAuthenticated();
   return tokenPair;
+}
+
+export async function logout() {
+  try {
+    await apiRequest<void>("/api/auth/logout", { method: "POST" });
+  } finally {
+    clearAuthenticated();
+  }
 }
 
 export function getCurrentUser() {

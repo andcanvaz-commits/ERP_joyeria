@@ -747,7 +747,7 @@ Puntos para integrar luego con inventario:
 - La finalizacion futura de produccion debera pasar por `InventoryIntegrationPort.commit_finished_production`.
 
 Docker:
-- Se actualizo `docker-compose.yml` para sembrar solo `admin / Admin123!`.
+- Se actualizo `docker-compose.yml` para sembrar solo el usuario admin (credenciales via `.env`, ver `.env.example`).
 - No se reiniciaron contenedores ni se ejecuto `docker-compose up`, por instruccion expresa del usuario.
 - En el proximo arranque manual, `AUTO_CREATE_TABLES=true` limpiara tablas obsoletas de ordenes/plantillas anteriores.
 

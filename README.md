@@ -5,6 +5,21 @@
 Requisitos:
 - Docker Desktop instalado y ejecutandose.
 
+Configurar secretos (una vez):
+
+```powershell
+copy .env.example .env
+```
+
+Edita `.env` y define `POSTGRES_PASSWORD`, `JWT_SECRET_KEY` y `JWT_REFRESH_SECRET_KEY` con valores fuertes.
+Genera secretos con:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+El archivo `.env` esta en `.gitignore` y no debe subirse al repo.
+
 Levantar frontend, API y base de datos:
 
 ```powershell
@@ -19,11 +34,18 @@ http://localhost:3000/login
 http://localhost:3000/produccion
 ```
 
-Cuentas locales sembradas por Docker:
+Cuenta admin sembrada en el primer arranque:
 
-```text
-admin / Admin123!
+- Usuario: valor de `SEED_ADMIN_USERNAME` (por defecto `admin`).
+- Contrasena: valor de `SEED_ADMIN_PASSWORD`. Si lo dejas vacio, la API genera
+  una contrasena aleatoria y la imprime UNA sola vez en los logs al crear el usuario:
+
+```powershell
+docker-compose logs api | Select-String "contrasena generada"
 ```
+
+Cambia esa contrasena tras el primer inicio de sesion. En arranques posteriores
+la contrasena del admin no se sobrescribe.
 
 Permisos:
 - `admin`: accede a mantenimiento de produccion y crea procesos con etapas.

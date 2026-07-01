@@ -3,7 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Printer, Save, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
-import { getAccessToken } from "@/lib/api";
+import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
@@ -221,7 +221,7 @@ export function InventoryDashboard() {
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
 
   async function loadInventory() {
-    if (!getAccessToken()) {
+    if (!isAuthenticated()) {
       window.location.href = "/login";
       return;
     }

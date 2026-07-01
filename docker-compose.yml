@@ -4,9 +4,12 @@ services:
       context: ./frontend
     command: npm run dev
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Origen relativo: el navegador llama /api en el mismo origen; Next lo
+      # reenvia al backend. Asi la cookie HttpOnly funciona sin cross-site.
+      NEXT_PUBLIC_API_URL: ""
+      API_PROXY_TARGET: http://api:8000
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
@@ -19,16 +22,20 @@ services:
       context: .
     command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
-      DATABASE_URL: postgresql+psycopg://erp_joyeria:erp_joyeria@db:5432/erp_joyeria
+      APP_ENV: development
+      ENABLE_DOCS: "true"
+      # "api" incluido: el proxy de Next reenvia con Host=api:8000 (nombre de servicio).
+      ALLOWED_HOSTS: localhost,127.0.0.1,api
+      DATABASE_URL: postgresql+psycopg://erp_joyeria:${POSTGRES_PASSWORD}@db:5432/erp_joyeria
       AUTO_CREATE_TABLES: "true"
-      JWT_SECRET_KEY: dev-change-me
-      JWT_REFRESH_SECRET_KEY: dev-change-me
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY}
       CORS_ORIGINS: http://localhost:3000
       DEV_AUTH_ENABLED: "false"
-      SEED_ADMIN_USERNAME: admin
-      SEED_ADMIN_PASSWORD: Admin123!
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
     restart: unless-stopped
@@ -40,9 +47,10 @@ services:
     environment:
       POSTGRES_DB: erp_joyeria
       POSTGRES_USER: erp_joyeria
-      POSTGRES_PASSWORD: erp_joyeria
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Solo accesible desde la maquina local, no expuesto a la red.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

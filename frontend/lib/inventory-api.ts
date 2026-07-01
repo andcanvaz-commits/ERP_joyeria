@@ -1,4 +1,4 @@
-import { API_URL, apiRequest, getAccessToken } from "@/lib/api";
+import { API_URL, apiRequest } from "@/lib/api";
 import type {
   InventoryItem,
   InventoryItemType,
@@ -64,9 +64,8 @@ export function createInventoryMovement(payload: CreateInventoryMovementPayload)
 }
 
 export async function downloadInventoryMovementSourceFile(movementId: string) {
-  const token = getAccessToken();
   const response = await fetch(`${API_URL}/api/inventory/movements/${movementId}/source-file`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
     cache: "no-store",
   });
   if (!response.ok) {

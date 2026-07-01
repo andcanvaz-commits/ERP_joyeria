@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import text
 
 from backend.modules.auth.router import router as auth_router
@@ -21,7 +24,16 @@ from backend.modules.production.router import router as production_router
 from backend.modules.production.service import ProductionService
 
 
-app = FastAPI(title="ERP Joyeria API")
+app = FastAPI(
+    title="ERP Joyeria API",
+    docs_url="/docs" if settings.enable_docs else None,
+    redoc_url="/redoc" if settings.enable_docs else None,
+    openapi_url="/openapi.json" if settings.enable_docs else None,
+)
+
+allowed_hosts = [host.strip() for host in settings.allowed_hosts.split(",") if host.strip()]
+if allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 if cors_origins:
@@ -29,13 +41,43 @@ if cors_origins:
         CORSMiddleware,
         allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        max_age=600,
     )
+
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    # API JSON: bloquea render de contenido activo si un endpoint devolviera HTML.
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+
+
+@app.middleware("http")
+async def apply_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    # HSTS solo bajo HTTPS (produccion tras TLS). Evita romper HTTP local.
+    if settings.is_production or request.url.scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 
 @app.on_event("startup")
 def create_dev_tables() -> None:
+    if settings.is_production and settings.auto_create_tables:
+        logging.getLogger(__name__).warning(
+            "AUTO_CREATE_TABLES esta activo en produccion. Migra a Alembic y "
+            "desactivalo (AUTO_CREATE_TABLES=false) antes del despliegue final."
+        )
     if settings.auto_create_tables:
         drop_obsolete_production_tables()
         Base.metadata.create_all(bind=engine)

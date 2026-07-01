@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
-import { getAccessToken } from "@/lib/api";
+import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import { buildProductCode, listCatalogSegments, type CatalogSegment } from "@/lib/catalog-api";
 import {
@@ -230,7 +230,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setIsLoading(true);
     setError(null);
     try {
-      if (!getAccessToken()) {
+      if (!isAuthenticated()) {
         window.location.href = "/login";
         return;
       }

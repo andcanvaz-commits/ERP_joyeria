@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+import logging
 import re
 import secrets
 import unicodedata
@@ -14,6 +15,8 @@ from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.auth.models import AuthUser
 from backend.modules.config.settings import settings
 
+
+logger = logging.getLogger(__name__)
 
 ROLE_ADMIN = "Admin"
 ROLE_PRODUCTION_MANAGER = "Jefe de producción"
@@ -289,14 +292,27 @@ class AuthService:
 
 def seed_default_users(session: Session) -> None:
     disable_removed_users(session, usernames=("owner",))
-    seed_user(
+    password = settings.seed_admin_password
+    generated = False
+    if not password:
+        password = generate_temporary_password()
+        generated = True
+    created = seed_user(
         session,
         username=settings.seed_admin_username,
-        password=settings.seed_admin_password,
+        password=password,
         role=ROLE_ADMIN,
         permissions=ADMIN_PERMISSIONS,
+        reset_password=settings.seed_admin_reset_on_boot,
     )
     session.commit()
+    if created and generated:
+        logger.warning(
+            "Usuario admin '%s' creado con contraseña generada aleatoriamente: %s "
+            "-- cambiela tras el primer inicio de sesion. Este mensaje solo aparece al crearse.",
+            settings.seed_admin_username,
+            password,
+        )
 
 
 def disable_removed_users(session: Session, *, usernames: tuple[str, ...]) -> None:
@@ -307,7 +323,21 @@ def disable_removed_users(session: Session, *, usernames: tuple[str, ...]) -> No
             user.updated_at = datetime.utcnow()
 
 
-def seed_user(session: Session, *, username: str, password: str, role: str, permissions: list[str]) -> None:
+def seed_user(
+    session: Session,
+    *,
+    username: str,
+    password: str,
+    role: str,
+    permissions: list[str],
+    reset_password: bool = False,
+) -> bool:
+    """Crea el usuario si no existe. Devuelve True solo cuando se crea.
+
+    Para usuarios ya existentes se sincronizan rol, permisos y estado, pero la
+    contraseña NO se sobrescribe salvo que ``reset_password`` sea True. Esto evita
+    revertir la contraseña del admin en cada arranque.
+    """
     user = session.execute(select(AuthUser).where(AuthUser.username == username)).scalar_one_or_none()
     if user is None:
         session.add(
@@ -322,13 +352,15 @@ def seed_user(session: Session, *, username: str, password: str, role: str, perm
                 is_active=True,
             )
         )
-        return
+        return True
 
     user.role = role
     user.permissions = permissions
-    user.password_hash = hash_password(password)
     user.first_name = user.first_name or "Admin"
     user.last_name = user.last_name or "Sistema"
     user.email = user.email or generate_system_email(username, role)
     user.is_active = True
+    if reset_password:
+        user.password_hash = hash_password(password)
     user.updated_at = datetime.utcnow()
+    return False

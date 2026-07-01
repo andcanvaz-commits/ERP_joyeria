@@ -1,0 +1,82 @@
+# Stack de produccion. Nada expuesto salvo nginx (80/443).
+# Uso: docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# Requisitos previos:
+#   - .env con secretos fuertes (ver .env.example) y APP_ENV=production.
+#   - Certificados TLS en ./nginx/certs/ (fullchain.pem, privkey.pem).
+#   - DNS del dominio apuntando al servidor.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: erp_joyeria
+      POSTGRES_USER: erp_joyeria
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+    # Sin puertos: solo accesible dentro de la red interna de Docker.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_joyeria -d erp_joyeria"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+    # Aplica migraciones Alembic antes de arrancar; luego uvicorn de produccion.
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers 4"
+    environment:
+      APP_ENV: production
+      ENABLE_DOCS: "false"
+      DEV_AUTH_ENABLED: "false"
+      # Con Alembic el esquema lo gestionan las migraciones.
+      AUTO_CREATE_TABLES: ${AUTO_CREATE_TABLES:-false}
+      DATABASE_URL: postgresql+psycopg://erp_joyeria:${POSTGRES_PASSWORD}@db:5432/erp_joyeria
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?define JWT_SECRET_KEY en .env}
+      JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY:?define JWT_REFRESH_SECRET_KEY en .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:?define CORS_ORIGINS en .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?define ALLOWED_HOSTS en .env}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+    # Sin puertos: nginx habla con api por la red interna.
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        # Origen relativo: el navegador llama https://DOMAIN/api y nginx enruta al backend.
+        NEXT_PUBLIC_API_URL: ""
+    # Sin puertos: nginx habla con web por la red interna.
+    restart: always
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?define DOMAIN en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - certbot_webroot:/var/www/certbot
+    restart: always
+    depends_on:
+      - api
+      - web
+
+volumes:
+  postgres_data:
+  certbot_webroot:

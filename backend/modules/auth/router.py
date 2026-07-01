@@ -1,14 +1,62 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from backend.modules.auth.dependencies import CurrentUser, get_current_user
+from backend.modules.auth.dependencies import ACCESS_COOKIE_NAME, CurrentUser, get_current_user
 from backend.modules.auth.schemas import AuthUserCreate, AuthUserCredentialRead, AuthUserRead, AuthUserUpdate, LoginRequest, TokenPair
 from backend.modules.auth.service import AuthError, AuthService, create_access_token
+from backend.modules.config.settings import settings
 from backend.modules.database.session import SessionLocal
+from backend.modules.shared.rate_limit import SlidingWindowRateLimiter, get_client_ip
+
+
+def _set_access_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=token,
+        max_age=settings.access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_access_cookie(response: Response) -> None:
+    response.delete_cookie(key=ACCESS_COOKIE_NAME, path="/")
 
 
 router = APIRouter()
+
+# Limite por IP: probar distintos usuarios/mayusculas desde la misma IP cuenta
+# en el mismo bucket, asi que variar el nombre no evade el limite.
+_login_ip_limiter = SlidingWindowRateLimiter(
+    settings.login_rate_limit_max,
+    settings.login_rate_limit_window_seconds,
+)
+# Limite por username: frena intentos distribuidos contra una sola cuenta.
+_login_user_limiter = SlidingWindowRateLimiter(
+    settings.login_rate_limit_max * 3,
+    settings.login_rate_limit_window_seconds,
+)
+
+
+def _enforce_login_rate_limit(request: Request, username: str) -> None:
+    ip = get_client_ip(request)
+    allowed_ip, retry_ip = _login_ip_limiter.check(f"ip:{ip}")
+    allowed_user, retry_user = _login_user_limiter.check(f"user:{username.strip().lower()}")
+    if not (allowed_ip and allowed_user):
+        retry_after = max(retry_ip, retry_user)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos de inicio de sesion. Intenta mas tarde.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _clear_login_rate_limit(request: Request, username: str) -> None:
+    _login_ip_limiter.reset(f"ip:{get_client_ip(request)}")
+    _login_user_limiter.reset(f"user:{username.strip().lower()}")
 
 
 def get_auth_service():
@@ -29,13 +77,30 @@ def auth_health() -> dict[str, str]:
 
 
 @router.post("/login", response_model=TokenPair)
-def login(payload: LoginRequest, service: AuthService = Depends(get_auth_service)) -> TokenPair:
+def login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    service: AuthService = Depends(get_auth_service),
+) -> TokenPair:
+    _enforce_login_rate_limit(request, payload.username)
     try:
         user = service.authenticate(payload.username, payload.password)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    _clear_login_rate_limit(request, payload.username)
     access_token = create_access_token(user)
+    _set_access_cookie(response, access_token)
+    # El token va en cookie HttpOnly; el cuerpo se mantiene por compatibilidad
+    # con clientes no-web. El frontend no lo almacena.
     return TokenPair(access_token=access_token, refresh_token=access_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response) -> Response:
+    _clear_access_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.get("/me", response_model=AuthUserRead)

@@ -1,5 +1,8 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const TOKEN_KEY = "erp_joyeria_access_token";
+// Origen relativo por defecto: mismo origen (Next rewrite en dev, nginx en prod).
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+// Bandera NO sensible de "sesion iniciada" para decisiones de UI. El token real
+// vive en una cookie HttpOnly que JS no puede leer; la seguridad la impone el backend.
+const AUTH_FLAG_KEY = "erp_joyeria_authenticated";
 
 export class ApiError extends Error {
   constructor(
@@ -67,14 +70,13 @@ function formatApiDetail(detail: unknown, fallback: string): string {
 }
 
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
+    credentials: "include",
     cache: "no-store",
   });
 
@@ -87,7 +89,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
       // Keep the HTTP fallback message.
     }
     if (response.status === 401 && typeof window !== "undefined") {
-      window.localStorage.removeItem(TOKEN_KEY);
+      window.localStorage.removeItem(AUTH_FLAG_KEY);
       window.location.href = "/login";
     }
     throw new ApiError(message, response.status);
@@ -100,14 +102,14 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return (await response.json()) as T;
 }
 
-export function saveAccessToken(token: string) {
-  window.localStorage.setItem(TOKEN_KEY, token);
+export function markAuthenticated() {
+  if (typeof window !== "undefined") window.localStorage.setItem(AUTH_FLAG_KEY, "1");
 }
 
-export function getAccessToken() {
-  return typeof window !== "undefined" ? window.localStorage.getItem(TOKEN_KEY) : null;
+export function isAuthenticated() {
+  return typeof window !== "undefined" && window.localStorage.getItem(AUTH_FLAG_KEY) === "1";
 }
 
-export function clearAccessToken() {
-  window.localStorage.removeItem(TOKEN_KEY);
+export function clearAuthenticated() {
+  if (typeof window !== "undefined") window.localStorage.removeItem(AUTH_FLAG_KEY);
 }

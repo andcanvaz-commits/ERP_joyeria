@@ -1,0 +1,25 @@
+# Secretos / entorno
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+npm-debug.log*
+
+# Datos locales
+postgres_data/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
