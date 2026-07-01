@@ -25,6 +25,7 @@ class AuthUserRead(BaseModel):
     last_name: str
     email: str
     role: str
+    employee_code: str | None = None
     permissions: list[str]
     is_active: bool = True
 

@@ -2847,6 +2847,103 @@ textarea {
   .reportFigures { grid-template-columns: 1fr; }
 }
 
+/* ── Codificación (catálogo de códigos de producto) ──────────── */
+.catalogGenGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.catalogCodeOut {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.catalogCodeOut strong {
+  font-family: monospace;
+  font-size: 28px;
+  letter-spacing: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.catalogCodeHint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.catalogGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+.catalogGrid3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.catalogGridTall .catalogCard {
+  height: calc(100vh - 220px);
+  min-height: 480px;
+}
+
+.catalogGenGrid3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.catalogCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 380px;
+  padding: 16px;
+}
+
+.catalogCardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.catalogCardHead span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.catalogScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.catalogScroll .table {
+  min-width: 0;
+}
+
+.catalogScroll .table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+@media (max-width: 960px) {
+  .catalogGenGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .catalogGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
+  .catalogGenGrid { grid-template-columns: 1fr; }
+}
+
 /* Etiqueta del código de orden de producción (reutiliza el id, no inventa otro) */
 .orderCodeTag {
   display: inline-block;

@@ -313,6 +313,13 @@ class ProductionService:
         self.repository = repository
         self.inventory_service = inventory_service
 
+    def _next_process_code(self) -> str:
+        from sqlalchemy import select
+
+        codes = self.repository.session.execute(select(ProductionProcess.code)).scalars().all()
+        nums = [int(code) for code in codes if code and code.isdigit()]
+        return str(max(nums) + 1 if nums else 2000)
+
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
         self._ensure_material_configuration(payload.raw_material_item_id, payload.raw_material_quantity_per_unit)
@@ -344,6 +351,7 @@ class ProductionService:
 
         process = ProductionProcess(
             name=payload.name,
+            code=self._next_process_code(),
             description=payload.description,
             version=payload.version,
             raw_material_item_id=payload.raw_material_item_id,

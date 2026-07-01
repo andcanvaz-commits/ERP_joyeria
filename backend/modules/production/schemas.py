@@ -91,6 +91,7 @@ class ProductionProcessRead(BaseModel):
 
     id: UUID
     name: str
+    code: str | None = None
     description: str | None = None
     version: int
     raw_material_item_id: UUID | None = None

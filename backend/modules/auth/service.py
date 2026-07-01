@@ -161,6 +161,14 @@ class AuthService:
         statement = select(AuthUser).order_by(AuthUser.username.asc())
         return list(self.session.execute(statement).scalars().all())
 
+    def _next_employee_code(self) -> str:
+        from sqlalchemy import select
+
+        codes = self.session.execute(select(AuthUser.employee_code)).scalars().all()
+        nums = [int(code) for code in codes if code and code.isdigit()]
+        nxt = (max(nums) + 1) if nums else 1
+        return f"{nxt:02d}"
+
     def create_user(
         self,
         *,
@@ -180,6 +188,7 @@ class AuthService:
             email=email,
             password_hash=hash_password(temporary_password),
             role=role,
+            employee_code=self._next_employee_code(),
             permissions=self._permissions_for_role(role),
             is_active=True,
         )

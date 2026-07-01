@@ -18,6 +18,7 @@ class AuthUser(Base):
     email: Mapped[str | None] = mapped_column(String(180), unique=True, index=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(220), nullable=False)
     role: Mapped[str] = mapped_column(String(40), nullable=False)
+    employee_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     permissions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

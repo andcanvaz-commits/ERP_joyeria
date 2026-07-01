@@ -417,6 +417,12 @@ export function InventoryDashboard() {
 
   const pendingInventoryRuns = productionRuns.filter((run) => run.status === "PENDIENTE_INVENTARIO");
   const pendingReceptionRuns = productionRuns.filter((run) => run.status === "PENDIENTE_RECEPCION");
+  const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
+  const receivedCodes = new Set(receivedRuns.map((run) => run.production_code).filter(Boolean) as string[]);
+  // En "Producto terminado": las órdenes recibidas se muestran como filas (con id OP);
+  // ocultamos el item de stock auto-creado con ese mismo código para no duplicar.
+  const displayItems =
+    itemFilter === "FINISHED_PRODUCT" ? filteredItems.filter((item) => !receivedCodes.has(item.sku)) : filteredItems;
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
@@ -736,7 +742,21 @@ export function InventoryDashboard() {
           </div>
 
           <div className="inventoryList">
-            {filteredItems.map((item) => (
+            {itemFilter === "FINISHED_PRODUCT"
+              ? receivedRuns.map((run) => (
+                  <div className="inventoryItemRow" key={`recibida-${run.id}`}>
+                    <div>
+                      <strong>
+                        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                        {run.process_name}
+                      </strong>
+                      <span>Producto terminado · recibido</span>
+                    </div>
+                    <span className="stockPill">{run.quantity} und</span>
+                  </div>
+                ))
+              : null}
+            {displayItems.map((item) => (
               <article className="inventoryItemRow" key={item.id} {...openableProps(() => setViewingItem(item), `Ver detalle de ${item.name}`)}>
                 <div>
                   <strong>{item.name}</strong>
@@ -779,7 +799,11 @@ export function InventoryDashboard() {
                 </div>
               ))
             ) : null}
-            {!isLoading && filteredItems.length === 0 && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.some((r) => r.status === "EN_PROCESO")) ? <div className="emptyState">No hay items para este filtro.</div> : null}
+            {!isLoading
+              && displayItems.length === 0
+              && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.some((r) => r.status === "EN_PROCESO"))
+              && !(itemFilter === "FINISHED_PRODUCT" && receivedRuns.length > 0)
+              ? <div className="emptyState">No hay items para este filtro.</div> : null}
             {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
           </div>
         </article>

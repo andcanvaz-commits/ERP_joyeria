@@ -13,6 +13,7 @@ export type CurrentUser = {
   last_name: string;
   email: string;
   role: string;
+  employee_code?: string | null;
   permissions: string[];
   is_active: boolean;
 };

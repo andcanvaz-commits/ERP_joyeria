@@ -24,6 +24,7 @@ export type ProductionProcessStage = {
 export type ProductionProcess = {
   id: string;
   name: string;
+  code?: string | null;
   description: string | null;
   version: number;
   raw_material_item_id: string | null;

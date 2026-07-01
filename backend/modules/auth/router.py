@@ -65,6 +65,7 @@ def read_user(user) -> AuthUserRead:
         last_name=user.last_name or "",
         email=user.email or "",
         role=user.role,
+        employee_code=user.employee_code,
         permissions=sorted(user.permissions),
         is_active=user.is_active,
     )

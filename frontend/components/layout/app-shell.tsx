@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BarChart3, Boxes, Factory, FileText, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
+import { BarChart3, Boxes, Factory, FileText, Hash, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
 import { clearAccessToken, getAccessToken } from "@/lib/api";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth-api";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
@@ -11,6 +11,7 @@ import { useModalA11y } from "@/hooks/use-modal-a11y";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
+  { href: "/codificacion", label: "Codificacion", icon: Hash },
   { href: "/produccion", label: "Produccion", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/documentos", label: "Documentos", icon: FileText },
@@ -29,6 +30,10 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   "/mantenimientos": {
     title: "Mantenimientos",
     subtitle: "Procesos, usuarios y configuraciones del sistema",
+  },
+  "/codificacion": {
+    title: "Codificacion",
+    subtitle: "Codigos de productos, materiales y categorias",
   },
   "/inventario": {
     title: "Inventario",

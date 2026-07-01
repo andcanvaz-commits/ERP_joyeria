@@ -1887,6 +1887,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       }}
                       type="button"
                     >
+                      {process.code ? <span className="orderCodeTag">{process.code}</span> : null}
                       {process.name}
                     </button>
                     <span>{process.stages.length} etapas</span>
@@ -2088,7 +2089,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               {users.map((user) => (
                 <article className={`processRow userRow ${!user.is_active ? "userRowInactive" : ""}`} key={user.id} {...openableProps(() => setViewingUser(user), `Ver usuario ${user.first_name} ${user.last_name}`)}>
                   <div className="userRowHeader" onClick={stopClick}>
-                    <strong>{user.first_name} {user.last_name}</strong>
+                    <strong>
+                      {user.employee_code ? <span className="orderCodeTag">{user.employee_code}</span> : null}
+                      {user.first_name} {user.last_name}
+                    </strong>
                     {user.is_active ? (
                       <button
                         className="iconTextButton dangerText"

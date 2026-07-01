@@ -5,6 +5,9 @@ from sqlalchemy import text
 from backend.modules.auth.router import router as auth_router
 from backend.modules.auth import models as auth_models
 from backend.modules.auth.service import seed_default_users
+from backend.modules.catalog import models as catalog_models
+from backend.modules.catalog.router import router as catalog_router
+from backend.modules.catalog.service import seed_catalog
 from backend.modules.config.settings import settings
 from backend.modules.database.base import Base
 from backend.modules.database.session import SessionLocal, engine
@@ -46,6 +49,7 @@ def create_dev_tables() -> None:
                 repository=ProductionProcessRepository(session),
                 inventory_service=InventoryService(repository=InventoryRepository(session)),
             ).seed_example_processes()
+            seed_catalog(session)
             session.commit()
         finally:
             session.close()
@@ -69,6 +73,10 @@ def upgrade_auth_users_table() -> None:
         "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS last_name VARCHAR(120)",
         "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS email VARCHAR(180)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_auth_users_email ON auth_users (email)",
+        "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(10)",
+        "WITH ordered AS (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn FROM auth_users) "
+        "UPDATE auth_users u SET employee_code = LPAD(o.rn::text, 2, '0') "
+        "FROM ordered o WHERE u.id = o.id AND u.employee_code IS NULL",
     )
     with engine.begin() as connection:
         for statement in statements:
@@ -118,6 +126,10 @@ def upgrade_production_tables() -> None:
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS finished_by_user_id UUID",
         "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS rework_target_order INTEGER",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS rework_target_order INTEGER",
+        "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS code VARCHAR(10)",
+        "WITH ordered AS (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn FROM production_processes) "
+        "UPDATE production_processes p SET code = (2000 + o.rn - 1)::text "
+        "FROM ordered o WHERE p.id = o.id AND p.code IS NULL",
         "CREATE TABLE IF NOT EXISTS production_run_stage_decisions ("
         "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
         "run_id UUID NOT NULL, "
@@ -139,3 +151,4 @@ def upgrade_production_tables() -> None:
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(production_router, prefix="/api/production", tags=["production"])
 app.include_router(inventory_router, prefix="/api/inventory", tags=["inventory"])
+app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
