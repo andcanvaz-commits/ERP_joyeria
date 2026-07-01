@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { KeyRound } from "lucide-react";
 import { ApiError } from "@/lib/api";
-import { changePassword } from "@/lib/auth-api";
+import { changePassword, getCurrentUser } from "@/lib/auth-api";
 
 function validate(current: string, next: string, confirm: string): string | null {
   if (!current) return "Ingresa tu contrasena actual.";
@@ -16,12 +17,20 @@ function validate(current: string, next: string, confirm: string): string | null
 }
 
 export function ChangePasswordForm() {
+  const router = useRouter();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [forced, setForced] = useState(false);
+
+  useEffect(() => {
+    getCurrentUser()
+      .then((user) => setForced(Boolean(user.must_change_password)))
+      .catch(() => setForced(false));
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,10 +46,16 @@ export function ChangePasswordForm() {
     setIsSubmitting(true);
     try {
       await changePassword(current, next);
-      setSuccess("Contrasena actualizada correctamente.");
       setCurrent("");
       setNext("");
       setConfirm("");
+      if (forced) {
+        setForced(false);
+        setSuccess("Contrasena actualizada. Redirigiendo...");
+        router.replace("/dashboard");
+      } else {
+        setSuccess("Contrasena actualizada correctamente.");
+      }
     } catch (nextError) {
       const message =
         nextError instanceof ApiError
@@ -61,6 +76,11 @@ export function ChangePasswordForm() {
         </div>
       </div>
 
+      {forced ? (
+        <div className="notice noticeError">
+          Debes cambiar tu contrasena temporal antes de continuar.
+        </div>
+      ) : null}
       {error ? <div className="notice noticeError">{error}</div> : null}
       {success ? <div className="notice noticeSuccess">{success}</div> : null}
 

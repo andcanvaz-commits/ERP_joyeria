@@ -35,6 +35,7 @@ class AuthUserRead(BaseModel):
     employee_code: str | None = None
     permissions: list[str]
     is_active: bool = True
+    must_change_password: bool = False
 
 
 class AuthUserCreate(BaseModel):

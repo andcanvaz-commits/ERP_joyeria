@@ -16,6 +16,7 @@ export type CurrentUser = {
   employee_code?: string | null;
   permissions: string[];
   is_active: boolean;
+  must_change_password?: boolean;
 };
 
 export type ManagedUser = CurrentUser;

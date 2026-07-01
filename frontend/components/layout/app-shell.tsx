@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { BarChart3, Boxes, Factory, FileText, Hash, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { BarChart3, Boxes, ChevronDown, Factory, FileText, Hash, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout, type CurrentUser } from "@/lib/auth-api";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
@@ -55,7 +55,10 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const currentPage = pageTitles[pathname] ?? pageTitles["/dashboard"];
 
   useModalA11y();
@@ -66,6 +69,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .then(setCurrentUser)
       .catch(() => setCurrentUser(null));
   }, []);
+
+  // Fuerza el cambio de contrasena: mientras este pendiente, solo /seguridad.
+  useEffect(() => {
+    if (currentUser?.must_change_password && pathname !== "/seguridad") {
+      router.replace("/seguridad");
+    }
+  }, [currentUser, pathname, router]);
+
+  // Cierra el menu de perfil al hacer clic fuera o presionar Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
+  function handleLogout() {
+    setMenuOpen(false);
+    void logout().finally(() => {
+      window.location.href = "/login";
+    });
+  }
 
   return (
     <div className="appShell">
@@ -100,25 +136,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <strong>{currentPage.title}</strong>
             <span>{currentPage.subtitle}</span>
           </div>
-          <div className="profileMenu">
-            <UserCircle aria-hidden="true" size={28} />
-            <div className="profileText">
-              <strong>{currentUser?.email ?? currentUser?.username ?? ""}</strong>
-              <span>({currentUser?.role ?? ""})</span>
-            </div>
+          <div className="profileMenu" ref={menuRef}>
             <button
-              aria-label="Cerrar sesion"
-              className="iconOnlyButton"
-              onClick={() => {
-                void logout().finally(() => {
-                  window.location.href = "/login";
-                });
-              }}
-              title="Salir"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              className="profileTrigger"
+              onClick={() => setMenuOpen((open) => !open)}
               type="button"
             >
-              <LogOut aria-hidden="true" size={18} />
+              <UserCircle aria-hidden="true" size={28} />
+              <div className="profileText">
+                <strong>{currentUser?.email ?? currentUser?.username ?? ""}</strong>
+                <span>({currentUser?.role ?? ""})</span>
+              </div>
+              <ChevronDown aria-hidden="true" size={16} />
             </button>
+            {menuOpen ? (
+              <div className="profileDropdown" role="menu">
+                <Link
+                  className="profileDropdownItem"
+                  href="/seguridad"
+                  onClick={() => setMenuOpen(false)}
+                  role="menuitem"
+                >
+                  <KeyRound aria-hidden="true" size={16} />
+                  <span>Cambiar contrasena</span>
+                </Link>
+                <button
+                  className="profileDropdownItem"
+                  onClick={handleLogout}
+                  role="menuitem"
+                  type="button"
+                >
+                  <LogOut aria-hidden="true" size={16} />
+                  <span>Cerrar sesion</span>
+                </button>
+              </div>
+            ) : null}
           </div>
         </header>
         {children}

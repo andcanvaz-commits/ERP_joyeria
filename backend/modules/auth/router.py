@@ -125,7 +125,14 @@ def change_password(
 
 
 @router.get("/me", response_model=AuthUserRead)
-def me(current_user: CurrentUser = Depends(get_current_user)) -> AuthUserRead:
+def me(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> AuthUserRead:
+    user = service.get_user(current_user.id)
+    if user is not None:
+        return read_user(user)
+    # Fallback (p.ej. auth de desarrollo sin registro en BD).
     return AuthUserRead(
         id=str(current_user.id),
         username=current_user.username,
@@ -154,6 +161,7 @@ def read_user(user) -> AuthUserRead:
         employee_code=user.employee_code,
         permissions=sorted(user.permissions),
         is_active=user.is_active,
+        must_change_password=user.must_change_password,
     )
 
 

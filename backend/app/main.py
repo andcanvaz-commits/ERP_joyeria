@@ -116,6 +116,7 @@ def upgrade_auth_users_table() -> None:
         "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS email VARCHAR(180)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_auth_users_email ON auth_users (email)",
         "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS employee_code VARCHAR(10)",
+        "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
         "WITH ordered AS (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn FROM auth_users) "
         "UPDATE auth_users u SET employee_code = LPAD(o.rn::text, 2, '0') "
         "FROM ordered o WHERE u.id = o.id AND u.employee_code IS NULL",

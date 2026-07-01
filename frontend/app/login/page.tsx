@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { LockKeyhole, LogIn } from "lucide-react";
-import { login } from "@/lib/auth-api";
+import { getCurrentUser, login } from "@/lib/auth-api";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -16,7 +16,14 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(username, password);
-      window.location.href = "/produccion";
+      let destination = "/produccion";
+      try {
+        const current = await getCurrentUser();
+        if (current.must_change_password) destination = "/seguridad";
+      } catch {
+        // Si /me falla, el guard del layout redirige cuando corresponda.
+      }
+      window.location.href = destination;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar sesion.");
     } finally {

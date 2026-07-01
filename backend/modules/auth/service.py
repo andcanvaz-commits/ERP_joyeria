@@ -206,6 +206,7 @@ class AuthService:
             employee_code=self._next_employee_code(),
             permissions=self._permissions_for_role(role),
             is_active=True,
+            must_change_password=True,
         )
         self.session.add(user)
         self.session.flush()
@@ -266,6 +267,7 @@ class AuthService:
             raise AuthError("Usuario no encontrado.")
         temporary_password = generate_temporary_password()
         user.password_hash = hash_password(temporary_password)
+        user.must_change_password = True
         user.updated_at = datetime.utcnow()
         self.session.flush()
         return user, temporary_password
@@ -280,6 +282,7 @@ class AuthService:
             raise AuthError("La nueva contrasena debe ser distinta de la actual.")
         validate_password_strength(new_password)
         user.password_hash = hash_password(new_password)
+        user.must_change_password = False
         user.updated_at = datetime.utcnow()
         self.session.flush()
         return user
@@ -330,6 +333,7 @@ def seed_default_users(session: Session) -> None:
         role=ROLE_ADMIN,
         permissions=ADMIN_PERMISSIONS,
         reset_password=settings.seed_admin_reset_on_boot,
+        must_change_password=True,
     )
     session.commit()
     if created and generated:
@@ -357,6 +361,7 @@ def seed_user(
     role: str,
     permissions: list[str],
     reset_password: bool = False,
+    must_change_password: bool = False,
 ) -> bool:
     """Crea el usuario si no existe. Devuelve True solo cuando se crea.
 
@@ -376,6 +381,7 @@ def seed_user(
                 role=role,
                 permissions=permissions,
                 is_active=True,
+                must_change_password=must_change_password,
             )
         )
         return True
