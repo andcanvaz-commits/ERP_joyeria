@@ -175,18 +175,25 @@ export function CatalogDashboard() {
             <div className="modalHeader">
               <div>
                 <h2 style={{ fontFamily: "monospace", letterSpacing: 2 }}>{lookup.replace(/\D/g, "")}</h2>
-                <p>Significado del código de producto</p>
+                <p>Consulta de código de producto</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setLookupOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            <div className="userPreviewGrid">
-              <span><strong>Material ({decoded.matCode})</strong>{decoded.material ? decoded.material.label : "Desconocido"}</span>
-              <span><strong>Categoría ({decoded.catCode})</strong>{decoded.category ? decoded.category.label : "Desconocida"}</span>
-              <span><strong>Tipo / modelo ({decoded.modCode})</strong>{decoded.model ? decoded.model.label : "Desconocido"}</span>
-              <span><strong>Reservado</strong>{decoded.reserved || "9999"}</span>
-            </div>
+            {decoded.material && decoded.category && decoded.model && decoded.reserved === "9999" ? (
+              <div className="userPreviewGrid">
+                <span><strong>Material ({decoded.matCode})</strong>{decoded.material.label}</span>
+                <span><strong>Categoría ({decoded.catCode})</strong>{decoded.category.label}</span>
+                <span><strong>Tipo / modelo ({decoded.modCode})</strong>{decoded.model.label}</span>
+                <span><strong>Reservado</strong>{decoded.reserved}</span>
+              </div>
+            ) : (
+              <div className="emptyState" style={{ display: "grid", gap: 6 }}>
+                <strong style={{ color: "var(--danger)", fontSize: 16 }}>El código no existe en el sistema.</strong>
+                <span>No coincide con un material, categoría y tipo/modelo registrados (o los últimos 4 dígitos no son 9999).</span>
+              </div>
+            )}
           </section>
         </div>
       ) : null}
