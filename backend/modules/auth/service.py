@@ -99,6 +99,18 @@ def generate_temporary_password() -> str:
     return secrets.token_urlsafe(9)
 
 
+PASSWORD_MIN_LENGTH = 8
+
+
+def validate_password_strength(password: str) -> None:
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise AuthError(f"La contrasena debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.")
+    if not any(char.isalpha() for char in password):
+        raise AuthError("La contrasena debe incluir al menos una letra.")
+    if not any(char.isdigit() for char in password):
+        raise AuthError("La contrasena debe incluir al menos un numero.")
+
+
 def role_email_identifier(role: str) -> str:
     return ROLE_EMAIL_IDENTIFIERS.get(role, "usuario")
 
@@ -257,6 +269,20 @@ class AuthService:
         user.updated_at = datetime.utcnow()
         self.session.flush()
         return user, temporary_password
+
+    def change_password(self, user_id: UUID, current_password: str, new_password: str) -> AuthUser:
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+        if not verify_password(current_password, user.password_hash):
+            raise AuthError("La contrasena actual es incorrecta.")
+        if verify_password(new_password, user.password_hash):
+            raise AuthError("La nueva contrasena debe ser distinta de la actual.")
+        validate_password_strength(new_password)
+        user.password_hash = hash_password(new_password)
+        user.updated_at = datetime.utcnow()
+        self.session.flush()
+        return user
 
     @staticmethod
     def _ensure_role(role: str) -> None:

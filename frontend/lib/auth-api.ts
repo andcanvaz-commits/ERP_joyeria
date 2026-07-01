@@ -41,6 +41,13 @@ export async function login(username: string, password: string) {
   return tokenPair;
 }
 
+export function changePassword(currentPassword: string, newPassword: string) {
+  return apiRequest<void>("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
 export async function logout() {
   try {
     await apiRequest<void>("/api/auth/logout", { method: "POST" });

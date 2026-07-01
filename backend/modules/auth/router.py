@@ -3,7 +3,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from backend.modules.auth.dependencies import ACCESS_COOKIE_NAME, CurrentUser, get_current_user
-from backend.modules.auth.schemas import AuthUserCreate, AuthUserCredentialRead, AuthUserRead, AuthUserUpdate, LoginRequest, TokenPair
+from backend.modules.auth.schemas import (
+    AuthUserCreate,
+    AuthUserCredentialRead,
+    AuthUserRead,
+    AuthUserUpdate,
+    ChangePasswordRequest,
+    LoginRequest,
+    TokenPair,
+)
 from backend.modules.auth.service import AuthError, AuthService, create_access_token
 from backend.modules.config.settings import settings
 from backend.modules.database.session import SessionLocal
@@ -101,6 +109,19 @@ def logout(response: Response) -> Response:
     _clear_access_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> Response:
+    try:
+        service.change_password(current_user.id, payload.current_password, payload.new_password)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=AuthUserRead)
