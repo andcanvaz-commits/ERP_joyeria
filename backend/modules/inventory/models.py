@@ -16,6 +16,7 @@ class InventoryItem(Base):
     item_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     sku: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    product_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     minimum_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)

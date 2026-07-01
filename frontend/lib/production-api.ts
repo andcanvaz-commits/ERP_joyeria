@@ -3,6 +3,7 @@ import type { ProductionProcess, ProductionRun } from "@/types/production";
 
 export type CreateProductionProcessPayload = {
   name: string;
+  product_code?: string | null;
   description?: string | null;
   version?: number;
   raw_material_item_id?: string | null;
@@ -61,6 +62,13 @@ export function createProductionRun(payload: { process_id: string; quantity: str
   return apiRequest<ProductionRun>("/api/production/runs", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function rejectProductionRunMaterials(runId: string, reason?: string | null) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/reject-materials`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason ?? null }),
   });
 }
 

@@ -13,6 +13,7 @@ from backend.modules.production.schemas import (
     ProductionProcessUpdate,
     ProductionRunCreate,
     ProductionRunRead,
+    MaterialRejectPayload,
     ProductionRunStageFinish,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
@@ -122,6 +123,22 @@ def approve_run_materials(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.approve_materials(run_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/reject-materials", response_model=ProductionRunRead)
+def reject_run_materials(
+    run_id: UUID,
+    payload: MaterialRejectPayload | None = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.reject_materials(run_id, current_user, payload.reason if payload else None)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

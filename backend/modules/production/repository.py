@@ -73,6 +73,25 @@ class ProductionProcessRepository:
         ).scalar_one_or_none()
         return int(result or 0)
 
+    def next_run_seq_this_year(self, year: int) -> int:
+        """Siguiente secuencia = mayor código existente del año + 1 (no cuenta filas,
+        así borrar órdenes no reutiliza códigos ya usados)."""
+        prefix = f"OP-{year}-"
+        codes = (
+            self.session.execute(
+                select(ProductionRun.production_code).where(ProductionRun.production_code.like(f"{prefix}%"))
+            )
+            .scalars()
+            .all()
+        )
+        nums = []
+        for code in codes:
+            try:
+                nums.append(int(code.rsplit("-", 1)[1]))
+            except (ValueError, IndexError, AttributeError):
+                continue
+        return (max(nums) + 1) if nums else 1
+
     def has_processes(self) -> bool:
         return self.session.execute(select(ProductionProcess.id).limit(1)).first() is not None
 

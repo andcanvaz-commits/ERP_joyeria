@@ -14,6 +14,7 @@ export type InventoryItem = {
   item_type: InventoryItemType;
   name: string;
   sku: string;
+  product_code?: string | null;
   description: string | null;
   unit_code: string;
   minimum_stock: string | null;

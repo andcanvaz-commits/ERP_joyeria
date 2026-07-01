@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { getAccessToken } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
+import { buildProductCode, listCatalogSegments, type CatalogSegment } from "@/lib/catalog-api";
 import {
   activateUser,
   createUser,
@@ -46,6 +47,10 @@ type StageForm = {
 type ProcessForm = {
   name: string;
   description: string;
+  productMaterial: string;
+  productCategory: string;
+  productModel: string;
+  productCode: string;
   rawMaterialItemId: string;
   rawMaterialQuantityPerUnit: string;
   rawMaterialUnitCode: string;
@@ -85,6 +90,10 @@ const emptyStage = (): StageForm => ({
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
+  productMaterial: "",
+  productCategory: "",
+  productModel: "",
+  productCode: "",
   rawMaterialItemId: "",
   rawMaterialQuantityPerUnit: "",
   rawMaterialUnitCode: "g",
@@ -100,9 +109,14 @@ const emptyUserForm = () => ({
 
 function processToForm(process: ProductionProcess): ProcessForm {
   const stages = process.stages.length > 0 ? process.stages : [];
+  const pc = (process.product_code ?? "").replace(/\D/g, "");
   return {
     name: process.name,
     description: process.description ?? "",
+    productMaterial: pc.length >= 1 ? pc.slice(0, 1) : "",
+    productCategory: pc.length >= 3 ? pc.slice(1, 3) : "",
+    productModel: pc.length >= 7 ? pc.slice(3, 7) : "",
+    productCode: process.product_code ?? "",
     rawMaterialItemId: process.raw_material_item_id ?? "",
     rawMaterialQuantityPerUnit: process.raw_material_quantity_per_unit ?? "",
     rawMaterialUnitCode: process.raw_material_unit_code ?? "g",
@@ -131,6 +145,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [processes, setProcesses] = useState<ProductionProcess[]>([]);
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [rawMaterials, setRawMaterials] = useState<InventoryItem[]>([]);
+  const [catalog, setCatalog] = useState<CatalogSegment[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -182,6 +197,35 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   } | null>(null);
 
   const selectedStage = form.stages[selectedStageIndex] ?? form.stages[0];
+
+  function runFinisherName(run: ProductionRun): string {
+    const finished = run.stages.filter((s) => s.finished_at && s.finished_by_name);
+    if (finished.length === 0) return "—";
+    finished.sort((a, b) => a.stage_order - b.stage_order);
+    return finished[finished.length - 1].finished_by_name ?? "—";
+  }
+
+  const catMaterials = catalog.filter((s) => s.kind === "MATERIAL");
+  const catCategories = catalog.filter((s) => s.kind === "CATEGORY");
+  const catModelsOf = (cat: string) => catalog.filter((s) => s.kind === "MODEL" && s.parent_code === cat);
+
+  function updateProduct(patch: Partial<Pick<ProcessForm, "productMaterial" | "productCategory" | "productModel">>) {
+    setForm((current) => {
+      const merged = { ...current, ...patch };
+      if (patch.productCategory !== undefined) merged.productModel = "";
+      const mat = catalog.find((s) => s.kind === "MATERIAL" && s.code === merged.productMaterial);
+      const cat = catalog.find((s) => s.kind === "CATEGORY" && s.code === merged.productCategory);
+      const mod = catalog.find((s) => s.kind === "MODEL" && s.parent_code === merged.productCategory && s.code === merged.productModel);
+      if (mat && cat && mod) {
+        merged.productCode = buildProductCode(merged.productMaterial, merged.productCategory, merged.productModel, "");
+        merged.name = `${mat.label} ${mod.label}`;
+      } else {
+        merged.productCode = "";
+      }
+      return merged;
+    });
+  }
+
   async function loadData() {
     setIsLoading(true);
     setError(null);
@@ -190,18 +234,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         window.location.href = "/login";
         return;
       }
-      const [user, nextProcesses, nextUsers, nextRuns, nextRawMaterials] = await Promise.all([
+      const [user, nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextCatalog] = await Promise.all([
         getCurrentUser(),
         listProcesses(),
         variant === "maintenance" ? listUsers() : Promise.resolve([]),
         variant === "production" ? listProductionRuns() : Promise.resolve([]),
         listInventoryItems("RAW_MATERIAL"),
+        listCatalogSegments().catch(() => [] as CatalogSegment[]),
       ]);
       setCurrentUser(user);
       setProcesses(nextProcesses);
       setUsers(nextUsers);
       setRuns(nextRuns);
       setRawMaterials(nextRawMaterials);
+      setCatalog(nextCatalog);
       setSelectedRunForStages((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
       setSelectedStatsRun((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
       setSelectedProcessId((current) => current || nextProcesses.find((process) => process.is_active)?.id || "");
@@ -541,6 +587,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   function buildPayload() {
     const processName = form.name.trim();
 
+    if (!form.productMaterial || !form.productCategory || !form.productModel || !form.productCode) {
+      throw new Error("Selecciona material, categoría y tipo/modelo del producto.");
+    }
     if (!processName) {
       throw new Error("El nombre del proceso es obligatorio.");
     }
@@ -556,6 +605,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
     return {
       name: processName,
+      product_code: form.productCode || null,
       description: form.description.trim() || null,
       version: 1,
       raw_material_item_id: form.rawMaterialItemId,
@@ -1150,7 +1200,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
                         {run.process_name}
                       </strong>
-                      <span>{run.quantity} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)}{run.created_by_name ? ` · Por: ${run.created_by_name}` : ""}</span>
+                      <span>{run.quantity} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
                     </div>
                     <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); openStatsModal(run); }} type="button">
                       <Eye aria-hidden="true" size={14} />
@@ -1448,6 +1498,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <strong>Resultado</strong>
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
+              <span>
+                <strong>Finalizó</strong>
+                {runFinisherName(selectedStatsRun)}
+              </span>
             </div>
           </section>
         </div>
@@ -1517,7 +1571,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <div>
                         <strong>{run.process_name}</strong>
                         <span>{timeLabel(run.finished_at)}</span>
-                        {run.created_by_name ? <span>Por: {run.created_by_name}</span> : null}
+                        <span>Finalizó: {runFinisherName(run)}</span>
                       </div>
                       <div>
                         <strong>{run.quantity} unidades</strong>
@@ -1555,8 +1609,36 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
 
+            <div className="maintenanceGrid">
+              <label className="fieldGroup">
+                <span>Material del producto</span>
+                <select className="field" disabled={isSaving} onChange={(e) => updateProduct({ productMaterial: e.target.value })} value={form.productMaterial}>
+                  <option value="">—</option>
+                  {catMaterials.map((m) => <option key={m.id} value={m.code}>{m.code} · {m.label}</option>)}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Categoría</span>
+                <select className="field" disabled={isSaving} onChange={(e) => updateProduct({ productCategory: e.target.value })} value={form.productCategory}>
+                  <option value="">—</option>
+                  {catCategories.map((c) => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Tipo / modelo</span>
+                <select className="field" disabled={isSaving || !form.productCategory} onChange={(e) => updateProduct({ productModel: e.target.value })} value={form.productModel}>
+                  <option value="">—</option>
+                  {catModelsOf(form.productCategory).map((m) => <option key={m.id} value={m.code}>{m.code} · {m.label}</option>)}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Código de producto</span>
+                <input className="field" disabled readOnly value={form.productCode ? `${form.productCode}` : "—"} style={{ fontFamily: "monospace", fontWeight: 700 }} />
+              </label>
+            </div>
+
             <label className="fieldGroup">
-              <span>Nombre del proceso</span>
+              <span>Nombre del proceso (se autocompleta del producto)</span>
               <input
                 className="field"
                 disabled={isSaving}
@@ -1689,7 +1771,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <select
                         className="field"
                         disabled={isSaving}
-                        onChange={(event) => updateStage("stageType", event.target.value)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value === "DECISION" || value === "CONTROL") {
+                            updateStage("stageType", value);
+                          } else {
+                            updateStage({ stageType: value, qualityCheck: "", reworkAction: "", reworkTargetOrder: "" });
+                          }
+                        }}
                         value={selectedStage.stageType}
                       >
                         {STAGE_TYPES.map((type) => (
@@ -1711,45 +1800,47 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       />
                     </label>
                   </div>
-                  <label className="fieldGroup">
-                    <span>Control de calidad / pregunta (opcional)</span>
-                    <textarea
-                      className="field textareaCompact"
-                      disabled={isSaving}
-                      maxLength={1000}
-                      onChange={(event) => updateStage("qualityCheck", event.target.value)}
-                      placeholder="Ejemplo: ¿El hilo cumple con el grosor requerido?"
-                      value={selectedStage.qualityCheck}
-                    />
-                  </label>
-                  <label className="fieldGroup">
-                    <span>Accion si no cumple / reproceso (opcional)</span>
-                    <textarea
-                      className="field textareaCompact"
-                      disabled={isSaving}
-                      maxLength={1000}
-                      onChange={(event) => updateStage("reworkAction", event.target.value)}
-                      placeholder="Ejemplo: Si no cumple, regresa a Fundicion para reprocesar."
-                      value={selectedStage.reworkAction}
-                    />
-                  </label>
-                  {selectedStage.stageType === "DECISION" || selectedStage.stageType === "CONTROL" || selectedStage.qualityCheck.trim() ? (
-                    <label className="fieldGroup">
-                      <span>Volver a esta etapa si se rechaza</span>
-                      <select
-                        className="field"
-                        disabled={isSaving}
-                        onChange={(event) => updateStage("reworkTargetOrder", event.target.value)}
-                        value={selectedStage.reworkTargetOrder}
-                      >
-                        <option value="">Etapa anterior (por defecto)</option>
-                        {form.stages.slice(0, selectedStageIndex).map((earlier, earlierIndex) => (
-                          <option key={earlierIndex} value={String(earlierIndex + 1)}>
-                            {earlierIndex + 1}. {earlier.name.trim() || `Etapa ${earlierIndex + 1}`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                  {selectedStage.stageType === "DECISION" || selectedStage.stageType === "CONTROL" ? (
+                    <>
+                      <label className="fieldGroup">
+                        <span>Control de calidad / pregunta</span>
+                        <textarea
+                          className="field textareaCompact"
+                          disabled={isSaving}
+                          maxLength={1000}
+                          onChange={(event) => updateStage("qualityCheck", event.target.value)}
+                          placeholder="Ejemplo: ¿El hilo cumple con el grosor requerido?"
+                          value={selectedStage.qualityCheck}
+                        />
+                      </label>
+                      <label className="fieldGroup">
+                        <span>Accion si no cumple / reproceso</span>
+                        <textarea
+                          className="field textareaCompact"
+                          disabled={isSaving}
+                          maxLength={1000}
+                          onChange={(event) => updateStage("reworkAction", event.target.value)}
+                          placeholder="Ejemplo: Si no cumple, regresa a Fundicion para reprocesar."
+                          value={selectedStage.reworkAction}
+                        />
+                      </label>
+                      <label className="fieldGroup">
+                        <span>Volver a esta etapa si se rechaza</span>
+                        <select
+                          className="field"
+                          disabled={isSaving}
+                          onChange={(event) => updateStage("reworkTargetOrder", event.target.value)}
+                          value={selectedStage.reworkTargetOrder}
+                        >
+                          <option value="">Etapa anterior (por defecto)</option>
+                          {form.stages.slice(0, selectedStageIndex).map((earlier, earlierIndex) => (
+                            <option key={earlierIndex} value={String(earlierIndex + 1)}>
+                              {earlierIndex + 1}. {earlier.name.trim() || `Etapa ${earlierIndex + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
                   ) : null}
                   <div className="stageOptions">
                     <label className="checkControl">
@@ -1932,7 +2023,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>{viewingProcess.name}</h2>
-                <p>{viewingProcess.stages.length} etapas · v{viewingProcess.version ?? 1}</p>
+                <p>
+                  {viewingProcess.code ? `Proceso ${viewingProcess.code} · ` : ""}
+                  {viewingProcess.product_code ? `Producto ${viewingProcess.product_code} · ` : ""}
+                  {viewingProcess.stages.length} etapas · v{viewingProcess.version ?? 1}
+                </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingProcess(null)} type="button">
                 <X aria-hidden="true" size={18} />

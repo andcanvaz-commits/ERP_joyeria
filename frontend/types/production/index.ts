@@ -25,6 +25,7 @@ export type ProductionProcess = {
   id: string;
   name: string;
   code?: string | null;
+  product_code?: string | null;
   description: string | null;
   version: number;
   raw_material_item_id: string | null;
@@ -74,6 +75,7 @@ export type ProductionRun = {
   id: string;
   process_id: string;
   process_name: string;
+  product_code?: string | null;
   production_code?: string | null;
   quantity: string;
   status:
@@ -97,6 +99,8 @@ export type ProductionRun = {
   started_by_name?: string | null;
   materials_approved_by_name?: string | null;
   received_by_name?: string | null;
+  rejected_by_name?: string | null;
+  rejection_reason?: string | null;
   requested_at: string;
   materials_approved_at: string | null;
   started_at: string | null;

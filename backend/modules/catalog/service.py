@@ -140,16 +140,21 @@ MODELS = [
 
 def seed_catalog(session) -> None:
     """Siembra materiales, categorías y modelos reales de CODES.xlsx.
-    Idempotente por ítem: agrega lo que falte en cada arranque (no borra ni duplica)."""
+    Idempotente: agrega lo que falte y alinea el nombre al del Excel si un código ya
+    existía con otro nombre (corrige datos sembrados por versiones anteriores)."""
     existing = {
-        (seg.kind, seg.code, seg.parent_code)
+        (seg.kind, seg.code, seg.parent_code): seg
         for seg in session.execute(select(CatalogSegment)).scalars().all()
     }
 
     def ensure(kind: str, code: str, label: str, parent: str | None) -> None:
-        if (kind, code, parent) not in existing:
-            session.add(CatalogSegment(kind=kind, code=code, label=label, parent_code=parent))
-            existing.add((kind, code, parent))
+        seg = existing.get((kind, code, parent))
+        if seg is None:
+            seg = CatalogSegment(kind=kind, code=code, label=label, parent_code=parent)
+            session.add(seg)
+            existing[(kind, code, parent)] = seg
+        elif seg.label != label:
+            seg.label = label
 
     for code, label in MATERIALS:
         ensure("MATERIAL", code, label, None)

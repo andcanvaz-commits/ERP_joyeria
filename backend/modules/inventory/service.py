@@ -254,9 +254,11 @@ class InventoryService(InventoryIntegrationPort):
         production_order_id: UUID,
         production_code: str | None,
         quantity: Decimal,
+        product_code: str | None = None,
+        received_by_user_id: UUID | None = None,
     ) -> InventoryItem:
         """Crea un producto terminado POR ORDEN (lote), identificado por el código OP,
-        y registra su ingreso. No se agrega por nombre: cada orden es su propio lote."""
+        con el código de producto (codificación). Cada orden es su propio lote."""
         sku = (production_code or "").strip() or self._generate_sku("FINISHED_PRODUCT")
         if self.repository.get_item_by_sku(sku) is not None:
             sku = self._generate_sku("FINISHED_PRODUCT")
@@ -264,6 +266,7 @@ class InventoryService(InventoryIntegrationPort):
             item_type="FINISHED_PRODUCT",
             name=name,
             sku=sku,
+            product_code=product_code,
             description="Producto terminado de produccion.",
             unit_code=unit_code.strip(),
             minimum_stock=None,
@@ -278,7 +281,7 @@ class InventoryService(InventoryIntegrationPort):
             reference_type="production_order",
             reference_id=production_order_id,
         )
-        self.create_movement(payload, user_id=None, lot_code=production_code)
+        self.create_movement(payload, user_id=received_by_user_id, lot_code=production_code)
         return item
 
     def commit_finished_production(

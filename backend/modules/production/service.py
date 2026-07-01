@@ -54,6 +54,7 @@ def _populate_run_names(session, reads: list, runs: list) -> None:
             run.started_by_user_id,
             run.materials_approved_by_user_id,
             run.received_by_user_id,
+            run.rejected_by_user_id,
         ])
         for stage in run.stages:
             ids.append(stage.finished_by_user_id)
@@ -69,6 +70,7 @@ def _populate_run_names(session, reads: list, runs: list) -> None:
         read.started_by_name = name_for(run.started_by_user_id)
         read.materials_approved_by_name = name_for(run.materials_approved_by_user_id)
         read.received_by_name = name_for(run.received_by_user_id)
+        read.rejected_by_name = name_for(run.rejected_by_user_id)
         stages_by_id = {str(stage.id): stage for stage in run.stages}
         for stage_read in read.stages:
             stage = stages_by_id.get(str(stage_read.id))
@@ -84,214 +86,27 @@ def _populate_run_names(session, reads: list, runs: list) -> None:
 # Tipos de etapa: PROCESS, THERMAL, CHEMICAL, CONTROL, DECISION.
 EXAMPLE_PROCESSES: tuple[dict, ...] = (
     {
-        "name": "Cadenas de Oro",
-        "description": "Fabricacion de cadenas de oro, desde fundicion hasta producto terminado.",
-        "material_per_unit": Decimal("12.0000"),
+        "name": "PLATA CADENA BB",
+        "description": "Proceso de ejemplo con material, categoria y modelo asignados.",
+        "product_code": "20600049999",
+        "material_per_unit": Decimal("10.0000"),
         "waste_limit_percent": Decimal("5"),
         "stages": (
-            {"name": "Materia Prima", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
-             "description": "Ingreso del material que sera utilizado para fabricar la cadena."},
-            {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True, "estimated_minutes": 30,
-             "description": "El metal se calienta a altas temperaturas hasta volverse liquido."},
-            {"name": "Laminado de Hilo", "stage_type": "DECISION", "requires_weighing": True, "estimated_minutes": 25,
-             "description": "El metal fundido se lamina para obtener hilo con el grosor requerido.",
-             "quality_check": "¿El hilo cumple con el grosor requerido?",
-             "rework_action": "Si no cumple, regresa a Fundicion para reprocesar."},
-            {"name": "Recocido", "stage_type": "THERMAL", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se calienta el hilo para mejorar su flexibilidad y maleabilidad."},
-            {"name": "Amoniaco Gas", "stage_type": "CHEMICAL", "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Limpieza superficial con gas amoniaco para eliminar impurezas y oxidos.",
-             "quality_check": "¿La limpieza fue aprobada?",
-             "rework_action": "Si la limpieza es rechazada, repetir el tratamiento."},
-            {"name": "Tejido", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 40,
-             "description": "El hilo se entrelaza para formar la estructura de la cadena."},
-            {"name": "Soldado", "stage_type": "DECISION", "requires_weighing": False, "estimated_minutes": 25,
-             "description": "Se unen los eslabones mediante soldadura para dar continuidad a la cadena.",
-             "quality_check": "¿La soldadura cumple con el estandar?",
-             "rework_action": "Si no cumple, vuelve a revision o correccion."},
-            {"name": "Bruñido", "stage_type": "PROCESS", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se pule la cadena para mejorar brillo, suavidad y acabado."},
-            {"name": "Planchado", "stage_type": "PROCESS", "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se aplana y nivela la cadena para uniformar su superficie."},
-            {"name": "Diamantado", "stage_type": "DECISION", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Cortes con punta de diamante para dar brillo y diseño a la cadena.",
-             "quality_check": "¿Cumple con el brillo y diseño requerido?",
-             "rework_action": "Si no cumple, se corrige o vuelve al proceso necesario."},
-            {"name": "Cortado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 15,
-             "description": "Se corta la cadena en las medidas y longitudes solicitadas."},
-            {"name": "Placas y Broches", "stage_type": "PROCESS", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se colocan placas, broches y accesorios segun el diseño."},
-            {"name": "Control de Calidad Final", "stage_type": "CONTROL", "requires_weighing": True, "estimated_minutes": 15,
-             "description": "Inspeccion final del producto terminado.",
-             "quality_check": "Revisar acabado, medidas, peso, soldaduras, brillo y diseño. Aprobar o rechazar.",
-             "rework_action": "Si se rechaza, registrar observaciones y enviar a correccion."},
-            {"name": "Producto Terminado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 5,
-             "description": "La cadena aprobada queda lista para entrega o almacenamiento."},
-        ),
-    },
-    {
-        "name": "Monedas",
-        "description": "Produccion de monedas, desde recepcion de materia prima hasta entrega.",
-        "material_per_unit": Decimal("3.0000"),
-        "waste_limit_percent": Decimal("4"),
-        "stages": (
-            {"name": "Recepcion de Materia Prima", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
-             "description": "Recepcion e inspeccion de la materia prima (metal)."},
-            {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True, "estimated_minutes": 30,
-             "description": "El metal se funde a altas temperaturas para obtener metal liquido."},
-            {"name": "Laminado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 25,
-             "description": "El metal fundido se lamina para reducir su grosor y obtener laminas uniformes."},
-            {"name": "Cortado", "stage_type": "PROCESS", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Las laminas se cortan en discos del tamaño especificado para las monedas."},
-            {"name": "Revision de Peso", "stage_type": "CONTROL", "requires_weighing": True, "estimated_minutes": 10,
-             "description": "Se verifica que el peso de los discos cumpla con el estandar.",
-             "quality_check": "¿El peso de los discos cumple con el estandar?",
-             "rework_action": "Aceptar o rechazar piezas fuera de rango; generar reporte de diferencias."},
-            {"name": "Recocido", "stage_type": "THERMAL", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Los discos se calientan para ablandar el metal y facilitar el siguiente proceso."},
-            {"name": "Bruñido", "stage_type": "PROCESS", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se pule la superficie de los discos para mejorar acabado y brillo."},
-            {"name": "Revision de Calidad", "stage_type": "CONTROL", "requires_weighing": False, "estimated_minutes": 10,
-             "description": "Inspeccion del acabado y la calidad superficial de los discos.",
-             "quality_check": "¿El acabado y la calidad cumplen con el estandar?",
-             "rework_action": "Aprobar o rechazar; registrar observaciones."},
-            {"name": "Acido Sulfurico", "stage_type": "CHEMICAL", "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Los discos se sumergen en acido sulfurico para limpiar impurezas y oxidos."},
-            {"name": "Prensado", "stage_type": "PROCESS", "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se acuñan los diseños en los discos mediante prensas de alta presion."},
-            {"name": "Entrega", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
-             "description": "Las monedas terminadas se embalan y se entregan al cliente."},
-        ),
-    },
-    {
-        "name": "Medallas",
-        "description": "Produccion de medallas: preparacion, fabricacion, acabado y control final.",
-        "material_per_unit": Decimal("6.0000"),
-        "waste_limit_percent": Decimal("5"),
-        "stages": (
-            {"name": "Recepcion de Materia Prima", "stage_type": "PROCESS", "phase_name": "Fase 1 - Preparacion",
-             "requires_weighing": True, "estimated_minutes": 10,
-             "description": "Se recibe el metal (aleacion) y se verifica su cantidad y calidad."},
-            {"name": "Fundicion", "stage_type": "THERMAL", "phase_name": "Fase 1 - Preparacion",
-             "requires_weighing": True, "estimated_minutes": 30,
-             "description": "El metal se funde a altas temperaturas para obtener metal liquido."},
-            {"name": "Moldeado", "stage_type": "PROCESS", "phase_name": "Fase 1 - Preparacion",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "El metal liquido se vierte en moldes para dar forma inicial a la medalla."},
-            {"name": "Cortado mediante Maquina de Corte", "stage_type": "DECISION", "phase_name": "Fase 1 - Preparacion",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Las medallas se cortan con la forma deseada segun el diseño.",
-             "quality_check": "¿La medalla cumple con la forma y dimensiones?",
-             "rework_action": "Si no cumple, repetir el moldeado."},
-            {"name": "Desbaste", "stage_type": "PROCESS", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se eliminan rebabas e imperfecciones para dejar la medalla uniforme."},
-            {"name": "Recocido", "stage_type": "THERMAL", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se calienta la medalla para eliminar tensiones internas y mejorar su trabajabilidad."},
-            {"name": "Acido (Desoxidado)", "stage_type": "CHEMICAL", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se limpia la medalla en baño acido para eliminar oxidos e impurezas."},
-            {"name": "Lavado", "stage_type": "PROCESS", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 10,
-             "description": "Se enjuaga la medalla para eliminar residuos de acido."},
-            {"name": "Estampado", "stage_type": "PROCESS", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se coloca el diseño principal de la medalla mediante estampado en prensa."},
-            {"name": "Grabado", "stage_type": "CONTROL", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se detallan diseños, textos o imagenes con grabado.",
-             "quality_check": "Revision de grabado: profundidad, nitidez y calidad."},
-            {"name": "Pulido", "stage_type": "PROCESS", "phase_name": "Fase 2 - Fabricacion",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se pule la superficie de la medalla para brillo, suavidad y mejor apariencia."},
-            {"name": "Baño de Acabado", "stage_type": "PROCESS", "phase_name": "Fase 3 - Acabado",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se aplica baño (oro, plata, niquel, bronce) para color, proteccion y acabado final."},
-            {"name": "Esmaltado", "stage_type": "PROCESS", "phase_name": "Fase 3 - Acabado",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se aplica esmalte de color en las areas del diseño que lo requieren (si aplica)."},
-            {"name": "Secado", "stage_type": "DECISION", "phase_name": "Fase 3 - Acabado",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se seca la medalla para fijar el acabado y el esmalte.",
-             "quality_check": "¿El acabado cumple con el estandar?",
-             "rework_action": "Si no cumple, regresa a la fase de fabricacion."},
-            {"name": "Control de Calidad y Final", "stage_type": "CONTROL", "phase_name": "Fase 4 - Control y Final",
-             "requires_weighing": True, "estimated_minutes": 15,
-             "description": "Se inspecciona la medalla completa: medidas, diseño, acabado y calidad general."},
-            {"name": "Empaque", "stage_type": "PROCESS", "phase_name": "Fase 4 - Control y Final",
-             "requires_weighing": False, "estimated_minutes": 10,
-             "description": "Se empacan las medallas para su proteccion y presentacion."},
-            {"name": "Producto Terminado", "stage_type": "PROCESS", "phase_name": "Fase 4 - Control y Final",
-             "requires_weighing": True, "estimated_minutes": 5,
-             "description": "La medalla terminada queda lista para entrega o almacenamiento."},
-        ),
-    },
-    {
-        "name": "Casting de Joyas (Oro)",
-        "description": "Proceso de casting de joyas en oro: ceras, revestimiento, horneado y acabado.",
-        "material_per_unit": Decimal("8.0000"),
-        "waste_limit_percent": Decimal("6"),
-        "stages": (
-            {"name": "Diseño (3D / Manual)", "stage_type": "PROCESS", "phase_name": "Fase 1 - Diseño y Ceras",
-             "requires_weighing": False, "estimated_minutes": 30,
-             "description": "Se define el modelo de la pieza de forma manual o en 3D."},
-            {"name": "Vulcanizado del Molde", "stage_type": "PROCESS", "phase_name": "Fase 1 - Diseño y Ceras",
-             "requires_weighing": False, "estimated_minutes": 25,
-             "description": "Se crea el molde a partir del modelo mediante vulcanizado."},
-            {"name": "Inyeccion de Cera", "stage_type": "PROCESS", "phase_name": "Fase 1 - Diseño y Ceras",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se inyecta cera en el molde para obtener la pieza en cera."},
-            {"name": "Limpieza y Retoque de Ceras", "stage_type": "DECISION", "phase_name": "Fase 1 - Diseño y Ceras",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se limpia y retoca la pieza en cera.",
-             "quality_check": "¿La cera esta perfecta y cumple las especificaciones?",
-             "rework_action": "Si no cumple, repetir la inyeccion / moldeado de cera."},
-            {"name": "Montaje del Arbol", "stage_type": "PROCESS", "phase_name": "Fase 2 - Armado y Revestimiento",
-             "requires_weighing": True, "estimated_minutes": 20,
-             "description": "Se montan las piezas de cera en el arbol (arbolito) y se registra el peso de cera."},
-            {"name": "Envestido (En Cilindro)", "stage_type": "PROCESS", "phase_name": "Fase 2 - Armado y Revestimiento",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se coloca el arbol en el cilindro para el revestimiento."},
-            {"name": "Mezcla y Vaciado de Revestimiento", "stage_type": "PROCESS", "phase_name": "Fase 2 - Armado y Revestimiento",
-             "requires_weighing": False, "estimated_minutes": 20,
-             "description": "Se prepara el yeso/revestimiento y se vacia en el cilindro."},
-            {"name": "Camara de Vacio (Desgasificado)", "stage_type": "PROCESS", "phase_name": "Fase 2 - Armado y Revestimiento",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se eliminan las burbujas del revestimiento en camara de vacio."},
-            {"name": "Fundicion / Liga", "stage_type": "THERMAL", "phase_name": "Fase 3 - Horneado y Casting",
-             "requires_weighing": True, "estimated_minutes": 40,
-             "description": "Se calienta el cilindro y se prepara la liga/aleacion para la fundicion."},
-            {"name": "Inyeccion de Oro (Casting)", "stage_type": "THERMAL", "phase_name": "Fase 3 - Horneado y Casting",
-             "requires_weighing": True, "estimated_minutes": 30,
-             "description": "Se controla temperatura y vacio para inyectar el oro en el molde."},
-            {"name": "Choque Termico y Desmoldado", "stage_type": "THERMAL", "phase_name": "Fase 4 - Desmoldado y Final",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se aplica choque termico para desmoldar el arbol fundido."},
-            {"name": "Limpieza Quimica (Decapado)", "stage_type": "CHEMICAL", "phase_name": "Fase 4 - Desmoldado y Final",
-             "requires_weighing": False, "estimated_minutes": 15,
-             "description": "Se limpia y decapa la pieza para eliminar restos de revestimiento."},
-            {"name": "Corte de Casting (Control de Metal)", "stage_type": "DECISION", "phase_name": "Fase 4 - Desmoldado y Final",
-             "requires_weighing": True, "estimated_minutes": 15,
-             "description": "Se cortan las piezas del arbol y se controla el metal.",
-             "quality_check": "¿Casting exitoso? ¿Cumple con el estandar de metal?",
-             "rework_action": "Si no cumple, lote rechazado y retorno a refinacion; registrar mermas/tronco recuperable."},
-            {"name": "Pulido en Cascara de Nuez", "stage_type": "PROCESS", "phase_name": "Fase 4 - Desmoldado y Final",
-             "requires_weighing": False, "estimated_minutes": 30,
-             "description": "Las piezas se desbastan y pulen en tombolas con cascara de nuez."},
-            {"name": "Acabado Final y Embalado", "stage_type": "PROCESS", "phase_name": "Fase 4 - Desmoldado y Final",
-             "requires_weighing": True, "estimated_minutes": 20,
-             "description": "Se aplica pulido manual y abrillantado final, y se empacan las piezas."},
-            {"name": "Producto Terminado", "stage_type": "PROCESS", "phase_name": "Fase 4 - Desmoldado y Final",
-             "requires_weighing": True, "estimated_minutes": 5,
-             "description": "La pieza queda lista para entrega o almacenamiento."},
+            {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True, "estimated_minutes": 20,
+             "description": "El metal se funde y se prepara la materia prima."},
+            {"name": "Control de calidad", "stage_type": "CONTROL", "requires_weighing": True, "estimated_minutes": 10,
+             "description": "Se revisa la pieza y se aprueba o rechaza.",
+             "quality_check": "Cumple el estandar de calidad?",
+             "rework_action": "Si no cumple, regresa a Fundicion."},
+            {"name": "Acabado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
+             "description": "Pulido y acabado final; la pieza queda lista."},
         ),
     },
 )
 
 
 def _generate_production_code(repository: "ProductionProcessRepository", year: int) -> str:
-    seq = repository.count_runs_this_year(year) + 1
+    seq = repository.next_run_seq_this_year(year)
     return f"OP-{year}-{seq:04d}"
 
 
@@ -352,6 +167,7 @@ class ProductionService:
         process = ProductionProcess(
             name=payload.name,
             code=self._next_process_code(),
+            product_code=payload.product_code,
             description=payload.description,
             version=payload.version,
             raw_material_item_id=payload.raw_material_item_id,
@@ -376,6 +192,7 @@ class ProductionService:
             raise ProductionNotFoundError("Proceso no encontrado.")
 
         process.name = payload.name
+        process.product_code = payload.product_code
         process.description = payload.description
         process.version = payload.version
         process.raw_material_item_id = payload.raw_material_item_id
@@ -418,57 +235,44 @@ class ProductionService:
             raise ProductionNotFoundError("Proceso no encontrado.")
         self.repository.delete(process)
 
-    # Etapas que delataban un proceso demo viejo (3 etapas genericas) o nombres demo previos.
-    _OBSOLETE_DEMO_STAGE_NAMES = {"preparacion", "trabajo principal", "control final"}
-    _OBSOLETE_DEMO_PROCESS_NAMES = {"monedas de oro", "cadenas de oro"}
-
     def seed_example_processes(self) -> None:
-        """Limpia datos demo viejos y siembra los procesos de ejemplo reales.
+        """Siembra el proceso de ejemplo SOLO en una base nueva (sin procesos).
 
-        Los nombres y etapas viven solo como datos en la base; el backend y el
-        frontend siguen siendo genericos. Es idempotente: solo crea un proceso de
-        ejemplo si todavia no existe por nombre, asi se respetan ediciones del usuario.
-        """
+        Nunca borra ni modifica datos existentes: si ya hay procesos, no hace nada,
+        así el arranque jamás elimina lo que el usuario creó."""
         if self.inventory_service is None:
             return
+        if self.repository.list():
+            return
 
-        gold = self.inventory_service.ensure_production_item(
-            item_type="RAW_MATERIAL",
-            name="Oro 18K",
-            unit_code="g",
-        )
-        if gold.current_stock <= 0:
-            self.inventory_service.create_movement(
-                InventoryMovementCreate(
-                    item_id=gold.id,
-                    movement_type="ENTRADA",
-                    quantity=Decimal("5000"),
-                    reason="Stock inicial de ejemplo para produccion.",
-                ),
-                user_id=None,
+        def ensure_raw(name: str):
+            item = self.inventory_service.ensure_production_item(
+                item_type="RAW_MATERIAL", name=name, unit_code="g",
             )
+            if item.current_stock <= 0:
+                self.inventory_service.create_movement(
+                    InventoryMovementCreate(
+                        item_id=item.id,
+                        movement_type="ENTRADA",
+                        quantity=Decimal("5000"),
+                        reason="Stock inicial de ejemplo para produccion.",
+                    ),
+                    user_id=None,
+                )
+            return item
 
-        # 1) Eliminar procesos demo antiguos (nombre demo o firma de 3 etapas genericas).
-        for process in self.repository.list():
-            stage_names = {stage.name.strip().lower() for stage in process.stages}
-            is_obsolete_name = process.name.strip().lower() in self._OBSOLETE_DEMO_PROCESS_NAMES
-            is_obsolete_signature = stage_names == self._OBSOLETE_DEMO_STAGE_NAMES
-            if is_obsolete_name or is_obsolete_signature:
-                self.repository.delete(process)
-        self.repository.flush()
+        ensure_raw("Oro 18K")
+        silver = ensure_raw("Plata 925")
 
-        # 2) Crear procesos de ejemplo que aun no existan por nombre.
-        existing_names = {process.name.strip().lower() for process in self.repository.list()}
         for definition in EXAMPLE_PROCESSES:
-            if definition["name"].strip().lower() in existing_names:
-                continue
             self.create_process(
                 ProductionProcessCreate(
                     name=definition["name"],
+                    product_code=definition.get("product_code"),
                     description=definition["description"],
-                    raw_material_item_id=gold.id,
+                    raw_material_item_id=silver.id,
                     raw_material_quantity_per_unit=definition["material_per_unit"],
-                    raw_material_unit_code=gold.unit_code,
+                    raw_material_unit_code=silver.unit_code,
                     waste_limit_percent=definition["waste_limit_percent"],
                     stages=[
                         {"order": index + 1, **stage}
@@ -476,10 +280,6 @@ class ProductionService:
                     ],
                 )
             )
-
-        # 3) Limpiar ordenes huerfanas que apuntaban a procesos eliminados.
-        self.repository.delete_orphan_runs()
-        self.repository.flush()
 
     def create_run(self, payload: ProductionRunCreate, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
@@ -500,6 +300,7 @@ class ProductionService:
         run = ProductionRun(
             process_id=process.id,
             process_name=process.name,
+            product_code=process.product_code,
             quantity=payload.quantity,
             status=ProductionRunStatus.PENDING_INVENTORY,
             raw_material_item_id=process.raw_material_item_id,
@@ -562,6 +363,18 @@ class ProductionService:
         run.status = ProductionRunStatus.MATERIALS_APPROVED
         run.materials_approved_at = datetime.utcnow()
         run.materials_approved_by_user_id = current_user.id
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def reject_materials(self, run_id: UUID, current_user: CurrentUser, reason: str | None) -> ProductionRunRead:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.PENDING_INVENTORY:
+            raise ProductionDomainError("Solo se puede rechazar una orden pendiente de Inventario.")
+        run.status = ProductionRunStatus.CANCELLED
+        run.rejected_by_user_id = current_user.id
+        run.rejection_reason = (reason or "").strip() or None
         self.repository.flush()
         return self._read_with_names(run)
 
@@ -775,7 +588,9 @@ class ProductionService:
             unit_code="und",
             production_order_id=run.id,
             production_code=run.production_code,
+            product_code=run.product_code,
             quantity=run.quantity,
+            received_by_user_id=current_user.id,
         )
         run.status = ProductionRunStatus.RECEIVED
         run.received_at = datetime.utcnow()

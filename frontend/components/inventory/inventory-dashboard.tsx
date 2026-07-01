@@ -21,6 +21,7 @@ import {
 } from "@/lib/inventory-api";
 import {
   approveProductionRunMaterials,
+  rejectProductionRunMaterials,
   listProductionRuns,
   receiveProductionRunFinishedProduct,
 } from "@/lib/production-api";
@@ -394,6 +395,27 @@ export function InventoryDashboard() {
     }
   }
 
+  async function handleRejectMaterials(run: ProductionRun) {
+    const reason = window.prompt("Motivo del rechazo (opcional):", "");
+    if (reason === null) return;
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      await rejectProductionRunMaterials(run.id, reason);
+      setSuccess("Solicitud rechazada. La orden fue cancelada.");
+      const nextRuns = await listProductionRuns();
+      setProductionRuns(nextRuns);
+      const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
+      if (remaining === 0) {
+        setIsSolicitudesOpen(false);
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
+    } finally {
+      setIsSavingProduction(false);
+    }
+  }
+
   async function handleReceiveFinishedProduct(run: ProductionRun) {
     setError(null);
     setIsSavingProduction(true);
@@ -744,16 +766,20 @@ export function InventoryDashboard() {
           <div className="inventoryList">
             {itemFilter === "FINISHED_PRODUCT"
               ? receivedRuns.map((run) => (
-                  <div className="inventoryItemRow" key={`recibida-${run.id}`}>
+                  <article className="inventoryItemRow" key={`recibida-${run.id}`} {...openableProps(() => setViewingRun(run), `Ver ${run.process_name}`)}>
                     <div>
                       <strong>
                         {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
                         {run.process_name}
                       </strong>
-                      <span>Producto terminado · recibido</span>
+                      <span>{run.quantity} unidades · producto {run.product_code ?? "sin código"}</span>
                     </div>
                     <span className="stockPill">{run.quantity} und</span>
-                  </div>
+                    <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
+                      <Eye aria-hidden="true" size={15} />
+                      Visualizar
+                    </button>
+                  </article>
                 ))
               : null}
             {displayItems.map((item) => (
@@ -1047,7 +1073,8 @@ export function InventoryDashboard() {
             <div className="userPreviewGrid">
               <span><strong>Stock actual</strong>{numericText(viewingItem.current_stock)} {viewingItem.unit_code}</span>
               <span><strong>Caso</strong>{itemTypeLabel(viewingItem.item_type)}</span>
-              <span><strong>Identificador</strong>{viewingItem.sku}</span>
+              <span><strong>Lote (OP)</strong>{viewingItem.sku}</span>
+              {viewingItem.product_code ? <span><strong>Código de producto</strong>{viewingItem.product_code}</span> : null}
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
           </section>
@@ -1069,7 +1096,8 @@ export function InventoryDashboard() {
             <div className="userPreviewGrid">
               <span><strong>Cantidad</strong>{numericText(viewingMovement.quantity)} {viewingMovement.unit_code}</span>
               {viewingMovement.unit_cost ? <span><strong>Costo unitario</strong>{numericText(viewingMovement.unit_cost)}</span> : null}
-              {viewingMovement.lot_code ? <span><strong>Lote</strong>{viewingMovement.lot_code}</span> : null}
+              {viewingMovement.lot_code ? <span><strong>Lote (OP)</strong>{viewingMovement.lot_code}</span> : null}
+              {viewingMovement.item.product_code ? <span><strong>Producto</strong>{viewingMovement.item.product_code}</span> : null}
               <span><strong>Fecha</strong>{movementDateLabel(viewingMovement.created_at)} - {movementTimeLabel(viewingMovement.created_at)}</span>
               {viewingMovement.created_by_name ? <span><strong>Registrado por</strong>{viewingMovement.created_by_name}</span> : null}
               {viewingMovement.source_file_name ? <span><strong>Archivo</strong>{viewingMovement.source_file_name}</span> : null}
@@ -1096,7 +1124,10 @@ export function InventoryDashboard() {
                   {viewingRun.production_code ? <span className="orderCodeTag">{viewingRun.production_code}</span> : null}
                   {viewingRun.process_name}
                 </h2>
-                <p>{numericText(viewingRun.quantity)} unidades en proceso</p>
+                <p>
+                  {numericText(viewingRun.quantity)} unidades
+                  {viewingRun.product_code ? ` · producto ${viewingRun.product_code}` : ""}
+                </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingRun(null)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -1108,25 +1139,40 @@ export function InventoryDashboard() {
               const done = stages.filter((s) => s.status === "FINALIZADA").length;
               return (
                 <>
-                  <div className="userPreviewGrid">
-                    <span><strong>Etapa actual</strong>{current ? `${current.stage_order}. ${current.stage_name}` : "—"}</span>
-                    <span><strong>Avance</strong>{done} de {stages.length} etapas</span>
-                  </div>
-                  <div className="stageTimelineList">
-                    {stages.map((stage) => (
-                      <div className={`stageTimelineItem stageTimelineItem${stage.status}`} key={stage.id}>
-                        <div className="stageTimelineHead">
-                          <div className="stageTimelineLeft">
-                            <span className={`stageTimelineNum ${stage.status === "FINALIZADA" ? "stageTimelineNumDone" : stage.status === "EN_PROCESO" ? "stageTimelineNumActive" : ""}`}>{stage.stage_order}</span>
-                            <div>
-                              <strong>{stage.stage_name}</strong>
-                              <span>{stage.status === "FINALIZADA" ? "Finalizada" : stage.status === "EN_PROCESO" ? "En proceso" : "Pendiente"}</span>
+                  {viewingRun.status === "RECIBIDA" ? (
+                    <div className="userPreviewGrid">
+                      <span><strong>Lote (OP)</strong>{viewingRun.production_code ?? "—"}</span>
+                      <span><strong>Producto</strong>{viewingRun.product_code ?? "sin código"} · {viewingRun.process_name}</span>
+                      <span><strong>Cantidad</strong>{numericText(viewingRun.quantity)} unidades</span>
+                      <span><strong>Fecha</strong>{viewingRun.received_at ? productionTimeLabel(viewingRun.received_at) : "—"}</span>
+                      <span><strong>Recibido por</strong>{viewingRun.received_by_name ?? "—"}</span>
+                    </div>
+                  ) : (
+                    <div className="userPreviewGrid">
+                      <span><strong>Lote (OP)</strong>{viewingRun.production_code ?? "—"}</span>
+                      <span><strong>Producto</strong>{viewingRun.product_code ?? "sin código"} · {viewingRun.process_name}</span>
+                      <span><strong>Cantidad</strong>{numericText(viewingRun.quantity)} unidades</span>
+                      <span><strong>Creado por</strong>{viewingRun.created_by_name ?? "—"}{viewingRun.requested_at ? ` · ${productionTimeLabel(viewingRun.requested_at)}` : ""}</span>
+                      <span><strong>Etapas</strong>{current ? `Etapa ${current.stage_order}. ${current.stage_name}` : `${done} de ${stages.length}`}</span>
+                    </div>
+                  )}
+                  {viewingRun.status !== "RECIBIDA" ? (
+                    <div className="stageTimelineList">
+                      {stages.map((stage) => (
+                        <div className={`stageTimelineItem stageTimelineItem${stage.status}`} key={stage.id}>
+                          <div className="stageTimelineHead">
+                            <div className="stageTimelineLeft">
+                              <span className={`stageTimelineNum ${stage.status === "FINALIZADA" ? "stageTimelineNumDone" : stage.status === "EN_PROCESO" ? "stageTimelineNumActive" : ""}`}>{stage.stage_order}</span>
+                              <div>
+                                <strong>{stage.stage_name}</strong>
+                                <span>{stage.status === "FINALIZADA" ? "Finalizada" : stage.status === "EN_PROCESO" ? "En proceso" : "Pendiente"}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </>
               );
             })()}
@@ -1202,15 +1248,24 @@ export function InventoryDashboard() {
                             {numericText(run.total_required_material)} {run.raw_material_unit_code} · {productionTimeLabel(run.requested_at)}
                           </span>
                         </div>
-                        <button
-                          className="button buttonPrimary"
-                          disabled={isSavingProduction}
-                          onClick={() => void handleApproveMaterials(run)}
-                          type="button"
-                          style={{ flexShrink: 0 }}
-                        >
-                          Aprobar
-                        </button>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <button
+                            className="button buttonPrimary"
+                            disabled={isSavingProduction}
+                            onClick={() => void handleApproveMaterials(run)}
+                            type="button"
+                          >
+                            Aprobar
+                          </button>
+                          <button
+                            className="button buttonDanger"
+                            disabled={isSavingProduction}
+                            onClick={() => void handleRejectMaterials(run)}
+                            type="button"
+                          >
+                            Rechazar
+                          </button>
+                        </div>
                       </div>
                       <button
                         className="solicitudCardToggle"

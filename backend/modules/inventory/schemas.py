@@ -45,6 +45,7 @@ class InventoryItemRead(BaseModel):
     item_type: InventoryItemType
     name: str
     sku: str
+    product_code: str | None = None
     description: str | None = None
     unit_code: str
     minimum_stock: Decimal | None = None
