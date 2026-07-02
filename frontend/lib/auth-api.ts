@@ -49,6 +49,13 @@ export function changePassword(currentPassword: string, newPassword: string) {
   });
 }
 
+export function setInitialPassword(newPassword: string) {
+  return apiRequest<void>("/api/auth/set-initial-password", {
+    method: "POST",
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+}
+
 export async function logout() {
   try {
     await apiRequest<void>("/api/auth/logout", { method: "POST" });

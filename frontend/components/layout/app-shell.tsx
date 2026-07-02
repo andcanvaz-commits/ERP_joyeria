@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Boxes, ChevronDown, Factory, FileText, Hash, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
+import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, Hash, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout, type CurrentUser } from "@/lib/auth-api";
+import { allowedRoutes, canAccess, homeRoute, normalizeRole } from "@/lib/roles";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
 
 const navItems = [
@@ -14,6 +15,7 @@ const navItems = [
   { href: "/codificacion", label: "Codificacion", icon: Hash },
   { href: "/produccion", label: "Produccion", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
+  { href: "/solicitudes", label: "Solicitudes", icon: ClipboardList },
   { href: "/documentos", label: "Documentos", icon: FileText },
   { href: "/reportes", label: "Reportes", icon: BarChart3 }
 ];
@@ -70,12 +72,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => setCurrentUser(null));
   }, []);
 
-  // Fuerza el cambio de contrasena: mientras este pendiente, solo /seguridad.
+  const role = normalizeRole(currentUser?.role);
+  const visibleNav = currentUser ? navItems.filter((item) => allowedRoutes(role).includes(item.href)) : [];
+
+  // Cambio forzado de contrasena temporal: se realiza en la pantalla de login.
   useEffect(() => {
-    if (currentUser?.must_change_password && pathname !== "/seguridad") {
-      router.replace("/seguridad");
+    if (currentUser?.must_change_password && pathname !== "/login") {
+      router.replace("/login");
     }
   }, [currentUser, pathname, router]);
+
+  // Guard por rol: si la ruta no corresponde al rol, redirige a su inicio.
+  useEffect(() => {
+    if (!currentUser || currentUser.must_change_password) return;
+    if (!canAccess(role, pathname)) {
+      router.replace(homeRoute(role));
+    }
+  }, [currentUser, role, pathname, router]);
 
   // Cierra el menu de perfil al hacer clic fuera o presionar Escape.
   useEffect(() => {
@@ -114,7 +127,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="nav" aria-label="Navegacion principal">
-          {navItems.map((item) => {
+          {visibleNav.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
             return (

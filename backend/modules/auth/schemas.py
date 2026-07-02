@@ -23,6 +23,12 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class InitialPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class AuthUserRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

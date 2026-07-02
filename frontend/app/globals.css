@@ -166,6 +166,9 @@ textarea {
   background: rgba(250, 248, 244, 0.9);
   backdrop-filter: blur(6px);
   padding: 0 28px;
+  /* Sobre el contenido y el sidebar para que el menu de perfil no quede tapado. */
+  position: relative;
+  z-index: 30;
 }
 
 .topbarTitle {
@@ -317,6 +320,17 @@ textarea {
   padding: 8px 12px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.inlineActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inlineActions .field {
+  min-width: 180px;
 }
 
 .buttonPrimary {

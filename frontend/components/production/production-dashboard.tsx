@@ -168,6 +168,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [viewingUser, setViewingUser] = useState<ManagedUser | null>(null);
   const [generatedCredentials, setGeneratedCredentials] = useState<{
     title: string;
+    username: string;
     email: string;
     role: string;
     temporaryPassword: string;
@@ -876,6 +877,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         });
         setGeneratedCredentials({
           title: "Usuario creado",
+          username: response.user.username,
           email: response.user.email,
           role: response.user.role,
           temporaryPassword: response.temporary_password,
@@ -956,6 +958,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setViewingUser((current) => (current?.id === response.user.id ? response.user : current));
       setGeneratedCredentials({
         title: "Contrasena restablecida",
+        username: response.user.username,
         email: response.user.email,
         role: response.user.role,
         temporaryPassword: response.temporary_password,
@@ -2286,6 +2289,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
             <div className="credentialsStack">
+              <span>
+                <strong>Usuario</strong>
+                {generatedCredentials.username}
+              </span>
               <span>
                 <strong>Correo</strong>
                 {generatedCredentials.email}

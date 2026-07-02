@@ -1283,12 +1283,32 @@ export function InventoryDashboard() {
                             <span>{productionTimeLabel(run.requested_at)}</span>
                           </div>
                           <div className="solicitudDetailItem">
+                            <strong>Producto</strong>
+                            <span>{run.product_code ?? "-"}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>
                             <span>{numericText(run.quantity)} unidades</span>
                           </div>
                           <div className="solicitudDetailItem">
+                            <strong>Material por unidad</strong>
+                            <span>{numericText(run.raw_material_quantity_per_unit)} {run.raw_material_unit_code}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
                             <strong>Material requerido</strong>
                             <span>{numericText(run.total_required_material)} {run.raw_material_unit_code}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Peso esperado</strong>
+                            <span>{numericText(run.expected_finished_weight)}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Etapas</strong>
+                            <span>{run.stages.length}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Solicitada por</strong>
+                            <span>{run.created_by_name ?? "-"}</span>
                           </div>
                         </div>
                       ) : null}
@@ -1338,12 +1358,32 @@ export function InventoryDashboard() {
                       {expandedSolicitudId === `recv-${run.id}` ? (
                         <div className="solicitudCardDetail">
                           <div className="solicitudDetailItem">
+                            <strong>Producto</strong>
+                            <span>{run.product_code ?? "-"}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Cantidad</strong>
+                            <span>{numericText(run.quantity)} unidades</span>
+                          </div>
+                          <div className="solicitudDetailItem">
                             <strong>Finalizado</strong>
                             <span>{productionTimeLabel(run.finished_at)}</span>
                           </div>
                           <div className="solicitudDetailItem">
+                            <strong>Peso esperado</strong>
+                            <span>{numericText(run.expected_finished_weight)}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Peso real</strong>
+                            <span>{run.actual_finished_weight ? numericText(run.actual_finished_weight) : "-"}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
                             <strong>Merma</strong>
-                            <span>{numericText(run.waste_percent)}%</span>
+                            <span>{run.waste_weight ? `${numericText(run.waste_weight)} (${numericText(run.waste_percent)}%)` : `${numericText(run.waste_percent)}%`}</span>
+                          </div>
+                          <div className="solicitudDetailItem">
+                            <strong>Limite de merma</strong>
+                            <span>{numericText(run.waste_limit_percent)}%</span>
                           </div>
                         </div>
                       ) : null}

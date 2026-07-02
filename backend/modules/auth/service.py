@@ -8,7 +8,7 @@ import unicodedata
 from uuid import UUID
 
 import jwt
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.modules.auth.dependencies import CurrentUser
@@ -42,6 +42,8 @@ PRODUCTION_MANAGER_PERMISSIONS = [
     "production.runs.read",
     "production.runs.create",
     "production.runs.update",
+    # Lectura de inventario: ver materiales y stock para planificar produccion.
+    "inventory.read",
 ]
 INVENTORY_MANAGER_PERMISSIONS = [
     "production.processes.read",
@@ -164,9 +166,23 @@ class AuthService:
         self.session = session
 
     def authenticate(self, username: str, password: str) -> AuthUser:
-        user = self.session.execute(select(AuthUser).where(AuthUser.username == username)).scalar_one_or_none()
+        identifier = username.strip()
+        identifier_lower = identifier.lower()
+        # Permite iniciar sesion con el username o con el correo (case-insensitive).
+        statement = select(AuthUser).where(
+            (AuthUser.username == identifier)
+            | (func.lower(AuthUser.email) == identifier_lower)
+        )
+        user = self.session.execute(statement).scalar_one_or_none()
         if user is None or not user.is_active or not verify_password(password, user.password_hash):
             raise AuthError("Credenciales invalidas.")
+        # Re-sincroniza permisos desde el rol para que cambios en la definicion
+        # de roles apliquen a usuarios ya creados en su proximo inicio de sesion.
+        expected_permissions = self._permissions_for_role(user.role)
+        if sorted(user.permissions or []) != sorted(expected_permissions):
+            user.permissions = list(expected_permissions)
+            user.updated_at = datetime.utcnow()
+            self.session.flush()
         return user
 
     def get_user(self, user_id: UUID) -> AuthUser | None:
@@ -271,6 +287,26 @@ class AuthService:
         user.updated_at = datetime.utcnow()
         self.session.flush()
         return user, temporary_password
+
+    def set_initial_password(self, user_id: UUID, new_password: str) -> AuthUser:
+        """Cambio forzado tras el primer login (contrasena temporal).
+
+        No pide la contrasena actual porque el usuario acaba de autenticarse con
+        ella. Solo aplica si el usuario tiene el cambio pendiente.
+        """
+        user = self.session.get(AuthUser, user_id)
+        if user is None:
+            raise AuthError("Usuario no encontrado.")
+        if not user.must_change_password:
+            raise AuthError("El cambio inicial no esta habilitado para este usuario.")
+        if verify_password(new_password, user.password_hash):
+            raise AuthError("La nueva contrasena debe ser distinta de la temporal.")
+        validate_password_strength(new_password)
+        user.password_hash = hash_password(new_password)
+        user.must_change_password = False
+        user.updated_at = datetime.utcnow()
+        self.session.flush()
+        return user
 
     def change_password(self, user_id: UUID, current_password: str, new_password: str) -> AuthUser:
         user = self.session.get(AuthUser, user_id)

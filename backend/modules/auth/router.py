@@ -9,6 +9,7 @@ from backend.modules.auth.schemas import (
     AuthUserRead,
     AuthUserUpdate,
     ChangePasswordRequest,
+    InitialPasswordRequest,
     LoginRequest,
     TokenPair,
 )
@@ -119,6 +120,19 @@ def change_password(
 ) -> Response:
     try:
         service.change_password(current_user.id, payload.current_password, payload.new_password)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/set-initial-password", status_code=status.HTTP_204_NO_CONTENT)
+def set_initial_password(
+    payload: InitialPasswordRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> Response:
+    try:
+        service.set_initial_password(current_user.id, payload.new_password)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
