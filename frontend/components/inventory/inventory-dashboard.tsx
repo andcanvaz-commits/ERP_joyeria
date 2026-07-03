@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Pencil, Plus, Printer, Save, Trash2, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Pencil, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -19,6 +19,7 @@ import {
   getInventorySummary,
   listInventoryItems,
   listInventoryMovements,
+  revertLastEntry,
   updateInventoryItem,
   type CreateInventoryMovementPayload,
   type SaveInventoryItemPayload,
@@ -231,6 +232,14 @@ export function InventoryDashboard() {
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
+  // Modal de confirmacion (reemplaza a window.confirm/alert; todo con modales).
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
   // Slot del topbar (AppShell) donde se inyecta la bandeja de solicitudes.
   const [topbarSlot, setTopbarSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -536,18 +545,43 @@ export function InventoryDashboard() {
     setIsItemFormOpen(true);
   }
 
-  async function handleDeleteItem(item: InventoryItem) {
-    if (!window.confirm(`¿Eliminar "${item.material_type ?? item.name}"? Esta accion no se puede deshacer.`)) {
-      return;
-    }
-    setError(null);
-    try {
-      await deleteInventoryItem(item.id);
-      setSuccess("Materia prima eliminada.");
-      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
-    }
+  function handleDeleteItem(item: InventoryItem) {
+    setConfirmModal({
+      title: "Eliminar materia prima",
+      message: `¿Eliminar "${item.material_type ?? item.name}"? Esta accion no se puede deshacer.`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      onConfirm: async () => {
+        setError(null);
+        try {
+          await deleteInventoryItem(item.id);
+          setSuccess("Materia prima eliminada.");
+          await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
+        }
+      },
+    });
+  }
+
+  function handleRevertLastEntry(item: InventoryItem) {
+    setConfirmModal({
+      title: "Revertir último lote",
+      message: `¿Revertir la última entrada de lote de "${item.material_type ?? item.name}"? Se ajustarán el stock y el costo promedio.`,
+      confirmLabel: "Revertir",
+      danger: true,
+      onConfirm: async () => {
+        setError(null);
+        try {
+          await revertLastEntry(item.id);
+          setSuccess("Último lote revertido.");
+          setViewingItem(null);
+          await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "No se pudo revertir el lote.");
+        }
+      },
+    });
   }
 
   async function handleSaveItem(event: FormEvent<HTMLFormElement>) {
@@ -1254,11 +1288,48 @@ export function InventoryDashboard() {
             </div>
             <div className="userPreviewGrid">
               <span><strong>Stock actual</strong>{numericText(viewingItem.current_stock)} {viewingItem.unit_code}</span>
-              <span><strong>Caso</strong>{itemTypeLabel(viewingItem.item_type)}</span>
-              <span><strong>Lote (OP)</strong>{viewingItem.sku}</span>
-              {viewingItem.product_code ? <span><strong>Código de producto</strong>{viewingItem.product_code}</span> : null}
+              {viewingItem.material_type ? <span><strong>Tipo</strong>{viewingItem.material_type}</span> : null}
+              {viewingItem.purity ? <span><strong>Ley/pureza</strong>{viewingItem.purity}</span> : null}
+              <span><strong>Costo promedio</strong>{numericText(viewingItem.average_cost ?? "0")}</span>
+              <span><strong>Lote</strong>{viewingItem.sku}</span>
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
+            {canSeeAudit && viewingItem.item_type === "RAW_MATERIAL" ? (
+              <div className="modalActions">
+                <button className="button dangerText" onClick={() => handleRevertLastEntry(viewingItem)} type="button">
+                  <RotateCcw aria-hidden="true" size={16} />
+                  Revertir último lote
+                </button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {confirmModal ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label={confirmModal.title}>
+          <section className="modalWindow confirmWindow">
+            <div className="modalHeader">
+              <div><h2>{confirmModal.title}</h2></div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setConfirmModal(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <p className="panelText">{confirmModal.message}</p>
+            <div className="modalActions">
+              <button className="button" onClick={() => setConfirmModal(null)} type="button">Cancelar</button>
+              <button
+                className={`button ${confirmModal.danger ? "buttonDanger" : "buttonPrimary"}`}
+                onClick={async () => {
+                  const action = confirmModal.onConfirm;
+                  setConfirmModal(null);
+                  await action();
+                }}
+                type="button"
+              >
+                {confirmModal.confirmLabel}
+              </button>
+            </div>
           </section>
         </div>
       ) : null}

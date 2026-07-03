@@ -107,6 +107,35 @@ class InventoryService(InventoryIntegrationPort):
             )
         self.repository.delete_item(item)
 
+    def revert_last_entry(self, item_id: UUID) -> InventoryItemRead:
+        """Revierte SOLO la ultima entrada de lote registrada del item: la borra y
+        recalcula el stock y el costo promedio replayando los movimientos restantes."""
+        item = self._get_item_or_raise(item_id)
+        movements = sorted(
+            self.repository.list_movements(item_id), key=lambda m: m.created_at
+        )
+        if not movements:
+            raise InventoryDomainError("No hay movimientos para revertir.")
+        last = movements[-1]
+        if last.movement_type != "ENTRADA":
+            raise InventoryDomainError(
+                "Solo se puede revertir la ultima entrada de lote registrada."
+            )
+        self.repository.delete_movement(last)
+
+        stock = Decimal("0")
+        avg = Decimal("0")
+        for movement in movements[:-1]:
+            if movement.movement_type == "ENTRADA" and movement.unit_cost is not None:
+                total = stock + movement.quantity
+                if total > 0:
+                    avg = (stock * avg + movement.quantity * movement.unit_cost) / total
+            stock += self._movement_delta(movement.movement_type, movement.quantity)
+        item.current_stock = stock
+        item.average_cost = avg
+        self.repository.flush()
+        return InventoryItemRead.model_validate(item)
+
     def list_items(self, item_type: str | None = None) -> list[InventoryItemRead]:
         return [InventoryItemRead.model_validate(item) for item in self.repository.list_items(item_type)]
 

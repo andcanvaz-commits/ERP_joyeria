@@ -3910,3 +3910,5 @@ textarea:disabled {
   padding-left: 28px;
 }
 .inventoryItemsTable td:last-child .rowActions { justify-content: flex-end; }
+
+.confirmWindow { width: min(460px, 100%); }

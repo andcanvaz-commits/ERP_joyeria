@@ -33,6 +33,9 @@ class InventoryRepository:
             statement = statement.where(InventoryItem.item_type == item_type)
         return list(self.session.execute(statement).scalars().all())
 
+    def delete_movement(self, movement: InventoryMovement) -> None:
+        self.session.delete(movement)
+
     def add_movement(self, movement: InventoryMovement) -> InventoryMovement:
         self.session.add(movement)
         return movement
