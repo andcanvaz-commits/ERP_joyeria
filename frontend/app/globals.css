@@ -1626,6 +1626,7 @@ textarea {
   display: grid;
   place-items: center;
   overflow-y: auto;
+  overflow-x: hidden;
   background: rgba(23, 32, 51, 0.42);
   padding: 24px;
 }
@@ -2680,6 +2681,7 @@ textarea {
   width: min(620px, 100%);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .solicitudCard {
