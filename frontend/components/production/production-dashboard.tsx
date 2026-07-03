@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
-import { buildProductCode, listCatalogSegments, type CatalogSegment } from "@/lib/catalog-api";
 import {
   activateUser,
   createUser,
@@ -49,10 +48,6 @@ type StageForm = {
 type ProcessForm = {
   name: string;
   description: string;
-  productMaterial: string;
-  productCategory: string;
-  productModel: string;
-  productCode: string;
   rawMaterialItemId: string;
   rawMaterialQuantityPerUnit: string;
   rawMaterialUnitCode: string;
@@ -91,10 +86,6 @@ const emptyStage = (): StageForm => ({
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  productMaterial: "",
-  productCategory: "",
-  productModel: "",
-  productCode: "",
   rawMaterialItemId: "",
   rawMaterialQuantityPerUnit: "",
   rawMaterialUnitCode: "g",
@@ -110,14 +101,9 @@ const emptyUserForm = () => ({
 
 function processToForm(process: ProductionProcess): ProcessForm {
   const stages = process.stages.length > 0 ? process.stages : [];
-  const pc = (process.product_code ?? "").replace(/\D/g, "");
   return {
     name: process.name,
     description: process.description ?? "",
-    productMaterial: pc.length >= 1 ? pc.slice(0, 1) : "",
-    productCategory: pc.length >= 3 ? pc.slice(1, 3) : "",
-    productModel: pc.length >= 7 ? pc.slice(3, 7) : "",
-    productCode: process.product_code ?? "",
     rawMaterialItemId: process.raw_material_item_id ?? "",
     rawMaterialQuantityPerUnit: process.raw_material_quantity_per_unit ?? "",
     rawMaterialUnitCode: process.raw_material_unit_code ?? "g",
@@ -145,7 +131,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [processes, setProcesses] = useState<ProductionProcess[]>([]);
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [rawMaterials, setRawMaterials] = useState<InventoryItem[]>([]);
-  const [catalog, setCatalog] = useState<CatalogSegment[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -206,27 +191,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return finished[finished.length - 1].finished_by_name ?? "—";
   }
 
-  const catMaterials = catalog.filter((s) => s.kind === "MATERIAL");
-  const catCategories = catalog.filter((s) => s.kind === "CATEGORY");
-  const catModelsOf = (cat: string) => catalog.filter((s) => s.kind === "MODEL" && s.parent_code === cat);
-
-  function updateProduct(patch: Partial<Pick<ProcessForm, "productMaterial" | "productCategory" | "productModel">>) {
-    setForm((current) => {
-      const merged = { ...current, ...patch };
-      if (patch.productCategory !== undefined) merged.productModel = "";
-      const mat = catalog.find((s) => s.kind === "MATERIAL" && s.code === merged.productMaterial);
-      const cat = catalog.find((s) => s.kind === "CATEGORY" && s.code === merged.productCategory);
-      const mod = catalog.find((s) => s.kind === "MODEL" && s.parent_code === merged.productCategory && s.code === merged.productModel);
-      if (mat && cat && mod) {
-        merged.productCode = buildProductCode(merged.productMaterial, merged.productCategory, merged.productModel, "");
-        merged.name = `${mat.label} ${mod.label}`;
-      } else {
-        merged.productCode = "";
-      }
-      return merged;
-    });
-  }
-
   async function loadData() {
     setIsLoading(true);
     setError(null);
@@ -235,20 +199,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         window.location.href = "/login";
         return;
       }
-      const [user, nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextCatalog] = await Promise.all([
+      const [user, nextProcesses, nextUsers, nextRuns, nextRawMaterials] = await Promise.all([
         getCurrentUser(),
         listProcesses(),
         variant === "maintenance" ? listUsers() : Promise.resolve([]),
         variant === "production" ? listProductionRuns() : Promise.resolve([]),
         listInventoryItems("RAW_MATERIAL"),
-        listCatalogSegments().catch(() => [] as CatalogSegment[]),
       ]);
       setCurrentUser(user);
       setProcesses(nextProcesses);
       setUsers(nextUsers);
       setRuns(nextRuns);
       setRawMaterials(nextRawMaterials);
-      setCatalog(nextCatalog);
       setSelectedRunForStages((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
       setSelectedStatsRun((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
       setSelectedProcessId((current) => current || nextProcesses.find((process) => process.is_active)?.id || "");
@@ -562,9 +524,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   function buildPayload() {
     const processName = form.name.trim();
 
-    if (!form.productMaterial || !form.productCategory || !form.productModel || !form.productCode) {
-      throw new Error("Selecciona material, categoría y tipo/modelo del producto.");
-    }
     if (!processName) {
       throw new Error("El nombre del proceso es obligatorio.");
     }
@@ -577,7 +536,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
     return {
       name: processName,
-      product_code: form.productCode || null,
+      product_code: null,
       description: form.description.trim() || null,
       version: 1,
       raw_material_item_id: form.rawMaterialItemId,
@@ -1589,36 +1548,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
 
-            <div className="maintenanceGrid">
-              <label className="fieldGroup">
-                <span>Material del producto</span>
-                <select className="field" disabled={isSaving} onChange={(e) => updateProduct({ productMaterial: e.target.value })} value={form.productMaterial}>
-                  <option value="">—</option>
-                  {catMaterials.map((m) => <option key={m.id} value={m.code}>{m.code} · {m.label}</option>)}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Categoría</span>
-                <select className="field" disabled={isSaving} onChange={(e) => updateProduct({ productCategory: e.target.value })} value={form.productCategory}>
-                  <option value="">—</option>
-                  {catCategories.map((c) => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Tipo / modelo</span>
-                <select className="field" disabled={isSaving || !form.productCategory} onChange={(e) => updateProduct({ productModel: e.target.value })} value={form.productModel}>
-                  <option value="">—</option>
-                  {catModelsOf(form.productCategory).map((m) => <option key={m.id} value={m.code}>{m.code} · {m.label}</option>)}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Código de producto</span>
-                <input className="field" disabled readOnly value={form.productCode ? `${form.productCode}` : "—"} style={{ fontFamily: "monospace", fontWeight: 700 }} />
-              </label>
-            </div>
-
             <label className="fieldGroup">
-              <span>Nombre del proceso (se autocompleta del producto)</span>
+              <span>Nombre del proceso</span>
               <input
                 className="field"
                 disabled={isSaving}
