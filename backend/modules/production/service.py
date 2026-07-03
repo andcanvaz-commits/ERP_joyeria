@@ -33,7 +33,6 @@ def _resolve_run_user_names(session, user_ids: list) -> dict:
         return {}
     from sqlalchemy import select
     from backend.modules.auth.models import AuthUser
-
     unique_ids = list({uid for uid in user_ids if uid})
     if not unique_ids:
         return {}
@@ -91,14 +90,14 @@ EXAMPLE_PROCESSES: tuple[dict, ...] = (
         "description": "Proceso de ejemplo con material, categoria y modelo asignados.",
         "product_code": "20600049999",
         "material_per_unit": Decimal("10.0000"),
-        "waste_limit_percent": Decimal("1"),  # <-- changed from 5 to 1
+        "waste_limit_percent": Decimal("1"),
         "stages": (
             {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True, "estimated_minutes": 20,
              "description": "El metal se funde y se prepara la materia prima."},
             {"name": "Control de calidad", "stage_type": "CONTROL", "requires_weighing": True, "estimated_minutes": 10,
              "description": "Se revisa la pieza y se aprueba o rechaza.",
-              "quality_check": "Cumple el estandar de calidad?",
-              "rework_action": "Si no cumple, regresa a Fundicion."},
+             "quality_check": "Cumple el estandar de calidad?",
+             "rework_action": "Si no cumple, regresa a Fundicion."},
             {"name": "Acabado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
              "description": "Pulido y acabado final; la pieza queda lista."},
         ),
@@ -408,23 +407,12 @@ class ProductionService:
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
-        # Add waste_percent for each stage from the model property
-        for stage_read, stage_orm in zip(read.stages, run.stages):
-            # Attach waste_percent as a dynamic attribute; Pydantic will include it if the model has the field.
-            # Since ProductionRunStageRead does not currently have waste_percent, we add it via setattr.
-            # The schema will ignore it unless we update the schema; we will later add the field.
-            # For now, we just attach it; the schema will be updated separately.
-            setattr(stage_read, "waste_percent", stage_orm.waste_percent)
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
         runs = self.repository.list_runs()
         reads = [ProductionRunRead.model_validate(run) for run in runs]
         _populate_run_names(self.repository.session, reads, runs)
-        # Attach waste_percent to each stage
-        for read, run in zip(reads, runs):
-            for stage_read, stage_orm in zip(read.stages, run.stages):
-                setattr(stage_read, "waste_percent", stage_orm.waste_percent)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:
@@ -448,20 +436,18 @@ class ProductionService:
 
         requires_decision = stage.stage_type in DECISION_STAGE_TYPES or bool(stage.quality_check)
 
-        # Condición de peso: comparar el peso nuevo contra el peso de referencia
-        # (la etapa pesada anterior, o el material total) frente al límite de merma.
+        # Condición de peso: el límite de merma se controla sobre la merma ACUMULADA
+        # (desde el material inicial hasta esta etapa), no sobre una sola fase.
         weight_based = False
         auto_justification: str | None = None
         if stage.requires_weighing and payload.final_weight is not None:
-            reference = self._previous_stage_weight(run, stage)
-            if reference and reference > 0:
-                loss_pct = (reference - payload.final_weight) / reference * Decimal("100")
-                if loss_pct > run.waste_limit_percent:
-                    weight_based = True
-                    auto_justification = (
-                        f"Peso {payload.final_weight} implica una pérdida de {loss_pct:.2f}% "
-                        f"que supera el límite permitido {run.waste_limit_percent:.2f}%."
-                    )
+            cumulative_pct = self._accumulated_loss_percent(run, payload.final_weight)
+            if cumulative_pct is not None and cumulative_pct > run.waste_limit_percent:
+                weight_based = True
+                auto_justification = (
+                    f"La merma acumulada de {cumulative_pct:.2f}% supera el límite permitido "
+                    f"{run.waste_limit_percent:.2f}% tras esta etapa."
+                )
 
         if requires_decision and payload.decision is None:
             raise ProductionDomainError("Selecciona aprobar o rechazar esta etapa.")
@@ -497,6 +483,8 @@ class ProductionService:
                     candidate.finished_at = None
                     candidate.initial_weight = None
                     candidate.final_weight = None
+                    candidate.waste_weight = None
+                    candidate.waste_percent = None
                 else:
                     target_stage = candidate
             if target_stage is not None:
@@ -520,6 +508,19 @@ class ProductionService:
         stage.finished_at = now
         stage.finished_by_user_id = current_user.id
         stage.status = ProductionRunStageStatus.FINISHED
+
+        # Registrar la merma de esta fase: material que entró (peso de la fase pesada
+        # anterior, o material total si es la primera) menos el peso con el que sale.
+        # Así se puede sumar fase por fase y saber dónde se perdió material.
+        if stage.requires_weighing and stage.final_weight is not None:
+            reference = self._previous_stage_weight(run, stage)
+            if reference and reference > 0:
+                loss = max(Decimal("0"), reference - stage.final_weight)
+                stage.waste_weight = loss
+                stage.waste_percent = loss / reference * Decimal("100")
+            else:
+                stage.waste_weight = None
+                stage.waste_percent = None
 
         next_stage = next(
             (
@@ -552,6 +553,14 @@ class ProductionService:
             return prior[-1].final_weight
         return run.total_required_material
 
+    def _accumulated_loss_percent(self, run: ProductionRun, final_weight: Decimal) -> Decimal | None:
+        """Merma acumulada (%) desde el material inicial hasta el peso indicado.
+        La base es la materia prima total que entró a la orden."""
+        base = run.total_required_material
+        if not base or base <= 0:
+            return None
+        return (base - final_weight) / base * Decimal("100")
+
     def _record_decision(
         self,
         run: ProductionRun,
@@ -581,10 +590,18 @@ class ProductionService:
         run.status = ProductionRunStatus.PENDING_RECEPTION
         run.finished_at = datetime.utcnow()
         run.actual_finished_weight = final_weight
-        if final_weight is not None:
-            waste = max(Decimal("0"), run.expected_finished_weight - final_weight)
-            run.waste_weight = waste
-            run.waste_percent = (waste / run.expected_finished_weight * Decimal("100")) if run.expected_finished_weight else Decimal("0")
+        # Merma total = suma de la merma registrada en cada fase.
+        # El % se calcula sobre la materia prima total que entró a la orden.
+        total_waste = sum(
+            (stage.waste_weight for stage in run.stages if stage.waste_weight is not None),
+            Decimal("0"),
+        )
+        run.waste_weight = total_waste
+        run.waste_percent = (
+            total_waste / run.total_required_material * Decimal("100")
+            if run.total_required_material
+            else Decimal("0")
+        )
 
     def receive_finished_product(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:

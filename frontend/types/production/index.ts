@@ -55,6 +55,8 @@ export type ProductionRunStage = {
   finished_at: string | null;
   initial_weight: string | null;
   final_weight: string | null;
+  waste_weight: string | null;
+  waste_percent: string | null;
   finished_by_name?: string | null;
   rework_target_order?: number | null;
   decisions?: StageDecision[];

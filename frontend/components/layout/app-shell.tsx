@@ -17,7 +17,7 @@ const navItems = [
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/solicitudes", label: "Solicitudes", icon: ClipboardList },
   { href: "/documentos", label: "Documentos", icon: FileText },
-  { href: "/reportes", label: "Reportes", icon: BarChart3 }
+  { href: "/reportes", label: "Estadisticas", icon: BarChart3 }
 ];
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -42,7 +42,7 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Materia prima, productos en proceso y productos terminados",
   },
   "/reportes": {
-    title: "Reportes",
+    title: "Estadisticas",
     subtitle: "Resumenes y salidas de informacion",
   },
   "/documentos": {
