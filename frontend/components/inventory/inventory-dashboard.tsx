@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Printer, Save, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Pencil, Plus, Printer, Save, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -717,15 +717,29 @@ export function InventoryDashboard() {
       <section className="inventoryShell">
         <article className="card panelBody inventoryPanel">
           <div className="panelHeader">
-            <div>
-              <h2 className="panelTitle">Inventario actual</h2>
-              <p className="panelText">
-                {itemFilter === "RAW_MATERIAL"
-                  ? "Ingresos manuales y facturas XML de materia prima"
-                  : itemFilter === "FINISHED_PRODUCT"
-                    ? "Salidas comerciales de productos terminados"
-                    : "Seguimiento de productos en proceso"}
-              </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div>
+                <h2 className="panelTitle">Inventario actual</h2>
+                <p className="panelText">
+                  {itemFilter === "RAW_MATERIAL"
+                    ? "Ingresos manuales y facturas XML de materia prima"
+                    : itemFilter === "FINISHED_PRODUCT"
+                      ? "Salidas comerciales de productos terminados"
+                      : "Seguimiento de productos en proceso"}
+                </p>
+              </div>
+              <button
+                aria-label="Bandeja de solicitudes de produccion"
+                className="solicitudesButton"
+                onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+                type="button"
+              >
+                <Inbox aria-hidden="true" size={16} />
+                Solicitudes
+                {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
+                  <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
+                ) : null}
+              </button>
             </div>
             <div className="rowActions">
               {itemFilter === "RAW_MATERIAL" ? (
@@ -772,32 +786,20 @@ export function InventoryDashboard() {
           </div>
 
           <div className="toolbar">
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <div className="segmentedControl" aria-label="Filtrar por tipo">
-                {ITEM_TYPES.map((type) => (
-                  <button
-                    className={itemFilter === type.value ? "segmentActive" : ""}
-                    key={type.value}
-                    onClick={() => {
-                      setIsEntryMenuOpen(false);
-                      setItemFilter(type.value);
-                    }}
-                    type="button"
-                  >
-                    {type.label}
-                  </button>
-                ))}
-              </div>
-              <button
-                className="solicitudesButton"
-                onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
-                type="button"
-              >
-                Solicitudes
-                {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
-                  <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
-                ) : null}
-              </button>
+            <div className="segmentedControl" aria-label="Filtrar por tipo">
+              {ITEM_TYPES.map((type) => (
+                <button
+                  className={itemFilter === type.value ? "segmentActive" : ""}
+                  key={type.value}
+                  onClick={() => {
+                    setIsEntryMenuOpen(false);
+                    setItemFilter(type.value);
+                  }}
+                  type="button"
+                >
+                  {type.label}
+                </button>
+              ))}
             </div>
             <input
               className="field searchField"
