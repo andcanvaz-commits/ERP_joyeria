@@ -3825,6 +3825,15 @@ textarea:disabled {
   gap: 16px;
   align-items: end;
 }
+/* Lista de materias primas del proceso: a partir de ~3 filas hace scroll
+   interno en vez de estirar el modal hacia abajo. */
+.materialList {
+  display: grid;
+  gap: 10px;
+  max-height: 210px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
 .materialRow .field {
   padding: 7px 9px;
   font-size: 13px;

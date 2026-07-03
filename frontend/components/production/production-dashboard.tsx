@@ -1681,7 +1681,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
             <div className="fieldGroup">
               <span>Materias primas del proceso</span>
-              <div style={{ display: "grid", gap: 10 }}>
+              <div className="materialList">
                 {form.materials.map((material, materialIndex) => (
                   <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "end" }}>
                     <div className="materialRow" style={{ flex: 1 }}>
