@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
-import { Saira_Condensed, Hanken_Grotesk, IBM_Plex_Mono } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Saira_Condensed({
+const display = IBM_Plex_Sans({
   subsets: ["latin"],
   display: "swap",
   weight: ["600", "700"],
   variable: "--font-display",
 });
 
-const body = Hanken_Grotesk({
+const body = IBM_Plex_Sans({
   subsets: ["latin"],
   display: "swap",
   weight: ["400", "500", "600"],
