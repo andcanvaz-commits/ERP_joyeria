@@ -1087,11 +1087,14 @@ textarea {
   min-height: 0;
 }
 
-/* Panel de inventario: alto FIJO siempre (haya o no items) */
+/* Panel de inventario: se ajusta al contenido, con tope maximo (scroll si hay muchos). */
 .inventoryShell > .inventoryPanel:first-child {
-  height: 580px;
+  max-height: 580px;
   display: flex;
   flex-direction: column;
+}
+.inventoryShell > .inventoryPanel:first-child .tableWrap {
+  overflow-y: auto;
 }
 
 /* Panel de historial/movimientos: crece con el contenido hasta el tope del
