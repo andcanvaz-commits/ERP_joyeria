@@ -24,6 +24,8 @@ class InventoryItemCreate(BaseModel):
     item_type: InventoryItemType
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
+    material_type: str | None = Field(default=None, max_length=80)
+    purity: str | None = Field(default=None, max_length=40)
     unit_code: str = Field(min_length=1, max_length=20)
     minimum_stock: Decimal | None = Field(default=None, ge=0)
 
@@ -34,6 +36,8 @@ class InventoryItemUpdate(BaseModel):
     item_type: InventoryItemType
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
+    material_type: str | None = Field(default=None, max_length=80)
+    purity: str | None = Field(default=None, max_length=40)
     unit_code: str = Field(min_length=1, max_length=20)
     minimum_stock: Decimal | None = Field(default=None, ge=0)
 
@@ -47,9 +51,12 @@ class InventoryItemRead(BaseModel):
     sku: str
     product_code: str | None = None
     description: str | None = None
+    material_type: str | None = None
+    purity: str | None = None
     unit_code: str
     minimum_stock: Decimal | None = None
     current_stock: Decimal
+    average_cost: Decimal = Decimal("0")
 
 
 class InventoryMovementCreate(BaseModel):

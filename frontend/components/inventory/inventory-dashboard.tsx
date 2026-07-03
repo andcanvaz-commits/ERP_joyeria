@@ -65,12 +65,15 @@ const emptyItemForm = (): SaveInventoryItemPayload => ({
   name: "",
   description: "",
   unit_code: "g",
+  material_type: "",
+  purity: "",
 });
 
 const emptyMovementForm = (): CreateInventoryMovementPayload => ({
   item_id: "",
   movement_type: "ENTRADA",
   quantity: "",
+  unit_cost: "",
   reason: "",
   reference_type: null,
   reference_id: null,
@@ -325,6 +328,15 @@ export function InventoryDashboard() {
     return options;
   }, [itemForm.unit_code, items, units]);
 
+  const movementTotalCost = useMemo(() => {
+    const quantity = Number(movementForm.quantity);
+    const unitCost = Number(movementForm.unit_cost);
+    if (!movementForm.quantity || !movementForm.unit_cost || !Number.isFinite(quantity) || !Number.isFinite(unitCost)) {
+      return null;
+    }
+    return quantity * unitCost;
+  }, [movementForm.quantity, movementForm.unit_cost]);
+
   const usersById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
   const canSeeMovementAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const editingItem = editingItemId ? items.find((item) => item.id === editingItemId) ?? null : null;
@@ -521,6 +533,8 @@ export function InventoryDashboard() {
       name: item.name,
       description: item.description ?? "",
       unit_code: item.unit_code,
+      material_type: item.material_type ?? "",
+      purity: item.purity ?? "",
     });
     setIsItemFormOpen(true);
   }
@@ -535,6 +549,8 @@ export function InventoryDashboard() {
         item_type: "RAW_MATERIAL" as const,
         description: isEditingXmlItem ? editingItem?.description ?? null : itemForm.description?.trim() || null,
         unit_code: isEditingXmlItem ? editingItem?.unit_code ?? itemForm.unit_code : itemForm.unit_code,
+        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : itemForm.material_type?.trim() || null,
+        purity: isEditingXmlItem ? editingItem?.purity ?? null : itemForm.purity?.trim() || null,
         minimum_stock: null,
       };
       if (editingItemId) {
@@ -558,9 +574,13 @@ export function InventoryDashboard() {
     setIsSaving(true);
     setError(null);
     try {
+      const unitCost =
+        movementForm.movement_type === "ENTRADA" && movementForm.unit_cost
+          ? movementForm.unit_cost
+          : null;
       await createInventoryMovement({
         ...movementForm,
-        unit_cost: null,
+        unit_cost: unitCost,
         reference_type: null,
         reference_id: null,
       });
@@ -787,6 +807,69 @@ export function InventoryDashboard() {
             />
           </div>
 
+          {itemFilter === "RAW_MATERIAL" ? (
+            <div className="tableWrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}>#</th>
+                    <th>Nombre</th>
+                    <th>Tipo</th>
+                    <th>Descripción</th>
+                    <th>Ley/pureza</th>
+                    <th>Stock</th>
+                    <th>Costo prom.</th>
+                    <th>Valor total</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayItems.map((item, index) => {
+                    const averageCost = item.average_cost ?? "0";
+                    const totalValue = Number(item.current_stock) * Number(averageCost);
+                    return (
+                      <tr key={item.id}>
+                        <td className="num">{index + 1}</td>
+                        <td>{item.name}</td>
+                        <td>{item.material_type ?? "—"}</td>
+                        <td>{item.description ?? "—"}</td>
+                        <td>{item.purity ?? "—"}</td>
+                        <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                        <td className="num">{numericText(averageCost)}</td>
+                        <td className="num">{numericText(String(totalValue))}</td>
+                        <td>
+                          <div className="rowActions">
+                            <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                              <Eye aria-hidden="true" size={15} />
+                              Visualizar
+                            </button>
+                            <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
+                              <Pencil aria-hidden="true" size={15} />
+                              Editar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!isLoading && displayItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <div className="emptyState">No hay items para este filtro.</div>
+                      </td>
+                    </tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={9}>
+                        <div className="emptyState">Cargando inventario...</div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          ) : (
           <div className="inventoryList">
             {itemFilter === "FINISHED_PRODUCT"
               ? receivedRuns.map((run) => (
@@ -864,6 +947,7 @@ export function InventoryDashboard() {
               ? <div className="emptyState">No hay items para este filtro.</div> : null}
             {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
           </div>
+          )}
         </article>
 
         <article className="card panelBody inventoryPanel">
@@ -1037,6 +1121,28 @@ export function InventoryDashboard() {
             ) : null}
             {!isEditingXmlItem ? (
               <label className="fieldGroup">
+                <span>Tipo</span>
+                <input
+                  className="field"
+                  onChange={(event) => setItemForm((current) => ({ ...current, material_type: event.target.value }))}
+                  placeholder="Ej. Oro, Plata"
+                  value={itemForm.material_type ?? ""}
+                />
+              </label>
+            ) : null}
+            {!isEditingXmlItem ? (
+              <label className="fieldGroup">
+                <span>Ley / pureza</span>
+                <input
+                  className="field"
+                  onChange={(event) => setItemForm((current) => ({ ...current, purity: event.target.value }))}
+                  placeholder="Ej. 18K, 925"
+                  value={itemForm.purity ?? ""}
+                />
+              </label>
+            ) : null}
+            {!isEditingXmlItem ? (
+              <label className="fieldGroup">
                 <span>Descripcion</span>
                 <textarea className="field textareaCompact" onChange={(event) => setItemForm((current) => ({ ...current, description: event.target.value }))} value={itemForm.description ?? ""} />
               </label>
@@ -1076,6 +1182,25 @@ export function InventoryDashboard() {
               <span>Cantidad</span>
               <input className="field" min="0.0001" onChange={(event) => setMovementForm((current) => ({ ...current, quantity: event.target.value }))} step="0.0001" type="number" value={movementForm.quantity} />
             </label>
+            {movementForm.movement_type === "ENTRADA" ? (
+              <>
+                <label className="fieldGroup">
+                  <span>Costo por gramo</span>
+                  <input
+                    className="field"
+                    min="0"
+                    onChange={(event) => setMovementForm((current) => ({ ...current, unit_cost: event.target.value }))}
+                    step="0.0001"
+                    type="number"
+                    value={movementForm.unit_cost ?? ""}
+                  />
+                </label>
+                <label className="fieldGroup">
+                  <span>Costo total</span>
+                  <input className="field" disabled readOnly value={movementTotalCost !== null ? numericText(String(movementTotalCost)) : "—"} />
+                </label>
+              </>
+            ) : null}
             <label className="fieldGroup">
               <span>Motivo</span>
               <textarea className="field textareaCompact" onChange={(event) => setMovementForm((current) => ({ ...current, reason: event.target.value }))} value={movementForm.reason} />

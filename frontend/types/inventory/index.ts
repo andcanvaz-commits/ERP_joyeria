@@ -19,6 +19,9 @@ export type InventoryItem = {
   unit_code: string;
   minimum_stock: string | null;
   current_stock: string;
+  material_type?: string | null;
+  purity?: string | null;
+  average_cost?: string;
 };
 
 export type InventoryMovement = {

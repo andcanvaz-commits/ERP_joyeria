@@ -18,9 +18,13 @@ class InventoryItem(Base):
     sku: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
     product_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    material_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    purity: Mapped[str | None] = mapped_column(String(40), nullable=True)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     minimum_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     current_stock: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
+    # Costo promedio ponderado por unidad (kardex). Se recalcula en cada ENTRADA.
+    average_cost: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

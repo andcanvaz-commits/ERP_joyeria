@@ -13,6 +13,8 @@ export type SaveInventoryItemPayload = {
   description: string | null;
   unit_code: string;
   minimum_stock?: string | null;
+  material_type?: string | null;
+  purity?: string | null;
 };
 
 export type CreateInventoryMovementPayload = {

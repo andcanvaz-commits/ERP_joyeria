@@ -72,6 +72,8 @@ class InventoryService(InventoryIntegrationPort):
             name=payload.name,
             sku=self._generate_sku(payload.item_type),
             description=payload.description,
+            material_type=payload.material_type,
+            purity=payload.purity,
             unit_code=payload.unit_code.strip(),
             minimum_stock=payload.minimum_stock,
         )
@@ -87,6 +89,8 @@ class InventoryService(InventoryIntegrationPort):
         item.item_type = payload.item_type
         item.name = payload.name
         item.description = payload.description
+        item.material_type = payload.material_type
+        item.purity = payload.purity
         item.unit_code = payload.unit_code.strip()
         item.minimum_stock = payload.minimum_stock
         self.repository.flush()
@@ -129,6 +133,18 @@ class InventoryService(InventoryIntegrationPort):
                 item.id,
                 datetime.utcnow().year,
             )
+        # Kardex promedio ponderado movil: al ingresar materia prima con costo,
+        # el costo promedio del item se recalcula ponderando el stock anterior y
+        # la nueva entrada. nuevo_prom = (stock*prom + cantidad*costo) / (stock+cantidad).
+        if payload.movement_type == "ENTRADA" and payload.unit_cost is not None:
+            previous_stock = item.current_stock
+            previous_avg = item.average_cost or Decimal("0")
+            incoming_total = previous_stock + payload.quantity
+            if incoming_total > 0:
+                item.average_cost = (
+                    previous_stock * previous_avg + payload.quantity * payload.unit_cost
+                ) / incoming_total
+
         item.current_stock = next_stock
         self.repository.add_movement(movement)
         self.repository.flush()
