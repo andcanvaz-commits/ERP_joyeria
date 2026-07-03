@@ -10,13 +10,13 @@ from backend.modules.units.schemas import UnitCreate, UnitRead
 # Unidades por defecto de una base nueva. El usuario puede agregar o quitar
 # desde Mantenimiento > Datos > Unidades de medida.
 DEFAULT_UNITS = (
-    ("g", "Gramos (g)"),
-    ("kg", "Kilogramos (kg)"),
-    ("mg", "Miligramos (mg)"),
-    ("oz_t", "Onza troy (oz t)"),
-    ("dwt", "Pennyweight (dwt)"),
-    ("ct", "Quilates / carats (ct)"),
-    ("und", "Unidad (und)"),
+    ("g", "g"),
+    ("kg", "kg"),
+    ("mg", "mg"),
+    ("oz_t", "oz t"),
+    ("dwt", "dwt"),
+    ("ct", "ct"),
+    ("und", "und"),
 )
 
 

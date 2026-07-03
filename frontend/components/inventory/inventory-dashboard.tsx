@@ -311,13 +311,15 @@ export function InventoryDashboard() {
   const unitOptions = useMemo(() => {
     // Base dinamica: unidades gestionadas desde Mantenimiento > Datos. Si aun no
     // cargan, cae a las unidades por defecto para no dejar el combo vacio.
+    // El valor guardado en el item es el NOMBRE de la unidad (lo que se muestra
+    // como abreviatura); el codigo numerico es solo id interno de la BD.
     const base = units.length > 0
-      ? units.map((unit) => ({ value: unit.code, label: unit.label }))
+      ? units.map((unit) => ({ value: unit.label, label: unit.label }))
       : [...UNIT_OPTIONS];
     const options = [...base];
     for (const unitCode of [itemForm.unit_code, ...items.map((item) => item.unit_code)]) {
       if (unitCode && !options.some((option) => option.value === unitCode)) {
-        options.push({ value: unitCode, label: unitLabel(unitCode) });
+        options.push({ value: unitCode, label: unitCode });
       }
     }
     return options;
