@@ -827,10 +827,6 @@ export function InventoryDashboard() {
                       </div>
                     ) : null}
                   </div>
-                  <button className="button buttonPrimary" onClick={openCreateItem} type="button">
-                    <Plus aria-hidden="true" size={17} />
-                    Materia prima
-                  </button>
                 </>
               ) : null}
               {itemFilter === "FINISHED_PRODUCT" ? (

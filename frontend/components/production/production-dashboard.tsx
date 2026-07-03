@@ -2,8 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
+import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import {
@@ -195,6 +196,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isUsersOpen, setIsUsersOpen] = useState(false);
   const [isDataOpen, setIsDataOpen] = useState(false);
   const [isUnitsOpen, setIsUnitsOpen] = useState(false);
+  const [isRawMaterialsOpen, setIsRawMaterialsOpen] = useState(false);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -2020,12 +2022,25 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <strong>Unidades de medida</strong>
                 <span>Unidades del combo de inventario.</span>
               </button>
+              <button
+                className="maintenanceTile"
+                onClick={() => {
+                  setIsDataOpen(false);
+                  setIsRawMaterialsOpen(true);
+                }}
+                type="button"
+              >
+                <Boxes aria-hidden="true" size={22} />
+                <strong>Materias primas</strong>
+                <span>Crea las materias primas del inventario.</span>
+              </button>
             </div>
           </section>
         </div>
       ) : null}
 
       {isUnitsOpen ? <UnitsManager onClose={() => setIsUnitsOpen(false)} /> : null}
+      {isRawMaterialsOpen ? <RawMaterialsManager onClose={() => setIsRawMaterialsOpen(false)} /> : null}
 
       {isProcessesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Procesos creados">
