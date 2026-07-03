@@ -3848,3 +3848,11 @@ textarea:disabled {
 @media (max-width: 640px) {
   .materialRow { grid-template-columns: 1fr; }
 }
+
+.metricButton {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+.metricButton:hover { border-color: var(--gold); }

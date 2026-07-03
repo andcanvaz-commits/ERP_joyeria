@@ -712,34 +712,30 @@ export function InventoryDashboard() {
           <span className="metricLabel">Terminados</span>
           <strong className="metricValue">{summary?.finished_products ?? 0}</strong>
         </article>
+        <button
+          className="card metric metricButton"
+          onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+          type="button"
+          aria-label="Bandeja de solicitudes de produccion"
+        >
+          <Inbox aria-hidden="true" size={22} />
+          <span className="metricLabel">Solicitudes</span>
+          <strong className="metricValue">{pendingInventoryRuns.length + pendingReceptionRuns.length}</strong>
+        </button>
       </section>
 
       <section className="inventoryShell">
         <article className="card panelBody inventoryPanel">
           <div className="panelHeader">
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <div>
-                <h2 className="panelTitle">Inventario actual</h2>
-                <p className="panelText">
-                  {itemFilter === "RAW_MATERIAL"
-                    ? "Ingresos manuales y facturas XML de materia prima"
-                    : itemFilter === "FINISHED_PRODUCT"
-                      ? "Salidas comerciales de productos terminados"
-                      : "Seguimiento de productos en proceso"}
-                </p>
-              </div>
-              <button
-                aria-label="Bandeja de solicitudes de produccion"
-                className="solicitudesButton"
-                onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
-                type="button"
-              >
-                <Inbox aria-hidden="true" size={16} />
-                Solicitudes
-                {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
-                  <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
-                ) : null}
-              </button>
+            <div>
+              <h2 className="panelTitle">Inventario actual</h2>
+              <p className="panelText">
+                {itemFilter === "RAW_MATERIAL"
+                  ? "Ingresos manuales y facturas XML de materia prima"
+                  : itemFilter === "FINISHED_PRODUCT"
+                    ? "Salidas comerciales de productos terminados"
+                    : "Seguimiento de productos en proceso"}
+              </p>
             </div>
             <div className="rowActions">
               {itemFilter === "RAW_MATERIAL" ? (
@@ -819,7 +815,7 @@ export function InventoryDashboard() {
                     <th>Descripción</th>
                     <th>Ley/pureza</th>
                     <th>Stock</th>
-                    <th>Costo prom.</th>
+                    <th>Costo promedio</th>
                     <th>Valor total</th>
                     <th aria-label="Acciones" />
                   </tr>
