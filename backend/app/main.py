@@ -20,6 +20,9 @@ from backend.modules.auth.service import seed_default_users
 from backend.modules.catalog import models as catalog_models
 from backend.modules.catalog.router import router as catalog_router
 from backend.modules.catalog.service import seed_catalog
+from backend.modules.units import models as units_models
+from backend.modules.units.router import router as units_router
+from backend.modules.units.service import seed_units
 from backend.modules.config.settings import settings
 from backend.modules.database.base import Base
 from backend.modules.database.session import SessionLocal, engine
@@ -145,6 +148,9 @@ def create_dev_tables() -> None:
     session = SessionLocal()
     try:
         seed_default_users(session)
+        # Unidades de medida base: son configuracion fundamental (el inventario
+        # las necesita), se siembran siempre de forma idempotente.
+        seed_units(session)
         # Los datos de ejemplo (procesos y catalogo) solo se siembran en
         # desarrollo; no deben contaminar una base de produccion.
         if settings.auto_create_tables or settings.seed_on_startup:
@@ -262,3 +268,4 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(production_router, prefix="/api/production", tags=["production"])
 app.include_router(inventory_router, prefix="/api/inventory", tags=["inventory"])
 app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
+app.include_router(units_router, prefix="/api/units", tags=["units"])

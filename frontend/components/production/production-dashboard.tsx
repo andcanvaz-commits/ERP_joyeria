@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import {
@@ -192,6 +193,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
+  const [isUnitsOpen, setIsUnitsOpen] = useState(false);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -1036,6 +1038,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <Users aria-hidden="true" size={22} />
                 <strong>Usuarios</strong>
                 <span>{users.length} usuarios creados.</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="maintenanceSection" aria-label="Datos del sistema">
+            <h2>Datos</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setIsUnitsOpen(true)} type="button">
+                <Ruler aria-hidden="true" size={22} />
+                <strong>Unidades de medida</strong>
+                <span>Gestiona las unidades del inventario.</span>
               </button>
             </div>
           </section>
@@ -1980,6 +1993,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </form>
         </div>
       ) : null}
+
+      {isUnitsOpen ? <UnitsManager onClose={() => setIsUnitsOpen(false)} /> : null}
 
       {isProcessesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Procesos creados">

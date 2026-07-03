@@ -10,6 +10,7 @@ import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { CaliperScale } from "@/components/ui/caliper-scale";
+import { listUnits } from "@/lib/units-api";
 import {
   createInventoryItem,
   createInventoryMovement,
@@ -250,6 +251,12 @@ export function InventoryDashboard() {
     enabled: Boolean(currentUser),
   });
 
+  const { data: units = [] } = useQuery({
+    queryKey: ["units"],
+    queryFn: listUnits,
+    enabled: Boolean(currentUser),
+  });
+
   const summary = data?.summary ?? null;
   const items = data?.items ?? [];
   const movements = data?.movements ?? [];
@@ -302,14 +309,19 @@ export function InventoryDashboard() {
     });
   }, [items, itemFilter, search]);
   const unitOptions = useMemo(() => {
-    const options = [...UNIT_OPTIONS];
+    // Base dinamica: unidades gestionadas desde Mantenimiento > Datos. Si aun no
+    // cargan, cae a las unidades por defecto para no dejar el combo vacio.
+    const base = units.length > 0
+      ? units.map((unit) => ({ value: unit.code, label: unit.label }))
+      : [...UNIT_OPTIONS];
+    const options = [...base];
     for (const unitCode of [itemForm.unit_code, ...items.map((item) => item.unit_code)]) {
       if (unitCode && !options.some((option) => option.value === unitCode)) {
         options.push({ value: unitCode, label: unitLabel(unitCode) });
       }
     }
     return options;
-  }, [itemForm.unit_code, items]);
+  }, [itemForm.unit_code, items, units]);
 
   const usersById = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
   const canSeeMovementAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
