@@ -20,15 +20,20 @@ export type ProductionProcessStage = {
   ingredients?: StageIngredient[];
 };
 
+export type ProductionProcessMaterial = {
+  id: string;
+  inventory_item_id: string;
+  quantity_per_unit: string;
+  unit_code: string;
+};
+
 export type ProductionProcess = {
   id: string;
   name: string;
   code?: string | null;
   description: string | null;
   version: number;
-  raw_material_item_id: string | null;
-  raw_material_quantity_per_unit: string | null;
-  raw_material_unit_code: string | null;
+  materials: ProductionProcessMaterial[];
   waste_limit_percent: string;
   is_active: boolean;
   stages: ProductionProcessStage[];

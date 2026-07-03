@@ -45,12 +45,16 @@ type StageForm = {
   ingredients: Array<{ inventoryItemId: string; quantity: string; unitCode: string }>;
 };
 
+type ProcessMaterialForm = {
+  inventoryItemId: string;
+  quantityPerUnit: string;
+  unitCode: string;
+};
+
 type ProcessForm = {
   name: string;
   description: string;
-  rawMaterialItemId: string;
-  rawMaterialQuantityPerUnit: string;
-  rawMaterialUnitCode: string;
+  materials: ProcessMaterialForm[];
   wasteLimitPercent: string;
   stages: StageForm[];
 };
@@ -82,12 +86,16 @@ const emptyStage = (): StageForm => ({
   ingredients: [],
 });
 
+const emptyProcessMaterial = (): ProcessMaterialForm => ({
+  inventoryItemId: "",
+  quantityPerUnit: "",
+  unitCode: "g",
+});
+
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  rawMaterialItemId: "",
-  rawMaterialQuantityPerUnit: "",
-  rawMaterialUnitCode: "g",
+  materials: [emptyProcessMaterial()],
   wasteLimitPercent: "1",
   stages: [emptyStage()],
 });
@@ -103,9 +111,13 @@ function processToForm(process: ProductionProcess): ProcessForm {
   return {
     name: process.name,
     description: process.description ?? "",
-    rawMaterialItemId: process.raw_material_item_id ?? "",
-    rawMaterialQuantityPerUnit: process.raw_material_quantity_per_unit ?? "",
-    rawMaterialUnitCode: process.raw_material_unit_code ?? "g",
+    materials: process.materials.length > 0
+      ? process.materials.map((material) => ({
+          inventoryItemId: material.inventory_item_id,
+          quantityPerUnit: material.quantity_per_unit,
+          unitCode: material.unit_code,
+        }))
+      : [emptyProcessMaterial()],
     wasteLimitPercent: process.waste_limit_percent ?? "1",
     stages: stages.length > 0 ? stages.map((stage) => ({
       name: stage.name,
@@ -198,6 +210,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     temporaryPassword: string;
   } | null>(null);
   const [selectedProcessId, setSelectedProcessId] = useState("");
+  const [selectedMaterialId, setSelectedMaterialId] = useState("");
   const [runQuantity, setRunQuantity] = useState("1");
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
   const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
@@ -271,10 +284,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
-  const selectedMaterial = rawMaterials.find((item) => item.id === selectedProcess?.raw_material_item_id) ?? null;
-  const requiredMaterial = selectedProcess?.raw_material_quantity_per_unit && runQuantity
-    ? Number(selectedProcess.raw_material_quantity_per_unit) * Number(runQuantity)
+  const selectedProcessMaterial = selectedProcess?.materials.find((material) => material.inventory_item_id === selectedMaterialId) ?? null;
+  const selectedMaterial = rawMaterials.find((item) => item.id === selectedProcessMaterial?.inventory_item_id) ?? null;
+  const requiredMaterial = selectedProcessMaterial?.quantity_per_unit && runQuantity
+    ? Number(selectedProcessMaterial.quantity_per_unit) * Number(runQuantity)
     : 0;
+
+  useEffect(() => {
+    const materials = selectedProcess?.materials ?? [];
+    setSelectedMaterialId((current) => {
+      if (current && materials.some((material) => material.inventory_item_id === current)) {
+        return current;
+      }
+      return materials[0]?.inventory_item_id ?? "";
+    });
+  }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
   const finishedRuns = runs.filter((run) => run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA");
@@ -535,6 +559,32 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     });
   }
 
+  function addProcessMaterial() {
+    setForm((current) => ({
+      ...current,
+      materials: [...current.materials, emptyProcessMaterial()],
+    }));
+  }
+
+  function removeProcessMaterial(materialIndex: number) {
+    setForm((current) => {
+      if (current.materials.length === 1) return current;
+      return {
+        ...current,
+        materials: current.materials.filter((_, index) => index !== materialIndex),
+      };
+    });
+  }
+
+  function updateProcessMaterial(materialIndex: number, patch: Partial<ProcessMaterialForm>) {
+    setForm((current) => ({
+      ...current,
+      materials: current.materials.map((material, index) =>
+        index === materialIndex ? { ...material, ...patch } : material
+      ),
+    }));
+  }
+
   function updateStage(fieldOrPatch: keyof StageForm | Partial<StageForm>, value?: string | boolean | Array<{ inventoryItemId: string; quantity: string; unitCode: string }>) {
     setForm((current) => ({
       ...current,
@@ -557,17 +607,26 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (form.stages.some((stage) => !stage.name.trim())) {
       throw new Error("Todas las etapas agregadas deben tener nombre.");
     }
-    if (!form.rawMaterialItemId || !form.rawMaterialQuantityPerUnit || Number(form.rawMaterialQuantityPerUnit) <= 0) {
-      throw new Error("Selecciona la materia prima y la cantidad por unidad del proceso.");
+    if (
+      form.materials.length === 0 ||
+      form.materials.some((material) => !material.inventoryItemId || !material.quantityPerUnit || Number(material.quantityPerUnit) <= 0)
+    ) {
+      throw new Error("Agrega al menos una materia prima con su cantidad por unidad.");
+    }
+    const materialIds = form.materials.map((material) => material.inventoryItemId);
+    if (new Set(materialIds).size !== materialIds.length) {
+      throw new Error("No repitas la misma materia prima.");
     }
 
     return {
       name: processName,
       description: form.description.trim() || null,
       version: 1,
-      raw_material_item_id: form.rawMaterialItemId,
-      raw_material_quantity_per_unit: form.rawMaterialQuantityPerUnit,
-      raw_material_unit_code: form.rawMaterialUnitCode || "g",
+      materials: form.materials.map((material) => ({
+        inventory_item_id: material.inventoryItemId,
+        quantity_per_unit: material.quantityPerUnit,
+        unit_code: material.unitCode || "g",
+      })),
       waste_limit_percent: "1",
       is_active: true,
       stages: form.stages.map((stage, index) => ({
@@ -648,12 +707,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Ingresa una cantidad valida para fabricar.");
       return;
     }
+    const materialBelongsToProcess = selectedProcess.materials.some(
+      (material) => material.inventory_item_id === selectedMaterialId
+    );
+    if (!selectedMaterialId || !materialBelongsToProcess) {
+      setError("Selecciona la materia prima con la que se fabricará esta orden.");
+      return;
+    }
 
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
-      await createProductionRun({ process_id: selectedProcess.id, quantity: runQuantity });
+      await createProductionRun({
+        process_id: selectedProcess.id,
+        quantity: runQuantity,
+        raw_material_item_id: selectedMaterialId,
+      });
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima.");
       await reload();
     } catch (nextError) {
@@ -1003,21 +1073,34 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </div>
                 <Play aria-hidden="true" size={20} />
               </div>
-              <label className="fieldGroup">
-                <span>Proceso</span>
-                <select className="field" onChange={(e) => setSelectedProcessId(e.target.value)} value={selectedProcess?.id ?? ""}>
-                  {activeProcesses.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="materialRow">
+                <label className="fieldGroup">
+                  <span>Proceso</span>
+                  <select className="field" onChange={(e) => setSelectedProcessId(e.target.value)} value={selectedProcess?.id ?? ""}>
+                    {activeProcesses.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="fieldGroup">
+                  <span>Material</span>
+                  <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
+                    <option value="">Seleccionar material</option>
+                    {(selectedProcess?.materials ?? []).map((material) => (
+                      <option key={material.id} value={material.inventory_item_id}>
+                        {rawMaterials.find((item) => item.id === material.inventory_item_id)?.name ?? material.inventory_item_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <label className="fieldGroup">
                 <span>Cantidad a fabricar</span>
                 <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
               </label>
               <button
                 className="button buttonPrimary"
-                disabled={isSaving || !selectedProcess}
+                disabled={isSaving || !selectedProcess || !selectedMaterialId}
                 onClick={() => void handleCreateProductionOrder()}
                 type="button"
               >
@@ -1596,40 +1679,63 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               />
             </label>
 
-            <div className="materialRow">
-              <label className="fieldGroup">
-                <span>Materia prima por unidad</span>
-                <select
-                  className="field"
-                  disabled={isSaving}
-                  onChange={(event) => {
-                    const material = rawMaterials.find((item) => item.id === event.target.value);
-                    setForm((current) => ({
-                      ...current,
-                      rawMaterialItemId: event.target.value,
-                      rawMaterialUnitCode: material?.unit_code ?? current.rawMaterialUnitCode,
-                    }));
-                  }}
-                  value={form.rawMaterialItemId}
-                >
-                  <option value="">Seleccionar materia prima</option>
-                  {rawMaterials.map((item) => (
-                    <option key={item.id} value={item.id}>{item.name} - {item.current_stock} {item.unit_code}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Cantidad usada por unidad</span>
-                <input
-                  className="field"
-                  disabled={isSaving}
-                  min="0.0001"
-                  onChange={(event) => setForm((current) => ({ ...current, rawMaterialQuantityPerUnit: event.target.value }))}
-                  step="0.0001"
-                  type="number"
-                  value={form.rawMaterialQuantityPerUnit}
-                />
-              </label>
+            <div className="fieldGroup">
+              <span>Materias primas del proceso</span>
+              <div style={{ display: "grid", gap: 10 }}>
+                {form.materials.map((material, materialIndex) => (
+                  <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "end" }}>
+                    <div className="materialRow" style={{ flex: 1 }}>
+                      <label className="fieldGroup">
+                        <span>Materia prima</span>
+                        <select
+                          className="field"
+                          disabled={isSaving}
+                          onChange={(event) => {
+                            const selected = rawMaterials.find((item) => item.id === event.target.value);
+                            updateProcessMaterial(materialIndex, {
+                              inventoryItemId: event.target.value,
+                              unitCode: selected?.unit_code ?? material.unitCode,
+                            });
+                          }}
+                          value={material.inventoryItemId}
+                        >
+                          <option value="">Seleccionar materia prima</option>
+                          {rawMaterials.map((item) => (
+                            <option key={item.id} value={item.id}>{item.name} - {item.current_stock} {item.unit_code}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="fieldGroup">
+                        <span>Cantidad usada por unidad</span>
+                        <input
+                          className="field"
+                          disabled={isSaving}
+                          min="0.0001"
+                          onChange={(event) => updateProcessMaterial(materialIndex, { quantityPerUnit: event.target.value })}
+                          step="0.0001"
+                          type="number"
+                          value={material.quantityPerUnit}
+                        />
+                      </label>
+                    </div>
+                    {form.materials.length > 1 ? (
+                      <button
+                        aria-label="Quitar materia prima"
+                        className="iconOnlyButton dangerIconButton"
+                        disabled={isSaving}
+                        onClick={() => removeProcessMaterial(materialIndex)}
+                        type="button"
+                      >
+                        <X aria-hidden="true" size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <button className="button" disabled={isSaving} onClick={addProcessMaterial} type="button">
+                <Plus aria-hidden="true" size={14} />
+                Agregar materia prima
+              </button>
             </div>
 
             <section className="stageSingleWindow">
@@ -1958,15 +2064,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             ) : null}
 
             <div className="processFlowInfoBar">
-              <div className="processFlowMeta">
-                <strong>Materia prima</strong>
-                <span>{rawMaterials.find((m) => m.id === viewingProcess.raw_material_item_id)?.name ?? "Sin configurar"}</span>
-              </div>
-              <div className="processFlowMeta">
-                <strong>Cantidad por unidad</strong>
+              <div className="processFlowMeta" style={{ gridColumn: "span 2" }}>
+                <strong>Materias primas</strong>
                 <span>
-                  {viewingProcess.raw_material_quantity_per_unit
-                    ? `${viewingProcess.raw_material_quantity_per_unit} ${viewingProcess.raw_material_unit_code ?? ""}`
+                  {viewingProcess.materials.length > 0
+                    ? viewingProcess.materials
+                        .map((material) => {
+                          const name = rawMaterials.find((item) => item.id === material.inventory_item_id)?.name ?? material.inventory_item_id;
+                          return `${name}: ${material.quantity_per_unit} ${material.unit_code}`;
+                        })
+                        .join(" · ")
                     : "Sin configurar"}
                 </span>
               </div>

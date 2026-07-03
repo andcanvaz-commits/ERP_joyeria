@@ -17,9 +17,6 @@ class ProductionProcess(Base):
     code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    raw_material_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    raw_material_quantity_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
-    raw_material_unit_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     waste_limit_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=Decimal("1"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -30,6 +27,28 @@ class ProductionProcess(Base):
         cascade="all, delete-orphan",
         order_by="ProductionProcessStage.stage_order",
     )
+    # Materias primas configuradas: cada una es una opcion de fabricacion (ej.
+    # plata o oro) con su cantidad por unidad. Al crear una orden se elige una.
+    materials: Mapped[list["ProductionProcessMaterial"]] = relationship(
+        back_populates="process",
+        cascade="all, delete-orphan",
+    )
+
+
+class ProductionProcessMaterial(Base):
+    __tablename__ = "production_process_materials"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    process_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_processes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    process: Mapped["ProductionProcess"] = relationship(back_populates="materials")
 
 
 class ProductionProcessStage(Base):

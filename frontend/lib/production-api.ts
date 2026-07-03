@@ -5,9 +5,11 @@ export type CreateProductionProcessPayload = {
   name: string;
   description?: string | null;
   version?: number;
-  raw_material_item_id?: string | null;
-  raw_material_quantity_per_unit?: string | null;
-  raw_material_unit_code?: string | null;
+  materials: Array<{
+    inventory_item_id: string;
+    quantity_per_unit: string;
+    unit_code: string;
+  }>;
   waste_limit_percent?: string;
   is_active?: boolean;
   stages: Array<{
@@ -56,7 +58,7 @@ export function listProductionRuns() {
   return apiRequest<ProductionRun[]>("/api/production/runs");
 }
 
-export function createProductionRun(payload: { process_id: string; quantity: string }) {
+export function createProductionRun(payload: { process_id: string; quantity: string; raw_material_item_id: string }) {
   return apiRequest<ProductionRun>("/api/production/runs", {
     method: "POST",
     body: JSON.stringify(payload),

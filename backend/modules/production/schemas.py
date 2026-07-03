@@ -23,6 +23,23 @@ class StageIngredientRead(BaseModel):
     unit_code: str
 
 
+class ProcessMaterialCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    inventory_item_id: UUID
+    quantity_per_unit: Decimal = Field(gt=0)
+    unit_code: str = Field(min_length=1, max_length=20)
+
+
+class ProcessMaterialRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    inventory_item_id: UUID
+    quantity_per_unit: Decimal
+    unit_code: str
+
+
 class ProductionProcessStageCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -45,9 +62,7 @@ class ProductionProcessCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
     version: int = Field(default=1, ge=1)
-    raw_material_item_id: UUID | None = None
-    raw_material_quantity_per_unit: Decimal | None = Field(default=None, gt=0)
-    raw_material_unit_code: str | None = Field(default=None, max_length=20)
+    materials: list[ProcessMaterialCreate] = Field(min_length=1)
     waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
@@ -59,9 +74,7 @@ class ProductionProcessUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
     version: int = Field(default=1, ge=1)
-    raw_material_item_id: UUID | None = None
-    raw_material_quantity_per_unit: Decimal | None = Field(default=None, gt=0)
-    raw_material_unit_code: str | None = Field(default=None, max_length=20)
+    materials: list[ProcessMaterialCreate] = Field(min_length=1)
     waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
@@ -92,9 +105,7 @@ class ProductionProcessRead(BaseModel):
     code: str | None = None
     description: str | None = None
     version: int
-    raw_material_item_id: UUID | None = None
-    raw_material_quantity_per_unit: Decimal | None = None
-    raw_material_unit_code: str | None = None
+    materials: list[ProcessMaterialRead] = Field(default_factory=list)
     waste_limit_percent: Decimal
     is_active: bool
     stages: list[ProductionProcessStageRead] = Field(default_factory=list)
@@ -104,6 +115,8 @@ class ProductionRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     process_id: UUID
+    # Material con el que se fabricara: debe ser uno de los configurados en el proceso.
+    raw_material_item_id: UUID
     quantity: Decimal = Field(gt=0)
 
 

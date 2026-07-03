@@ -7,6 +7,7 @@ from backend.modules.inventory.schemas import InventoryMovementCreate
 from backend.modules.inventory.service import InventoryDomainError, InventoryService
 from backend.modules.production.models import (
     ProductionProcess,
+    ProductionProcessMaterial,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
@@ -136,7 +137,7 @@ class ProductionService:
 
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
-        self._ensure_material_configuration(payload.raw_material_item_id, payload.raw_material_quantity_per_unit)
+        self._validate_materials(payload.materials)
 
         stages = []
         for stage_data in payload.stages:
@@ -167,12 +168,17 @@ class ProductionService:
             code=self._next_process_code(),
             description=payload.description,
             version=payload.version,
-            raw_material_item_id=payload.raw_material_item_id,
-            raw_material_quantity_per_unit=payload.raw_material_quantity_per_unit,
-            raw_material_unit_code=payload.raw_material_unit_code,
             waste_limit_percent=payload.waste_limit_percent,
             is_active=payload.is_active,
             stages=stages,
+            materials=[
+                ProductionProcessMaterial(
+                    inventory_item_id=material.inventory_item_id,
+                    quantity_per_unit=material.quantity_per_unit,
+                    unit_code=material.unit_code,
+                )
+                for material in payload.materials
+            ],
         )
         self.repository.add(process)
         self.repository.flush()
@@ -183,7 +189,7 @@ class ProductionService:
 
     def update_process(self, process_id: UUID, payload: ProductionProcessUpdate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
-        self._ensure_material_configuration(payload.raw_material_item_id, payload.raw_material_quantity_per_unit)
+        self._validate_materials(payload.materials)
         process = self.repository.get(process_id)
         if process is None:
             raise ProductionNotFoundError("Proceso no encontrado.")
@@ -191,11 +197,16 @@ class ProductionService:
         process.name = payload.name
         process.description = payload.description
         process.version = payload.version
-        process.raw_material_item_id = payload.raw_material_item_id
-        process.raw_material_quantity_per_unit = payload.raw_material_quantity_per_unit
-        process.raw_material_unit_code = payload.raw_material_unit_code
         process.waste_limit_percent = payload.waste_limit_percent
         process.is_active = payload.is_active
+        process.materials = [
+            ProductionProcessMaterial(
+                inventory_item_id=material.inventory_item_id,
+                quantity_per_unit=material.quantity_per_unit,
+                unit_code=material.unit_code,
+            )
+            for material in payload.materials
+        ]
         new_stages = []
         for stage_data in payload.stages:
             stage = ProductionProcessStage(
@@ -256,7 +267,7 @@ class ProductionService:
                 )
             return item
 
-        ensure_raw("Oro 18K")
+        gold = ensure_raw("Oro 18K")
         silver = ensure_raw("Plata 925")
 
         for definition in EXAMPLE_PROCESSES:
@@ -264,9 +275,18 @@ class ProductionService:
                 ProductionProcessCreate(
                     name=definition["name"],
                     description=definition["description"],
-                    raw_material_item_id=silver.id,
-                    raw_material_quantity_per_unit=definition["material_per_unit"],
-                    raw_material_unit_code=silver.unit_code,
+                    materials=[
+                        {
+                            "inventory_item_id": silver.id,
+                            "quantity_per_unit": definition["material_per_unit"],
+                            "unit_code": silver.unit_code,
+                        },
+                        {
+                            "inventory_item_id": gold.id,
+                            "quantity_per_unit": definition["material_per_unit"],
+                            "unit_code": gold.unit_code,
+                        },
+                    ],
                     waste_limit_percent=definition["waste_limit_percent"],
                     stages=[
                         {"order": index + 1, **stage}
@@ -283,22 +303,32 @@ class ProductionService:
             raise ProductionNotFoundError("Proceso no encontrado.")
         if not process.is_active:
             raise ProductionDomainError("El proceso no esta activo.")
-        if process.raw_material_item_id is None or process.raw_material_quantity_per_unit is None:
-            raise ProductionDomainError("El proceso no tiene materia prima por unidad configurada.")
+        if not process.materials:
+            raise ProductionDomainError("El proceso no tiene materias primas configuradas.")
+
+        # Solo se puede fabricar con un material configurado en el proceso.
+        selected = next(
+            (m for m in process.materials if m.inventory_item_id == payload.raw_material_item_id),
+            None,
+        )
+        if selected is None:
+            raise ProductionDomainError(
+                "El material seleccionado no esta configurado en este proceso."
+            )
 
         active_stages = [stage for stage in process.stages if stage.is_active]
         if not active_stages:
             raise ProductionDomainError("El proceso debe tener al menos una etapa activa.")
 
-        total_required = process.raw_material_quantity_per_unit * payload.quantity
+        total_required = selected.quantity_per_unit * payload.quantity
         run = ProductionRun(
             process_id=process.id,
             process_name=process.name,
             quantity=payload.quantity,
             status=ProductionRunStatus.PENDING_INVENTORY,
-            raw_material_item_id=process.raw_material_item_id,
-            raw_material_quantity_per_unit=process.raw_material_quantity_per_unit,
-            raw_material_unit_code=process.raw_material_unit_code or "",
+            raw_material_item_id=selected.inventory_item_id,
+            raw_material_quantity_per_unit=selected.quantity_per_unit,
+            raw_material_unit_code=selected.unit_code,
             total_required_material=total_required,
             waste_limit_percent=process.waste_limit_percent,
             expected_finished_weight=total_required,
@@ -615,7 +645,26 @@ class ProductionService:
         if len(stage_orders) != len(set(stage_orders)):
             raise ProductionDomainError("El orden de las etapas no puede repetirse.")
 
-    @staticmethod
-    def _ensure_material_configuration(item_id: UUID | None, quantity_per_unit: Decimal | None) -> None:
-        if (item_id is None) != (quantity_per_unit is None):
-            raise ProductionDomainError("Configura materia prima y cantidad por unidad juntas.")
+    def _validate_materials(self, materials: list) -> None:
+        item_ids = [material.inventory_item_id for material in materials]
+        if len(item_ids) != len(set(item_ids)):
+            raise ProductionDomainError("No repitas la misma materia prima en el proceso.")
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+
+        rows = self.repository.session.execute(
+            select(InventoryItem.id, InventoryItem.item_type).where(
+                InventoryItem.id.in_(item_ids)
+            )
+        ).all()
+        item_types = {row[0]: row[1] for row in rows}
+        for item_id in item_ids:
+            item_type = item_types.get(item_id)
+            if item_type is None:
+                raise ProductionDomainError(
+                    "Una materia prima seleccionada no existe en el inventario."
+                )
+            if item_type != "RAW_MATERIAL":
+                raise ProductionDomainError(
+                    "Solo se pueden usar materias primas del inventario."
+                )
