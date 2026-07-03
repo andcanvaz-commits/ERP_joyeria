@@ -21,7 +21,7 @@ class ProductionProcess(Base):
     raw_material_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     raw_material_quantity_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     raw_material_unit_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    waste_limit_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=Decimal("5"))
+    waste_limit_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=Decimal("1"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -52,12 +52,24 @@ class ProductionProcessStage(Base):
     estimated_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requires_weighing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    initial_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    final_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
 
-    process: Mapped[ProductionProcess] = relationship(back_populates="stages")
+    process: Mapped["ProductionProcess"] = relationship(back_populates="stages")
     ingredients: Mapped[list["ProductionProcessStageIngredient"]] = relationship(
         back_populates="stage",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def waste_percent(self) -> Decimal | None:
+        if (
+            self.initial_weight is not None
+            and self.final_weight is not None
+            and self.initial_weight > 0
+        ):
+            return (self.initial_weight - self.final_weight) / self.initial_weight * Decimal("100")
+        return None
 
 
 class ProductionProcessStageIngredient(Base):
@@ -144,6 +156,8 @@ class ProductionRunStage(Base):
     stage_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False)
     estimated_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    initial_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    final_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     requires_weighing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default=ProductionRunStageStatus.PENDING)
     scheduled_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -151,9 +165,9 @@ class ProductionRunStage(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    rework_target_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    initial_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
-    final_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    # Merma registrada al finalizar la etapa: cuanto material se perdio en ella.
+    waste_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    waste_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
 
     run: Mapped[ProductionRun] = relationship(back_populates="stages")
     decisions: Mapped[list["ProductionRunStageDecision"]] = relationship(

@@ -36,6 +36,7 @@ type Aggregate = {
   unit: string;
   processes: ProcessAgg[];
   stageRework: { name: string; value: number }[];
+  stageWaste: { name: string; waste: number; avgPct: number }[];
 };
 
 function aggregate(runs: ProductionRun[]): Aggregate {
@@ -68,10 +69,23 @@ function aggregate(runs: ProductionRun[]): Aggregate {
   }
 
   const byStage = new Map<string, number>();
+  const byStageWaste = new Map<string, { waste: number; pctSum: number; pctCount: number }>();
   for (const run of runs) {
     for (const stage of run.stages) {
       const rejected = (stage.decisions ?? []).filter((d) => d.decision === "REJECTED").length;
       if (rejected > 0) byStage.set(stage.stage_name, (byStage.get(stage.stage_name) ?? 0) + rejected);
+
+      const stageWasteWeight = num(stage.waste_weight);
+      const stageWastePct = num(stage.waste_percent);
+      if (stageWasteWeight > 0 || stageWastePct > 0) {
+        const entry = byStageWaste.get(stage.stage_name) ?? { waste: 0, pctSum: 0, pctCount: 0 };
+        entry.waste += stageWasteWeight;
+        if (stageWastePct > 0) {
+          entry.pctSum += stageWastePct;
+          entry.pctCount += 1;
+        }
+        byStageWaste.set(stage.stage_name, entry);
+      }
     }
   }
 
@@ -82,7 +96,14 @@ function aggregate(runs: ProductionRun[]): Aggregate {
     avgWaste,
     unit,
     processes: [...byProcess.values()],
-    stageRework: [...byStage.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+    stageRework: [...byStage.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+    stageWaste: [...byStageWaste.entries()]
+      .map(([name, entry]) => ({
+        name,
+        waste: entry.waste,
+        avgPct: entry.pctCount ? entry.pctSum / entry.pctCount : 0
+      }))
+      .sort((a, b) => b.waste - a.waste)
   };
 }
 
@@ -137,6 +158,7 @@ export function ReportesDashboard() {
   const topStage = current.stageRework[0] ?? null;
   const processByUnits = [...current.processes].sort((a, b) => b.units - a.units);
   const wasteByProcess = [...current.processes].filter((p) => p.waste > 0).sort((a, b) => b.waste - a.waste);
+  const wasteByStage = current.stageWaste;
 
   return (
     <div className="content">
@@ -281,6 +303,40 @@ export function ReportesDashboard() {
                         <td>{proc.name}</td>
                         <td>{fmt(proc.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
                         <td>{proc.wastePctCount ? fmt(proc.wastePctSum / proc.wastePctCount) : "0"}%</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Merma por etapa */}
+          <section className="card reportSection">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Merma por etapa</h2>
+                <p className="panelText">En qué fase se pierde más material — suma de la merma registrada en cada etapa.</p>
+              </div>
+            </div>
+            <div className="tableWrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Etapa</th>
+                    <th>Merma (peso)</th>
+                    <th>Merma promedio %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wasteByStage.length === 0 ? (
+                    <tr><td colSpan={3}>Sin merma registrada por etapa este mes.</td></tr>
+                  ) : (
+                    wasteByStage.map((stage) => (
+                      <tr key={stage.name}>
+                        <td>{stage.name}</td>
+                        <td>{fmt(stage.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
+                        <td>{fmt(stage.avgPct)}%</td>
                       </tr>
                     ))
                   )}

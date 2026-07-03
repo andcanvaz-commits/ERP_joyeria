@@ -1348,6 +1348,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </div>
                     ) : null}
 
+                    {stage.status === "FINALIZADA" && stage.waste_weight !== null ? (
+                      <div
+                        className="processFlowCallout"
+                        style={{
+                          color: Number(stage.waste_percent ?? 0) > Number(selectedRunForStages.waste_limit_percent)
+                            ? "var(--danger, #b42318)"
+                            : "var(--muted)",
+                        }}
+                      >
+                        <strong>Merma de esta fase</strong>
+                        {numericText(stage.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {numericText(stage.waste_percent)}%
+                      </div>
+                    ) : null}
+
                     {stage.decisions && stage.decisions.length > 0 ? (
                       <div className="stageDecisions">
                         {stage.decisions.map((decision, decisionIndex) => (
@@ -1452,8 +1466,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         {numericText(selectedRunForStages.actual_finished_weight)} {selectedRunForStages.raw_material_unit_code}
                       </span>
                       <span>
-                        <strong>Merma</strong>
-                        {numericText(selectedRunForStages.waste_percent)}%
+                        <strong>Merma acumulada</strong>
+                        {numericText(selectedRunForStages.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {numericText(selectedRunForStages.waste_percent)}%
+                        {Number(selectedRunForStages.waste_percent ?? 0) > Number(selectedRunForStages.waste_limit_percent)
+                          ? ` · ⚠ supera el ${numericText(selectedRunForStages.waste_limit_percent)}%`
+                          : ""}
                       </span>
                     </div>
                   ) : null}
