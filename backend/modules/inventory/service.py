@@ -101,10 +101,14 @@ class InventoryService(InventoryIntegrationPort):
         item = self._get_item_or_raise(item_id)
         if item.item_type != "RAW_MATERIAL":
             raise InventoryDomainError("Solo se pueden eliminar materias primas.")
-        if self.repository.list_movements(item_id):
+        if item.current_stock > 0:
             raise InventoryDomainError(
-                "No se puede eliminar una materia prima con movimientos registrados."
+                "No se puede eliminar una materia prima con stock. Deja el stock en cero primero."
             )
+        # Sin stock: se permite eliminar. Se borran tambien sus movimientos para
+        # no dejar historial huerfano (integridad referencial).
+        for movement in self.repository.list_movements(item_id):
+            self.repository.delete_movement(movement)
         self.repository.delete_item(item)
 
     def revert_last_entry(self, item_id: UUID) -> InventoryItemRead:
