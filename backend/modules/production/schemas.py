@@ -34,7 +34,6 @@ class ProductionProcessStageCreate(BaseModel):
     rework_action: str | None = Field(default=None, max_length=1000)
     rework_target_order: int | None = Field(default=None, ge=1)
     order: int = Field(ge=1)
-    estimated_minutes: int | None = Field(default=None, ge=1)
     requires_weighing: bool = False
     is_active: bool = True
     ingredients: list[StageIngredientCreate] = Field(default_factory=list)
@@ -82,7 +81,6 @@ class ProductionProcessStageRead(BaseModel):
     rework_action: str | None = None
     rework_target_order: int | None = None
     stage_order: int
-    estimated_minutes: int | None = None
     requires_weighing: bool
     is_active: bool
     ingredients: list[StageIngredientRead] = Field(default_factory=list)
@@ -123,7 +121,6 @@ class ProductionRunStageFinish(BaseModel):
 
     initial_weight: Decimal | None = Field(default=None, ge=0)
     final_weight: Decimal | None = Field(default=None, ge=0)
-    confirm_early_finish: bool = False
     decision: Literal["APPROVED", "REJECTED"] | None = None
     justification: str | None = Field(default=None, max_length=1000)
 
@@ -154,7 +151,6 @@ class ProductionRunStageRead(BaseModel):
     rework_action: str | None = None
     rework_target_order: int | None = None
     stage_order: int
-    estimated_minutes: int | None = None
     requires_weighing: bool
     status: str
     scheduled_start_at: datetime | None = None

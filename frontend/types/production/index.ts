@@ -15,7 +15,6 @@ export type ProductionProcessStage = {
   rework_action: string | null;
   rework_target_order?: number | null;
   stage_order: number;
-  estimated_minutes: number | null;
   requires_weighing: boolean;
   is_active: boolean;
   ingredients?: StageIngredient[];
@@ -46,7 +45,6 @@ export type ProductionRunStage = {
   quality_check: string | null;
   rework_action: string | null;
   stage_order: number;
-  estimated_minutes: number | null;
   requires_weighing: boolean;
   status: "PENDIENTE" | "EN_PROCESO" | "FINALIZADA";
   scheduled_start_at: string | null;

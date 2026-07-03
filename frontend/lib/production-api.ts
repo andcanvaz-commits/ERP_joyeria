@@ -19,7 +19,6 @@ export type CreateProductionProcessPayload = {
     quality_check?: string | null;
     rework_action?: string | null;
     order: number;
-    estimated_minutes?: number | null;
     requires_weighing: boolean;
     is_active?: boolean;
     ingredients?: Array<{
@@ -89,7 +88,6 @@ export function finishProductionRunStage(
   payload: {
     initial_weight?: string | null;
     final_weight?: string | null;
-    confirm_early_finish?: boolean;
     decision?: "APPROVED" | "REJECTED";
     justification?: string | null;
   },

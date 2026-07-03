@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -92,13 +92,13 @@ EXAMPLE_PROCESSES: tuple[dict, ...] = (
         "material_per_unit": Decimal("10.0000"),
         "waste_limit_percent": Decimal("1"),
         "stages": (
-            {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True, "estimated_minutes": 20,
+            {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True,
              "description": "El metal se funde y se prepara la materia prima."},
-            {"name": "Control de calidad", "stage_type": "CONTROL", "requires_weighing": True, "estimated_minutes": 10,
+            {"name": "Control de calidad", "stage_type": "CONTROL", "requires_weighing": True,
              "description": "Se revisa la pieza y se aprueba o rechaza.",
              "quality_check": "Cumple el estandar de calidad?",
              "rework_action": "Si no cumple, regresa a Fundicion."},
-            {"name": "Acabado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
+            {"name": "Acabado", "stage_type": "PROCESS", "requires_weighing": True,
              "description": "Pulido y acabado final; la pieza queda lista."},
         ),
     },
@@ -150,7 +150,6 @@ class ProductionService:
                 rework_action=stage_data.rework_action,
                 rework_target_order=stage_data.rework_target_order,
                 stage_order=stage_data.order,
-                estimated_minutes=stage_data.estimated_minutes,
                 requires_weighing=stage_data.requires_weighing,
                 is_active=stage_data.is_active,
                 ingredients=[
@@ -211,7 +210,6 @@ class ProductionService:
                 rework_action=stage_data.rework_action,
                 rework_target_order=stage_data.rework_target_order,
                 stage_order=stage_data.order,
-                estimated_minutes=stage_data.estimated_minutes,
                 requires_weighing=stage_data.requires_weighing,
                 is_active=stage_data.is_active,
                 ingredients=[
@@ -326,7 +324,6 @@ class ProductionService:
                     rework_action=stage.rework_action,
                     rework_target_order=stage.rework_target_order,
                     stage_order=stage.stage_order,
-                    estimated_minutes=stage.estimated_minutes,
                     requires_weighing=stage.requires_weighing,
                     status=ProductionRunStageStatus.PENDING,
                     stage_code=_stage_code_for(stage.name, run_seq, stage.stage_order),
@@ -390,16 +387,10 @@ class ProductionService:
         run.started_at = started_at
         run.started_by_user_id = current_user.id
 
-        next_start = started_at
         ordered_stages = sorted(run.stages, key=lambda item: item.stage_order)
         for index, stage in enumerate(ordered_stages):
-            estimated = stage.estimated_minutes or 0
-            next_finish = next_start + timedelta(minutes=estimated)
             stage.status = ProductionRunStageStatus.IN_PROGRESS if index == 0 else ProductionRunStageStatus.PENDING
-            stage.scheduled_start_at = next_start
-            stage.scheduled_finish_at = next_finish
             stage.started_at = started_at if index == 0 else None
-            next_start = next_finish
 
         self.repository.flush()
         return self._read_with_names(run)
@@ -430,9 +421,6 @@ class ProductionService:
             raise ProductionDomainError("Esta etapa requiere registrar el nuevo pesaje.")
 
         now = datetime.utcnow()
-        scheduled_finish_at = stage.scheduled_finish_at.replace(tzinfo=None) if stage.scheduled_finish_at else None
-        if scheduled_finish_at and now < scheduled_finish_at and not payload.confirm_early_finish:
-            raise ProductionDomainError("La etapa esta terminando antes del tiempo estimado. Confirma para continuar.")
 
         requires_decision = stage.stage_type in DECISION_STAGE_TYPES or bool(stage.quality_check)
 

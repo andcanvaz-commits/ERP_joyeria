@@ -40,7 +40,6 @@ type StageForm = {
   reworkAction: string;
   reworkTargetOrder: string;
   requiresWeighing: boolean;
-  estimatedMinutes: string;
   ingredients: Array<{ inventoryItemId: string; quantity: string; unitCode: string }>;
 };
 
@@ -83,7 +82,6 @@ const emptyStage = (): StageForm => ({
   reworkAction: "",
   reworkTargetOrder: "",
   requiresWeighing: false,
-  estimatedMinutes: "",
   ingredients: [],
 });
 
@@ -130,7 +128,6 @@ function processToForm(process: ProductionProcess): ProcessForm {
       reworkAction: stage.rework_action ?? "",
       reworkTargetOrder: stage.rework_target_order ? String(stage.rework_target_order) : "",
       requiresWeighing: stage.requires_weighing,
-      estimatedMinutes: stage.estimated_minutes ? String(stage.estimated_minutes) : "",
       ingredients: (stage.ingredients ?? []).map((ing) => ({
         inventoryItemId: String(ing.inventory_item_id),
         quantity: String(ing.quantity),
@@ -393,19 +390,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return Math.round((done / run.stages.length) * 100);
   }
 
-  function getRunTimingStatus(run: ProductionRun): "on_time" | "warning" | "late" | "no_time" {
-    const current = run.stages.find((s) => s.status === "EN_PROCESO");
-    if (!current?.scheduled_finish_at) return "no_time";
-    const now = Date.now();
-    const finish = new Date(current.scheduled_finish_at).getTime();
-    const start = current.scheduled_start_at ? new Date(current.scheduled_start_at).getTime() : now;
-    if (now > finish) return "late";
-    const total = finish - start;
-    const elapsed = now - start;
-    if (total > 0 && elapsed / total > 0.75) return "warning";
-    return "on_time";
-  }
-
   function getElapsedLabel(isoDate: string | null): string {
     if (!isoDate) return "—";
     const diff = Math.floor((Date.now() - new Date(isoDate).getTime()) / 60000);
@@ -413,31 +397,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     const hours = Math.floor(diff / 60);
     const mins = diff % 60;
     return mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
-  }
-
-  function getStageTimingStatus(stage: ProductionRunStage): "on_time" | "warning" | "late" | "pending" | "done" {
-    if (stage.status === "FINALIZADA") return "done";
-    if (stage.status === "PENDIENTE") return "pending";
-    if (!stage.scheduled_finish_at) return "on_time";
-    const now = Date.now();
-    const finish = new Date(stage.scheduled_finish_at).getTime();
-    const start = stage.scheduled_start_at ? new Date(stage.scheduled_start_at).getTime() : now;
-    if (now > finish) return "late";
-    const total = finish - start;
-    const elapsed = now - start;
-    if (total > 0 && elapsed / total > 0.75) return "warning";
-    return "on_time";
-  }
-
-  function stageTimingLabel(stage: ProductionRunStage) {
-    const ts = getStageTimingStatus(stage);
-    if (ts === "done") return "Finalizada";
-    if (ts === "pending") return "Pendiente";
-    if (!stage.scheduled_finish_at) return "En proceso";
-    const delay = Math.ceil((Date.now() - new Date(stage.scheduled_finish_at).getTime()) / 60000);
-    if (ts === "late") return `Retrasada ${delay} min`;
-    if (ts === "warning") return "Por vencer";
-    return "A tiempo";
   }
 
   function nextStageInModal(stagesCount: number) {
@@ -597,9 +556,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (form.stages.some((stage) => !stage.name.trim())) {
       throw new Error("Todas las etapas agregadas deben tener nombre.");
     }
-    if (form.stages.some((stage) => stage.estimatedMinutes && Number(stage.estimatedMinutes) < 1)) {
-      throw new Error("El tiempo de duracion de cada etapa debe ser mayor a cero.");
-    }
     if (!form.rawMaterialItemId || !form.rawMaterialQuantityPerUnit || Number(form.rawMaterialQuantityPerUnit) <= 0) {
       throw new Error("Selecciona la materia prima y la cantidad por unidad del proceso.");
     }
@@ -623,7 +579,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         rework_action: stage.reworkAction.trim() || null,
         rework_target_order: stage.reworkTargetOrder ? Number(stage.reworkTargetOrder) : null,
         order: index + 1,
-        estimated_minutes: stage.estimatedMinutes ? Number(stage.estimatedMinutes) : null,
         requires_weighing: stage.requiresWeighing,
         is_active: true,
         ingredients: stage.ingredients
@@ -725,7 +680,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   async function handleFinishStage(
     stage: ProductionRunStage,
-    options: { confirmEarlyFinish?: boolean; decision?: "APPROVED" | "REJECTED"; justification?: string } = {}
+    options: { decision?: "APPROVED" | "REJECTED"; justification?: string } = {}
   ) {
     setError(null);
     setSuccess(null);
@@ -734,7 +689,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       const finalWeight = stageWeights[stage.id]?.trim() || null;
       await finishProductionRunStage(stage.id, {
         final_weight: finalWeight,
-        confirm_early_finish: options.confirmEarlyFinish ?? false,
         decision: options.decision,
         justification: options.justification,
       });
@@ -769,17 +723,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       }
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "No se pudo finalizar la etapa.";
-      if (message.includes("antes del tiempo estimado")) {
-        setIsSaving(false);
-        showConfirm(
-          "Finalizar antes del tiempo estimado",
-          `${message} ¿Deseas confirmar igualmente?`,
-          () => void handleFinishStage(stage, { ...options, confirmEarlyFinish: true }),
-          false,
-          "Confirmar igualmente"
-        );
-        return;
-      }
       setError(message);
     } finally {
       setIsSaving(false);
@@ -1096,12 +1039,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <div className="productionRunsVertical">
                   {inProgressRuns.map((run) => {
                     const progress = getRunProgress(run);
-                    const timing = getRunTimingStatus(run);
                     const currentStage = run.stages.find((s) => s.status === "EN_PROCESO") ?? run.stages.find((s) => s.status === "PENDIENTE") ?? null;
                     const doneCount = run.stages.filter((s) => s.status === "FINALIZADA").length;
-                    const timingColorClass = timing === "late" ? "timingLate" : timing === "warning" ? "timingWarning" : "timingOnTime";
-                    const timingBarClass = timing === "late" ? "progressFillLate" : timing === "warning" ? "progressFillWarning" : "";
-                    const timingLabel = timing === "late" ? "Retrasada" : timing === "warning" ? "Por vencer" : timing === "no_time" ? "En proceso" : "A tiempo";
                     return (
                       <div className="productionRunListRow" key={run.id} {...openableProps(() => openRunStagesModal(run), `Gestionar orden ${run.process_name}`)}>
                         {/* Title row: name + code left, timing + button right */}
@@ -1113,8 +1052,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
-                            <span className={`timingDot ${timingColorClass}`} aria-hidden="true" />
-                            <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700 }}>{timingLabel}</span>
                             <button className="button buttonPrimary runInlineBtn" onClick={() => openRunStagesModal(run)} type="button">
                               Gestionar
                             </button>
@@ -1131,7 +1068,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         {/* Progress: bar + fraction inline */}
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div className="progressTrack" style={{ flex: 1 }}>
-                            <div className={`progressFill ${timingBarClass}`} style={{ width: `${progress}%` }} />
+                            <div className="progressFill" style={{ width: `${progress}%` }} />
                           </div>
                           <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, flexShrink: 0 }}>{doneCount}/{run.stages.length}</span>
                         </div>
@@ -1245,7 +1182,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </div>
               <div className="progressTrack">
                 <div
-                  className={`progressFill ${getRunTimingStatus(selectedRunForStages) === "late" ? "progressFillLate" : getRunTimingStatus(selectedRunForStages) === "warning" ? "progressFillWarning" : ""}`}
+                  className="progressFill"
                   style={{ width: `${getRunProgress(selectedRunForStages)}%` }}
                 />
               </div>
@@ -1257,8 +1194,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               const safeIndex = stageModalIndex % stages.length;
               const stage = stages[safeIndex];
               const canManage = canManageStage(stage, safeIndex, stages);
-              const ts = getStageTimingStatus(stage);
-              const timingColorClass = ts === "late" ? "timingLate" : ts === "warning" ? "timingWarning" : ts === "done" ? "timingDone" : ts === "pending" ? "timingPending" : "timingOnTime";
               const statusLabel = stage.status === "FINALIZADA" ? "Finalizada" : stage.status === "EN_PROCESO" ? "En proceso" : "Pendiente";
               return (
                 <>
@@ -1301,7 +1236,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 2 }}>{statusLabel}</div>
                         </div>
                       </div>
-                      <span className={`runStageTimingPill ${timingColorClass}`}>{stageTimingLabel(stage)}</span>
                     </div>
 
                     {canManage && stage.status === "EN_PROCESO" && stageRequiresDecision(stage) ? (
@@ -1872,19 +1806,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       />
                       <span>Requiere pesaje</span>
                     </label>
-                    <label className="fieldGroup">
-                      <span>Tiempo estimado en minutos</span>
-                      <input
-                        aria-label="Tiempo estimado en minutos"
-                        className="field"
-                        disabled={isSaving}
-                        min="1"
-                        onChange={(event) => updateStage("estimatedMinutes", event.target.value)}
-                        placeholder="Ejemplo: 30"
-                        type="number"
-                        value={selectedStage.estimatedMinutes}
-                      />
-                    </label>
                   </div>
 
                   {/* Ingredients section */}
@@ -2083,7 +2004,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 const prevStage = viewingProcess.stages[index - 1];
                 const isFirstInPhase = stage.phase_name && stage.phase_name !== (prevStage?.phase_name ?? null);
                 const stageTypeClass = `processFlowStage${stage.stage_type ?? "PROCESS"}`;
-                const hasMeta = stage.requires_weighing || !!stage.estimated_minutes;
+                const hasMeta = stage.requires_weighing;
                 return (
                   <div key={stage.id}>
                     {isFirstInPhase ? (
@@ -2117,7 +2038,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       {hasMeta ? (
                         <div className="processFlowStageFoot">
                           {stage.requires_weighing ? <span className="processFlowTag">⚖ Requiere pesaje</span> : null}
-                          {stage.estimated_minutes ? <span className="processFlowTag">⏱ {stage.estimated_minutes} min</span> : null}
                         </div>
                       ) : null}
                     </div>
