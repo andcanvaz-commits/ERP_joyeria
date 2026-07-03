@@ -1,15 +1,16 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Boxes, CheckCircle2, Factory, ListChecks, Users } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
-import { getCurrentUser, listUsers, type ManagedUser } from "@/lib/auth-api";
+import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import { listProcesses, listProductionRuns } from "@/lib/production-api";
 import { normalizeRole, type Role } from "@/lib/roles";
-import type { InventoryItem, InventoryItemType, InventoryMovement, InventorySummary } from "@/types/inventory";
-import type { ProductionProcess, ProductionRun } from "@/types/production";
+import type { InventoryItemType } from "@/types/inventory";
+import type { ProductionRun } from "@/types/production";
 
 const INVENTORY_TYPE_LABELS: Record<InventoryItemType, string> = {
   RAW_MATERIAL: "Materia prima",
@@ -48,58 +49,58 @@ function movementDateLabel(value: string) {
   return date.toLocaleDateString("es-EC", { day: "2-digit", month: "short" });
 }
 
+async function fetchDashboardBundle(role: Role) {
+  const isAdmin = role === "admin";
+  const showProcesses = isAdmin || role === "produccion";
+  const showInventory = isAdmin || role === "inventario";
+
+  const [processes, runs, users, inventorySummary, inventoryItems, inventoryMovements] = await Promise.all([
+    showProcesses ? listProcesses() : Promise.resolve([]),
+    role === "produccion" ? listProductionRuns() : Promise.resolve([]),
+    isAdmin ? listUsers() : Promise.resolve([]),
+    showInventory ? getInventorySummary() : Promise.resolve(null),
+    showInventory ? listInventoryItems() : Promise.resolve([]),
+    showInventory ? listInventoryMovements() : Promise.resolve([]),
+  ]);
+
+  return { processes, runs, users, inventorySummary, inventoryItems, inventoryMovements };
+}
+
 export function SystemDashboard() {
-  const [role, setRole] = useState<Role>("unknown");
-  const [processes, setProcesses] = useState<ProductionProcess[]>([]);
-  const [runs, setRuns] = useState<ProductionRun[]>([]);
-  const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [inventorySummary, setInventorySummary] = useState<InventorySummary | null>(null);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
-  const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   useEffect(() => {
-    async function loadDashboard() {
-      if (!isAuthenticated()) {
-        window.location.href = "/login";
-        return;
-      }
-
-      setIsLoading(true);
-      setError(null);
-      try {
-        const me = await getCurrentUser();
-        const currentRole = normalizeRole(me.role);
-        setRole(currentRole);
-        const isAdmin = currentRole === "admin";
-        const showProcesses = isAdmin || currentRole === "produccion";
-        const showInventory = isAdmin || currentRole === "inventario";
-
-        const [nextProcesses, nextRuns, nextUsers, nextInventorySummary, nextInventoryItems, nextInventoryMovements] =
-          await Promise.all([
-            showProcesses ? listProcesses() : Promise.resolve([]),
-            currentRole === "produccion" ? listProductionRuns() : Promise.resolve([]),
-            isAdmin ? listUsers() : Promise.resolve([]),
-            showInventory ? getInventorySummary() : Promise.resolve(null),
-            showInventory ? listInventoryItems() : Promise.resolve([]),
-            showInventory ? listInventoryMovements() : Promise.resolve([]),
-          ]);
-        setProcesses(nextProcesses);
-        setRuns(nextRuns);
-        setUsers(nextUsers);
-        setInventorySummary(nextInventorySummary);
-        setInventoryItems(nextInventoryItems);
-        setInventoryMovements(nextInventoryMovements);
-      } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "No se pudo cargar el dashboard.");
-      } finally {
-        setIsLoading(false);
-      }
+    if (!isAuthenticated()) {
+      window.location.href = "/login";
     }
-
-    void loadDashboard();
   }, []);
+
+  const { data: me, error: meError } = useQuery({
+    queryKey: ["me"],
+    queryFn: getCurrentUser,
+    enabled: isAuthenticated(),
+  });
+
+  const role: Role = me ? normalizeRole(me.role) : "unknown";
+
+  const {
+    data,
+    isLoading: isBundleLoading,
+    error: bundleErrorRaw,
+  } = useQuery({
+    queryKey: ["system-dashboard", role],
+    queryFn: () => fetchDashboardBundle(role),
+    enabled: Boolean(me),
+  });
+
+  const processes = data?.processes ?? [];
+  const runs = data?.runs ?? [];
+  const users = data?.users ?? [];
+  const inventorySummary = data?.inventorySummary ?? null;
+  const inventoryItems = data?.inventoryItems ?? [];
+  const inventoryMovements = data?.inventoryMovements ?? [];
+
+  const isLoading = !me || isBundleLoading;
+  const queryError = meError ?? bundleErrorRaw;
+  const error = queryError ? (queryError instanceof Error ? queryError.message : "No se pudo cargar el dashboard.") : null;
 
   const isAdmin = role === "admin";
   const isProduction = role === "produccion";

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { listProductionRuns } from "@/lib/production-api";
 import type { ProductionRun } from "@/types/production";
 
@@ -120,16 +121,11 @@ function Delta({ current, previous, suffix = "" }: { current: number; previous: 
 }
 
 export function ReportesDashboard() {
-  const [runs, setRuns] = useState<ProductionRun[]>([]);
+  const { data: runs = [], isLoading } = useQuery({
+    queryKey: ["reportes"],
+    queryFn: listProductionRuns,
+  });
   const [selectedMonth, setSelectedMonth] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    listProductionRuns()
-      .then(setRuns)
-      .catch(() => undefined)
-      .finally(() => setIsLoading(false));
-  }, []);
 
   const finished = useMemo(() => runs.filter((run) => run.finished_at), [runs]);
   const months = useMemo(

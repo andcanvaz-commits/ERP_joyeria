@@ -1,13 +1,14 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Minus, Pencil, Plus, Printer, Save, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
-import { getCurrentUser, listUsers, type CurrentUser, type ManagedUser } from "@/lib/auth-api";
+import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { CaliperScale } from "@/components/ui/caliper-scale";
 import {
   createInventoryItem,
@@ -26,7 +27,7 @@ import {
   listProductionRuns,
   receiveProductionRunFinishedProduct,
 } from "@/lib/production-api";
-import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType, InventorySummary } from "@/types/inventory";
+import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS"; label: string }> = [
@@ -188,17 +189,23 @@ function parseInvoiceDetails(content: string) {
   return { accessKey, details, invoiceNumber, supplier };
 }
 
+async function fetchInventoryBundle(canSeeAudit: boolean) {
+  const [summary, items, movements, users, runs] = await Promise.all([
+    getInventorySummary(),
+    listInventoryItems(),
+    listInventoryMovements(),
+    canSeeAudit ? listUsers() : Promise.resolve([]),
+    listProductionRuns(),
+  ]);
+  return { summary, items, movements, users, runs };
+}
+
 export function InventoryDashboard() {
   const xmlInputRef = useRef<HTMLInputElement | null>(null);
   const entryMenuRef = useRef<HTMLDivElement | null>(null);
-  const [summary, setSummary] = useState<InventorySummary | null>(null);
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [movements, setMovements] = useState<InventoryMovement[]>([]);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const queryClient = useQueryClient();
   const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS">("RAW_MATERIAL");
   const [search, setSearch] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -216,46 +223,50 @@ export function InventoryDashboard() {
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
-  const [productionRuns, setProductionRuns] = useState<ProductionRun[]>([]);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
 
-  async function loadInventory() {
+  useEffect(() => {
     if (!isAuthenticated()) {
       window.location.href = "/login";
-      return;
     }
+  }, []);
 
-    setIsLoading(true);
-    setError(null);
-    try {
-      const nextCurrentUser = await getCurrentUser();
-      const canSeeAudit = nextCurrentUser.role === "admin" || nextCurrentUser.role === "Admin";
-      const [nextSummary, nextItems, nextMovements, nextUsers, nextRuns] = await Promise.all([
-        getInventorySummary(),
-        listInventoryItems(),
-        listInventoryMovements(),
-        canSeeAudit ? listUsers() : Promise.resolve([]),
-        listProductionRuns(),
-      ]);
-      setCurrentUser(nextCurrentUser);
-      setUsers(nextUsers);
-      setSummary(nextSummary);
-      setItems(nextItems);
-      setMovements(nextMovements);
-      setProductionRuns(nextRuns);
-      setMovementForm((current) => ({ ...current, item_id: current.item_id || nextItems[0]?.id || "" }));
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo cargar inventario.");
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  const { data: currentUser } = useQuery({
+    queryKey: ["me"],
+    queryFn: getCurrentUser,
+    enabled: isAuthenticated(),
+  });
+  const canSeeAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
+
+  const {
+    data,
+    isLoading: isBundleLoading,
+    error: bundleError,
+  } = useQuery({
+    queryKey: ["inventory"],
+    queryFn: () => fetchInventoryBundle(canSeeAudit),
+    enabled: Boolean(currentUser),
+  });
+
+  const summary = data?.summary ?? null;
+  const items = data?.items ?? [];
+  const movements = data?.movements ?? [];
+  const users = data?.users ?? [];
+  const productionRuns = data?.runs ?? [];
+  const isLoading = !currentUser || isBundleLoading;
 
   useEffect(() => {
-    void loadInventory();
-  }, []);
+    if (bundleError) {
+      setError(bundleError instanceof Error ? bundleError.message : "No se pudo cargar inventario.");
+    }
+  }, [bundleError]);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    setMovementForm((current) => ({ ...current, item_id: current.item_id || items[0]?.id || "" }));
+  }, [items]);
 
   useEffect(() => {
     if (!error && !success) return;
@@ -382,12 +393,11 @@ export function InventoryDashboard() {
       const updated = await approveProductionRunMaterials(run.id);
       setSuccess("Salida de materia prima aprobada. Produccion ya puede iniciar.");
       const nextRuns = await listProductionRuns();
-      setProductionRuns(nextRuns);
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
       }
-      void loadInventory();
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       setPrintPreview({ run: updated, mode: "entrega" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
@@ -405,11 +415,11 @@ export function InventoryDashboard() {
       await rejectProductionRunMaterials(run.id, reason);
       setSuccess("Solicitud rechazada. La orden fue cancelada.");
       const nextRuns = await listProductionRuns();
-      setProductionRuns(nextRuns);
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
       }
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
     } finally {
@@ -424,12 +434,11 @@ export function InventoryDashboard() {
       const updated = await receiveProductionRunFinishedProduct(run.id);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
-      setProductionRuns(nextRuns);
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
       }
-      void loadInventory();
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       setPrintPreview({ run: updated, mode: "recepcion" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
@@ -522,7 +531,7 @@ export function InventoryDashboard() {
         setSuccess("Item creado correctamente.");
       }
       setIsItemFormOpen(false);
-      await loadInventory();
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo guardar el item.");
     } finally {
@@ -544,7 +553,7 @@ export function InventoryDashboard() {
       setSuccess("Movimiento registrado correctamente.");
       setIsMovementFormOpen(false);
       setMovementForm(emptyMovementForm());
-      await loadInventory();
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo registrar el movimiento.");
     } finally {
@@ -607,7 +616,7 @@ export function InventoryDashboard() {
         throw new Error("No encontramos cantidades validas para ingresar al inventario.");
       }
       setSuccess(`Factura XML importada: ${imported} lineas registradas.`);
-      await loadInventory();
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo importar la factura XML.");
     } finally {

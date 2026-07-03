@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Eye, Factory, Pencil, Play, Plus, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -11,7 +12,6 @@ import {
   deleteUser,
   getCurrentUser,
   listUsers,
-  type CurrentUser,
   type ManagedUser,
   resetUserPassword,
   updateUser,
@@ -126,14 +126,54 @@ function processToForm(process: ProductionProcess): ProcessForm {
   };
 }
 
+async function fetchProductionBundle(variant: "production" | "maintenance") {
+  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials] = await Promise.all([
+    listProcesses(),
+    variant === "maintenance" ? listUsers() : Promise.resolve([]),
+    variant === "production" ? listProductionRuns() : Promise.resolve([]),
+    listInventoryItems("RAW_MATERIAL"),
+  ]);
+  return {
+    processes: nextProcesses,
+    users: nextUsers,
+    runs: nextRuns,
+    rawMaterials: nextRawMaterials,
+  };
+}
+
+const EMPTY_PROCESSES: ProductionProcess[] = [];
+const EMPTY_USERS: ManagedUser[] = [];
+const EMPTY_RUNS: ProductionRun[] = [];
+const EMPTY_RAW_MATERIALS: InventoryItem[] = [];
+
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
+  const queryClient = useQueryClient();
+
+  const { data: currentUser = null, error: meError } = useQuery({
+    queryKey: ["me"],
+    queryFn: getCurrentUser,
+    enabled: isAuthenticated(),
+  });
+
+  const {
+    data: bundle,
+    isLoading: isBundleLoading,
+    error: bundleError,
+  } = useQuery({
+    queryKey: ["production", variant],
+    queryFn: () => fetchProductionBundle(variant),
+    enabled: Boolean(currentUser),
+  });
+
+  const processes = bundle?.processes ?? EMPTY_PROCESSES;
+  const users = bundle?.users ?? EMPTY_USERS;
+  const runs = bundle?.runs ?? EMPTY_RUNS;
+  const rawMaterials = bundle?.rawMaterials ?? EMPTY_RAW_MATERIALS;
+  const isLoading = !currentUser || isBundleLoading;
+
+  const reload = () => queryClient.invalidateQueries({ queryKey: ["production", variant] });
+
   const [form, setForm] = useState<ProcessForm>(emptyProcessForm);
-  const [processes, setProcesses] = useState<ProductionProcess[]>([]);
-  const [runs, setRuns] = useState<ProductionRun[]>([]);
-  const [rawMaterials, setRawMaterials] = useState<InventoryItem[]>([]);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -191,39 +231,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return finished[finished.length - 1].finished_by_name ?? "—";
   }
 
-  async function loadData() {
-    setIsLoading(true);
-    setError(null);
-    try {
-      if (!isAuthenticated()) {
-        window.location.href = "/login";
-        return;
-      }
-      const [user, nextProcesses, nextUsers, nextRuns, nextRawMaterials] = await Promise.all([
-        getCurrentUser(),
-        listProcesses(),
-        variant === "maintenance" ? listUsers() : Promise.resolve([]),
-        variant === "production" ? listProductionRuns() : Promise.resolve([]),
-        listInventoryItems("RAW_MATERIAL"),
-      ]);
-      setCurrentUser(user);
-      setProcesses(nextProcesses);
-      setUsers(nextUsers);
-      setRuns(nextRuns);
-      setRawMaterials(nextRawMaterials);
-      setSelectedRunForStages((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
-      setSelectedStatsRun((current) => (current ? nextRuns.find((run) => run.id === current.id) ?? null : null));
-      setSelectedProcessId((current) => current || nextProcesses.find((process) => process.is_active)?.id || "");
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo cargar produccion.");
-    } finally {
-      setIsLoading(false);
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      window.location.href = "/login";
     }
-  }
+  }, []);
 
   useEffect(() => {
-    void loadData();
-  }, []);
+    const queryError = meError ?? bundleError;
+    if (queryError) {
+      setError(queryError instanceof Error ? queryError.message : "No se pudo cargar produccion.");
+    }
+  }, [meError, bundleError]);
+
+  useEffect(() => {
+    setSelectedRunForStages((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
+    setSelectedStatsRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
+  }, [runs]);
+
+  useEffect(() => {
+    setSelectedProcessId((current) => current || processes.find((process) => process.is_active)?.id || "");
+  }, [processes]);
 
   useEffect(() => {
     if (!error && !success) return;
@@ -579,7 +607,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         await createProcess(payload);
         setSuccess("Proceso creado correctamente.");
       }
-      await loadData();
+      await reload();
       setIsFormOpen(false);
       if (formMode === "edit" && returnToProcesses) {
         setIsProcessesOpen(true);
@@ -602,7 +630,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         try {
           await deleteProcess(process.id);
           setSuccess("Proceso eliminado.");
-          await loadData();
+          await reload();
         } catch (nextError) {
           setError(nextError instanceof Error ? nextError.message : "No se pudo eliminar el proceso.");
         }
@@ -628,7 +656,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     try {
       await createProductionRun({ process_id: selectedProcess.id, quantity: runQuantity });
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima.");
-      await loadData();
+      await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo crear la orden de produccion.");
     } finally {
@@ -643,7 +671,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     try {
       await startProductionRun(run.id);
       setSuccess("Produccion iniciada.");
-      await loadData();
+      await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la produccion.");
     } finally {
@@ -677,7 +705,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           ? "Etapa rechazada. La produccion regreso a la etapa correspondiente."
           : "Etapa registrada correctamente."
       );
-      await loadData();
+      await reload();
       if (options.decision === "REJECTED") {
         // Volver en pantalla a la tarjeta de la etapa destino.
         const targetOrder = stage.rework_target_order ?? (stage.stage_order > 1 ? stage.stage_order - 1 : stage.stage_order);
@@ -800,7 +828,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         });
         setSuccess("Usuario creado correctamente.");
       }
-      await loadData();
+      await reload();
       setIsUserCreateOpen(false);
       if (userFormMode === "edit" && returnToUsers) {
         setIsUsersOpen(true);
@@ -825,7 +853,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         try {
           await deleteUser(user.id);
           setSuccess("Usuario eliminado.");
-          await loadData();
+          await reload();
         } catch (nextError) {
           setError(nextError instanceof Error ? nextError.message : "No se pudo eliminar el usuario.");
         }
@@ -847,7 +875,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       const updatedUser = await deactivateUser(user.id);
       setViewingUser((current) => (current?.id === updatedUser.id ? updatedUser : current));
       setSuccess("Usuario desactivado.");
-      await loadData();
+      await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo desactivar el usuario.");
     }
@@ -860,7 +888,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       const updatedUser = await activateUser(user.id);
       setViewingUser((current) => (current?.id === updatedUser.id ? updatedUser : current));
       setSuccess("Usuario activado.");
-      await loadData();
+      await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo activar el usuario.");
     }
@@ -880,7 +908,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         temporaryPassword: response.temporary_password,
       });
       setSuccess("Contrasena restablecida correctamente.");
-      await loadData();
+      await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo restablecer la contrasena.");
     }

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Eye, X } from "lucide-react";
+import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
-import { normalizeRole, type Role } from "@/lib/roles";
+import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
 import type { ProductionRun } from "@/types/production";
 
@@ -136,30 +138,26 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
 }
 
 export function SolicitudesView() {
-  const [role, setRole] = useState<Role | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [runs, setRuns] = useState<ProductionRun[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<ProductionRun | null>(null);
 
-  useEffect(() => {
-    async function init() {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const user = await getCurrentUser();
-        setRole(normalizeRole(user.role));
-        setUserId(user.id);
-        setRuns(await listProductionRuns());
-      } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "No se pudieron cargar las solicitudes.");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    void init();
-  }, []);
+  const { data: currentUser, isLoading: isLoadingUser } = useQuery({
+    queryKey: ["me"],
+    queryFn: getCurrentUser,
+    enabled: isAuthenticated(),
+  });
+  const {
+    data: runs = [],
+    isLoading: isLoadingRuns,
+    error: queryError,
+  } = useQuery({
+    queryKey: ["solicitudes"],
+    queryFn: listProductionRuns,
+  });
+
+  const role = currentUser ? normalizeRole(currentUser.role) : null;
+  const userId = currentUser?.id ?? null;
+  const isLoading = isLoadingUser || isLoadingRuns;
+  const error = queryError instanceof Error ? queryError.message : null;
 
   const myRuns = useMemo(() => runs.filter((run) => run.created_by_user_id === userId), [runs, userId]);
   const respondedRuns = useMemo(() => runs.filter((run) => run.status !== "PENDIENTE_INVENTARIO"), [runs]);

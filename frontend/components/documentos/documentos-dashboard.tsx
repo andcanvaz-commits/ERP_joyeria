@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
 import { FileText, Printer } from "lucide-react";
 import { listProductionRuns } from "@/lib/production-api";
 import { listInventoryItems } from "@/lib/inventory-api";
@@ -25,22 +26,20 @@ const STATUS_LABEL: Record<ProductionRun["status"], string> = {
   CANCELADA: "Cancelada"
 };
 
+async function fetchDocumentosBundle(): Promise<{ runs: ProductionRun[]; items: InventoryItem[] }> {
+  const [runs, items] = await Promise.all([listProductionRuns(), listInventoryItems("TODOS")]);
+  return { runs, items };
+}
+
 export function DocumentosDashboard() {
-  const [runs, setRuns] = useState<ProductionRun[]>([]);
-  const [items, setItems] = useState<InventoryItem[]>([]);
+  const { data, isLoading } = useQuery({
+    queryKey: ["documentos"],
+    queryFn: fetchDocumentosBundle
+  });
+  const runs = data?.runs ?? [];
+  const items = data?.items ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState<DocMode | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.all([listProductionRuns(), listInventoryItems("TODOS")])
-      .then(([runList, itemList]) => {
-        setRuns(runList);
-        setItems(itemList);
-      })
-      .catch(() => undefined)
-      .finally(() => setIsLoading(false));
-  }, []);
 
   const itemNames = useMemo(() => buildItemNameMap(items), [items]);
   const selectedRun = runs.find((run) => run.id === selectedId) ?? null;

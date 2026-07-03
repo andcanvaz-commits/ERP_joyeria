@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Boxes, ListChecks } from "lucide-react";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventorySummary } from "@/types/inventory";
@@ -38,34 +39,25 @@ function isLowStock(item: InventoryItem) {
   return Number(item.current_stock) <= Number(item.minimum_stock);
 }
 
-export function InventoryReports() {
-  const [summary, setSummary] = useState<InventorySummary | null>(null);
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [movements, setMovements] = useState<InventoryMovement[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+async function fetchInventoryReportsBundle() {
+  const [summary, items, movements] = await Promise.all([
+    getInventorySummary(),
+    listInventoryItems(),
+    listInventoryMovements(),
+  ]);
+  return { summary, items, movements };
+}
 
-  useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const [nextSummary, nextItems, nextMovements] = await Promise.all([
-          getInventorySummary(),
-          listInventoryItems(),
-          listInventoryMovements(),
-        ]);
-        setSummary(nextSummary);
-        setItems(nextItems);
-        setMovements(nextMovements);
-      } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "No se pudieron cargar los reportes.");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    void load();
-  }, []);
+export function InventoryReports() {
+  const { data, isLoading, error: queryError } = useQuery({
+    queryKey: ["inventory-reports"],
+    queryFn: fetchInventoryReportsBundle,
+  });
+
+  const summary: InventorySummary | null = data?.summary ?? null;
+  const items: InventoryItem[] = data?.items ?? [];
+  const movements: InventoryMovement[] = data?.movements ?? [];
+  const error = queryError instanceof Error ? queryError.message : queryError ? "No se pudieron cargar los reportes." : null;
 
   const lowStock = useMemo(() => items.filter(isLowStock), [items]);
   const sortedItems = useMemo(
