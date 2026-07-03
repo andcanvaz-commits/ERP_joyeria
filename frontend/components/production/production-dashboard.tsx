@@ -1222,11 +1222,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           ) : null}
 
           {/* History */}
-          <section className="card panelBody" aria-label="Historial de produccion">
+          <section className="card panelBody" aria-label="Movimientos de produccion">
             <div className="panelHeader">
               <div>
-                <h2 className="panelTitle">Historial reciente</h2>
-                <p className="panelText">Ultimas producciones finalizadas</p>
+                <h2 className="panelTitle">Movimientos</h2>
+                <p className="panelText">Movimientos de los ultimos 30 dias</p>
               </div>
               <button
                 aria-label="Ver historial completo"
