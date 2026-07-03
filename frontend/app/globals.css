@@ -3821,9 +3821,13 @@ textarea:disabled {
 
 .materialRow {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
   align-items: end;
+}
+.materialRow .field {
+  padding: 7px 9px;
+  font-size: 13px;
 }
 @media (max-width: 640px) {
   .materialRow { grid-template-columns: 1fr; }
