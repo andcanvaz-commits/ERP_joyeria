@@ -78,9 +78,9 @@ textarea {
 }
 
 .sidebar {
-  border-right: 1px solid var(--sidebar-border);
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
+  border-right: 1px solid var(--line);
   padding: 0 0 20px;
 }
 
@@ -141,27 +141,26 @@ textarea {
   gap: 11px;
   border-radius: 8px;
   border-left: 2px solid transparent;
-  color: var(--sidebar-muted);
+  color: var(--sidebar-text);
   padding: 10px 12px;
   font-size: 14px;
+  font-weight: 500;
   transition: color 0.15s, background 0.15s;
 }
 
 .navItem:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--sidebar-text);
+  background: var(--surface-2);
 }
 
-.navItemActive,
-.navItemActive:hover {
-  background: var(--sidebar-active-bg);
-  border-left-color: var(--primary);
-  color: #f1ebdf;
-  font-weight: 700;
+.navItemActive {
+  border-left: 2px solid var(--gold);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .navItemActive svg {
-  color: var(--primary);
+  color: var(--gold-deep);
 }
 
 .mainArea {
@@ -824,10 +823,34 @@ textarea {
 }
 
 .card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  position: relative;
   background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
   box-shadow: var(--shadow);
+}
+
+.card::before,
+.card::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-color: var(--gold);
+  border-style: solid;
+  opacity: 0.5;
+}
+
+.card::before {
+  top: 6px;
+  left: 6px;
+  border-width: 1px 0 0 1px;
+}
+
+.card::after {
+  bottom: 6px;
+  right: 6px;
+  border-width: 0 1px 1px 0;
 }
 
 .metric {
