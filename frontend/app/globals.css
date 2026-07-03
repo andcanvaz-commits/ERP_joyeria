@@ -3747,3 +3747,32 @@ textarea:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.caliper { display: flex; align-items: center; gap: 10px; }
+.caliperTrack {
+  position: relative; flex: 1; height: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.caliperTick {
+  position: absolute; bottom: 0; width: 1px; height: 5px;
+  background: var(--line);
+}
+.caliperFill {
+  position: absolute; bottom: 0; left: 0; height: 2px;
+  background: var(--ink);
+}
+.caliperMarker {
+  position: absolute; bottom: -2px; width: 2px; height: 12px;
+  background: var(--gold); transform: translateX(-1px);
+}
+.caliperLimit {
+  position: absolute; bottom: 2px; width: 0; height: 0;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-bottom: 6px solid var(--muted); transform: translateX(-4px);
+}
+.caliperOver .caliperFill { background: var(--danger); }
+.caliperOver .caliperMarker { background: var(--danger); }
+.caliperLabel { font-size: 12px; color: var(--muted); flex-shrink: 0; min-width: 42px; text-align: right; }
+@media (prefers-reduced-motion: no-preference) {
+  .caliperFill, .caliperMarker { transition: left .25s ease, width .25s ease; }
+}
