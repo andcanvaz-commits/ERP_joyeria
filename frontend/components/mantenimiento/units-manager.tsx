@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import { createUnit, deleteUnit, listUnits } from "@/lib/units-api";
+import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 
 export function UnitsManager({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -12,6 +13,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
@@ -33,7 +35,9 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, name: string) {
+    const ok = await confirmDelete(confirm, name);
+    if (!ok) return;
     setError(null);
     try {
       await deleteUnit(id);
@@ -106,7 +110,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
                     <button
                       aria-label={`Eliminar ${unit.code}`}
                       className="iconOnlyButton dangerIconButton"
-                      onClick={() => void handleDelete(unit.id)}
+                      onClick={() => void handleDelete(unit.id, unit.label)}
                       type="button"
                     >
                       <Trash2 aria-hidden="true" size={14} />
@@ -125,6 +129,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
           </table>
         </div>
       </section>
+      {dialog}
     </div>
   );
 }

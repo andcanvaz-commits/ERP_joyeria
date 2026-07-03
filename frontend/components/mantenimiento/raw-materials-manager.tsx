@@ -2,9 +2,11 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, X } from "lucide-react";
-import { createInventoryItem, listInventoryItems } from "@/lib/inventory-api";
+import { Plus, Trash2, X } from "lucide-react";
+import type { InventoryItem } from "@/types/inventory";
+import { createInventoryItem, deleteInventoryItem, listInventoryItems } from "@/lib/inventory-api";
 import { listUnits } from "@/lib/units-api";
+import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 
 export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -20,6 +22,20 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
   const [unitCode, setUnitCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const { confirm, dialog } = useConfirm();
+
+  async function handleDelete(item: InventoryItem) {
+    const ok = await confirmDelete(confirm, item.material_type ?? item.name);
+    if (!ok) return;
+    setError(null);
+    try {
+      await deleteInventoryItem(item.id);
+      await queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
+    }
+  }
 
   const unitOptions = useMemo(
     () => units.map((unit) => ({ value: unit.code, label: `${unit.label} (${unit.code})` })),
@@ -105,7 +121,7 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
           </div>
         </form>
 
-        <div className="tableWrap" style={{ marginTop: 14, maxHeight: 320, overflowY: "auto" }}>
+        <div className="tableWrap" style={{ marginTop: 14, maxHeight: 200, overflowY: "auto" }}>
           <table className="table">
             <thead>
               <tr>
@@ -113,6 +129,7 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
                 <th>Tipo</th>
                 <th>Ley/pureza</th>
                 <th>Unidad</th>
+                <th aria-label="Acciones" />
               </tr>
             </thead>
             <tbody>
@@ -122,17 +139,28 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
                   <td>{item.material_type ?? item.name}</td>
                   <td>{item.purity ?? "—"}</td>
                   <td>{item.unit_code}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <button
+                      aria-label={`Eliminar ${item.material_type ?? item.name}`}
+                      className="iconOnlyButton dangerIconButton"
+                      onClick={() => void handleDelete(item)}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {!isLoading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={4}><div className="emptyState">Sin materias primas. Crea la primera.</div></td>
+                  <td colSpan={5}><div className="emptyState">Sin materias primas. Crea la primera.</div></td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
       </section>
+      {dialog}
     </div>
   );
 }

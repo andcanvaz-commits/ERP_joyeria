@@ -10,6 +10,7 @@ import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { CaliperScale } from "@/components/ui/caliper-scale";
+import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listUnits } from "@/lib/units-api";
 import {
   createInventoryItem,
@@ -232,14 +233,8 @@ export function InventoryDashboard() {
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
-  // Modal de confirmacion (reemplaza a window.confirm/alert; todo con modales).
-  const [confirmModal, setConfirmModal] = useState<{
-    title: string;
-    message: string;
-    confirmLabel: string;
-    danger?: boolean;
-    onConfirm: () => Promise<void> | void;
-  } | null>(null);
+  // Confirmaciones por modal (nada de window.confirm); doble confirmacion para borrar.
+  const { confirm, dialog: confirmDialog } = useConfirm();
   // Slot del topbar (AppShell) donde se inyecta la bandeja de solicitudes.
   const [topbarSlot, setTopbarSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -545,43 +540,36 @@ export function InventoryDashboard() {
     setIsItemFormOpen(true);
   }
 
-  function handleDeleteItem(item: InventoryItem) {
-    setConfirmModal({
-      title: "Eliminar materia prima",
-      message: `¿Eliminar "${item.material_type ?? item.name}"? Esta accion no se puede deshacer.`,
-      confirmLabel: "Eliminar",
-      danger: true,
-      onConfirm: async () => {
-        setError(null);
-        try {
-          await deleteInventoryItem(item.id);
-          setSuccess("Materia prima eliminada.");
-          await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
-        }
-      },
-    });
+  async function handleDeleteItem(item: InventoryItem) {
+    const ok = await confirmDelete(confirm, item.material_type ?? item.name);
+    if (!ok) return;
+    setError(null);
+    try {
+      await deleteInventoryItem(item.id);
+      setSuccess("Materia prima eliminada.");
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
+    }
   }
 
-  function handleRevertLastEntry(item: InventoryItem) {
-    setConfirmModal({
+  async function handleRevertLastEntry(item: InventoryItem) {
+    const ok = await confirm({
       title: "Revertir último lote",
       message: `¿Revertir la última entrada de lote de "${item.material_type ?? item.name}"? Se ajustarán el stock y el costo promedio.`,
       confirmLabel: "Revertir",
       danger: true,
-      onConfirm: async () => {
-        setError(null);
-        try {
-          await revertLastEntry(item.id);
-          setSuccess("Último lote revertido.");
-          setViewingItem(null);
-          await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-        } catch (err) {
-          setError(err instanceof Error ? err.message : "No se pudo revertir el lote.");
-        }
-      },
     });
+    if (!ok) return;
+    setError(null);
+    try {
+      await revertLastEntry(item.id);
+      setSuccess("Último lote revertido.");
+      setViewingItem(null);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo revertir el lote.");
+    }
   }
 
   async function handleSaveItem(event: FormEvent<HTMLFormElement>) {
@@ -1302,33 +1290,7 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
-      {confirmModal ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label={confirmModal.title}>
-          <section className="modalWindow confirmWindow">
-            <div className="modalHeader">
-              <div><h2>{confirmModal.title}</h2></div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setConfirmModal(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <p className="panelText">{confirmModal.message}</p>
-            <div className="modalActions">
-              <button className="button" onClick={() => setConfirmModal(null)} type="button">Cancelar</button>
-              <button
-                className={`button ${confirmModal.danger ? "buttonDanger" : "buttonPrimary"}`}
-                onClick={async () => {
-                  const action = confirmModal.onConfirm;
-                  setConfirmModal(null);
-                  await action();
-                }}
-                type="button"
-              >
-                {confirmModal.confirmLabel}
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
+      {confirmDialog}
 
       {viewingMovement ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de movimiento">
