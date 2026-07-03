@@ -230,6 +230,11 @@ export function InventoryDashboard() {
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
+  // Slot del topbar (AppShell) donde se inyecta la bandeja de solicitudes.
+  const [topbarSlot, setTopbarSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setTopbarSlot(document.getElementById("topbarSlot"));
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated()) {
@@ -712,17 +717,25 @@ export function InventoryDashboard() {
           <span className="metricLabel">Terminados</span>
           <strong className="metricValue">{summary?.finished_products ?? 0}</strong>
         </article>
-        <button
-          className="card metric metricButton"
-          onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
-          type="button"
-          aria-label="Bandeja de solicitudes de produccion"
-        >
-          <Inbox aria-hidden="true" size={22} />
-          <span className="metricLabel">Solicitudes</span>
-          <strong className="metricValue">{pendingInventoryRuns.length + pendingReceptionRuns.length}</strong>
-        </button>
       </section>
+
+      {topbarSlot
+        ? createPortal(
+            <button
+              className="topbarInbox"
+              onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+              type="button"
+              aria-label="Bandeja de solicitudes de produccion"
+            >
+              <Inbox aria-hidden="true" size={18} />
+              Solicitudes
+              {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
+                <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
+              ) : null}
+            </button>,
+            topbarSlot,
+          )
+        : null}
 
       <section className="inventoryShell">
         <article className="card panelBody inventoryPanel">

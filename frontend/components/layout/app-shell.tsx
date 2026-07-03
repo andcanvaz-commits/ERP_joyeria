@@ -150,6 +150,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <strong>{currentPage.title}</strong>
             <span>{currentPage.subtitle}</span>
           </div>
+          {/* Slot para acciones de la pagina (ej. bandeja de solicitudes en inventario). */}
+          <div id="topbarSlot" className="topbarSlot" />
           <div className="profileMenu" ref={menuRef}>
             <button
               aria-expanded={menuOpen}
