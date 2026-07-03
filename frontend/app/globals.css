@@ -85,10 +85,9 @@ textarea {
   display: flex;
   flex-direction: column;
 }
-.sidebar > .nav { flex: 1; align-content: start; }
-/* Perfil al fondo de la sidebar; el dropdown abre hacia arriba. */
+/* Perfil justo debajo del ultimo item del menu (Estadistica). */
 .profileMenu.sidebarProfile {
-  margin: auto 12px 0;
+  margin: 14px 12px 0;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
@@ -3882,7 +3881,6 @@ textarea:disabled {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 7px 12px;
-  margin-right: 14px;
   background: var(--surface);
   color: var(--ink);
   font: inherit;
