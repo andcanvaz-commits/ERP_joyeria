@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 type ConfirmOpts = {
@@ -25,6 +25,24 @@ export function useConfirm(): { confirm: (opts: ConfirmOpts) => Promise<boolean>
     state?.resolve(value);
     setState(null);
   }
+
+  // Enter = confirmar, Escape = cancelar, sin depender del foco.
+  useEffect(() => {
+    if (!state) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        state?.resolve(true);
+        setState(null);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        state?.resolve(false);
+        setState(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state]);
 
   const dialog: ReactNode = state ? (
     <div
