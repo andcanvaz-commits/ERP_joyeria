@@ -3818,3 +3818,13 @@ textarea:disabled {
 .kpiNum::after { content: ""; display: block; height: 2px; width: 28px; background: var(--gold); margin-top: 4px; }
 .kpiCard .kpiLabel { font-family: var(--font-display, sans-serif); text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); }
 
+
+.materialRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+@media (max-width: 640px) {
+  .materialRow { grid-template-columns: 1fr; }
+}

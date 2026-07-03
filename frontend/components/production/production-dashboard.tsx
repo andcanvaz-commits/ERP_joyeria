@@ -1597,7 +1597,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               />
             </label>
 
-            <div className="formGrid">
+            <div className="materialRow">
               <label className="fieldGroup">
                 <span>Materia prima por unidad</span>
                 <select
