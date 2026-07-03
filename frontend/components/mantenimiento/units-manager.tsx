@@ -8,7 +8,6 @@ import { createUnit, deleteUnit, listUnits } from "@/lib/units-api";
 export function UnitsManager({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: units = [], isLoading } = useQuery({ queryKey: ["units"], queryFn: listUnits });
-  const [code, setCode] = useState("");
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -16,14 +15,13 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    if (!code.trim() || !label.trim()) {
-      setError("Completa el código y el nombre de la unidad.");
+    if (!label.trim()) {
+      setError("Escribe el nombre de la unidad.");
       return;
     }
     setIsSaving(true);
     try {
-      await createUnit({ code: code.trim(), label: label.trim() });
-      setCode("");
+      await createUnit({ label: label.trim() });
       setLabel("");
       await queryClient.invalidateQueries({ queryKey: ["units"] });
     } catch (err) {
@@ -58,20 +56,9 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
 
         {error ? <div className="notice noticeError">{error}</div> : null}
 
-        <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "end" }}>
-          <label className="fieldGroup" style={{ width: 120 }}>
-            <span>Código</span>
-            <input
-              className="field"
-              disabled={isSaving}
-              maxLength={20}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="ej. g"
-              value={code}
-            />
-          </label>
-          <label className="fieldGroup" style={{ flex: 1 }}>
-            <span>Nombre</span>
+        <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <label className="fieldGroup" style={{ flex: 1, minWidth: 0 }}>
+            <span>Nombre de la unidad</span>
             <input
               className="field"
               disabled={isSaving}
@@ -81,7 +68,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
               value={label}
             />
           </label>
-          <button className="button buttonPrimary" disabled={isSaving} type="submit">
+          <button className="button buttonPrimary" disabled={isSaving} type="submit" style={{ flexShrink: 0 }}>
             <Plus aria-hidden="true" size={14} /> Agregar
           </button>
         </form>

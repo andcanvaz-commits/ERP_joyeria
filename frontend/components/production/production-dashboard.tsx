@@ -193,6 +193,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
+  const [isDataOpen, setIsDataOpen] = useState(false);
   const [isUnitsOpen, setIsUnitsOpen] = useState(false);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
@@ -1045,10 +1046,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           <section className="maintenanceSection" aria-label="Datos del sistema">
             <h2>Datos</h2>
             <div className="maintenanceGrid">
-              <button className="maintenanceTile" onClick={() => setIsUnitsOpen(true)} type="button">
+              <button className="maintenanceTile" onClick={() => setIsDataOpen(true)} type="button">
                 <Ruler aria-hidden="true" size={22} />
-                <strong>Unidades de medida</strong>
-                <span>Gestiona las unidades del inventario.</span>
+                <strong>Datos</strong>
+                <span>Gestiona las listas del sistema.</span>
               </button>
             </div>
           </section>
@@ -1991,6 +1992,36 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {isDataOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Datos del sistema">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Datos del sistema</h2>
+                <p className="panelText">Selecciona una lista para gestionar.</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsDataOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="maintenanceGrid">
+              <button
+                className="maintenanceTile"
+                onClick={() => {
+                  setIsDataOpen(false);
+                  setIsUnitsOpen(true);
+                }}
+                type="button"
+              >
+                <Ruler aria-hidden="true" size={22} />
+                <strong>Unidades de medida</strong>
+                <span>Unidades del combo de inventario.</span>
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
 

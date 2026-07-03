@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from sqlalchemy import select
@@ -36,15 +37,32 @@ class UnitsService:
         )
         return [UnitRead.model_validate(row) for row in rows]
 
-    def create_unit(self, payload: UnitCreate) -> UnitRead:
-        code = payload.code.strip()
-        existing = (
+    def _code_taken(self, code: str) -> bool:
+        return (
             self.session.execute(select(UnitOfMeasure).where(UnitOfMeasure.code == code))
             .scalars()
             .first()
+            is not None
         )
-        if existing is not None:
-            raise UnitError("Ya existe una unidad con ese codigo.")
+
+    def _generate_code(self, label: str) -> str:
+        base = re.sub(r"[^a-z0-9]+", "", label.lower())[:16] or "unidad"
+        code = base
+        counter = 2
+        while self._code_taken(code):
+            suffix = str(counter)
+            code = base[: 20 - len(suffix)] + suffix
+            counter += 1
+        return code
+
+    def create_unit(self, payload: UnitCreate) -> UnitRead:
+        provided = (payload.code or "").strip()
+        if provided:
+            if self._code_taken(provided):
+                raise UnitError("Ya existe una unidad con ese codigo.")
+            code = provided
+        else:
+            code = self._generate_code(payload.label)
         unit = UnitOfMeasure(code=code, label=payload.label.strip())
         self.session.add(unit)
         self.session.flush()

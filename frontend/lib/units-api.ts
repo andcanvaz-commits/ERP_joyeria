@@ -11,7 +11,7 @@ export function listUnits() {
   return apiRequest<Unit[]>("/api/units");
 }
 
-export function createUnit(payload: { code: string; label: string }) {
+export function createUnit(payload: { label: string; code?: string }) {
   return apiRequest<Unit>("/api/units", {
     method: "POST",
     body: JSON.stringify(payload),
