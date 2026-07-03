@@ -675,8 +675,9 @@ textarea {
 .donutChart strong {
   align-self: end;
   font-family: var(--font-display, "Arial Narrow"), sans-serif;
-  font-size: 30px;
+  font-size: 22px;
   font-weight: 700;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 
