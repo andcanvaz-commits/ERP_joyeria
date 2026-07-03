@@ -536,7 +536,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
     return {
       name: processName,
-      product_code: null,
       description: form.description.trim() || null,
       version: 1,
       raw_material_item_id: form.rawMaterialItemId,
@@ -1923,7 +1922,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{viewingProcess.name}</h2>
                 <p>
                   {viewingProcess.code ? `Proceso ${viewingProcess.code} · ` : ""}
-                  {viewingProcess.product_code ? `Producto ${viewingProcess.product_code} · ` : ""}
                   {viewingProcess.stages.length} etapas · v{viewingProcess.version ?? 1}
                 </p>
               </div>

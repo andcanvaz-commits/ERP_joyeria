@@ -87,8 +87,7 @@ def _populate_run_names(session, reads: list, runs: list) -> None:
 EXAMPLE_PROCESSES: tuple[dict, ...] = (
     {
         "name": "PLATA CADENA BB",
-        "description": "Proceso de ejemplo con material, categoria y modelo asignados.",
-        "product_code": "20600049999",
+        "description": "Proceso de ejemplo.",
         "material_per_unit": Decimal("10.0000"),
         "waste_limit_percent": Decimal("1"),
         "stages": (
@@ -166,7 +165,6 @@ class ProductionService:
         process = ProductionProcess(
             name=payload.name,
             code=self._next_process_code(),
-            product_code=payload.product_code,
             description=payload.description,
             version=payload.version,
             raw_material_item_id=payload.raw_material_item_id,
@@ -191,7 +189,6 @@ class ProductionService:
             raise ProductionNotFoundError("Proceso no encontrado.")
 
         process.name = payload.name
-        process.product_code = payload.product_code
         process.description = payload.description
         process.version = payload.version
         process.raw_material_item_id = payload.raw_material_item_id
@@ -266,7 +263,6 @@ class ProductionService:
             self.create_process(
                 ProductionProcessCreate(
                     name=definition["name"],
-                    product_code=definition.get("product_code"),
                     description=definition["description"],
                     raw_material_item_id=silver.id,
                     raw_material_quantity_per_unit=definition["material_per_unit"],
@@ -298,7 +294,6 @@ class ProductionService:
         run = ProductionRun(
             process_id=process.id,
             process_name=process.name,
-            product_code=process.product_code,
             quantity=payload.quantity,
             status=ProductionRunStatus.PENDING_INVENTORY,
             raw_material_item_id=process.raw_material_item_id,
@@ -605,7 +600,6 @@ class ProductionService:
             unit_code="und",
             production_order_id=run.id,
             production_code=run.production_code,
-            product_code=run.product_code,
             quantity=run.quantity,
             received_by_user_id=current_user.id,
         )

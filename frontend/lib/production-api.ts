@@ -3,7 +3,6 @@ import type { ProductionProcess, ProductionRun } from "@/types/production";
 
 export type CreateProductionProcessPayload = {
   name: string;
-  product_code?: string | null;
   description?: string | null;
   version?: number;
   raw_material_item_id?: string | null;

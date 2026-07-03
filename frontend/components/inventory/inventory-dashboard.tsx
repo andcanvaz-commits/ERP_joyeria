@@ -773,7 +773,7 @@ export function InventoryDashboard() {
                         {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
                         {run.process_name}
                       </strong>
-                      <span>{run.quantity} unidades · producto {run.product_code ?? "sin código"}</span>
+                      <span>{run.quantity} unidades</span>
                     </div>
                     <span className="stockPill num">{run.quantity} und</span>
                     <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
@@ -1135,7 +1135,6 @@ export function InventoryDashboard() {
                 </h2>
                 <p>
                   {numericText(viewingRun.quantity)} unidades
-                  {viewingRun.product_code ? ` · producto ${viewingRun.product_code}` : ""}
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingRun(null)} type="button">
@@ -1151,7 +1150,7 @@ export function InventoryDashboard() {
                   {viewingRun.status === "RECIBIDA" ? (
                     <div className="userPreviewGrid">
                       <span><strong>Lote (OP)</strong>{viewingRun.production_code ?? "—"}</span>
-                      <span><strong>Producto</strong>{viewingRun.product_code ?? "sin código"} · {viewingRun.process_name}</span>
+                      <span><strong>Proceso</strong>{viewingRun.process_name}</span>
                       <span><strong>Cantidad</strong>{numericText(viewingRun.quantity)} unidades</span>
                       <span><strong>Fecha</strong>{viewingRun.received_at ? productionTimeLabel(viewingRun.received_at) : "—"}</span>
                       <span><strong>Recibido por</strong>{viewingRun.received_by_name ?? "—"}</span>
@@ -1159,7 +1158,7 @@ export function InventoryDashboard() {
                   ) : (
                     <div className="userPreviewGrid">
                       <span><strong>Lote (OP)</strong>{viewingRun.production_code ?? "—"}</span>
-                      <span><strong>Producto</strong>{viewingRun.product_code ?? "sin código"} · {viewingRun.process_name}</span>
+                      <span><strong>Proceso</strong>{viewingRun.process_name}</span>
                       <span><strong>Cantidad</strong>{numericText(viewingRun.quantity)} unidades</span>
                       <span><strong>Creado por</strong>{viewingRun.created_by_name ?? "—"}{viewingRun.requested_at ? ` · ${productionTimeLabel(viewingRun.requested_at)}` : ""}</span>
                       <span><strong>Etapas</strong>{current ? `Etapa ${current.stage_order}. ${current.stage_name}` : `${done} de ${stages.length}`}</span>
@@ -1292,8 +1291,8 @@ export function InventoryDashboard() {
                             <span>{productionTimeLabel(run.requested_at)}</span>
                           </div>
                           <div className="solicitudDetailItem">
-                            <strong>Producto</strong>
-                            <span>{run.product_code ?? "-"}</span>
+                            <strong>Proceso</strong>
+                            <span>{run.process_name}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>
@@ -1367,8 +1366,8 @@ export function InventoryDashboard() {
                       {expandedSolicitudId === `recv-${run.id}` ? (
                         <div className="solicitudCardDetail">
                           <div className="solicitudDetailItem">
-                            <strong>Producto</strong>
-                            <span>{run.product_code ?? "-"}</span>
+                            <strong>Proceso</strong>
+                            <span>{run.process_name}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>

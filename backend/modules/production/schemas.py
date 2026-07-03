@@ -43,7 +43,6 @@ class ProductionProcessCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=180)
-    product_code: str | None = Field(default=None, max_length=20)
     description: str | None = Field(default=None, max_length=1000)
     version: int = Field(default=1, ge=1)
     raw_material_item_id: UUID | None = None
@@ -58,7 +57,6 @@ class ProductionProcessUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=180)
-    product_code: str | None = Field(default=None, max_length=20)
     description: str | None = Field(default=None, max_length=1000)
     version: int = Field(default=1, ge=1)
     raw_material_item_id: UUID | None = None
@@ -92,7 +90,6 @@ class ProductionProcessRead(BaseModel):
     id: UUID
     name: str
     code: str | None = None
-    product_code: str | None = None
     description: str | None = None
     version: int
     raw_material_item_id: UUID | None = None
@@ -171,7 +168,6 @@ class ProductionRunRead(BaseModel):
     id: UUID
     process_id: UUID
     process_name: str
-    product_code: str | None = None
     production_code: str | None = None
     quantity: Decimal
     status: str

@@ -186,8 +186,6 @@ def upgrade_production_tables() -> None:
         "WITH ordered AS (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn FROM production_processes) "
         "UPDATE production_processes p SET code = (2000 + o.rn - 1)::text "
         "FROM ordered o WHERE p.id = o.id AND p.code IS NULL",
-        "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS product_code VARCHAR(20)",
-        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS product_code VARCHAR(20)",
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS product_code VARCHAR(20)",
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS rejected_by_user_id UUID",
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS rejection_reason TEXT",

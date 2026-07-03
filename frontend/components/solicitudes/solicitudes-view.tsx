@@ -72,7 +72,7 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
         </div>
 
         <div className="credentialsStack">
-          <span><strong>Producto</strong>{run.product_code ?? "-"}</span>
+          <span><strong>Proceso</strong>{run.process_name}</span>
           <span><strong>Material por unidad</strong>{num(run.raw_material_quantity_per_unit)} {run.raw_material_unit_code}</span>
           <span><strong>Peso esperado</strong>{num(run.expected_finished_weight)}</span>
           <span><strong>Peso real</strong>{run.actual_finished_weight ? num(run.actual_finished_weight) : "-"}</span>
