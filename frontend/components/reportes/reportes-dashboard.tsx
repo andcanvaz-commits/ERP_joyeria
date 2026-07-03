@@ -265,10 +265,10 @@ export function ReportesDashboard() {
                     processByUnits.map((proc) => (
                       <tr key={proc.name}>
                         <td>{proc.name}</td>
-                        <td>{proc.orders}</td>
-                        <td>{fmt(proc.units)}</td>
-                        <td>{current.orders ? fmt((proc.orders / current.orders) * 100) : "0"}%</td>
-                        <td>{fmt(proc.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
+                        <td className="num">{proc.orders}</td>
+                        <td className="num">{fmt(proc.units)}</td>
+                        <td className="num">{current.orders ? fmt((proc.orders / current.orders) * 100) : "0"}%</td>
+                        <td className="num">{fmt(proc.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
                       </tr>
                     ))
                   )}
@@ -301,8 +301,8 @@ export function ReportesDashboard() {
                     wasteByProcess.map((proc) => (
                       <tr key={proc.name}>
                         <td>{proc.name}</td>
-                        <td>{fmt(proc.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
-                        <td>{proc.wastePctCount ? fmt(proc.wastePctSum / proc.wastePctCount) : "0"}%</td>
+                        <td className="num">{fmt(proc.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
+                        <td className="num">{proc.wastePctCount ? fmt(proc.wastePctSum / proc.wastePctCount) : "0"}%</td>
                       </tr>
                     ))
                   )}
@@ -335,8 +335,8 @@ export function ReportesDashboard() {
                     wasteByStage.map((stage) => (
                       <tr key={stage.name}>
                         <td>{stage.name}</td>
-                        <td>{fmt(stage.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
-                        <td>{fmt(stage.avgPct)}%</td>
+                        <td className="num">{fmt(stage.waste)}{current.unit ? ` ${current.unit}` : ""}</td>
+                        <td className="num">{fmt(stage.avgPct)}%</td>
                       </tr>
                     ))
                   )}
@@ -368,7 +368,7 @@ export function ReportesDashboard() {
                     current.stageRework.map((stage) => (
                       <tr key={stage.name}>
                         <td>{stage.name}</td>
-                        <td>{stage.value}</td>
+                        <td className="num">{stage.value}</td>
                       </tr>
                     ))
                   )}

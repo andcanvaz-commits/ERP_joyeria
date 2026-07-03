@@ -125,8 +125,8 @@ export function InventoryReports() {
                 <tr key={item.id}>
                   <td>{item.name}</td>
                   <td>{TYPE_LABELS[item.item_type]}</td>
-                  <td>{num(item.current_stock)}</td>
-                  <td>{num(item.minimum_stock)}</td>
+                  <td className="num">{num(item.current_stock)}</td>
+                  <td className="num">{num(item.minimum_stock)}</td>
                   <td>{item.unit_code}</td>
                 </tr>
               ))}
@@ -167,8 +167,8 @@ export function InventoryReports() {
                   <td>{item.name}</td>
                   <td>{item.sku}</td>
                   <td>{TYPE_LABELS[item.item_type]}</td>
-                  <td>{num(item.current_stock)}</td>
-                  <td>{item.minimum_stock === null ? "-" : num(item.minimum_stock)}</td>
+                  <td className="num">{num(item.current_stock)}</td>
+                  <td className="num">{item.minimum_stock === null ? "-" : num(item.minimum_stock)}</td>
                   <td>{item.unit_code}</td>
                 </tr>
               ))}
@@ -210,7 +210,7 @@ export function InventoryReports() {
                   <td>{dateLabel(movement.created_at)}</td>
                   <td>{movement.item.name}</td>
                   <td>{MOVEMENT_LABELS[movement.movement_type] ?? movement.movement_type}</td>
-                  <td>{num(movement.quantity)}</td>
+                  <td className="num">{num(movement.quantity)}</td>
                   <td>{movement.unit_code}</td>
                   <td>{movement.lot_code ?? "-"}</td>
                   <td>{movement.created_by_name ?? "-"}</td>

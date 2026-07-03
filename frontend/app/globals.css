@@ -1002,20 +1002,36 @@ textarea {
 
 .table th,
 .table td {
-  border-bottom: 1px solid var(--border);
-  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px;
   text-align: left;
   vertical-align: middle;
-  font-size: 14px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
 
 .table th {
+  font-family: var(--font-display, "Arial Narrow"), sans-serif;
   color: var(--muted);
-  background: var(--surface-muted);
-  font-size: 12px;
-  font-weight: 800;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.table td.num {
+  font-family: var(--font-mono, ui-monospace), monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.table tfoot td,
+.table tr.totalRow td {
+  border-top: 1px solid var(--gold);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .statusBadge {
