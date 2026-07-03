@@ -952,14 +952,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           <section className="maintenanceSection" aria-label="Mantenimientos de produccion">
             <h2>Procesos</h2>
             <div className="maintenanceGrid">
-              <button className="maintenanceTile" disabled={!canCreate || isLoading} onClick={openCreateForm} type="button">
+              <button className="maintenanceTile" disabled={currentUser !== null && !canCreate} onClick={openCreateForm} type="button">
                 <Factory aria-hidden="true" size={22} />
                 <strong>Crear proceso</strong>
                 <span>Nombre del proceso y etapas configurables.</span>
               </button>
               <button
                 className="maintenanceTile"
-                disabled={isLoading}
                 onClick={() => setIsProcessesOpen(true)}
                 type="button"
               >
