@@ -65,7 +65,6 @@ const STAGE_TYPES: { value: string; label: string }[] = [
   { value: "THERMAL", label: "Proceso térmico" },
   { value: "CHEMICAL", label: "Proceso químico" },
   { value: "CONTROL", label: "Control / Revisión" },
-  { value: "DECISION", label: "Decisión (control con reproceso)" },
 ];
 
 const stageTypeLabel = (value: string): string =>
