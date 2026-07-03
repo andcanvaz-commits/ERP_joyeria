@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Trash2, X } from "lucide-react";
 import {
   CatalogSegment,
@@ -11,9 +12,12 @@ import {
 } from "@/lib/catalog-api";
 
 export function CatalogDashboard() {
-  const [segments, setSegments] = useState<CatalogSegment[]>([]);
+  const queryClient = useQueryClient();
+  const { data: segments = [], isLoading } = useQuery({
+    queryKey: ["catalog"],
+    queryFn: listCatalogSegments,
+  });
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   const [newMaterial, setNewMaterial] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -24,19 +28,7 @@ export function CatalogDashboard() {
   const [lookupOpen, setLookupOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<CatalogSegment | null>(null);
 
-  async function reload() {
-    try {
-      setSegments(await listCatalogSegments());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo cargar el catálogo.");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void reload();
-  }, []);
+  const reload = () => queryClient.invalidateQueries({ queryKey: ["catalog"] });
 
   const materials = useMemo(() => segments.filter((s) => s.kind === "MATERIAL"), [segments]);
   const categories = useMemo(() => segments.filter((s) => s.kind === "CATEGORY"), [segments]);

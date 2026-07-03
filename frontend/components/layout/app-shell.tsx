@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, Hash, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
-import { getCurrentUser, logout, type CurrentUser } from "@/lib/auth-api";
+import { getCurrentUser, logout } from "@/lib/auth-api";
 import { allowedRoutes, canAccess, homeRoute, normalizeRole } from "@/lib/roles";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
 
@@ -58,19 +59,19 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const currentPage = pageTitles[pathname] ?? pageTitles["/dashboard"];
 
   useModalA11y();
 
-  useEffect(() => {
-    if (!isAuthenticated()) return;
-    getCurrentUser()
-      .then(setCurrentUser)
-      .catch(() => setCurrentUser(null));
-  }, []);
+  // Usuario en caché compartida (['me']): se pide una vez y otras pantallas lo
+  // reutilizan sin volver a pedirlo.
+  const { data: currentUser = null } = useQuery({
+    queryKey: ["me"],
+    queryFn: getCurrentUser,
+    enabled: isAuthenticated(),
+  });
 
   const role = normalizeRole(currentUser?.role);
   const visibleNav = currentUser ? navItems.filter((item) => allowedRoutes(role).includes(item.href)) : [];

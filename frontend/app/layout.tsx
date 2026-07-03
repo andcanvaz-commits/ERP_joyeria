@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
 
 const display = IBM_Plex_Sans({
   subsets: ["latin"],
@@ -35,7 +36,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
