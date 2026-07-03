@@ -311,10 +311,10 @@ export function InventoryDashboard() {
   const unitOptions = useMemo(() => {
     // Base dinamica: unidades gestionadas desde Mantenimiento > Datos. Si aun no
     // cargan, cae a las unidades por defecto para no dejar el combo vacio.
-    // El valor guardado en el item es el NOMBRE de la unidad (lo que se muestra
-    // como abreviatura); el codigo numerico es solo id interno de la BD.
+    // El item guarda la ABREVIATURA (unit.code, ej. "g"); el combo la muestra
+    // por su nombre (unit.label, ej. "Gramos"). Asi el inventario muestra "50 g".
     const base = units.length > 0
-      ? units.map((unit) => ({ value: unit.label, label: unit.label }))
+      ? units.map((unit) => ({ value: unit.code, label: `${unit.label} (${unit.code})` }))
       : [...UNIT_OPTIONS];
     const options = [...base];
     for (const unitCode of [itemForm.unit_code, ...items.map((item) => item.unit_code)]) {

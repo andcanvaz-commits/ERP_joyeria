@@ -9,14 +9,15 @@ from backend.modules.units.schemas import UnitCreate, UnitRead
 
 # Unidades por defecto de una base nueva. El usuario puede agregar o quitar
 # desde Mantenimiento > Datos > Unidades de medida.
+# (abreviatura, nombre)
 DEFAULT_UNITS = (
-    ("g", "g"),
-    ("kg", "kg"),
-    ("mg", "mg"),
-    ("oz_t", "oz t"),
-    ("dwt", "dwt"),
-    ("ct", "ct"),
-    ("und", "und"),
+    ("g", "Gramos"),
+    ("kg", "Kilogramos"),
+    ("mg", "Miligramos"),
+    ("oz t", "Onza troy"),
+    ("dwt", "Pennyweight"),
+    ("ct", "Quilates"),
+    ("und", "Unidad"),
 )
 
 
@@ -44,19 +45,10 @@ class UnitsService:
             is not None
         )
 
-    def _generate_code(self) -> str:
-        codes = self.session.execute(select(UnitOfMeasure.code)).scalars().all()
-        nums = [int(code) for code in codes if code and code.isdigit()]
-        return str(max(nums) + 1 if nums else 1)
-
     def create_unit(self, payload: UnitCreate) -> UnitRead:
-        provided = (payload.code or "").strip()
-        if provided:
-            if self._code_taken(provided):
-                raise UnitError("Ya existe una unidad con ese codigo.")
-            code = provided
-        else:
-            code = self._generate_code()
+        code = payload.code.strip()
+        if self._code_taken(code):
+            raise UnitError("Ya existe una unidad con esa abreviatura.")
         unit = UnitOfMeasure(code=code, label=payload.label.strip())
         self.session.add(unit)
         self.session.flush()

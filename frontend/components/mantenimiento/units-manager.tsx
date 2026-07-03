@@ -9,20 +9,22 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: units = [], isLoading } = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const [label, setLabel] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    if (!label.trim()) {
-      setError("Escribe el nombre de la unidad.");
+    if (!label.trim() || !code.trim()) {
+      setError("Escribe el nombre y la abreviatura de la unidad.");
       return;
     }
     setIsSaving(true);
     try {
-      await createUnit({ label: label.trim() });
+      await createUnit({ label: label.trim(), code: code.trim() });
       setLabel("");
+      setCode("");
       await queryClient.invalidateQueries({ queryKey: ["units"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo agregar la unidad.");
@@ -58,14 +60,25 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
 
         <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
           <label className="fieldGroup" style={{ flex: 1, minWidth: 0 }}>
-            <span>Nombre de la unidad</span>
+            <span>Nombre</span>
             <input
               className="field"
               disabled={isSaving}
               maxLength={120}
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="ej. Gramos (g)"
+              placeholder="ej. Gramos"
               value={label}
+            />
+          </label>
+          <label className="fieldGroup" style={{ width: 120 }}>
+            <span>Abreviatura</span>
+            <input
+              className="field"
+              disabled={isSaving}
+              maxLength={20}
+              onChange={(event) => setCode(event.target.value)}
+              placeholder="ej. g"
+              value={code}
             />
           </label>
           <button className="button buttonPrimary" disabled={isSaving} type="submit" style={{ flexShrink: 0 }}>
@@ -77,16 +90,18 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
           <table className="table">
             <thead>
               <tr>
-                <th>Código</th>
+                <th style={{ width: 40 }}>#</th>
                 <th>Nombre</th>
+                <th>Abreviatura</th>
                 <th aria-label="Acciones" />
               </tr>
             </thead>
             <tbody>
-              {units.map((unit) => (
+              {units.map((unit, index) => (
                 <tr key={unit.id}>
-                  <td className="num">{unit.code}</td>
+                  <td className="num">{index + 1}</td>
                   <td>{unit.label}</td>
+                  <td>{unit.code}</td>
                   <td style={{ textAlign: "right" }}>
                     <button
                       aria-label={`Eliminar ${unit.code}`}
@@ -101,7 +116,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
               ))}
               {!isLoading && units.length === 0 ? (
                 <tr>
-                  <td colSpan={3}>
+                  <td colSpan={4}>
                     <div className="emptyState">Sin unidades. Agrega la primera.</div>
                   </td>
                 </tr>
