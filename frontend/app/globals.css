@@ -3857,7 +3857,7 @@ textarea:disabled {
 }
 .metricButton:hover { border-color: var(--gold); }
 
-.topbarSlot { margin-left: auto; display: flex; align-items: center; }
+.topbarSlot { margin-right: auto; margin-left: 20px; display: flex; align-items: center; }
 .topbarInbox {
   position: relative;
   display: inline-flex;
