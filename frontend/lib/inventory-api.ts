@@ -53,6 +53,10 @@ export function updateInventoryItem(itemId: string, payload: SaveInventoryItemPa
   });
 }
 
+export function deleteInventoryItem(itemId: string) {
+  return apiRequest<void>(`/api/inventory/items/${itemId}`, { method: "DELETE" });
+}
+
 export function listInventoryMovements(itemId?: string) {
   const query = itemId ? `?item_id=${itemId}` : "";
   return apiRequest<InventoryMovement[]>(`/api/inventory/movements${query}`);

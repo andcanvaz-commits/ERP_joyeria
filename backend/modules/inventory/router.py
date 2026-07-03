@@ -104,6 +104,21 @@ def update_item(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_item(
+    item_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> None:
+    ensure_permission(current_user, "inventory.items.delete")
+    try:
+        service.delete_item(item_id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.get("/movements", response_model=list[InventoryMovementRead])
 def list_movements(
     item_id: UUID | None = Query(default=None),

@@ -14,6 +14,9 @@ class InventoryRepository:
         self.session.add(item)
         return item
 
+    def delete_item(self, item: InventoryItem) -> None:
+        self.session.delete(item)
+
     def get_item(self, item_id: UUID) -> InventoryItem | None:
         return self.session.get(InventoryItem, item_id)
 

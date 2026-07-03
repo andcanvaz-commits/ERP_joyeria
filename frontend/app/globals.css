@@ -3898,3 +3898,6 @@ textarea:disabled {
   cursor: pointer;
 }
 .topbarInbox:hover { border-color: var(--gold); }
+
+.table th.num { text-align: right; }
+.dangerText { color: var(--danger); }

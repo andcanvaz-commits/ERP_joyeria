@@ -97,6 +97,16 @@ class InventoryService(InventoryIntegrationPort):
         self.repository.flush()
         return InventoryItemRead.model_validate(item)
 
+    def delete_item(self, item_id: UUID) -> None:
+        item = self._get_item_or_raise(item_id)
+        if item.item_type != "RAW_MATERIAL":
+            raise InventoryDomainError("Solo se pueden eliminar materias primas.")
+        if self.repository.list_movements(item_id):
+            raise InventoryDomainError(
+                "No se puede eliminar una materia prima con movimientos registrados."
+            )
+        self.repository.delete_item(item)
+
     def list_items(self, item_type: str | None = None) -> list[InventoryItemRead]:
         return [InventoryItemRead.model_validate(item) for item in self.repository.list_items(item_type)]
 

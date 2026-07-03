@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Pencil, Plus, Printer, Save, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Pencil, Plus, Printer, Save, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -14,6 +14,7 @@ import { listUnits } from "@/lib/units-api";
 import {
   createInventoryItem,
   createInventoryMovement,
+  deleteInventoryItem,
   downloadInventoryMovementSourceFile,
   getInventorySummary,
   listInventoryItems,
@@ -535,6 +536,20 @@ export function InventoryDashboard() {
     setIsItemFormOpen(true);
   }
 
+  async function handleDeleteItem(item: InventoryItem) {
+    if (!window.confirm(`¿Eliminar "${item.material_type ?? item.name}"? Esta accion no se puede deshacer.`)) {
+      return;
+    }
+    setError(null);
+    try {
+      await deleteInventoryItem(item.id);
+      setSuccess("Materia prima eliminada.");
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
+    }
+  }
+
   async function handleSaveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSaving(true);
@@ -823,13 +838,13 @@ export function InventoryDashboard() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th style={{ width: 40 }}>#</th>
+                    <th className="num" style={{ width: 40 }}>#</th>
                     <th>Tipo</th>
                     <th>Descripción</th>
                     <th>Ley/pureza</th>
-                    <th>Stock</th>
-                    <th>Costo promedio</th>
-                    <th>Valor total</th>
+                    <th className="num">Stock</th>
+                    <th className="num">Costo promedio</th>
+                    <th className="num">Valor total</th>
                     <th aria-label="Acciones" />
                   </tr>
                 </thead>
@@ -853,10 +868,16 @@ export function InventoryDashboard() {
                               Visualizar
                             </button>
                             {canSeeAudit ? (
-                              <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
-                                <Pencil aria-hidden="true" size={15} />
-                                Editar
-                              </button>
+                              <>
+                                <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
+                                  <Pencil aria-hidden="true" size={15} />
+                                  Editar
+                                </button>
+                                <button className="iconTextButton dangerText" onClick={() => void handleDeleteItem(item)} type="button">
+                                  <Trash2 aria-hidden="true" size={15} />
+                                  Eliminar
+                                </button>
+                              </>
                             ) : null}
                           </div>
                         </td>
