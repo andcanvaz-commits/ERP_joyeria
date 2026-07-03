@@ -32,8 +32,9 @@ services:
       DATABASE_URL: postgresql+psycopg://erp_joyeria:${POSTGRES_PASSWORD}@db:5432/erp_joyeria
       # Esquema gestionado por Alembic (no create_all).
       AUTO_CREATE_TABLES: "false"
-      # Siembra admin, procesos y catalogo de ejemplo en desarrollo.
-      SEED_ON_STARTUP: "true"
+      # Siembra procesos y catalogo de ejemplo en desarrollo (default true).
+      # Ponlo en false en tu .env para arrancar sin datos de ejemplo.
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY}
       CORS_ORIGINS: http://localhost:3000
