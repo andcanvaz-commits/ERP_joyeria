@@ -1268,7 +1268,7 @@ textarea {
 }
 
 .inventoryItemRow {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto) auto;
   align-items: center;
 }
 
@@ -3792,6 +3792,16 @@ textarea:disabled {
 @media (prefers-reduced-motion: no-preference) {
   .caliperFill, .caliperMarker { transition: left .25s ease, width .25s ease; }
 }
+/* .inventoryItemRow div / .movementRow div force display:grid on every nested div;
+   restore the caliper's own layout when it is placed inside those rows. */
+.inventoryItemRow .caliper,
+.movementRow .caliper {
+  display: flex;
+}
+.inventoryItemRow .caliperTrack,
+.movementRow .caliperTrack {
+  display: block;
+}
 
 .punch {
   display: inline-flex; align-items: center;
@@ -3811,3 +3821,13 @@ textarea:disabled {
 .kpiNum { font-size: 30px; font-weight: 600; color: var(--ink); display: inline-block; }
 .kpiNum::after { content: ""; display: block; height: 2px; width: 28px; background: var(--gold); margin-top: 4px; }
 .kpiCard .kpiLabel { font-family: var(--font-display, sans-serif); text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); }
+
+.assayTable { width: 100%; border-collapse: collapse; }
+.assayTable th {
+  font-family: var(--font-display, sans-serif); text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 11px; color: var(--muted);
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+}
+.assayTable td { padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.assayTable td.num { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; text-align: right; }
+.assayTableWrap { overflow-x: auto; }

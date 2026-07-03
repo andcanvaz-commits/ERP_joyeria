@@ -8,6 +8,7 @@ import { openableProps, stopClick } from "@/lib/a11y";
 import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers, type CurrentUser, type ManagedUser } from "@/lib/auth-api";
+import { CaliperScale } from "@/components/ui/caliper-scale";
 import {
   createInventoryItem,
   createInventoryMovement,
@@ -774,7 +775,7 @@ export function InventoryDashboard() {
                       </strong>
                       <span>{run.quantity} unidades · producto {run.product_code ?? "sin código"}</span>
                     </div>
-                    <span className="stockPill">{run.quantity} und</span>
+                    <span className="stockPill num">{run.quantity} und</span>
                     <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
                       <Eye aria-hidden="true" size={15} />
                       Visualizar
@@ -788,9 +789,17 @@ export function InventoryDashboard() {
                   <strong>{item.name}</strong>
                   <span>{item.sku} - {itemTypeLabel(item.item_type)}</span>
                 </div>
-                <div className="stockPill">
-                  {numericText(item.current_stock)} {item.unit_code}
-                </div>
+                {item.minimum_stock != null ? (
+                  <CaliperScale
+                    value={Number(item.current_stock)}
+                    max={Math.max(Number(item.minimum_stock) * 2, Number(item.current_stock), 1)}
+                    limit={Number(item.minimum_stock)}
+                    limitMode="floor"
+                    ariaLabel="Stock frente al minimo"
+                  />
+                ) : (
+                  <span className="num">{numericText(item.current_stock)} {item.unit_code}</span>
+                )}
                 <div className="rowActions" onClick={stopClick}>
                   <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
                     <Eye aria-hidden="true" size={15} />
@@ -817,7 +826,7 @@ export function InventoryDashboard() {
                     </strong>
                     <span>Orden en proceso · {run.quantity} unidades</span>
                   </div>
-                  <span className="stockPill" style={{ background: "#f3e9d6" }}>{run.quantity} und</span>
+                  <span className="stockPill num" style={{ background: "#f3e9d6" }}>{run.quantity} und</span>
                   <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
                     <Eye aria-hidden="true" size={15} />
                     Visualizar
@@ -862,7 +871,7 @@ export function InventoryDashboard() {
                   <span>{movementDateLabel(movement.created_at)} - {movement.item.name}</span>
                 </div>
                 <div>
-                  <strong>{numericText(movement.quantity)} {movement.unit_code}</strong>
+                  <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
                   <span>{movementTimeLabel(movement.created_at)}{movement.reason ? ` - ${movement.reason}` : ""}</span>
                   {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
                   <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
@@ -951,7 +960,7 @@ export function InventoryDashboard() {
                         <span>{movementTimeLabel(movement.created_at)} - {movement.item.name}</span>
                       </div>
                       <div>
-                        <strong>{numericText(movement.quantity)} {movement.unit_code}</strong>
+                        <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
                         <span>{movement.reason || "Sin motivo registrado"}</span>
                         {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
                         <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
