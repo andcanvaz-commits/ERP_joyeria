@@ -3825,12 +3825,19 @@ textarea:disabled {
   gap: 16px;
   align-items: end;
 }
-/* Lista de materias primas del proceso: a partir de ~3 filas hace scroll
-   interno en vez de estirar el modal hacia abajo. */
+/* Listas repetibles (materias primas del proceso e ingredientes de etapa):
+   a partir de ~2 filas hacen scroll interno en vez de estirar el modal. */
 .materialList {
   display: grid;
   gap: 10px;
-  max-height: 210px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.ingredientList {
+  display: grid;
+  gap: 8px;
+  max-height: 104px;
   overflow-y: auto;
   padding-right: 4px;
 }

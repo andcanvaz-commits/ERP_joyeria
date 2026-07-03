@@ -1896,7 +1896,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {/* Ingredients section */}
                   <div className="fieldGroup">
                     <span>Materiales que entran en esta etapa</span>
-                    <div style={{ display: "grid", gap: 8 }}>
+                    <div className="ingredientList">
                       {selectedStage.ingredients.map((ing, ingIndex) => (
                         <div key={ingIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <select
