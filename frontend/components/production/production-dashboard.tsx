@@ -1631,10 +1631,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   value={form.rawMaterialQuantityPerUnit}
                 />
               </label>
-              <label className="fieldGroup">
-                <span>Unidad de materia prima</span>
-                <input className="field" disabled value={form.rawMaterialUnitCode} />
-              </label>
             </div>
 
             <section className="stageSingleWindow">
