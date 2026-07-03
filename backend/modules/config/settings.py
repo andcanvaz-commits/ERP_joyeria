@@ -54,6 +54,11 @@ class Settings(BaseSettings):
             errors.append("DEV_AUTH_ENABLED debe ser false en produccion.")
         if self.enable_docs:
             errors.append("ENABLE_DOCS debe ser false en produccion.")
+        if not (self.seed_admin_password or "").strip():
+            errors.append(
+                "SEED_ADMIN_PASSWORD debe definirse en produccion para crear el "
+                "admin inicial con una clave conocida (no aleatoria)."
+            )
         if errors:
             raise ValueError("Configuracion insegura para produccion:\n- " + "\n- ".join(errors))
         return self

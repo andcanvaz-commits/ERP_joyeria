@@ -41,8 +41,11 @@ services:
       JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY:?define JWT_REFRESH_SECRET_KEY en .env}
       CORS_ORIGINS: ${CORS_ORIGINS:?define CORS_ORIGINS en .env}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?define ALLOWED_HOSTS en .env}
+      # El admin inicial se crea en el arranque con esta clave (obligatoria).
       SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?define SEED_ADMIN_PASSWORD en .env}
+      # Poner true una vez para forzar el reseteo de la clave del admin existente.
+      SEED_ADMIN_RESET_ON_BOOT: ${SEED_ADMIN_RESET_ON_BOOT:-false}
     # Sin puertos: nginx habla con api por la red interna.
     restart: always
     depends_on:

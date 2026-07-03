@@ -84,20 +84,23 @@ def create_dev_tables() -> None:
         upgrade_auth_users_table()
         upgrade_inventory_movements_table()
         upgrade_production_tables()
-    # Siembra desacoplada del esquema: con Alembic gestionando las tablas,
-    # seed_on_startup permite sembrar sin reactivar create_all.
-    if settings.auto_create_tables or settings.seed_on_startup:
-        session = SessionLocal()
-        try:
-            seed_default_users(session)
+    # El admin SIEMPRE debe existir, en cualquier entorno (dev y produccion).
+    # Es idempotente: solo crea el admin si falta y toma la clave de
+    # SEED_ADMIN_PASSWORD (o la resetea si SEED_ADMIN_RESET_ON_BOOT=true).
+    session = SessionLocal()
+    try:
+        seed_default_users(session)
+        # Los datos de ejemplo (procesos y catalogo) solo se siembran en
+        # desarrollo; no deben contaminar una base de produccion.
+        if settings.auto_create_tables or settings.seed_on_startup:
             ProductionService(
                 repository=ProductionProcessRepository(session),
                 inventory_service=InventoryService(repository=InventoryRepository(session)),
             ).seed_example_processes()
             seed_catalog(session)
-            session.commit()
-        finally:
-            session.close()
+        session.commit()
+    finally:
+        session.close()
 
 
 def drop_obsolete_production_tables() -> None:
