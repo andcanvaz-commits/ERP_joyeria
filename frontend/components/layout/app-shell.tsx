@@ -143,6 +143,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        <div className="profileMenu sidebarProfile" ref={menuRef}>
+          <button
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            className="profileTrigger"
+            onClick={() => setMenuOpen((open) => !open)}
+            type="button"
+          >
+            <UserCircle aria-hidden="true" size={26} />
+            <div className="profileText">
+              <strong>{currentUser?.email ?? currentUser?.username ?? ""}</strong>
+              <span>({currentUser?.role ?? ""})</span>
+            </div>
+            <ChevronDown aria-hidden="true" size={16} />
+          </button>
+          {menuOpen ? (
+            <div className="profileDropdown" role="menu">
+              <Link
+                className="profileDropdownItem"
+                href="/seguridad"
+                onClick={() => setMenuOpen(false)}
+                role="menuitem"
+              >
+                <KeyRound aria-hidden="true" size={16} />
+                <span>Cambiar contrasena</span>
+              </Link>
+              <button
+                className="profileDropdownItem"
+                onClick={handleLogout}
+                role="menuitem"
+                type="button"
+              >
+                <LogOut aria-hidden="true" size={16} />
+                <span>Cerrar sesion</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
       </aside>
       <main className="mainArea">
         <header className="topbar">
@@ -152,44 +190,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           {/* Slot para acciones de la pagina (ej. bandeja de solicitudes en inventario). */}
           <div id="topbarSlot" className="topbarSlot" />
-          <div className="profileMenu" ref={menuRef}>
-            <button
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              className="profileTrigger"
-              onClick={() => setMenuOpen((open) => !open)}
-              type="button"
-            >
-              <UserCircle aria-hidden="true" size={28} />
-              <div className="profileText">
-                <strong>{currentUser?.email ?? currentUser?.username ?? ""}</strong>
-                <span>({currentUser?.role ?? ""})</span>
-              </div>
-              <ChevronDown aria-hidden="true" size={16} />
-            </button>
-            {menuOpen ? (
-              <div className="profileDropdown" role="menu">
-                <Link
-                  className="profileDropdownItem"
-                  href="/seguridad"
-                  onClick={() => setMenuOpen(false)}
-                  role="menuitem"
-                >
-                  <KeyRound aria-hidden="true" size={16} />
-                  <span>Cambiar contrasena</span>
-                </Link>
-                <button
-                  className="profileDropdownItem"
-                  onClick={handleLogout}
-                  role="menuitem"
-                  type="button"
-                >
-                  <LogOut aria-hidden="true" size={16} />
-                  <span>Cerrar sesion</span>
-                </button>
-              </div>
-            ) : null}
-          </div>
         </header>
         {children}
       </main>

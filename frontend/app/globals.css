@@ -82,6 +82,22 @@ textarea {
   color: var(--sidebar-text);
   border-right: 1px solid var(--line);
   padding: 0 0 20px;
+  display: flex;
+  flex-direction: column;
+}
+.sidebar > .nav { flex: 1; align-content: start; }
+/* Perfil al fondo de la sidebar; el dropdown abre hacia arriba. */
+.profileMenu.sidebarProfile {
+  margin: auto 12px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.sidebarProfile .profileTrigger { width: 100%; }
+.sidebarProfile .profileDropdown {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
 }
 
 .brand {
@@ -3857,7 +3873,7 @@ textarea:disabled {
 }
 .metricButton:hover { border-color: var(--gold); }
 
-.topbarSlot { margin-right: auto; margin-left: 20px; display: flex; align-items: center; }
+.topbarSlot { margin-left: auto; display: flex; align-items: center; }
 .topbarInbox {
   position: relative;
   display: inline-flex;
