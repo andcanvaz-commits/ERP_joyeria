@@ -69,11 +69,29 @@ function formatApiDetail(detail: unknown, fallback: string): string {
   return fallback;
 }
 
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  // Proteccion CSRF (double-submit): en peticiones que modifican datos,
+  // reenvia el token de la cookie csrf_token en el header X-CSRF-Token.
+  const method = (init?.method ?? "GET").toUpperCase();
+  const csrfHeaders: Record<string, string> = {};
+  if (!CSRF_SAFE_METHODS.has(method)) {
+    const csrfToken = readCookie("csrf_token");
+    if (csrfToken) csrfHeaders["X-CSRF-Token"] = csrfToken;
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...csrfHeaders,
       ...init?.headers,
     },
     credentials: "include",

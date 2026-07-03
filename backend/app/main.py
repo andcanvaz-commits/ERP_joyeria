@@ -2,8 +2,17 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import text
+
+from backend.modules.security.csrf import (
+    CSRF_COOKIE_NAME,
+    CSRF_HEADER_NAME,
+    SAFE_METHODS,
+    generate_csrf_token,
+    tokens_match,
+)
 
 from backend.modules.auth.router import router as auth_router
 from backend.modules.auth import models as auth_models
@@ -42,7 +51,7 @@ if cors_origins:
         allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", CSRF_HEADER_NAME],
         max_age=600,
     )
 
@@ -67,6 +76,45 @@ async def apply_security_headers(request: Request, call_next):
     if settings.is_production or request.url.scheme == "https":
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+# El login es el arranque que entrega la cookie CSRF; no puede exigirla todavia.
+CSRF_EXEMPT_PATHS = frozenset({"/api/auth/login"})
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    method = request.method.upper()
+    path = request.url.path
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
+
+    # Exige el token en toda peticion que modifica estado (excepto el login).
+    if (
+        path.startswith("/api")
+        and method not in SAFE_METHODS
+        and path not in CSRF_EXEMPT_PATHS
+    ):
+        header_token = request.headers.get(CSRF_HEADER_NAME)
+        if not tokens_match(cookie_token, header_token):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Token CSRF invalido o ausente."},
+            )
+
+    response = await call_next(request)
+
+    # Siembra la cookie CSRF si aun no existe: la primera peticion segura (GET)
+    # de la app la genera, y el frontend la reenvia luego en el header.
+    if cookie_token is None:
+        response.set_cookie(
+            key=CSRF_COOKIE_NAME,
+            value=generate_csrf_token(),
+            httponly=False,  # legible por JS a proposito (double-submit)
+            secure=settings.is_production,
+            samesite="lax",
+            path="/",
         )
     return response
 

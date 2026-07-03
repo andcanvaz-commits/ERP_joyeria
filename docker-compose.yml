@@ -38,7 +38,6 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY}
       CORS_ORIGINS: http://localhost:3000
-      DEV_AUTH_ENABLED: "false"
       # Admin inicial: si no defines SEED_ADMIN_PASSWORD se genera una aleatoria
       # (aparece una vez en los logs del api). Definela en .env para clave fija.
       SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}

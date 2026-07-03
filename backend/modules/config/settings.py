@@ -20,9 +20,6 @@ class Settings(BaseSettings):
     # Siembra datos base (admin, procesos y catalogo de ejemplo) al arrancar.
     # Desacoplado de auto_create_tables: el esquema lo gestiona Alembic.
     seed_on_startup: bool = False
-    dev_auth_enabled: bool = False
-    dev_user_id: str = "00000000-0000-0000-0000-000000000001"
-    dev_username: str = "admin"
     access_token_expire_minutes: int = 480
     login_rate_limit_max: int = 5
     login_rate_limit_window_seconds: int = 60
@@ -50,8 +47,6 @@ class Settings(BaseSettings):
             errors.append("CORS_ORIGINS debe listar los dominios permitidos en produccion.")
         if not self.allowed_hosts.strip():
             errors.append("ALLOWED_HOSTS debe listar los hosts permitidos en produccion.")
-        if self.dev_auth_enabled:
-            errors.append("DEV_AUTH_ENABLED debe ser false en produccion.")
         if self.enable_docs:
             errors.append("ENABLE_DOCS debe ser false en produccion.")
         if not (self.seed_admin_password or "").strip():

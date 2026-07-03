@@ -33,7 +33,6 @@ services:
     environment:
       APP_ENV: production
       ENABLE_DOCS: "false"
-      DEV_AUTH_ENABLED: "false"
       # Con Alembic el esquema lo gestionan las migraciones.
       AUTO_CREATE_TABLES: ${AUTO_CREATE_TABLES:-false}
       DATABASE_URL: postgresql+psycopg://erp_joyeria:${POSTGRES_PASSWORD}@db:5432/erp_joyeria

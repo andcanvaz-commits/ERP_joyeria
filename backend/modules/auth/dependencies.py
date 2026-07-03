@@ -4,8 +4,6 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from backend.modules.config.settings import settings
-
 
 ACCESS_COOKIE_NAME = "access_token"
 
@@ -18,24 +16,6 @@ class CurrentUser:
     permissions: frozenset[str]
 
 
-DEV_PRODUCTION_PERMISSIONS = frozenset(
-    {
-        "production.processes.read",
-        "production.processes.create",
-        "production.processes.update",
-        "production.processes.delete",
-        "production.runs.read",
-        "production.runs.create",
-        "production.runs.update",
-        "inventory.read",
-        "inventory.items.create",
-        "inventory.items.update",
-        "inventory.items.delete",
-        "inventory.movements.create",
-    }
-)
-
-
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -43,13 +23,7 @@ def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> CurrentUser:
-    if settings.dev_auth_enabled:
-        return CurrentUser(
-            id=UUID(settings.dev_user_id),
-            username=settings.dev_username,
-            role="admin",
-            permissions=DEV_PRODUCTION_PERMISSIONS,
-        )
+    # No hay bypass: toda peticion se autentica con un JWT valido.
     # Prioridad: cookie HttpOnly; fallback a header Authorization (clientes no-web).
     token = request.cookies.get(ACCESS_COOKIE_NAME)
     if token is None and credentials is not None:

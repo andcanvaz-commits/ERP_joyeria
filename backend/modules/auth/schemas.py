@@ -10,10 +10,13 @@ class TokenPair(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # extra="forbid": rechaza campos inesperados. La consulta de login usa el ORM
+    # de SQLAlchemy (parametrizado), por lo que la entrada nunca se concatena en
+    # SQL; estos limites son un refuerzo de tamano/tipo del input.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=180)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class ChangePasswordRequest(BaseModel):
