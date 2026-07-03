@@ -828,29 +828,6 @@ textarea {
   box-shadow: var(--shadow);
 }
 
-.card::before,
-.card::after {
-  content: "";
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  border-color: var(--gold);
-  border-style: solid;
-  opacity: 0.5;
-}
-
-.card::before {
-  top: 6px;
-  left: 6px;
-  border-width: 1px 0 0 1px;
-}
-
-.card::after {
-  bottom: 6px;
-  right: 6px;
-  border-width: 0 1px 1px 0;
-}
-
 .metric {
   display: grid;
   gap: 8px;
