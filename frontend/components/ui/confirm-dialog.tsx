@@ -53,24 +53,15 @@ export function useConfirm(): { confirm: (opts: ConfirmOpts) => Promise<boolean>
   return { confirm, dialog };
 }
 
-// Doble confirmacion estandar para eliminar. Devuelve true solo si el usuario
-// confirma las dos veces.
-export async function confirmDelete(
+// Confirmacion estandar para eliminar (una sola, por modal).
+export function confirmDelete(
   confirm: (opts: ConfirmOpts) => Promise<boolean>,
   nombre: string,
 ): Promise<boolean> {
-  const first = await confirm({
+  return confirm({
     title: "Eliminar",
-    message: `¿Eliminar "${nombre}"?`,
-    confirmLabel: "Continuar",
-    danger: true,
-  });
-  if (!first) return false;
-  const second = await confirm({
-    title: "Confirmar eliminación",
-    message: "Esta acción es definitiva y no se puede deshacer. ¿Eliminar de todos modos?",
+    message: `¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`,
     confirmLabel: "Eliminar",
     danger: true,
   });
-  return second;
 }
