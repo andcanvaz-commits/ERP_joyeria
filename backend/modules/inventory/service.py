@@ -36,8 +36,9 @@ def _resolve_user_names(session, user_ids: list) -> dict:
     return result
 
 
-def _generate_lot_code(repository: "InventoryRepository", item_name: str, item_id, year: int) -> str:
-    prefix = "".join(c for c in item_name.upper() if c.isalpha())[:2] or "XX"
+def _generate_lot_code(repository: "InventoryRepository", material_label: str, item_id, year: int) -> str:
+    # Prefijo = abreviatura del tipo de material (ej. "Plata" -> "PL", "AG" -> "AG").
+    prefix = "".join(c for c in (material_label or "").upper() if c.isalnum())[:2] or "XX"
     year_short = str(year)[-2:]
     seq = repository.count_entrada_movements_for_item_this_year(item_id, year) + 1
     return f"LOT-{prefix}-{year_short}{seq:04d}"
@@ -129,7 +130,7 @@ class InventoryService(InventoryIntegrationPort):
         elif payload.movement_type == "ENTRADA":
             movement.lot_code = _generate_lot_code(
                 self.repository,
-                item.name,
+                item.material_type or item.name,
                 item.id,
                 datetime.utcnow().year,
             )

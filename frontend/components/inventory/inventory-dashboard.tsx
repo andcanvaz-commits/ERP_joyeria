@@ -852,10 +852,12 @@ export function InventoryDashboard() {
                               <Eye aria-hidden="true" size={15} />
                               Visualizar
                             </button>
-                            <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
-                              <Pencil aria-hidden="true" size={15} />
-                              Editar
-                            </button>
+                            {canSeeAudit ? (
+                              <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
+                                <Pencil aria-hidden="true" size={15} />
+                                Editar
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -920,7 +922,7 @@ export function InventoryDashboard() {
                     <Eye aria-hidden="true" size={15} />
                     Visualizar
                   </button>
-                  {item.item_type === "RAW_MATERIAL" ? (
+                  {item.item_type === "RAW_MATERIAL" && canSeeAudit ? (
                     <>
                       <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
                         <Pencil aria-hidden="true" size={15} />

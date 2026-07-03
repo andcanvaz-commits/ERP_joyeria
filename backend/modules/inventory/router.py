@@ -34,7 +34,20 @@ def get_inventory_service():
         session.close()
 
 
+# Editar y eliminar inventario es exclusivo del administrador (el jefe de
+# inventario puede leer, crear items y registrar movimientos, pero no editar/borrar).
+INVENTORY_ADMIN_ONLY = {"inventory.items.update", "inventory.items.delete"}
+
+
 def ensure_permission(current_user: CurrentUser, permission: str) -> None:
+    is_admin = current_user.role in {"admin", "Admin"}
+    if permission in INVENTORY_ADMIN_ONLY:
+        if is_admin:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el administrador puede editar o eliminar el inventario.",
+        )
     if current_user.role in {"admin", "Admin", "Jefe de inventario"} and permission.startswith("inventory."):
         return
     try:
