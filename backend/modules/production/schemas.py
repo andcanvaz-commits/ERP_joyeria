@@ -50,7 +50,7 @@ class ProductionProcessCreate(BaseModel):
     raw_material_item_id: UUID | None = None
     raw_material_quantity_per_unit: Decimal | None = Field(default=None, gt=0)
     raw_material_unit_code: str | None = Field(default=None, max_length=20)
-    waste_limit_percent: Decimal = Field(default=Decimal("5"), ge=0, le=100)
+    waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)  # <-- changed to 1%
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
 
@@ -65,7 +65,7 @@ class ProductionProcessUpdate(BaseModel):
     raw_material_item_id: UUID | None = None
     raw_material_quantity_per_unit: Decimal | None = Field(default=None, gt=0)
     raw_material_unit_code: str | None = Field(default=None, max_length=20)
-    waste_limit_percent: Decimal = Field(default=Decimal("5"), ge=0, le=100)
+    waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)  # <-- changed to 1%
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
 
@@ -164,6 +164,7 @@ class ProductionRunStageRead(BaseModel):
     initial_weight: Decimal | None = None
     final_weight: Decimal | None = None
     finished_by_name: str | None = None
+    waste_percent: Decimal | None = None  # <-- added
     decisions: list[StageDecisionRead] = Field(default_factory=list)
 
 

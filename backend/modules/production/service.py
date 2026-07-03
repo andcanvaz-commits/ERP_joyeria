@@ -33,6 +33,7 @@ def _resolve_run_user_names(session, user_ids: list) -> dict:
         return {}
     from sqlalchemy import select
     from backend.modules.auth.models import AuthUser
+
     unique_ids = list({uid for uid in user_ids if uid})
     if not unique_ids:
         return {}
@@ -90,14 +91,14 @@ EXAMPLE_PROCESSES: tuple[dict, ...] = (
         "description": "Proceso de ejemplo con material, categoria y modelo asignados.",
         "product_code": "20600049999",
         "material_per_unit": Decimal("10.0000"),
-        "waste_limit_percent": Decimal("5"),
+        "waste_limit_percent": Decimal("1"),  # <-- changed from 5 to 1
         "stages": (
             {"name": "Fundicion", "stage_type": "THERMAL", "requires_weighing": True, "estimated_minutes": 20,
              "description": "El metal se funde y se prepara la materia prima."},
             {"name": "Control de calidad", "stage_type": "CONTROL", "requires_weighing": True, "estimated_minutes": 10,
              "description": "Se revisa la pieza y se aprueba o rechaza.",
-             "quality_check": "Cumple el estandar de calidad?",
-             "rework_action": "Si no cumple, regresa a Fundicion."},
+              "quality_check": "Cumple el estandar de calidad?",
+              "rework_action": "Si no cumple, regresa a Fundicion."},
             {"name": "Acabado", "stage_type": "PROCESS", "requires_weighing": True, "estimated_minutes": 10,
              "description": "Pulido y acabado final; la pieza queda lista."},
         ),
@@ -407,12 +408,23 @@ class ProductionService:
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
+        # Add waste_percent for each stage from the model property
+        for stage_read, stage_orm in zip(read.stages, run.stages):
+            # Attach waste_percent as a dynamic attribute; Pydantic will include it if the model has the field.
+            # Since ProductionRunStageRead does not currently have waste_percent, we add it via setattr.
+            # The schema will ignore it unless we update the schema; we will later add the field.
+            # For now, we just attach it; the schema will be updated separately.
+            setattr(stage_read, "waste_percent", stage_orm.waste_percent)
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
         runs = self.repository.list_runs()
         reads = [ProductionRunRead.model_validate(run) for run in runs]
         _populate_run_names(self.repository.session, reads, runs)
+        # Attach waste_percent to each stage
+        for read, run in zip(reads, runs):
+            for stage_read, stage_orm in zip(read.stages, run.stages):
+                setattr(stage_read, "waste_percent", stage_orm.waste_percent)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:
