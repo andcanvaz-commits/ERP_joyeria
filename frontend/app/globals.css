@@ -118,7 +118,7 @@ textarea {
   font-size: 19px;
   font-weight: 600;
   letter-spacing: 0.3px;
-  color: #f1ebdf;
+  color: var(--ink);
 }
 
 .brandMeta {
@@ -3109,9 +3109,9 @@ textarea {
   box-shadow: 0 0 0 3px rgba(184, 137, 58, 0.22);
 }
 
-/* Foco sobre fondo oscuro del sidebar: halo claro para que se vea */
+/* Foco sobre el sidebar papel: halo dorado oscuro para que se vea */
 .navItem:focus-visible {
-  outline-color: #e3cfa6;
+  outline-color: var(--gold-deep);
   outline-offset: -2px;
 }
 
