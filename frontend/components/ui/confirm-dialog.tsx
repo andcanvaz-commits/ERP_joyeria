@@ -27,8 +27,23 @@ export function useConfirm(): { confirm: (opts: ConfirmOpts) => Promise<boolean>
   }
 
   const dialog: ReactNode = state ? (
-    <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label={state.title}>
-      <section className="modalWindow confirmWindow">
+    <div
+      className="modalBackdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={state.title}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") close(false);
+      }}
+    >
+      {/* Form: Enter envia (confirma); el boton de confirmar recibe el foco. */}
+      <form
+        className="modalWindow confirmWindow"
+        onSubmit={(event) => {
+          event.preventDefault();
+          close(true);
+        }}
+      >
         <div className="modalHeader">
           <div><h2>{state.title}</h2></div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => close(false)} type="button">
@@ -39,14 +54,14 @@ export function useConfirm(): { confirm: (opts: ConfirmOpts) => Promise<boolean>
         <div className="modalActions">
           <button className="button" onClick={() => close(false)} type="button">Cancelar</button>
           <button
+            autoFocus
             className={`button ${state.danger ? "buttonDanger" : "buttonPrimary"}`}
-            onClick={() => close(true)}
-            type="button"
+            type="submit"
           >
             {state.confirmLabel ?? "Confirmar"}
           </button>
         </div>
-      </section>
+      </form>
     </div>
   ) : null;
 
