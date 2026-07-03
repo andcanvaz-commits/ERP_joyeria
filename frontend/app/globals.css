@@ -84,6 +84,11 @@ textarea {
   padding: 0 0 20px;
   display: flex;
   flex-direction: column;
+  /* Fija la barra: se queda en su lugar mientras el contenido hace scroll. */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 /* Perfil justo debajo del ultimo item del menu (Estadistica). */
 .profileMenu.sidebarProfile {
