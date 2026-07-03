@@ -714,19 +714,6 @@ export function InventoryDashboard() {
         </article>
       </section>
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          className="solicitudesButton"
-          onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
-          type="button"
-        >
-          Solicitudes de produccion
-          {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
-            <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
-          ) : null}
-        </button>
-      </div>
-
       <section className="inventoryShell">
         <article className="card panelBody inventoryPanel">
           <div className="panelHeader">
@@ -785,20 +772,32 @@ export function InventoryDashboard() {
           </div>
 
           <div className="toolbar">
-            <div className="segmentedControl" aria-label="Filtrar por tipo">
-              {ITEM_TYPES.map((type) => (
-                <button
-                  className={itemFilter === type.value ? "segmentActive" : ""}
-                  key={type.value}
-                  onClick={() => {
-                    setIsEntryMenuOpen(false);
-                    setItemFilter(type.value);
-                  }}
-                  type="button"
-                >
-                  {type.label}
-                </button>
-              ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div className="segmentedControl" aria-label="Filtrar por tipo">
+                {ITEM_TYPES.map((type) => (
+                  <button
+                    className={itemFilter === type.value ? "segmentActive" : ""}
+                    key={type.value}
+                    onClick={() => {
+                      setIsEntryMenuOpen(false);
+                      setItemFilter(type.value);
+                    }}
+                    type="button"
+                  >
+                    {type.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="solicitudesButton"
+                onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+                type="button"
+              >
+                Solicitudes
+                {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
+                  <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
+                ) : null}
+              </button>
             </div>
             <input
               className="field searchField"
