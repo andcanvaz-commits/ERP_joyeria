@@ -95,6 +95,8 @@ export default function LoginPage() {
           </div>
         </div>
 
+        <div className="goldRule" aria-hidden="true" />
+
         {error ? <div className="notice noticeError">{error}</div> : null}
 
         {mode === "login" ? (
