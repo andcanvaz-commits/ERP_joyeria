@@ -1,10 +1,12 @@
-const statusClassByValue: Record<string, string> = {
-  PENDIENTE: "statusPending",
-  EN_PROCESO: "statusProgress",
-  PAUSADA: "statusPaused",
-  FINALIZADA: "statusFinished",
-  CANCELADA: "statusCancelled",
-  BORRADOR: "statusPending"
+import { StatusPunch } from "./status-punch";
+
+const toneByValue: Record<string, "neutral" | "active" | "done" | "danger" | "warning"> = {
+  BORRADOR: "neutral",
+  PENDIENTE: "neutral",
+  EN_PROCESO: "active",
+  PAUSADA: "warning",
+  FINALIZADA: "done",
+  CANCELADA: "danger",
 };
 
 const statusLabelByValue: Record<string, string> = {
@@ -13,12 +15,11 @@ const statusLabelByValue: Record<string, string> = {
   EN_PROCESO: "En proceso",
   PAUSADA: "Pausada",
   FINALIZADA: "Finalizada",
-  CANCELADA: "Cancelada"
+  CANCELADA: "Cancelada",
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  const statusClass = statusClassByValue[status] ?? "statusPending";
+  const tone = toneByValue[status] ?? "neutral";
   const label = statusLabelByValue[status] ?? status;
-
-  return <span className={`statusBadge ${statusClass}`}>{label}</span>;
+  return <StatusPunch label={label} tone={tone} />;
 }

@@ -3776,3 +3776,16 @@ textarea:disabled {
 @media (prefers-reduced-motion: no-preference) {
   .caliperFill, .caliperMarker { transition: left .25s ease, width .25s ease; }
 }
+
+.punch {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-display, sans-serif);
+  font-weight: 600; font-size: 11px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink);
+  padding: 2px 8px; border: 1px solid var(--line); border-radius: 3px;
+  background: var(--surface);
+}
+.punch-active { border-color: var(--gold); color: var(--gold-deep); }
+.punch-done { border-color: var(--success); color: var(--success); }
+.punch-danger { border-color: var(--danger); color: var(--danger); }
+.punch-warning { border-color: var(--warning); color: var(--warning); }
