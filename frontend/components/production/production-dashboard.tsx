@@ -1077,6 +1077,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <label className="fieldGroup">
                   <span>Proceso</span>
                   <select className="field" onChange={(e) => setSelectedProcessId(e.target.value)} value={selectedProcess?.id ?? ""}>
+                    <option value="">Seleccionar proceso</option>
                     {activeProcesses.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
