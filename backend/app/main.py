@@ -81,6 +81,13 @@ def create_dev_tables() -> None:
     if settings.auto_create_tables:
         drop_obsolete_production_tables()
         Base.metadata.create_all(bind=engine)
+    # Reconciliacion idempotente de columnas (ADD COLUMN IF NOT EXISTS). Cura
+    # bases de desarrollo antiguas creadas con create_all y luego selladas por
+    # Alembic mas adelante: 'alembic upgrade' no puede agregarles columnas de
+    # baseline ya "aplicado", asi que sin esto dan 500 por columnas faltantes.
+    # En produccion el esquema lo gestiona Alembic sobre una base limpia (una DB
+    # nueva migrada tiene 0 columnas faltantes), por lo que aqui no se ejecuta.
+    if not settings.is_production:
         upgrade_auth_users_table()
         upgrade_inventory_movements_table()
         upgrade_production_tables()
