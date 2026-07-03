@@ -20,14 +20,20 @@ services:
   api:
     build:
       context: .
-    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    # Aplica migraciones Alembic antes de arrancar; el esquema lo gestiona Alembic.
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --workers 1"
     environment:
       APP_ENV: development
       ENABLE_DOCS: "true"
       # "api" incluido: el proxy de Next reenvia con Host=api:8000 (nombre de servicio).
       ALLOWED_HOSTS: localhost,127.0.0.1,api
       DATABASE_URL: postgresql+psycopg://erp_joyeria:${POSTGRES_PASSWORD}@db:5432/erp_joyeria
-      AUTO_CREATE_TABLES: "true"
+      # Esquema gestionado por Alembic (no create_all).
+      AUTO_CREATE_TABLES: "false"
+      # Siembra admin, procesos y catalogo de ejemplo en desarrollo.
+      SEED_ON_STARTUP: "true"
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY}
       CORS_ORIGINS: http://localhost:3000
@@ -40,7 +46,8 @@ services:
       - .:/app
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   db:
     image: postgres:16-alpine
@@ -53,6 +60,11 @@ services:
       - "127.0.0.1:5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_joyeria -d erp_joyeria"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   postgres_data:

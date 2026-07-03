@@ -84,6 +84,9 @@ def create_dev_tables() -> None:
         upgrade_auth_users_table()
         upgrade_inventory_movements_table()
         upgrade_production_tables()
+    # Siembra desacoplada del esquema: con Alembic gestionando las tablas,
+    # seed_on_startup permite sembrar sin reactivar create_all.
+    if settings.auto_create_tables or settings.seed_on_startup:
         session = SessionLocal()
         try:
             seed_default_users(session)

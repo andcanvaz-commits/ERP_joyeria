@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     enable_docs: bool = True
     redis_url: str | None = None
     auto_create_tables: bool = False
+    # Siembra datos base (admin, procesos y catalogo de ejemplo) al arrancar.
+    # Desacoplado de auto_create_tables: el esquema lo gestiona Alembic.
+    seed_on_startup: bool = False
     dev_auth_enabled: bool = False
     dev_user_id: str = "00000000-0000-0000-0000-000000000001"
     dev_username: str = "admin"

@@ -90,7 +90,13 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     }
     if (response.status === 401 && typeof window !== "undefined") {
       window.localStorage.removeItem(AUTH_FLAG_KEY);
-      window.location.href = "/login";
+      // No redirigir si el 401 viene del propio login o ya estamos en /login:
+      // recargar borraria el mensaje de error antes de que el usuario lo lea.
+      const onLoginPage = window.location.pathname === "/login";
+      const isLoginRequest = path.includes("/api/auth/login");
+      if (!onLoginPage && !isLoginRequest) {
+        window.location.href = "/login";
+      }
     }
     throw new ApiError(message, response.status);
   }
