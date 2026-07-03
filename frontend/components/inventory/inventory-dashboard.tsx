@@ -835,7 +835,7 @@ export function InventoryDashboard() {
 
           {itemFilter === "RAW_MATERIAL" ? (
             <div className="tableWrap">
-              <table className="table">
+              <table className="table inventoryItemsTable">
                 <thead>
                   <tr>
                     <th className="num" style={{ width: 40 }}>#</th>

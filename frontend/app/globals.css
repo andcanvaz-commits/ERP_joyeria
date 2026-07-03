@@ -3899,5 +3899,14 @@ textarea:disabled {
 }
 .topbarInbox:hover { border-color: var(--gold); }
 
-.table th.num { text-align: right; }
 .dangerText { color: var(--danger); }
+/* Tabla de materias primas: numeros alineados a la izquierda (bajo su titulo),
+   y la columna de acciones separada y pegada a la derecha. */
+.inventoryItemsTable th.num,
+.inventoryItemsTable td.num { text-align: left; }
+.inventoryItemsTable th:last-child,
+.inventoryItemsTable td:last-child {
+  text-align: right;
+  padding-left: 28px;
+}
+.inventoryItemsTable td:last-child .rowActions { justify-content: flex-end; }
