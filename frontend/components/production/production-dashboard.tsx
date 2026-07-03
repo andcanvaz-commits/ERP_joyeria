@@ -30,6 +30,9 @@ import {
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
+import { CaliperScale } from "@/components/ui/caliper-scale";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { StatusPunch } from "@/components/ui/status-punch";
 
 type StageForm = {
   name: string;
@@ -330,6 +333,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       CANCELADA: "Cancelada",
     };
     return labels[status] ?? status;
+  }
+
+  function runStatusTone(status: ProductionRun["status"]): "neutral" | "active" | "done" | "danger" | "warning" {
+    const tones: Record<ProductionRun["status"], "neutral" | "active" | "done" | "danger" | "warning"> = {
+      PENDIENTE_INVENTARIO: "warning",
+      MATERIALES_APROBADOS: "active",
+      EN_PROCESO: "active",
+      PENDIENTE_RECEPCION: "warning",
+      RECIBIDA: "done",
+      CANCELADA: "danger",
+    };
+    return tones[status] ?? "neutral";
   }
 
   function buildCalendarDays(monthKey: string) {
@@ -1038,7 +1053,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               {inProgressRuns.length > 0 ? (
                 <div className="productionRunsVertical">
                   {inProgressRuns.map((run) => {
-                    const progress = getRunProgress(run);
                     const currentStage = run.stages.find((s) => s.status === "EN_PROCESO") ?? run.stages.find((s) => s.status === "PENDIENTE") ?? null;
                     const doneCount = run.stages.filter((s) => s.status === "FINALIZADA").length;
                     return (
@@ -1065,13 +1079,24 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <span aria-hidden="true">·</span>
                           <span>Inició {hourLabel(run.started_at)}</span>
                         </div>
-                        {/* Progress: bar + fraction inline */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div className="progressTrack" style={{ flex: 1 }}>
-                            <div className="progressFill" style={{ width: `${progress}%` }} />
-                          </div>
-                          <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, flexShrink: 0 }}>{doneCount}/{run.stages.length}</span>
-                        </div>
+                        {/* Progress: caliper scale for stage advance */}
+                        <CaliperScale
+                          ariaLabel="Avance de la orden"
+                          label={`${doneCount}/${run.stages.length}`}
+                          max={run.stages.length}
+                          ticks={run.stages.length}
+                          value={doneCount}
+                        />
+                        {run.waste_limit_percent ? (
+                          <CaliperScale
+                            ariaLabel="Merma frente al limite"
+                            label={`${Number(run.waste_percent ?? 0).toFixed(1)}%`}
+                            limit={Number(run.waste_limit_percent)}
+                            limitMode="ceiling"
+                            max={Math.max(Number(run.waste_limit_percent) * 2, 1)}
+                            value={Number(run.waste_percent ?? 0)}
+                          />
+                        ) : null}
                       </div>
                     );
                   })}
@@ -1167,7 +1192,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   ) : null}
                   {selectedRunForStages.process_name}
                 </h2>
-                <p>{numericText(selectedRunForStages.quantity)} unidades · {runStatusLabel(selectedRunForStages.status)}</p>
+                <p style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {numericText(selectedRunForStages.quantity)} unidades
+                  <StatusPunch label={runStatusLabel(selectedRunForStages.status)} tone={runStatusTone(selectedRunForStages.status)} />
+                </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
                 <X aria-hidden="true" size={18} />
@@ -1194,7 +1222,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               const safeIndex = stageModalIndex % stages.length;
               const stage = stages[safeIndex];
               const canManage = canManageStage(stage, safeIndex, stages);
-              const statusLabel = stage.status === "FINALIZADA" ? "Finalizada" : stage.status === "EN_PROCESO" ? "En proceso" : "Pendiente";
               return (
                 <>
                   <div className="stageCarouselNav">
@@ -1233,7 +1260,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           {stage.stage_code ? (
                             <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--muted)", display: "block" }}>{stage.stage_code}</span>
                           ) : null}
-                          <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 2 }}>{statusLabel}</div>
+                          <div style={{ marginTop: 4 }}><StatusBadge status={stage.status} /></div>
                         </div>
                       </div>
                     </div>
@@ -1430,7 +1457,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="userPreviewGrid">
               <span>
                 <strong>Estado</strong>
-                {runStatusLabel(selectedStatsRun.status)}
+                <StatusPunch label={runStatusLabel(selectedStatsRun.status)} tone={runStatusTone(selectedStatsRun.status)} />
               </span>
               <span>
                 <strong>Inicio</strong>

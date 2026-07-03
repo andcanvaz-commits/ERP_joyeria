@@ -190,20 +190,20 @@ export function SystemDashboard() {
         {error ? <div className="alert alertError">{error}</div> : null}
 
         <section className="summaryGrid" aria-label="Resumen del sistema">
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <Factory aria-hidden="true" size={22} />
-            <span className="metricLabel">Procesos creados</span>
-            <strong className="metricValue">{processes.length}</strong>
+            <span className="metricLabel kpiLabel">Procesos creados</span>
+            <strong className="metricValue"><span className="kpiNum num">{processes.length}</span></strong>
           </article>
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <Users aria-hidden="true" size={22} />
-            <span className="metricLabel">Usuarios</span>
-            <strong className="metricValue">{users.length}</strong>
+            <span className="metricLabel kpiLabel">Usuarios</span>
+            <strong className="metricValue"><span className="kpiNum num">{users.length}</span></strong>
           </article>
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <Boxes aria-hidden="true" size={22} />
-            <span className="metricLabel">Items de inventario</span>
-            <strong className="metricValue">{totalInventoryItems}</strong>
+            <span className="metricLabel kpiLabel">Items de inventario</span>
+            <strong className="metricValue"><span className="kpiNum num">{totalInventoryItems}</span></strong>
           </article>
         </section>
 
@@ -377,20 +377,20 @@ export function SystemDashboard() {
         {error ? <div className="alert alertError">{error}</div> : null}
 
         <section className="summaryGrid" aria-label="Resumen de produccion">
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <Factory aria-hidden="true" size={22} />
-            <span className="metricLabel">Procesos creados</span>
-            <strong className="metricValue">{processes.length}</strong>
+            <span className="metricLabel kpiLabel">Procesos creados</span>
+            <strong className="metricValue"><span className="kpiNum num">{processes.length}</span></strong>
           </article>
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <ListChecks aria-hidden="true" size={22} />
-            <span className="metricLabel">Ordenes activas</span>
-            <strong className="metricValue">{activeRuns.length}</strong>
+            <span className="metricLabel kpiLabel">Ordenes activas</span>
+            <strong className="metricValue"><span className="kpiNum num">{activeRuns.length}</span></strong>
           </article>
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <CheckCircle2 aria-hidden="true" size={22} />
-            <span className="metricLabel">Ordenes recibidas</span>
-            <strong className="metricValue">{finishedRuns.length}</strong>
+            <span className="metricLabel kpiLabel">Ordenes recibidas</span>
+            <strong className="metricValue"><span className="kpiNum num">{finishedRuns.length}</span></strong>
           </article>
         </section>
 
@@ -570,20 +570,20 @@ export function SystemDashboard() {
         {error ? <div className="alert alertError">{error}</div> : null}
 
         <section className="summaryGrid" aria-label="Resumen de inventario">
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <Boxes aria-hidden="true" size={22} />
-            <span className="metricLabel">Items de inventario</span>
-            <strong className="metricValue">{totalInventoryItems}</strong>
+            <span className="metricLabel kpiLabel">Items de inventario</span>
+            <strong className="metricValue"><span className="kpiNum num">{totalInventoryItems}</span></strong>
           </article>
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <AlertTriangle aria-hidden="true" size={22} />
-            <span className="metricLabel">Stock bajo</span>
-            <strong className="metricValue">{lowStockItems}</strong>
+            <span className="metricLabel kpiLabel">Stock bajo</span>
+            <strong className="metricValue"><span className="kpiNum num">{lowStockItems}</span></strong>
           </article>
-          <article className="card metric">
+          <article className="card metric kpiCard">
             <ListChecks aria-hidden="true" size={22} />
-            <span className="metricLabel">Movimientos</span>
-            <strong className="metricValue">{inventoryMovements.length}</strong>
+            <span className="metricLabel kpiLabel">Movimientos</span>
+            <strong className="metricValue"><span className="kpiNum num">{inventoryMovements.length}</span></strong>
           </article>
         </section>
 
