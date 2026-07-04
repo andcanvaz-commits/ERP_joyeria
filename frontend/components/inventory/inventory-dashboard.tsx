@@ -975,24 +975,6 @@ export function InventoryDashboard() {
             </div>
           ) : (
           <div className="inventoryList">
-            {itemFilter === "FINISHED_PRODUCT"
-              ? receivedRuns.map((run) => (
-                  <article className="inventoryItemRow" key={`recibida-${run.id}`} {...openableProps(() => setViewingRun(run), `Ver ${run.process_name}`)}>
-                    <div>
-                      <strong>
-                        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                        {run.process_name}
-                      </strong>
-                      <span>{run.quantity} unidades</span>
-                    </div>
-                    <span className="stockPill num">{run.quantity} und</span>
-                    <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
-                      <Eye aria-hidden="true" size={15} />
-                      Visualizar
-                    </button>
-                  </article>
-                ))
-              : null}
             {displayItems.map((item) => (
               <article className="inventoryItemRow" key={item.id} {...openableProps(() => setViewingItem(item), `Ver detalle de ${item.name}`)}>
                 <div>
@@ -1047,7 +1029,6 @@ export function InventoryDashboard() {
             {!isLoading
               && displayItems.length === 0
               && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.some((r) => r.status === "EN_PROCESO"))
-              && !(itemFilter === "FINISHED_PRODUCT" && receivedRuns.length > 0)
               ? <div className="emptyState">No hay items para este filtro.</div> : null}
             {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
           </div>
