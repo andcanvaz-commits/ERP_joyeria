@@ -9,7 +9,6 @@ import { openableProps, stopClick } from "@/lib/a11y";
 import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
-import { CaliperScale } from "@/components/ui/caliper-scale";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listUnits } from "@/lib/units-api";
 import {
@@ -981,17 +980,7 @@ export function InventoryDashboard() {
                   <strong>{item.name}</strong>
                   <span>{item.sku} - {itemTypeLabel(item.item_type)}</span>
                 </div>
-                {item.minimum_stock != null ? (
-                  <CaliperScale
-                    value={Number(item.current_stock)}
-                    max={Math.max(Number(item.minimum_stock) * 2, Number(item.current_stock), 1)}
-                    limit={Number(item.minimum_stock)}
-                    limitMode="floor"
-                    ariaLabel="Stock frente al minimo"
-                  />
-                ) : (
-                  <span className="num">{numericText(item.current_stock)} {item.unit_code}</span>
-                )}
+                <span className="num">{numericText(item.current_stock)} {item.unit_code}</span>
                 <div className="rowActions" onClick={stopClick}>
                   <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
                     <Eye aria-hidden="true" size={15} />

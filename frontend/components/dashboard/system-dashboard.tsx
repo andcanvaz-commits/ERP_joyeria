@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Boxes, CheckCircle2, Factory, ListChecks, Users } from "lucide-react";
+import { Boxes, CheckCircle2, Factory, ListChecks, Users } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
@@ -145,17 +145,12 @@ export function SystemDashboard() {
     [inventoryMovements],
   );
   const recentInventoryMovements = sortedInventoryMovements.slice(0, 4);
-  const lowStockList = useMemo(
-    () => inventoryItems.filter((item) => item.minimum_stock !== null && Number(item.current_stock) <= Number(item.minimum_stock)).slice(0, 4),
-    [inventoryItems],
-  );
   const inventoryByType = useMemo(() => {
     return inventoryItems.reduce<Record<InventoryItemType, number>>((acc, item) => {
       acc[item.item_type] = (acc[item.item_type] ?? 0) + 1;
       return acc;
     }, { RAW_MATERIAL: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0 });
   }, [inventoryItems]);
-  const lowStockItems = inventorySummary?.low_stock_items ?? lowStockList.length;
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;
   const maxInventoryTypeTotal = Math.max(1, ...inventoryTypeEntries.map(([, total]) => total));
@@ -164,9 +159,6 @@ export function SystemDashboard() {
 
   // Donut de avance de ordenes (produccion) y salud de stock (inventario).
   const receivedPercent = runs.length ? Math.round((finishedRuns.length / runs.length) * 100) : 0;
-  const stockHealthPercent = totalInventoryItems
-    ? Math.round(((totalInventoryItems - lowStockItems) / totalInventoryItems) * 100)
-    : 0;
   const movementsByType = useMemo(() => {
     return inventoryMovements.reduce<Record<string, number>>((acc, movement) => {
       acc[movement.movement_type] = (acc[movement.movement_type] ?? 0) + 1;
@@ -256,7 +248,7 @@ export function SystemDashboard() {
           <article className="card chartPanel">
             <div>
               <h2 className="panelTitle">Inventario por tipo</h2>
-              <p className="panelText">{lowStockItems} items con stock bajo</p>
+              <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
             <div className="barChartList">
               {inventoryTypeEntries.map(([type, total]) => {
@@ -577,11 +569,6 @@ export function SystemDashboard() {
             <strong className="metricValue"><span className="kpiNum num">{totalInventoryItems}</span></strong>
           </article>
           <article className="card metric kpiCard">
-            <AlertTriangle aria-hidden="true" size={22} />
-            <span className="metricLabel kpiLabel">Stock bajo</span>
-            <strong className="metricValue"><span className="kpiNum num">{lowStockItems}</span></strong>
-          </article>
-          <article className="card metric kpiCard">
             <ListChecks aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Movimientos</span>
             <strong className="metricValue"><span className="kpiNum num">{inventoryMovements.length}</span></strong>
@@ -592,7 +579,7 @@ export function SystemDashboard() {
           <article className="card chartPanel">
             <div>
               <h2 className="panelTitle">Inventario por tipo</h2>
-              <p className="panelText">{lowStockItems} items con stock bajo</p>
+              <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
             <div className="barChartList">
               {inventoryTypeEntries.map(([type, total]) => {
@@ -608,28 +595,6 @@ export function SystemDashboard() {
                 );
               })}
               {!isLoading && inventoryItems.length === 0 ? <div className="emptyState">No hay inventario registrado.</div> : null}
-            </div>
-          </article>
-
-          <article className="card chartPanel">
-            <div>
-              <h2 className="panelTitle">Salud de stock</h2>
-              <p className="panelText">{totalInventoryItems - lowStockItems} en nivel de {totalInventoryItems}</p>
-            </div>
-            <div className="donutWrap">
-              <div
-                aria-label={`${stockHealthPercent}% de items en nivel`}
-                className="donutChart"
-                role="img"
-                style={{ "--donut-value": `${stockHealthPercent}%` } as CSSProperties}
-              >
-                <strong>{stockHealthPercent}%</strong>
-                <span>en nivel</span>
-              </div>
-              <div className="chartLegend">
-                <span><i className="legendActive" />En nivel</span>
-                <span><i className="legendInactive" />Stock bajo</span>
-              </div>
             </div>
           </article>
 
@@ -676,30 +641,6 @@ export function SystemDashboard() {
               ))}
               {!isLoading && recentInventoryMovements.length === 0 ? (
                 <div className="emptyState">No hay movimientos de inventario.</div>
-              ) : null}
-              {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
-            </div>
-          </article>
-
-          <article className="card panelBody">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Stock bajo</h2>
-                <p className="panelText">Items en o bajo el minimo</p>
-              </div>
-            </div>
-            <div className="dashboardList">
-              {lowStockList.map((item) => (
-                <div className="dashboardRow" key={item.id}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <span>{INVENTORY_TYPE_LABELS[item.item_type]}</span>
-                  </div>
-                  <small>{numericText(item.current_stock)} {item.unit_code}</small>
-                </div>
-              ))}
-              {!isLoading && lowStockList.length === 0 ? (
-                <div className="emptyState">Sin items en stock bajo.</div>
               ) : null}
               {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
             </div>

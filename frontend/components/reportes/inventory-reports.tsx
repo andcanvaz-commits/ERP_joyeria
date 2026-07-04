@@ -99,7 +99,6 @@ export function InventoryReports() {
                 <th>SKU</th>
                 <th>Tipo</th>
                 <th>Stock actual</th>
-                <th>Minimo</th>
                 <th>Unidad</th>
               </tr>
             </thead>
@@ -110,13 +109,12 @@ export function InventoryReports() {
                   <td>{item.sku}</td>
                   <td>{TYPE_LABELS[item.item_type]}</td>
                   <td className="num">{num(item.current_stock)}</td>
-                  <td className="num">{item.minimum_stock === null ? "-" : num(item.minimum_stock)}</td>
                   <td>{item.unit_code}</td>
                 </tr>
               ))}
               {!isLoading && sortedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={5}>
                     <div className="emptyState">No hay inventario registrado.</div>
                   </td>
                 </tr>
