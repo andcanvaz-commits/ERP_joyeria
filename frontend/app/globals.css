@@ -1348,7 +1348,7 @@ textarea {
 .actionMenuPanel {
   position: absolute;
   top: calc(100% + 8px);
-  left: 0;
+  right: 0;
   z-index: 20;
   display: grid;
   min-width: 230px;
