@@ -993,6 +993,7 @@ textarea {
 }
 
 .tableWrap {
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
   border-top: 1px solid var(--border);
