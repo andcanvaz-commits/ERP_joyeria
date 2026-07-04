@@ -2,9 +2,9 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import type { InventoryItem } from "@/types/inventory";
-import { createInventoryItem, deleteInventoryItem, listInventoryItems } from "@/lib/inventory-api";
+import { createInventoryItem, deleteInventoryItem, listInventoryItems, updateInventoryItem } from "@/lib/inventory-api";
 import { listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 
@@ -16,6 +16,7 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
   });
   const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits });
 
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [materialType, setMaterialType] = useState("");
   const [description, setDescription] = useState("");
   const [purity, setPurity] = useState("");
@@ -23,6 +24,23 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
+
+  function resetForm() {
+    setEditingId(null);
+    setMaterialType("");
+    setDescription("");
+    setPurity("");
+    setUnitCode("");
+  }
+
+  function startEdit(item: InventoryItem) {
+    setEditingId(item.id);
+    setMaterialType(item.material_type ?? item.name);
+    setDescription(item.description ?? "");
+    setPurity(item.purity ?? "");
+    setUnitCode(item.unit_code);
+    setError(null);
+  }
 
   async function handleDelete(item: InventoryItem) {
     const ok = await confirmDelete(confirm, item.material_type ?? item.name);
@@ -50,25 +68,27 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
       return;
     }
     const unit = unitCode || unitOptions[0]?.value || "g";
+    const payload = {
+      item_type: "RAW_MATERIAL" as const,
+      name: materialType.trim(),
+      material_type: materialType.trim(),
+      description: description.trim() || null,
+      purity: purity.trim() || null,
+      unit_code: unit,
+      minimum_stock: null,
+    };
     setIsSaving(true);
     try {
-      await createInventoryItem({
-        item_type: "RAW_MATERIAL",
-        name: materialType.trim(),
-        material_type: materialType.trim(),
-        description: description.trim() || null,
-        purity: purity.trim() || null,
-        unit_code: unit,
-        minimum_stock: null,
-      });
-      setMaterialType("");
-      setDescription("");
-      setPurity("");
-      setUnitCode("");
+      if (editingId) {
+        await updateInventoryItem(editingId, payload);
+      } else {
+        await createInventoryItem(payload);
+      }
+      resetForm();
       await queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la materia prima.");
+      setError(err instanceof Error ? err.message : "No se pudo guardar la materia prima.");
     } finally {
       setIsSaving(false);
     }
@@ -119,8 +139,12 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
             </label>
           </div>
           <div className="modalActions">
+            {editingId ? (
+              <button className="button" disabled={isSaving} onClick={resetForm} type="button">Cancelar</button>
+            ) : null}
             <button className="button buttonPrimary" disabled={isSaving} type="submit">
-              <Plus aria-hidden="true" size={14} /> Crear materia prima
+              {editingId ? <Save aria-hidden="true" size={14} /> : <Plus aria-hidden="true" size={14} />}
+              {editingId ? " Guardar cambios" : " Crear materia prima"}
             </button>
           </div>
         </form>
@@ -144,16 +168,26 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
                   <td>{item.purity ?? "—"}</td>
                   <td>{item.unit_code}</td>
                   <td style={{ textAlign: "right" }}>
-                    <button
-                      aria-label={`Eliminar ${item.material_type ?? item.name}`}
-                      className="iconOnlyButton dangerIconButton"
-                      disabled={Number(item.current_stock) > 0}
-                      title={Number(item.current_stock) > 0 ? "Deja el stock en cero para poder eliminar" : "Eliminar"}
-                      onClick={() => void handleDelete(item)}
-                      type="button"
-                    >
-                      <Trash2 aria-hidden="true" size={14} />
-                    </button>
+                    <span className="rowActions" style={{ justifyContent: "flex-end" }}>
+                      <button
+                        aria-label={`Editar ${item.material_type ?? item.name}`}
+                        className="iconOnlyButton"
+                        onClick={() => startEdit(item)}
+                        type="button"
+                      >
+                        <Pencil aria-hidden="true" size={14} />
+                      </button>
+                      <button
+                        aria-label={`Eliminar ${item.material_type ?? item.name}`}
+                        className="iconOnlyButton dangerIconButton"
+                        disabled={Number(item.current_stock) > 0}
+                        title={Number(item.current_stock) > 0 ? "Deja el stock en cero para poder eliminar" : "Eliminar"}
+                        onClick={() => void handleDelete(item)}
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={14} />
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}

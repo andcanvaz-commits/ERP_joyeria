@@ -885,12 +885,6 @@ export function InventoryDashboard() {
                               <Eye aria-hidden="true" size={15} />
                               Visualizar
                             </button>
-                            {canSeeAudit ? (
-                              <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
-                                <Pencil aria-hidden="true" size={15} />
-                                Editar
-                              </button>
-                            ) : null}
                           </div>
                         </td>
                       </tr>
