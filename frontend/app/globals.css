@@ -3912,3 +3912,6 @@ textarea:disabled {
 .inventoryItemsTable td:last-child .rowActions { justify-content: flex-end; }
 
 .confirmWindow { width: min(460px, 100%); }
+
+.noticeCompact { padding: 10px 14px; }
+.noticeCompact .noticeInner { padding-bottom: 0; }

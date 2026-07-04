@@ -71,8 +71,8 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
 
         {error || success ? (
           <div className="toastStack" aria-live="polite">
-            {error ? <div className="notice noticeError" key={error} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div> : null}
-            {success ? <div className="notice noticeSuccess" key={success} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{success}</span></div> : null}
+            {error ? <div className="notice noticeError noticeCompact" key={error} style={{ pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div> : null}
+            {success ? <div className="notice noticeSuccess noticeCompact" key={success} style={{ pointerEvents: "auto" }}><span className="noticeInner">{success}</span></div> : null}
           </div>
         ) : null}
 
