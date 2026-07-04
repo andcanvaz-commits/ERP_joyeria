@@ -917,10 +917,10 @@ export function InventoryDashboard() {
                   <tr>
                     <th className="num" style={{ width: 40 }}>#</th>
                     <th>Producto</th>
+                    <th>Descripción</th>
                     <th>Metal principal</th>
                     <th>Ley/pureza</th>
                     <th className="num">Peso total</th>
-                    <th>Elaboración</th>
                     <th className="num">Stock</th>
                     <th aria-label="Acciones" />
                   </tr>
@@ -930,10 +930,10 @@ export function InventoryDashboard() {
                     <tr key={item.id}>
                       <td className="num">{index + 1}</td>
                       <td>{item.name}</td>
+                      <td>{item.description ?? "—"}</td>
                       <td>{item.material_type ?? "—"}</td>
                       <td>{item.purity ?? "—"}</td>
                       <td className="num">{item.total_weight ? numericText(item.total_weight) : "—"}</td>
-                      <td>{item.elaboration_date ?? "—"}</td>
                       <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
                       <td>
                         <div className="rowActions">
@@ -951,8 +951,8 @@ export function InventoryDashboard() {
                       <td>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</td>
                       <td>—</td>
                       <td>—</td>
-                      <td className="num">—</td>
                       <td>—</td>
+                      <td className="num">—</td>
                       <td className="num">{run.quantity} und</td>
                       <td>
                         <div className="rowActions">

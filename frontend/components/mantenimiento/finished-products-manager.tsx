@@ -148,10 +148,6 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
           </div>
           <div className="materialRow">
             <label className="fieldGroup">
-              <span>Fecha de elaboración</span>
-              <input className="field" disabled={isSaving} onChange={(e) => setElaborationDate(e.target.value)} type="date" value={elaborationDate} />
-            </label>
-            <label className="fieldGroup">
               <span>Descripción</span>
               <input className="field" disabled={isSaving} maxLength={1000} onChange={(e) => setDescription(e.target.value)} value={description} />
             </label>
@@ -175,10 +171,10 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
               <tr>
                 <th style={{ width: 40 }}>#</th>
                 <th>Producto</th>
+                <th>Descripción</th>
                 <th>Metal principal</th>
                 <th>Ley/pureza</th>
                 <th>Peso total</th>
-                <th>Elaboración</th>
                 <th aria-label="Acciones" />
               </tr>
             </thead>
@@ -187,10 +183,10 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
                 <tr key={item.id}>
                   <td className="num">{index + 1}</td>
                   <td>{item.name}</td>
+                  <td>{item.description ?? "—"}</td>
                   <td>{item.material_type ?? "—"}</td>
                   <td>{item.purity ?? "—"}</td>
                   <td>{item.total_weight ?? "—"}</td>
-                  <td>{item.elaboration_date ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     <span className="rowActions" style={{ justifyContent: "flex-end" }}>
                       <button aria-label={`Editar ${item.name}`} className="iconOnlyButton" onClick={() => startEdit(item)} type="button">
