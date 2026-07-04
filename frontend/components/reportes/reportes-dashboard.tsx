@@ -158,22 +158,6 @@ export function ReportesDashboard() {
 
   return (
     <div className="content">
-      <div className="pageHeader">
-        <p style={{ margin: 0, maxWidth: 740 }}>
-          Informe mensual para decisiones de ventas y producción: qué se fabrica más, dónde se pierde material y qué etapas generan reprocesos. Cada mes acumula información nueva; consulta meses anteriores.
-        </p>
-        <div className="actions">
-          <label className="fieldGroup" style={{ minWidth: 220 }}>
-            <span>Periodo</span>
-            <select className="field" disabled={months.length === 0} onChange={(e) => setSelectedMonth(e.target.value)} value={selectedMonth}>
-              {months.map((month) => (
-                <option key={month} value={month}>{monthLabel(month)}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
-
       {isLoading ? (
         <section className="card panelBody"><div className="emptyState">Cargando reportes...</div></section>
       ) : finished.length === 0 ? null : (
