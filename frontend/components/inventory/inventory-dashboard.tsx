@@ -891,7 +891,13 @@ export function InventoryDashboard() {
                                   <Pencil aria-hidden="true" size={15} />
                                   Editar
                                 </button>
-                                <button className="iconTextButton dangerText" onClick={() => void handleDeleteItem(item)} type="button">
+                                <button
+                                  className="iconTextButton dangerText"
+                                  disabled={Number(item.current_stock) > 0}
+                                  title={Number(item.current_stock) > 0 ? "Deja el stock en cero para poder eliminar" : "Eliminar materia prima"}
+                                  onClick={() => void handleDeleteItem(item)}
+                                  type="button"
+                                >
                                   <Trash2 aria-hidden="true" size={15} />
                                   Eliminar
                                 </button>

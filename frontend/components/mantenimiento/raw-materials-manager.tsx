@@ -143,6 +143,8 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
                     <button
                       aria-label={`Eliminar ${item.material_type ?? item.name}`}
                       className="iconOnlyButton dangerIconButton"
+                      disabled={Number(item.current_stock) > 0}
+                      title={Number(item.current_stock) > 0 ? "Deja el stock en cero para poder eliminar" : "Eliminar"}
                       onClick={() => void handleDelete(item)}
                       type="button"
                     >
