@@ -910,6 +910,69 @@ export function InventoryDashboard() {
                 </tbody>
               </table>
             </div>
+          ) : itemFilter === "FINISHED_PRODUCT" ? (
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th className="num" style={{ width: 40 }}>#</th>
+                    <th>Producto</th>
+                    <th>Metal principal</th>
+                    <th>Ley/pureza</th>
+                    <th className="num">Peso total</th>
+                    <th>Elaboración</th>
+                    <th className="num">Stock</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayItems.map((item, index) => (
+                    <tr key={item.id}>
+                      <td className="num">{index + 1}</td>
+                      <td>{item.name}</td>
+                      <td>{item.material_type ?? "—"}</td>
+                      <td>{item.purity ?? "—"}</td>
+                      <td className="num">{item.total_weight ? numericText(item.total_weight) : "—"}</td>
+                      <td>{item.elaboration_date ?? "—"}</td>
+                      <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                      <td>
+                        <div className="rowActions">
+                          <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                            <Eye aria-hidden="true" size={15} />
+                            Visualizar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {receivedRuns.map((run) => (
+                    <tr key={`recibida-${run.id}`}>
+                      <td className="num">·</td>
+                      <td>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</td>
+                      <td>—</td>
+                      <td>—</td>
+                      <td className="num">—</td>
+                      <td>—</td>
+                      <td className="num">{run.quantity} und</td>
+                      <td>
+                        <div className="rowActions">
+                          <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
+                            <Eye aria-hidden="true" size={15} />
+                            Visualizar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!isLoading && displayItems.length === 0 && receivedRuns.length === 0 ? (
+                    <tr><td colSpan={8}><div className="emptyState">No hay productos terminados.</div></td></tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
           ) : (
           <div className="inventoryList">
             {itemFilter === "FINISHED_PRODUCT"
