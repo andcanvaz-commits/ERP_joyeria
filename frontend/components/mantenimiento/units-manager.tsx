@@ -6,7 +6,7 @@ import { Plus, Trash2, X } from "lucide-react";
 import { createUnit, deleteUnit, listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 
-export function UnitsManager({ onClose }: { onClose: () => void }) {
+export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: units = [], isLoading } = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const [label, setLabel] = useState("");
@@ -52,7 +52,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
       <section className="modalWindow">
         <div className="modalHeader">
           <div>
-            <h2>Unidades de medida</h2>
+            <h2>{mode === "create" ? "Crear unidad de medida" : "Unidades de medida"}</h2>
             <p className="panelText">Alimentan el combo de unidad al crear materias primas en inventario.</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
@@ -66,6 +66,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
+        {mode === "create" ? (
         <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
           <label className="fieldGroup" style={{ flex: 1, minWidth: 0 }}>
             <span>Nombre</span>
@@ -93,7 +94,9 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
             <Plus aria-hidden="true" size={14} /> Agregar
           </button>
         </form>
+        ) : null}
 
+        {mode === "view" ? (
         <div className="tableWrap" style={{ marginTop: 14, maxHeight: 320, overflowY: "auto" }}>
           <table className="table">
             <thead>
@@ -132,6 +135,7 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
             </tbody>
           </table>
         </div>
+        ) : null}
       </section>
       {dialog}
     </div>

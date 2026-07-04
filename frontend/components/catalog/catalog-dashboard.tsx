@@ -128,19 +128,19 @@ export function CatalogDashboard() {
       <section className="catalogGrid catalogGrid3 catalogGridTall">
         <article className="card catalogCard">
           <div className="catalogCardHead"><h2 className="panelTitle">Materiales</h2><span>{materials.length} · 1 dígito</span></div>
-          <div className="inlineField">
+          <form className="inlineField" onSubmit={(e) => { e.preventDefault(); void add("MATERIAL", newMaterial, null, () => setNewMaterial("")); }}>
             <input className="field" placeholder="Nuevo material" value={newMaterial} onChange={(e) => setNewMaterial(e.target.value)} />
-            <button className="button buttonPrimary" onClick={() => void add("MATERIAL", newMaterial, null, () => setNewMaterial(""))} type="button"><Plus size={16} /> Agregar</button>
-          </div>
+            <button className="button buttonPrimary" type="submit"><Plus size={16} /> Agregar</button>
+          </form>
           <div className="catalogScroll"><SegmentTable rows={materials} /></div>
         </article>
 
         <article className="card catalogCard">
           <div className="catalogCardHead"><h2 className="panelTitle">Categorías</h2><span>{categories.length} · 2 dígitos</span></div>
-          <div className="inlineField">
+          <form className="inlineField" onSubmit={(e) => { e.preventDefault(); void add("CATEGORY", newCategory, null, () => setNewCategory("")); }}>
             <input className="field" placeholder="Nueva categoría" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} />
-            <button className="button buttonPrimary" onClick={() => void add("CATEGORY", newCategory, null, () => setNewCategory(""))} type="button"><Plus size={16} /> Agregar</button>
-          </div>
+            <button className="button buttonPrimary" type="submit"><Plus size={16} /> Agregar</button>
+          </form>
           <div className="catalogScroll"><SegmentTable rows={categories} /></div>
         </article>
 
@@ -151,10 +151,10 @@ export function CatalogDashboard() {
             {categories.map((c) => <option key={c.id} value={c.code}>{c.code} · {c.label}</option>)}
           </select>
           {modelCat ? (
-            <div className="inlineField">
+            <form className="inlineField" onSubmit={(e) => { e.preventDefault(); void add("MODEL", newModel, modelCat, () => setNewModel("")); }}>
               <input className="field" placeholder="Nuevo tipo/modelo" value={newModel} onChange={(e) => setNewModel(e.target.value)} />
-              <button className="button buttonPrimary" onClick={() => void add("MODEL", newModel, modelCat, () => setNewModel(""))} type="button"><Plus size={16} /> Agregar</button>
-            </div>
+              <button className="button buttonPrimary" type="submit"><Plus size={16} /> Agregar</button>
+            </form>
           ) : null}
           <div className="catalogScroll">{modelCat ? <SegmentTable rows={modelsOf(modelCat)} /> : <div className="emptyState">Selecciona una categoría.</div>}</div>
         </article>

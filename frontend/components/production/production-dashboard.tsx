@@ -195,8 +195,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
   const [isDataOpen, setIsDataOpen] = useState(false);
-  const [isUnitsOpen, setIsUnitsOpen] = useState(false);
-  const [isRawMaterialsOpen, setIsRawMaterialsOpen] = useState(false);
+  const [dataModal, setDataModal] = useState<{ type: "units" | "materials"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -2010,37 +2009,33 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
             <div className="maintenanceGrid">
-              <button
-                className="maintenanceTile"
-                onClick={() => {
-                  setIsDataOpen(false);
-                  setIsUnitsOpen(true);
-                }}
-                type="button"
-              >
+              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "units", mode: "create" }); }} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear unidad</strong>
+                <span>Nueva unidad de medida.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "units", mode: "view" }); }} type="button">
                 <Ruler aria-hidden="true" size={22} />
                 <strong>Unidades de medida</strong>
-                <span>Unidades del combo de inventario.</span>
+                <span>Ver y eliminar unidades.</span>
               </button>
-              <button
-                className="maintenanceTile"
-                onClick={() => {
-                  setIsDataOpen(false);
-                  setIsRawMaterialsOpen(true);
-                }}
-                type="button"
-              >
+              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "materials", mode: "create" }); }} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear materia prima</strong>
+                <span>Nueva materia prima.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "materials", mode: "view" }); }} type="button">
                 <Boxes aria-hidden="true" size={22} />
                 <strong>Materias primas</strong>
-                <span>Crea las materias primas del inventario.</span>
+                <span>Ver, editar y eliminar.</span>
               </button>
             </div>
           </section>
         </div>
       ) : null}
 
-      {isUnitsOpen ? <UnitsManager onClose={() => setIsUnitsOpen(false)} /> : null}
-      {isRawMaterialsOpen ? <RawMaterialsManager onClose={() => setIsRawMaterialsOpen(false)} /> : null}
+      {dataModal?.type === "units" ? <UnitsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
+      {dataModal?.type === "materials" ? <RawMaterialsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
       {isProcessesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Procesos creados">

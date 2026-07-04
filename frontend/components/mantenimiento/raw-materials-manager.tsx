@@ -8,7 +8,7 @@ import { createInventoryItem, deleteInventoryItem, listInventoryItems, updateInv
 import { listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 
-export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
+export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["raw-materials"],
@@ -99,8 +99,8 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
       <section className="modalWindow">
         <div className="modalHeader">
           <div>
-            <h2>Materias primas</h2>
-            <p className="panelText">Crea las materias primas del inventario.</p>
+            <h2>{mode === "create" ? "Crear materia prima" : "Materias primas"}</h2>
+            <p className="panelText">Materias primas del inventario (tipo, ley y unidad).</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
@@ -113,6 +113,7 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
+        {mode === "create" || editingId ? (
         <form onSubmit={handleAdd} style={{ display: "grid", gap: 12 }}>
           <div className="materialRow">
             <label className="fieldGroup">
@@ -148,7 +149,9 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </form>
+        ) : null}
 
+        {mode === "view" ? (
         <div className="tableWrap" style={{ marginTop: 14, maxHeight: 200, overflowY: "auto" }}>
           <table className="table">
             <thead>
@@ -199,6 +202,7 @@ export function RawMaterialsManager({ onClose }: { onClose: () => void }) {
             </tbody>
           </table>
         </div>
+        ) : null}
       </section>
       {dialog}
     </div>
