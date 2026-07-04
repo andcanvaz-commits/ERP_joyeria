@@ -60,7 +60,11 @@ export function UnitsManager({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {error ? <div className="notice noticeError">{error}</div> : null}
+        {error ? (
+          <div className="toastStack" aria-live="polite">
+            <div className="notice noticeError" key={error} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div>
+          </div>
+        ) : null}
 
         <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
           <label className="fieldGroup" style={{ flex: 1, minWidth: 0 }}>
