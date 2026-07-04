@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -26,6 +26,8 @@ class InventoryItemCreate(BaseModel):
     description: str | None = Field(default=None, max_length=1000)
     material_type: str | None = Field(default=None, max_length=80)
     purity: str | None = Field(default=None, max_length=40)
+    total_weight: Decimal | None = Field(default=None, ge=0)
+    elaboration_date: date | None = None
     unit_code: str = Field(min_length=1, max_length=20)
     minimum_stock: Decimal | None = Field(default=None, ge=0)
 
@@ -38,6 +40,8 @@ class InventoryItemUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=1000)
     material_type: str | None = Field(default=None, max_length=80)
     purity: str | None = Field(default=None, max_length=40)
+    total_weight: Decimal | None = Field(default=None, ge=0)
+    elaboration_date: date | None = None
     unit_code: str = Field(min_length=1, max_length=20)
     minimum_stock: Decimal | None = Field(default=None, ge=0)
 
@@ -53,6 +57,8 @@ class InventoryItemRead(BaseModel):
     description: str | None = None
     material_type: str | None = None
     purity: str | None = None
+    total_weight: Decimal | None = None
+    elaboration_date: date | None = None
     unit_code: str
     minimum_stock: Decimal | None = None
     current_stock: Decimal

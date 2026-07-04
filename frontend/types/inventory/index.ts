@@ -22,6 +22,8 @@ export type InventoryItem = {
   material_type?: string | null;
   purity?: string | null;
   average_cost?: string;
+  total_weight?: string | null;
+  elaboration_date?: string | null;
 };
 
 export type InventoryMovement = {

@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID as PyUUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,9 @@ class InventoryItem(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     material_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     purity: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Productos terminados: peso total y fecha de elaboracion.
+    total_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    elaboration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     minimum_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     current_stock: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))

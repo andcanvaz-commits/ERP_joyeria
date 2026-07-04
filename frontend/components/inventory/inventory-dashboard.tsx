@@ -357,9 +357,12 @@ export function InventoryDashboard() {
     minimumDate.setHours(0, 0, 0, 0);
     return sortedMovements.filter((movement) => {
       const movementDate = new Date(movement.created_at);
-      return !Number.isNaN(movementDate.getTime()) && movementDate >= minimumDate;
+      const inRange = !Number.isNaN(movementDate.getTime()) && movementDate >= minimumDate;
+      // Los movimientos siguen la pestaña activa (materia prima / proceso / terminado).
+      const matchesTab = itemFilter === "TODOS" || movement.item.item_type === itemFilter;
+      return inRange && matchesTab;
     });
-  }, [sortedMovements]);
+  }, [sortedMovements, itemFilter]);
   const movementCountsByDate = useMemo(() => {
     return sortedMovements.reduce<Map<string, number>>((counts, movement) => {
       const key = movementDateKey(movement);

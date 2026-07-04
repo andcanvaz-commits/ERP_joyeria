@@ -66,8 +66,10 @@ class InventoryService(InventoryIntegrationPort):
         self.repository = repository
 
     def create_item(self, payload: InventoryItemCreate) -> InventoryItemRead:
-        if payload.item_type != "RAW_MATERIAL":
-            raise InventoryDomainError("Solo se pueden crear manualmente materias primas.")
+        if payload.item_type not in ("RAW_MATERIAL", "FINISHED_PRODUCT"):
+            raise InventoryDomainError(
+                "Solo se pueden crear manualmente materias primas o productos terminados."
+            )
         item = InventoryItem(
             item_type=payload.item_type,
             name=payload.name,
@@ -75,6 +77,8 @@ class InventoryService(InventoryIntegrationPort):
             description=payload.description,
             material_type=payload.material_type,
             purity=payload.purity,
+            total_weight=payload.total_weight,
+            elaboration_date=payload.elaboration_date,
             unit_code=payload.unit_code.strip(),
             minimum_stock=payload.minimum_stock,
         )
@@ -84,14 +88,19 @@ class InventoryService(InventoryIntegrationPort):
 
     def update_item(self, item_id: UUID, payload: InventoryItemUpdate) -> InventoryItemRead:
         item = self._get_item_or_raise(item_id)
-        if item.item_type != "RAW_MATERIAL" or payload.item_type != "RAW_MATERIAL":
-            raise InventoryDomainError("Solo se pueden editar manualmente materias primas.")
+        editable = ("RAW_MATERIAL", "FINISHED_PRODUCT")
+        if item.item_type not in editable or payload.item_type not in editable:
+            raise InventoryDomainError(
+                "Solo se pueden editar manualmente materias primas o productos terminados."
+            )
 
         item.item_type = payload.item_type
         item.name = payload.name
         item.description = payload.description
         item.material_type = payload.material_type
         item.purity = payload.purity
+        item.total_weight = payload.total_weight
+        item.elaboration_date = payload.elaboration_date
         item.unit_code = payload.unit_code.strip()
         item.minimum_stock = payload.minimum_stock
         self.repository.flush()
@@ -99,11 +108,11 @@ class InventoryService(InventoryIntegrationPort):
 
     def delete_item(self, item_id: UUID) -> None:
         item = self._get_item_or_raise(item_id)
-        if item.item_type != "RAW_MATERIAL":
-            raise InventoryDomainError("Solo se pueden eliminar materias primas.")
+        if item.item_type not in ("RAW_MATERIAL", "FINISHED_PRODUCT"):
+            raise InventoryDomainError("Solo se pueden eliminar materias primas o productos terminados.")
         if item.current_stock > 0:
             raise InventoryDomainError(
-                "No se puede eliminar una materia prima con stock. Deja el stock en cero primero."
+                "No se puede eliminar un item con stock. Deja el stock en cero primero."
             )
         # Sin stock: se permite eliminar. Se borran tambien sus movimientos para
         # no dejar historial huerfano (integridad referencial).

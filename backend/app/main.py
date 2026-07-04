@@ -198,6 +198,8 @@ def upgrade_inventory_movements_table() -> None:
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS material_type VARCHAR(80)",
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS purity VARCHAR(40)",
         "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS average_cost NUMERIC(14, 4) NOT NULL DEFAULT 0",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS total_weight NUMERIC(14, 4)",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS elaboration_date DATE",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS source_file_name VARCHAR(240)",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS source_file_mime VARCHAR(120)",
         "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS source_file_content TEXT",
