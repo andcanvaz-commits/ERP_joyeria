@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Boxes, ListChecks } from "lucide-react";
+import { Boxes, ListChecks } from "lucide-react";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventorySummary } from "@/types/inventory";
 
@@ -34,11 +34,6 @@ function dateLabel(value: string) {
   return date.toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function isLowStock(item: InventoryItem) {
-  if (item.minimum_stock === null) return false;
-  return Number(item.current_stock) <= Number(item.minimum_stock);
-}
-
 async function fetchInventoryReportsBundle() {
   const [summary, items, movements] = await Promise.all([
     getInventorySummary(),
@@ -59,7 +54,6 @@ export function InventoryReports() {
   const movements: InventoryMovement[] = data?.movements ?? [];
   const error = queryError instanceof Error ? queryError.message : queryError ? "No se pudieron cargar los reportes." : null;
 
-  const lowStock = useMemo(() => items.filter(isLowStock), [items]);
   const sortedItems = useMemo(
     () => [...items].sort((a, b) => a.name.localeCompare(b.name, "es")),
     [items],
@@ -83,56 +77,12 @@ export function InventoryReports() {
           <strong className="metricValue">{summary?.total_items ?? items.length}</strong>
         </article>
         <article className="card metric">
-          <AlertTriangle aria-hidden="true" size={22} />
-          <span className="metricLabel">Stock bajo</span>
-          <strong className="metricValue">{summary?.low_stock_items ?? lowStock.length}</strong>
-        </article>
-        <article className="card metric">
           <ListChecks aria-hidden="true" size={22} />
           <span className="metricLabel">Movimientos</span>
           <strong className="metricValue">{movements.length}</strong>
         </article>
       </section>
 
-      <section className="card panelBody">
-        <div className="panelHeader">
-          <div>
-            <h2 className="panelTitle">Stock bajo</h2>
-            <p className="panelText">Items en o por debajo del minimo</p>
-          </div>
-        </div>
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Tipo</th>
-                <th>Stock actual</th>
-                <th>Minimo</th>
-                <th>Unidad</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lowStock.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td>{TYPE_LABELS[item.item_type]}</td>
-                  <td className="num">{num(item.current_stock)}</td>
-                  <td className="num">{num(item.minimum_stock)}</td>
-                  <td>{item.unit_code}</td>
-                </tr>
-              ))}
-              {!isLoading && lowStock.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="emptyState">No hay items con stock bajo.</div>
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       <section className="card panelBody">
         <div className="panelHeader">
