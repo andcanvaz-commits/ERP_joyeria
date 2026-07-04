@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import { createUnit, deleteUnit, listUnits } from "@/lib/units-api";
@@ -12,8 +12,15 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
   const [label, setLabel] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
+
+  useEffect(() => {
+    if (!success) return;
+    const timer = setTimeout(() => setSuccess(null), 3000);
+    return () => clearTimeout(timer);
+  }, [success]);
 
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
@@ -27,6 +34,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
       await createUnit({ label: label.trim(), code: code.trim() });
       setLabel("");
       setCode("");
+      setSuccess("Unidad creada.");
       await queryClient.invalidateQueries({ queryKey: ["units"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo agregar la unidad.");
@@ -41,6 +49,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
     setError(null);
     try {
       await deleteUnit(id);
+      setSuccess("Unidad eliminada.");
       await queryClient.invalidateQueries({ queryKey: ["units"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar la unidad.");
@@ -60,9 +69,10 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
           </button>
         </div>
 
-        {error ? (
+        {error || success ? (
           <div className="toastStack" aria-live="polite">
-            <div className="notice noticeError" key={error} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div>
+            {error ? <div className="notice noticeError" key={error} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div> : null}
+            {success ? <div className="notice noticeSuccess" key={success} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{success}</span></div> : null}
           </div>
         ) : null}
 

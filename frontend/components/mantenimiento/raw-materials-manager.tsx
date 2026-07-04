@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import type { InventoryItem } from "@/types/inventory";
@@ -22,8 +22,15 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
   const [purity, setPurity] = useState("");
   const [unitCode, setUnitCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
+
+  useEffect(() => {
+    if (!success) return;
+    const timer = setTimeout(() => setSuccess(null), 3000);
+    return () => clearTimeout(timer);
+  }, [success]);
 
   function resetForm() {
     setEditingId(null);
@@ -48,6 +55,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
     setError(null);
     try {
       await deleteInventoryItem(item.id);
+      setSuccess("Materia prima eliminada.");
       await queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (err) {
@@ -81,8 +89,10 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
     try {
       if (editingId) {
         await updateInventoryItem(editingId, payload);
+        setSuccess("Materia prima actualizada.");
       } else {
         await createInventoryItem(payload);
+        setSuccess("Materia prima creada.");
       }
       resetForm();
       await queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
@@ -107,9 +117,10 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
           </button>
         </div>
 
-        {error ? (
+        {error || success ? (
           <div className="toastStack" aria-live="polite">
-            <div className="notice noticeError" key={error} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div>
+            {error ? <div className="notice noticeError" key={error} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div> : null}
+            {success ? <div className="notice noticeSuccess" key={success} style={{ paddingBottom: 13, pointerEvents: "auto" }}><span className="noticeInner">{success}</span></div> : null}
           </div>
         ) : null}
 
