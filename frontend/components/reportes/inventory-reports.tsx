@@ -2,15 +2,9 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, ListChecks } from "lucide-react";
+import { Boxes, ListChecks, Package } from "lucide-react";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
-import type { InventoryItem, InventoryItemType, InventoryMovement, InventorySummary } from "@/types/inventory";
-
-const TYPE_LABELS: Record<InventoryItemType, string> = {
-  RAW_MATERIAL: "Materia prima",
-  WORK_IN_PROGRESS: "En proceso",
-  FINISHED_PRODUCT: "Terminados",
-};
+import type { InventoryItem, InventoryMovement, InventorySummary } from "@/types/inventory";
 
 const MOVEMENT_LABELS: Record<string, string> = {
   ENTRADA: "Entrada",
@@ -22,10 +16,10 @@ const MOVEMENT_LABELS: Record<string, string> = {
   MERMA: "Merma",
 };
 
-function num(value: string | null) {
-  if (!value) return "0";
+function num(value: string | number | null) {
+  if (value === null || value === "") return "0";
   const n = Number(value);
-  return Number.isFinite(n) ? n.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
+  return Number.isFinite(n) ? n.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
 }
 
 function dateLabel(value: string) {
@@ -54,15 +48,43 @@ export function InventoryReports() {
   const movements: InventoryMovement[] = data?.movements ?? [];
   const error = queryError instanceof Error ? queryError.message : queryError ? "No se pudieron cargar los reportes." : null;
 
-  const sortedItems = useMemo(
-    () => [...items].sort((a, b) => a.name.localeCompare(b.name, "es")),
+  const finished = useMemo(
+    () => items.filter((item) => item.item_type === "FINISHED_PRODUCT"),
     [items],
   );
-  const recentMovements = useMemo(
-    () =>
-      [...movements]
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        .slice(0, 25),
+
+  // Producción por categoría de producto (nombre): cuántos subtipos y stock total.
+  const byCategory = useMemo(() => {
+    const map = new Map<string, { subtipos: number; stock: number }>();
+    for (const it of finished) {
+      const cur = map.get(it.name) ?? { subtipos: 0, stock: 0 };
+      cur.subtipos += 1;
+      cur.stock += Number(it.current_stock) || 0;
+      map.set(it.name, cur);
+    }
+    return [...map.entries()].sort((a, b) => b[1].stock - a[1].stock);
+  }, [finished]);
+
+  // Producción por ley / pureza.
+  const byLey = useMemo(() => {
+    const map = new Map<string, { productos: number; stock: number }>();
+    for (const it of finished) {
+      const k = it.purity ?? "Sin ley";
+      const cur = map.get(k) ?? { productos: 0, stock: 0 };
+      cur.productos += 1;
+      cur.stock += Number(it.current_stock) || 0;
+      map.set(k, cur);
+    }
+    return [...map.entries()].sort((a, b) => b[1].stock - a[1].stock);
+  }, [finished]);
+
+  const totalFinishedStock = useMemo(
+    () => finished.reduce((acc, it) => acc + (Number(it.current_stock) || 0), 0),
+    [finished],
+  );
+
+  const sortedMovements = useMemo(
+    () => [...movements].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [movements],
   );
 
@@ -70,11 +92,16 @@ export function InventoryReports() {
     <div className="content">
       {error ? <div className="alert alertError">{error}</div> : null}
 
-      <section className="summaryGrid" aria-label="Resumen de inventario">
+      <section className="summaryGrid" aria-label="Resumen">
+        <article className="card metric">
+          <Package aria-hidden="true" size={22} />
+          <span className="metricLabel">Productos terminados</span>
+          <strong className="metricValue">{finished.length}</strong>
+        </article>
         <article className="card metric">
           <Boxes aria-hidden="true" size={22} />
-          <span className="metricLabel">Items registrados</span>
-          <strong className="metricValue">{summary?.total_items ?? items.length}</strong>
+          <span className="metricLabel">Stock terminado (g)</span>
+          <strong className="metricValue">{num(totalFinishedStock)}</strong>
         </article>
         <article className="card metric">
           <ListChecks aria-hidden="true" size={22} />
@@ -83,41 +110,64 @@ export function InventoryReports() {
         </article>
       </section>
 
+      <section className="card panelBody">
+        <div className="panelHeader">
+          <div>
+            <h2 className="panelTitle">Producción por producto</h2>
+            <p className="panelText">Subtipos y stock por categoría de producto terminado</p>
+          </div>
+        </div>
+        <div className="tableWrap tableScroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th className="num">Subtipos</th>
+                <th className="num">Stock total (g)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byCategory.map(([name, agg]) => (
+                <tr key={name}>
+                  <td>{name}</td>
+                  <td className="num">{agg.subtipos}</td>
+                  <td className="num">{num(agg.stock)}</td>
+                </tr>
+              ))}
+              {!isLoading && byCategory.length === 0 ? (
+                <tr><td colSpan={3}><div className="emptyState">No hay producción registrada.</div></td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="card panelBody">
         <div className="panelHeader">
           <div>
-            <h2 className="panelTitle">Stock actual</h2>
-            <p className="panelText">Existencias por item</p>
+            <h2 className="panelTitle">Producción por ley</h2>
+            <p className="panelText">Productos y stock por ley/pureza</p>
           </div>
         </div>
-        <div className="tableWrap">
+        <div className="tableWrap tableScroll">
           <table className="table">
             <thead>
               <tr>
-                <th>Item</th>
-                <th>SKU</th>
-                <th>Tipo</th>
-                <th>Stock actual</th>
-                <th>Unidad</th>
+                <th>Ley / pureza</th>
+                <th className="num">Productos</th>
+                <th className="num">Stock total (g)</th>
               </tr>
             </thead>
             <tbody>
-              {sortedItems.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}</td>
-                  <td>{item.sku}</td>
-                  <td>{TYPE_LABELS[item.item_type]}</td>
-                  <td className="num">{num(item.current_stock)}</td>
-                  <td>{item.unit_code}</td>
+              {byLey.map(([ley, agg]) => (
+                <tr key={ley}>
+                  <td>{ley}</td>
+                  <td className="num">{agg.productos}</td>
+                  <td className="num">{num(agg.stock)}</td>
                 </tr>
               ))}
-              {!isLoading && sortedItems.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="emptyState">No hay inventario registrado.</div>
-                  </td>
-                </tr>
+              {!isLoading && byLey.length === 0 ? (
+                <tr><td colSpan={3}><div className="emptyState">No hay producción registrada.</div></td></tr>
               ) : null}
             </tbody>
           </table>
@@ -128,24 +178,24 @@ export function InventoryReports() {
         <div className="panelHeader">
           <div>
             <h2 className="panelTitle">Kardex de movimientos</h2>
-            <p className="panelText">Ultimos 25 movimientos</p>
+            <p className="panelText">{sortedMovements.length} movimientos</p>
           </div>
         </div>
-        <div className="tableWrap">
+        <div className="tableWrap tableScroll">
           <table className="table">
             <thead>
               <tr>
                 <th>Fecha</th>
                 <th>Item</th>
                 <th>Tipo</th>
-                <th>Cantidad</th>
+                <th className="num">Cantidad</th>
                 <th>Unidad</th>
                 <th>Lote</th>
                 <th>Usuario</th>
               </tr>
             </thead>
             <tbody>
-              {recentMovements.map((movement) => (
+              {sortedMovements.map((movement) => (
                 <tr key={movement.id}>
                   <td>{dateLabel(movement.created_at)}</td>
                   <td>{movement.item.name}</td>
@@ -156,7 +206,7 @@ export function InventoryReports() {
                   <td>{movement.created_by_name ?? "-"}</td>
                 </tr>
               ))}
-              {!isLoading && recentMovements.length === 0 ? (
+              {!isLoading && sortedMovements.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
                     <div className="emptyState">No hay movimientos registrados.</div>

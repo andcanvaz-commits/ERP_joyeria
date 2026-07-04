@@ -3919,3 +3919,6 @@ textarea:disabled {
 
 .noticeCompact { padding: 10px 14px; }
 .noticeCompact .noticeInner { padding-bottom: 0; }
+
+.tableScroll { max-height: 620px; overflow-y: auto; }
+.tableScroll thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
