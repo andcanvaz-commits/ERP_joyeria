@@ -176,9 +176,7 @@ export function ReportesDashboard() {
 
       {isLoading ? (
         <section className="card panelBody"><div className="emptyState">Cargando reportes...</div></section>
-      ) : finished.length === 0 ? (
-        <section className="card panelBody"><div className="emptyState">Aún no hay producción finalizada para reportar.</div></section>
-      ) : (
+      ) : finished.length === 0 ? null : (
         <>
           {/* Resumen ejecutivo */}
           <section className="card reportSummary">
