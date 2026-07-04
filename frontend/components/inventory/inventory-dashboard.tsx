@@ -877,8 +877,8 @@ export function InventoryDashboard() {
                         <td>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
                         <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                        <td className="num">{numericText(averageCost)}</td>
-                        <td className="num">{numericText(String(totalValue))}</td>
+                        <td className="num">$ {numericText(averageCost)}</td>
+                        <td className="num">$ {numericText(String(totalValue))}</td>
                         <td>
                           <div className="rowActions">
                             <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
