@@ -156,11 +156,14 @@ export function ReportesDashboard() {
   const wasteByProcess = [...current.processes].filter((p) => p.waste > 0).sort((a, b) => b.waste - a.waste);
   const wasteByStage = current.stageWaste;
 
+  // Sin produccion finalizada no se renderiza nada (evita un .content vacio con margen).
+  if (!isLoading && finished.length === 0) return null;
+
   return (
     <div className="content">
       {isLoading ? (
         <section className="card panelBody"><div className="emptyState">Cargando reportes...</div></section>
-      ) : finished.length === 0 ? null : (
+      ) : (
         <>
           {/* Resumen ejecutivo */}
           <section className="card reportSummary">
