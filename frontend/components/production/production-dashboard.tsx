@@ -194,7 +194,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
-  const [isDataOpen, setIsDataOpen] = useState(false);
   const [dataModal, setDataModal] = useState<{ type: "units" | "materials"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
@@ -1044,13 +1043,34 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </section>
 
-          <section className="maintenanceSection" aria-label="Datos del sistema">
-            <h2>Datos</h2>
+          <section className="maintenanceSection" aria-label="Unidades de medida">
+            <h2>Unidades de medida</h2>
             <div className="maintenanceGrid">
-              <button className="maintenanceTile" onClick={() => setIsDataOpen(true)} type="button">
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "units", mode: "create" })} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear unidad</strong>
+                <span>Nueva unidad de medida.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "units", mode: "view" })} type="button">
                 <Ruler aria-hidden="true" size={22} />
-                <strong>Datos</strong>
-                <span>Gestiona las listas del sistema.</span>
+                <strong>Unidades de medida</strong>
+                <span>Ver y eliminar unidades.</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="maintenanceSection" aria-label="Materias primas">
+            <h2>Materias primas</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "materials", mode: "create" })} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear materia prima</strong>
+                <span>Nueva materia prima.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "materials", mode: "view" })} type="button">
+                <Boxes aria-hidden="true" size={22} />
+                <strong>Materias primas</strong>
+                <span>Ver, editar y eliminar.</span>
               </button>
             </div>
           </section>
@@ -1993,44 +2013,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
           </form>
-        </div>
-      ) : null}
-
-      {isDataOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Datos del sistema">
-          <section className="modalWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Datos del sistema</h2>
-                <p className="panelText">Selecciona una lista para gestionar.</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsDataOpen(false)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div className="maintenanceGrid">
-              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "units", mode: "create" }); }} type="button">
-                <Plus aria-hidden="true" size={22} />
-                <strong>Crear unidad</strong>
-                <span>Nueva unidad de medida.</span>
-              </button>
-              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "units", mode: "view" }); }} type="button">
-                <Ruler aria-hidden="true" size={22} />
-                <strong>Unidades de medida</strong>
-                <span>Ver y eliminar unidades.</span>
-              </button>
-              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "materials", mode: "create" }); }} type="button">
-                <Plus aria-hidden="true" size={22} />
-                <strong>Crear materia prima</strong>
-                <span>Nueva materia prima.</span>
-              </button>
-              <button className="maintenanceTile" onClick={() => { setIsDataOpen(false); setDataModal({ type: "materials", mode: "view" }); }} type="button">
-                <Boxes aria-hidden="true" size={22} />
-                <strong>Materias primas</strong>
-                <span>Ver, editar y eliminar.</span>
-              </button>
-            </div>
-          </section>
         </div>
       ) : null}
 
