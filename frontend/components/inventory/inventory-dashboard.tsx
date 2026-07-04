@@ -1012,7 +1012,7 @@ export function InventoryDashboard() {
             </button>
           </div>
           <div className="movementList">
-            {lastMonthMovements.map((movement) => (
+            {lastMonthMovements.map((movement, index) => (
               <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                 <div>
                   <strong>{movementTypeLabel(movement.movement_type)}</strong>
@@ -1036,6 +1036,12 @@ export function InventoryDashboard() {
                       <Eye aria-hidden="true" size={15} />
                       Visualizar
                     </button>
+                    {index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" ? (
+                      <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
+                        <RotateCcw aria-hidden="true" size={15} />
+                        Revertir
+                      </button>
+                    ) : null}
                   </span>
                 </div>
               </article>
@@ -1272,14 +1278,6 @@ export function InventoryDashboard() {
               <span><strong>Lote</strong>{viewingItem.sku}</span>
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
-            {canSeeAudit && viewingItem.item_type === "RAW_MATERIAL" ? (
-              <div className="modalActions">
-                <button className="button dangerText" onClick={() => handleRevertLastEntry(viewingItem)} type="button">
-                  <RotateCcw aria-hidden="true" size={16} />
-                  Revertir último lote
-                </button>
-              </div>
-            ) : null}
           </section>
         </div>
       ) : null}
