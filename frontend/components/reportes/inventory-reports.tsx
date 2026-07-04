@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, ListChecks, Package } from "lucide-react";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
-import type { InventoryItem, InventoryMovement, InventorySummary } from "@/types/inventory";
+import type { InventoryItem, InventoryMovement } from "@/types/inventory";
 
 const MOVEMENT_LABELS: Record<string, string> = {
   ENTRADA: "Entrada",
@@ -16,10 +16,25 @@ const MOVEMENT_LABELS: Record<string, string> = {
   MERMA: "Merma",
 };
 
+// Movimientos que representan ingreso de producto terminado (produccion del mes).
+const PRODUCTION_IN = new Set(["ENTRADA", "INGRESO_PRODUCCION"]);
+
 function num(value: string | number | null) {
   if (value === null || value === "") return "0";
   const n = Number(value);
   return Number.isFinite(n) ? n.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
+}
+
+function monthKey(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(key: string) {
+  if (!key) return "-";
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("es-EC", { month: "long", year: "numeric" });
 }
 
 function dateLabel(value: string) {
@@ -43,70 +58,110 @@ export function InventoryReports() {
     queryFn: fetchInventoryReportsBundle,
   });
 
-  const summary: InventorySummary | null = data?.summary ?? null;
   const items: InventoryItem[] = data?.items ?? [];
   const movements: InventoryMovement[] = data?.movements ?? [];
   const error = queryError instanceof Error ? queryError.message : queryError ? "No se pudieron cargar los reportes." : null;
 
-  const finished = useMemo(
-    () => items.filter((item) => item.item_type === "FINISHED_PRODUCT"),
-    [items],
+  const itemsById = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
+
+  // Meses disponibles a partir de las fechas de los movimientos (desc).
+  const months = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of movements) {
+      const k = monthKey(m.created_at);
+      if (k) set.add(k);
+    }
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [movements]);
+
+  const [selectedMonth, setSelectedMonth] = useState<string>("");
+  const activeMonth = selectedMonth || months[0] || "";
+
+  const monthMovements = useMemo(
+    () =>
+      movements
+        .filter((m) => monthKey(m.created_at) === activeMonth)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [movements, activeMonth],
   );
 
-  // Producción por categoría de producto (nombre): cuántos subtipos y stock total.
-  const byCategory = useMemo(() => {
-    const map = new Map<string, { subtipos: number; stock: number }>();
-    for (const it of finished) {
-      const cur = map.get(it.name) ?? { subtipos: 0, stock: 0 };
-      cur.subtipos += 1;
-      cur.stock += Number(it.current_stock) || 0;
-      map.set(it.name, cur);
-    }
-    return [...map.entries()].sort((a, b) => b[1].stock - a[1].stock);
-  }, [finished]);
+  // Ingreso de producto terminado en el mes.
+  const finishedIn = useMemo(
+    () =>
+      monthMovements.filter(
+        (m) => m.item.item_type === "FINISHED_PRODUCT" && PRODUCTION_IN.has(m.movement_type),
+      ),
+    [monthMovements],
+  );
 
-  // Producción por ley / pureza.
+  const byCategory = useMemo(() => {
+    const map = new Map<string, { subtipos: Set<string>; cantidad: number }>();
+    for (const m of finishedIn) {
+      const cur = map.get(m.item.name) ?? { subtipos: new Set<string>(), cantidad: 0 };
+      cur.subtipos.add(m.item_id);
+      cur.cantidad += Number(m.quantity) || 0;
+      map.set(m.item.name, cur);
+    }
+    return [...map.entries()]
+      .map(([name, v]) => ({ name, subtipos: v.subtipos.size, cantidad: v.cantidad }))
+      .sort((a, b) => b.cantidad - a.cantidad);
+  }, [finishedIn]);
+
   const byLey = useMemo(() => {
-    const map = new Map<string, { productos: number; stock: number }>();
-    for (const it of finished) {
-      const k = it.purity ?? "Sin ley";
-      const cur = map.get(k) ?? { productos: 0, stock: 0 };
-      cur.productos += 1;
-      cur.stock += Number(it.current_stock) || 0;
+    const map = new Map<string, { productos: Set<string>; cantidad: number }>();
+    for (const m of finishedIn) {
+      const k = itemsById.get(m.item_id)?.purity ?? "Sin ley";
+      const cur = map.get(k) ?? { productos: new Set<string>(), cantidad: 0 };
+      cur.productos.add(m.item_id);
+      cur.cantidad += Number(m.quantity) || 0;
       map.set(k, cur);
     }
-    return [...map.entries()].sort((a, b) => b[1].stock - a[1].stock);
-  }, [finished]);
+    return [...map.entries()]
+      .map(([ley, v]) => ({ ley, productos: v.productos.size, cantidad: v.cantidad }))
+      .sort((a, b) => b.cantidad - a.cantidad);
+  }, [finishedIn, itemsById]);
 
-  const totalFinishedStock = useMemo(
-    () => finished.reduce((acc, it) => acc + (Number(it.current_stock) || 0), 0),
-    [finished],
-  );
-
-  const sortedMovements = useMemo(
-    () => [...movements].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [movements],
+  const totalProducido = useMemo(
+    () => finishedIn.reduce((acc, m) => acc + (Number(m.quantity) || 0), 0),
+    [finishedIn],
   );
 
   return (
     <div className="content">
       {error ? <div className="alert alertError">{error}</div> : null}
 
-      <section className="summaryGrid" aria-label="Resumen">
+      <div className="pageHeader">
+        <p style={{ margin: 0, maxWidth: 740 }}>
+          Reportes de inventario y producción. Los datos cambian según el mes seleccionado.
+        </p>
+        <div className="actions">
+          <label className="fieldGroup" style={{ minWidth: 220 }}>
+            <span>Periodo</span>
+            <select className="field" disabled={months.length === 0} onChange={(e) => setSelectedMonth(e.target.value)} value={activeMonth}>
+              {months.length === 0 ? <option value="">Sin datos</option> : null}
+              {months.map((month) => (
+                <option key={month} value={month}>{monthLabel(month)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <section className="summaryGrid" aria-label="Resumen del mes">
         <article className="card metric">
           <Package aria-hidden="true" size={22} />
-          <span className="metricLabel">Productos terminados</span>
-          <strong className="metricValue">{finished.length}</strong>
+          <span className="metricLabel">Productos con ingreso</span>
+          <strong className="metricValue">{new Set(finishedIn.map((m) => m.item_id)).size}</strong>
         </article>
         <article className="card metric">
           <Boxes aria-hidden="true" size={22} />
-          <span className="metricLabel">Stock terminado (g)</span>
-          <strong className="metricValue">{num(totalFinishedStock)}</strong>
+          <span className="metricLabel">Producido (g)</span>
+          <strong className="metricValue">{num(totalProducido)}</strong>
         </article>
         <article className="card metric">
           <ListChecks aria-hidden="true" size={22} />
-          <span className="metricLabel">Movimientos</span>
-          <strong className="metricValue">{movements.length}</strong>
+          <span className="metricLabel">Movimientos del mes</span>
+          <strong className="metricValue">{monthMovements.length}</strong>
         </article>
       </section>
 
@@ -114,7 +169,7 @@ export function InventoryReports() {
         <div className="panelHeader">
           <div>
             <h2 className="panelTitle">Producción por producto</h2>
-            <p className="panelText">Subtipos y stock por categoría de producto terminado</p>
+            <p className="panelText">Subtipos y cantidad producida en {monthLabel(activeMonth)}</p>
           </div>
         </div>
         <div className="tableWrap tableScroll">
@@ -123,19 +178,19 @@ export function InventoryReports() {
               <tr>
                 <th>Producto</th>
                 <th className="num">Subtipos</th>
-                <th className="num">Stock total (g)</th>
+                <th className="num">Producido (g)</th>
               </tr>
             </thead>
             <tbody>
-              {byCategory.map(([name, agg]) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td className="num">{agg.subtipos}</td>
-                  <td className="num">{num(agg.stock)}</td>
+              {byCategory.map((row) => (
+                <tr key={row.name}>
+                  <td>{row.name}</td>
+                  <td className="num">{row.subtipos}</td>
+                  <td className="num">{num(row.cantidad)}</td>
                 </tr>
               ))}
               {!isLoading && byCategory.length === 0 ? (
-                <tr><td colSpan={3}><div className="emptyState">No hay producción registrada.</div></td></tr>
+                <tr><td colSpan={3}><div className="emptyState">Sin producción en este mes.</div></td></tr>
               ) : null}
             </tbody>
           </table>
@@ -146,7 +201,7 @@ export function InventoryReports() {
         <div className="panelHeader">
           <div>
             <h2 className="panelTitle">Producción por ley</h2>
-            <p className="panelText">Productos y stock por ley/pureza</p>
+            <p className="panelText">Productos y cantidad por ley/pureza en {monthLabel(activeMonth)}</p>
           </div>
         </div>
         <div className="tableWrap tableScroll">
@@ -155,19 +210,19 @@ export function InventoryReports() {
               <tr>
                 <th>Ley / pureza</th>
                 <th className="num">Productos</th>
-                <th className="num">Stock total (g)</th>
+                <th className="num">Producido (g)</th>
               </tr>
             </thead>
             <tbody>
-              {byLey.map(([ley, agg]) => (
-                <tr key={ley}>
-                  <td>{ley}</td>
-                  <td className="num">{agg.productos}</td>
-                  <td className="num">{num(agg.stock)}</td>
+              {byLey.map((row) => (
+                <tr key={row.ley}>
+                  <td>{row.ley}</td>
+                  <td className="num">{row.productos}</td>
+                  <td className="num">{num(row.cantidad)}</td>
                 </tr>
               ))}
               {!isLoading && byLey.length === 0 ? (
-                <tr><td colSpan={3}><div className="emptyState">No hay producción registrada.</div></td></tr>
+                <tr><td colSpan={3}><div className="emptyState">Sin producción en este mes.</div></td></tr>
               ) : null}
             </tbody>
           </table>
@@ -178,7 +233,7 @@ export function InventoryReports() {
         <div className="panelHeader">
           <div>
             <h2 className="panelTitle">Kardex de movimientos</h2>
-            <p className="panelText">{sortedMovements.length} movimientos</p>
+            <p className="panelText">{monthMovements.length} movimientos en {monthLabel(activeMonth)}</p>
           </div>
         </div>
         <div className="tableWrap tableScroll">
@@ -195,7 +250,7 @@ export function InventoryReports() {
               </tr>
             </thead>
             <tbody>
-              {sortedMovements.map((movement) => (
+              {monthMovements.map((movement) => (
                 <tr key={movement.id}>
                   <td>{dateLabel(movement.created_at)}</td>
                   <td>{movement.item.name}</td>
@@ -206,10 +261,10 @@ export function InventoryReports() {
                   <td>{movement.created_by_name ?? "-"}</td>
                 </tr>
               ))}
-              {!isLoading && sortedMovements.length === 0 ? (
+              {!isLoading && monthMovements.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
-                    <div className="emptyState">No hay movimientos registrados.</div>
+                    <div className="emptyState">No hay movimientos en este mes.</div>
                   </td>
                 </tr>
               ) : null}
