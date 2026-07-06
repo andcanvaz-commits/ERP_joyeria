@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import type { InventoryItem } from "@/types/inventory";
 import { createInventoryItem, deleteInventoryItem, listInventoryItems, updateInventoryItem } from "@/lib/inventory-api";
-import { listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 
 export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
@@ -14,28 +13,18 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
     queryKey: ["finished-products"],
     queryFn: () => listInventoryItems("FINISHED_PRODUCT"),
   });
-  const { data: rawMaterials = [] } = useQuery({
-    queryKey: ["raw-materials"],
-    queryFn: () => listInventoryItems("RAW_MATERIAL"),
-  });
-  const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits });
-  const activeUnits = units.filter((unit) => unit.is_active);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [materialItemId, setMaterialItemId] = useState("");
-  const [unitCode, setUnitCode] = useState("");
   const [description, setDescription] = useState("");
-  // Valores actuales del item al editar; se conservan si no se re-elige materia prima.
-  const [fallbackMetal, setFallbackMetal] = useState("");
-  const [fallbackPurity, setFallbackPurity] = useState("");
+  const [metal, setMetal] = useState("");
+  const [purity, setPurity] = useState("");
+  const [totalWeight, setTotalWeight] = useState("");
+  const [elaborationDate, setElaborationDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
-
-  const selectedMaterial = rawMaterials.find((item) => item.id === materialItemId) ?? null;
-  const purity = selectedMaterial ? (selectedMaterial.purity ?? "") : fallbackPurity;
 
   useEffect(() => {
     if (!success) return;
@@ -46,23 +35,21 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
   function resetForm() {
     setEditingId(null);
     setName("");
-    setMaterialItemId("");
-    setUnitCode("");
     setDescription("");
-    setFallbackMetal("");
-    setFallbackPurity("");
+    setMetal("");
+    setPurity("");
+    setTotalWeight("");
+    setElaborationDate("");
   }
 
   function startEdit(item: InventoryItem) {
     setEditingId(item.id);
     setName(item.name);
     setDescription(item.description ?? "");
-    setUnitCode(item.unit_code);
-    setFallbackMetal(item.material_type ?? "");
-    setFallbackPurity(item.purity ?? "");
-    // Preselecciona si el metal actual coincide con una materia prima registrada.
-    const material = rawMaterials.find((raw) => raw.name === item.material_type);
-    setMaterialItemId(material?.id ?? "");
+    setMetal(item.material_type ?? "");
+    setPurity(item.purity ?? "");
+    setTotalWeight(item.total_weight ?? "");
+    setElaborationDate(item.elaboration_date ?? "");
     setError(null);
   }
 
@@ -84,26 +71,18 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
     event.preventDefault();
     setError(null);
     if (!name.trim()) {
-      setError("Escribe el nombre del modelo.");
-      return;
-    }
-    if (!editingId && !selectedMaterial) {
-      setError("Selecciona el metal (materia prima).");
-      return;
-    }
-    if (!unitCode) {
-      setError("Selecciona la unidad de medida.");
+      setError("Escribe el nombre del producto.");
       return;
     }
     const payload = {
       item_type: "FINISHED_PRODUCT" as const,
       name: name.trim(),
       description: description.trim() || null,
-      material_type: selectedMaterial ? selectedMaterial.name : fallbackMetal.trim() || null,
+      material_type: metal.trim() || null,
       purity: purity.trim() || null,
-      total_weight: null,
-      elaboration_date: null,
-      unit_code: unitCode,
+      total_weight: totalWeight.trim() ? totalWeight.trim() : null,
+      elaboration_date: elaborationDate || null,
+      unit_code: "und",
       minimum_stock: null,
     };
     setIsSaving(true);
@@ -131,7 +110,7 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
         <div className="modalHeader">
           <div>
             <h2>{mode === "create" ? "Crear producto terminado" : "Productos terminados"}</h2>
-            <p className="panelText">Cada producto es un modelo; las existencias entran por movimientos de inventario.</p>
+            <p className="panelText">Catálogo de productos terminados de la joyería.</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
@@ -149,32 +128,22 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
         <form onSubmit={handleAdd} style={{ display: "grid", gap: 12 }}>
           <div className="materialRow">
             <label className="fieldGroup">
-              <span>Nombre del modelo</span>
-              <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setName(e.target.value)} placeholder="Ej. Cadena BB 45cm" value={name} />
+              <span>Producto</span>
+              <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setName(e.target.value)} placeholder="Ej. Anillo modelo A" value={name} />
             </label>
             <label className="fieldGroup">
-              <span>Metal (materia prima)</span>
-              <select className="field" disabled={isSaving} onChange={(e) => setMaterialItemId(e.target.value)} value={materialItemId}>
-                <option value="">Seleccionar materia prima</option>
-                {rawMaterials.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
+              <span>Metal principal</span>
+              <input className="field" disabled={isSaving} maxLength={80} onChange={(e) => setMetal(e.target.value)} placeholder="Ej. Oro, Plata" value={metal} />
             </label>
           </div>
           <div className="materialRow">
             <label className="fieldGroup">
               <span>Ley / pureza</span>
-              <input className="field" disabled readOnly value={purity || "—"} />
+              <input className="field" disabled={isSaving} maxLength={40} onChange={(e) => setPurity(e.target.value)} placeholder="Ej. 18K, 925" value={purity} />
             </label>
             <label className="fieldGroup">
-              <span>Unidad de medida</span>
-              <select className="field" disabled={isSaving} onChange={(e) => setUnitCode(e.target.value)} value={unitCode}>
-                <option value="">Seleccionar unidad</option>
-                {activeUnits.map((unit) => (
-                  <option key={unit.id} value={unit.code}>{unit.label} ({unit.code})</option>
-                ))}
-              </select>
+              <span>Peso total (g)</span>
+              <input className="field" disabled={isSaving} inputMode="decimal" onChange={(e) => setTotalWeight(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="Ej. 12.5" value={totalWeight} />
             </label>
           </div>
           <div className="materialRow">
@@ -201,11 +170,11 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
             <thead>
               <tr>
                 <th style={{ width: 40 }}>#</th>
-                <th>Modelo</th>
-                <th>Metal</th>
-                <th>Ley</th>
-                <th>Unidad</th>
-                <th>Stock actual</th>
+                <th>Producto</th>
+                <th>Descripción</th>
+                <th>Metal principal</th>
+                <th>Ley/pureza</th>
+                <th>Peso total</th>
                 <th aria-label="Acciones" />
               </tr>
             </thead>
@@ -214,10 +183,10 @@ export function FinishedProductsManager({ mode, onClose }: { mode: "create" | "v
                 <tr key={item.id}>
                   <td className="num">{index + 1}</td>
                   <td>{item.name}</td>
+                  <td>{item.description ?? "—"}</td>
                   <td>{item.material_type ?? "—"}</td>
                   <td>{item.purity ?? "—"}</td>
-                  <td>{item.unit_code}</td>
-                  <td className="num">{item.current_stock}</td>
+                  <td>{item.total_weight ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     <span className="rowActions" style={{ justifyContent: "flex-end" }}>
                       <button aria-label={`Editar ${item.name}`} className="iconOnlyButton" onClick={() => startEdit(item)} type="button">
