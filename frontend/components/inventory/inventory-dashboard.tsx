@@ -36,8 +36,8 @@ import type { ProductionRun } from "@/types/production";
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
   { value: "WORK_IN_PROGRESS", label: "Producto en proceso" },
-  { value: "FINISHED_PRODUCT", label: "Producto terminado" },
   { value: "ORDENES_TERMINADAS", label: "Ordenes terminadas" },
+  { value: "FINISHED_PRODUCT", label: "Producto terminado" },
 ];
 
 const UNIT_OPTIONS = [
@@ -946,7 +946,7 @@ export function InventoryDashboard() {
               <table className="table inventoryItemsTable">
                 <thead>
                   <tr>
-                    <th>Codigo</th>
+                    <th>#</th>
                     <th>Proceso</th>
                     <th className="num">Cantidad</th>
                     <th className="num">Peso final</th>
