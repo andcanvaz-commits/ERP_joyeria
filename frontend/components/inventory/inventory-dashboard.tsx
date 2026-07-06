@@ -36,7 +36,7 @@ import type { ProductionRun } from "@/types/production";
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
   { value: "WORK_IN_PROGRESS", label: "Producto en proceso" },
-  { value: "ORDENES_TERMINADAS", label: "Ordenes terminadas" },
+  { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Producto terminado" },
 ];
 
@@ -977,7 +977,7 @@ export function InventoryDashboard() {
                     </tr>
                   ))}
                   {receivedRuns.length === 0 ? (
-                    <tr><td colSpan={8}><div className="emptyState">No hay ordenes terminadas.</div></td></tr>
+                    <tr><td colSpan={8}><div className="emptyState">No hay procesos terminados.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
