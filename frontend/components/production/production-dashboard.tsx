@@ -20,6 +20,7 @@ import {
   updateUser,
 } from "@/lib/auth-api";
 import { listInventoryItems } from "@/lib/inventory-api";
+import { listUnits } from "@/lib/units-api";
 import {
   createProcess,
   createProductionRun,
@@ -177,6 +178,24 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryKey: ["production", variant],
     queryFn: () => fetchProductionBundle(variant),
     enabled: Boolean(currentUser),
+  });
+
+  // Mismas queryKeys que los managers de mantenimiento: al crear/eliminar alli
+  // se invalidan y estos conteos se refrescan solos.
+  const { data: unitsList = [] } = useQuery({
+    queryKey: ["units"],
+    queryFn: listUnits,
+    enabled: Boolean(currentUser) && variant === "maintenance",
+  });
+  const { data: rawMaterialsList = EMPTY_RAW_MATERIALS } = useQuery({
+    queryKey: ["raw-materials"],
+    queryFn: () => listInventoryItems("RAW_MATERIAL"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
+  });
+  const { data: finishedProductsList = EMPTY_RAW_MATERIALS } = useQuery({
+    queryKey: ["finished-products"],
+    queryFn: () => listInventoryItems("FINISHED_PRODUCT"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
   });
 
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
@@ -1055,7 +1074,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <button className="maintenanceTile" onClick={() => setDataModal({ type: "units", mode: "view" })} type="button">
                 <Ruler aria-hidden="true" size={22} />
                 <strong>Unidades de medida</strong>
-                <span>Ver y eliminar unidades.</span>
+                <span>{unitsList.length} unidades creadas.</span>
               </button>
             </div>
           </section>
@@ -1071,7 +1090,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <button className="maintenanceTile" onClick={() => setDataModal({ type: "materials", mode: "view" })} type="button">
                 <Boxes aria-hidden="true" size={22} />
                 <strong>Materias primas</strong>
-                <span>Ver, editar y eliminar.</span>
+                <span>{rawMaterialsList.length} materias primas creadas.</span>
               </button>
             </div>
           </section>
@@ -1087,7 +1106,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <button className="maintenanceTile" onClick={() => setDataModal({ type: "finished", mode: "view" })} type="button">
                 <FileText aria-hidden="true" size={22} />
                 <strong>Productos terminados</strong>
-                <span>Ver, editar y eliminar.</span>
+                <span>{finishedProductsList.length} productos creados.</span>
               </button>
             </div>
           </section>
