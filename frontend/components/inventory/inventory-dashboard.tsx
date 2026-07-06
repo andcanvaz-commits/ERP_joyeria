@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Pencil, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -479,6 +479,7 @@ export function InventoryDashboard() {
   const pendingInventoryRuns = productionRuns.filter((run) => run.status === "PENDIENTE_INVENTARIO");
   const pendingReceptionRuns = productionRuns.filter((run) => run.status === "PENDIENTE_RECEPCION");
   const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
+  const inProcessRuns = productionRuns.filter((run) => run.status === "EN_PROCESO");
   const receivedCodes = new Set(receivedRuns.map((run) => run.production_code).filter(Boolean) as string[]);
   // En "Producto terminado": las órdenes recibidas se muestran como filas (con id OP);
   // ocultamos el item de stock auto-creado con ese mismo código para no duplicar.
@@ -526,20 +527,6 @@ export function InventoryDashboard() {
   function openXmlInvoiceInput() {
     setIsEntryMenuOpen(false);
     xmlInputRef.current?.click();
-  }
-
-  function openEditItem(item: InventoryItem) {
-    if (item.item_type !== "RAW_MATERIAL") return;
-    setEditingItemId(item.id);
-    setItemForm({
-      item_type: item.item_type,
-      name: item.name,
-      description: item.description ?? "",
-      unit_code: item.unit_code,
-      material_type: item.material_type ?? item.name,
-      purity: item.purity ?? "",
-    });
-    setIsItemFormOpen(true);
   }
 
   async function handleDeleteItem(item: InventoryItem) {
@@ -973,53 +960,66 @@ export function InventoryDashboard() {
               </table>
             </div>
           ) : (
-          <div className="inventoryList">
-            {displayItems.map((item) => (
-              <article className="inventoryItemRow" key={item.id} {...openableProps(() => setViewingItem(item), `Ver detalle de ${item.name}`)}>
-                <div>
-                  <strong>{item.name}</strong>
-                  <span>{item.sku} - {itemTypeLabel(item.item_type)}</span>
-                </div>
-                <span className="num">{numericText(item.current_stock)} {item.unit_code}</span>
-                <div className="rowActions" onClick={stopClick}>
-                  <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
-                    <Eye aria-hidden="true" size={15} />
-                    Visualizar
-                  </button>
-                  {item.item_type === "RAW_MATERIAL" && canSeeAudit ? (
-                    <>
-                      <button className="iconTextButton" onClick={() => openEditItem(item)} type="button">
-                        <Pencil aria-hidden="true" size={15} />
-                        Editar
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-            {itemFilter === "WORK_IN_PROGRESS" ? (
-              productionRuns.filter((r) => r.status === "EN_PROCESO").map((run) => (
-                <div className="inventoryItemRow" key={`run-${run.id}`} style={{ borderColor: "#e3cfa6", background: "#faf6ee" }} {...openableProps(() => setViewingRun(run), `Ver avance de ${run.process_name}`)}>
-                  <div>
-                    <strong>
-                      {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                      {run.process_name}
-                    </strong>
-                    <span>Orden en proceso · {run.quantity} unidades</span>
-                  </div>
-                  <span className="stockPill num" style={{ background: "#f3e9d6" }}>{run.quantity} und</span>
-                  <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingRun(run); }} type="button">
-                    <Eye aria-hidden="true" size={15} />
-                    Visualizar
-                  </button>
-                </div>
-              ))
-            ) : null}
-            {!isLoading
-              && displayItems.length === 0
-              && !(itemFilter === "WORK_IN_PROGRESS" && productionRuns.some((r) => r.status === "EN_PROCESO"))
-              ? <div className="emptyState">No hay items para este filtro.</div> : null}
-            {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
+          <div className="tableWrap">
+            <table className="table inventoryItemsTable">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Proceso</th>
+                  <th className="num">Cantidad</th>
+                  <th>Etapa actual</th>
+                  <th>Inicio</th>
+                  <th aria-label="Acciones" />
+                </tr>
+              </thead>
+              <tbody>
+                {inProcessRuns.map((run) => {
+                  const currentStage = run.stages.find((stage) => stage.status === "EN_PROCESO")
+                    ?? run.stages.find((stage) => stage.status === "PENDIENTE")
+                    ?? null;
+                  return (
+                    <tr key={`run-${run.id}`}>
+                      <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
+                      <td>{run.process_name}</td>
+                      <td className="num">{numericText(run.quantity)} und</td>
+                      <td>{currentStage ? `${currentStage.stage_name} (${currentStage.stage_order}/${run.stages.length})` : "—"}</td>
+                      <td>{productionTimeLabel(run.started_at)}</td>
+                      <td>
+                        <div className="rowActions">
+                          <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
+                            <Eye aria-hidden="true" size={15} />
+                            Visualizar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {displayItems.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.sku}</td>
+                    <td>{item.name}</td>
+                    <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>
+                      <div className="rowActions">
+                        <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                          <Eye aria-hidden="true" size={15} />
+                          Visualizar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!isLoading && displayItems.length === 0 && inProcessRuns.length === 0 ? (
+                  <tr><td colSpan={6}><div className="emptyState">No hay productos en proceso.</div></td></tr>
+                ) : null}
+                {isLoading ? (
+                  <tr><td colSpan={6}><div className="emptyState">Cargando inventario...</div></td></tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
           )}
         </article>
