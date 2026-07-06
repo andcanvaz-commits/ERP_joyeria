@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -213,6 +213,8 @@ export function InventoryDashboard() {
   const queryClient = useQueryClient();
   const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS" | "ORDENES_TERMINADAS">("RAW_MATERIAL");
   const [search, setSearch] = useState("");
+  // Grupos de productos terminados expandidos (por nombre de categoria).
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -486,6 +488,33 @@ export function InventoryDashboard() {
   // ocultamos el item de stock auto-creado con ese mismo código para no duplicar.
   const displayItems =
     itemFilter === "FINISHED_PRODUCT" ? filteredItems.filter((item) => !receivedCodes.has(item.sku)) : filteredItems;
+
+  // Grupos por nombre (categoria): la descripcion de cada pieza es su modelo.
+  const finishedGroups = useMemo(() => {
+    const map = new Map<string, InventoryItem[]>();
+    for (const item of displayItems) {
+      const list = map.get(item.name);
+      if (list) list.push(item);
+      else map.set(item.name, [item]);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, groupItems]) => ({
+        name,
+        items: groupItems,
+        totalStock: groupItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+      }));
+  }, [displayItems]);
+  const searchActive = search.trim().length > 0;
+
+  function toggleGroup(name: string) {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
@@ -914,25 +943,42 @@ export function InventoryDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayItems.map((item, index) => (
-                    <tr key={item.id}>
-                      <td className="num">{index + 1}</td>
-                      <td>{item.name}</td>
-                      <td>{item.description ?? "—"}</td>
-                      <td>{item.material_type ?? "—"}</td>
-                      <td>{item.purity ?? "—"}</td>
-                      <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                      <td>
-                        <div className="rowActions">
-                          <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
-                            <Eye aria-hidden="true" size={15} />
-                            Visualizar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!isLoading && displayItems.length === 0 ? (
+                  {finishedGroups.map((group) => {
+                    const isExpanded = searchActive || expandedGroups.has(group.name);
+                    return (
+                      <Fragment key={group.name}>
+                        <tr onClick={() => toggleGroup(group.name)} style={{ cursor: "pointer" }}>
+                          <td className="num">
+                            {isExpanded ? <ChevronDown aria-hidden="true" size={15} /> : <ChevronRight aria-hidden="true" size={15} />}
+                          </td>
+                          <td colSpan={4}><strong>{group.name}</strong> · {group.items.length} {group.items.length === 1 ? "pieza" : "piezas"}</td>
+                          <td className="num"><strong>{numericText(String(group.totalStock))} {group.items[0]?.unit_code ?? "g"}</strong></td>
+                          <td />
+                        </tr>
+                        {isExpanded
+                          ? group.items.map((item) => (
+                              <tr key={item.id}>
+                                <td />
+                                <td>{item.sku}</td>
+                                <td>{item.description ?? "—"}</td>
+                                <td>{item.material_type ?? "—"}</td>
+                                <td>{item.purity ?? "—"}</td>
+                                <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                                <td>
+                                  <div className="rowActions">
+                                    <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} type="button">
+                                      <Eye aria-hidden="true" size={15} />
+                                      Visualizar
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          : null}
+                      </Fragment>
+                    );
+                  })}
+                  {!isLoading && finishedGroups.length === 0 ? (
                     <tr><td colSpan={7}><div className="emptyState">No hay productos terminados.</div></td></tr>
                   ) : null}
                   {isLoading ? (
