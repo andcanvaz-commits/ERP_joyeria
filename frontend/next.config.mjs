@@ -7,6 +7,9 @@ const apiProxyTarget = process.env.API_PROXY_TARGET ?? "http://localhost:8000";
 
 const nextConfig = {
   reactStrictMode: true,
+  // El dev server corre dentro de Docker; el navegador entra por 127.0.0.1.
+  // Sin esto Next 16 bloquea los recursos /_next/* y la pagina no hidrata.
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   async rewrites() {
     return [
       {
