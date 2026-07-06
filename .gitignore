@@ -26,3 +26,6 @@ postgres_data/
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# Backups locales de PostgreSQL
+backups/
