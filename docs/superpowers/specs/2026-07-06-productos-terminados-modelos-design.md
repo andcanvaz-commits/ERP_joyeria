@@ -1,7 +1,7 @@
 # Productos terminados como modelos
 
 Fecha: 2026-07-06
-Estado: aprobado
+Estado: revertido — la consolidación borró el detalle por pieza (la descripción era el modelo real de cada pieza). Los datos originales se restauraron desde el WAL y el código se revirtió. El campo `description` de cada pieza contiene el modelo ("GOTA", "BOX CHAIN 60"); cualquier rediseño futuro debe agrupar por descripción, no por nombre.
 Reemplaza: la sección 2 de `2026-07-06-producto-terminado-derivado-design.md` (form derivado de procesos).
 
 ## Problema
