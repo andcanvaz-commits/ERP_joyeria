@@ -98,8 +98,8 @@ textarea {
 }
 .sidebarProfile .profileTrigger { width: 100%; }
 .sidebarProfile .profileDropdown {
-  top: auto;
-  bottom: calc(100% + 8px);
+  top: calc(100% + 8px);
+  bottom: auto;
   left: 0;
   right: 0;
 }

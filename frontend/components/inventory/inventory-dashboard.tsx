@@ -33,10 +33,11 @@ import {
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
 
-const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS"; label: string }> = [
+const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
   { value: "WORK_IN_PROGRESS", label: "Producto en proceso" },
   { value: "FINISHED_PRODUCT", label: "Producto terminado" },
+  { value: "ORDENES_TERMINADAS", label: "Ordenes terminadas" },
 ];
 
 const UNIT_OPTIONS = [
@@ -210,7 +211,7 @@ export function InventoryDashboard() {
   const xmlInputRef = useRef<HTMLInputElement | null>(null);
   const entryMenuRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
-  const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS">("RAW_MATERIAL");
+  const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS" | "ORDENES_TERMINADAS">("RAW_MATERIAL");
   const [search, setSearch] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -773,7 +774,9 @@ export function InventoryDashboard() {
                   ? "Ingresos manuales y facturas XML de materia prima"
                   : itemFilter === "FINISHED_PRODUCT"
                     ? "Salidas comerciales de productos terminados"
-                    : "Seguimiento de productos en proceso"}
+                    : itemFilter === "ORDENES_TERMINADAS"
+                      ? "Ordenes de produccion recibidas en inventario"
+                      : "Seguimiento de productos en proceso"}
               </p>
             </div>
             <div className="rowActions">
@@ -906,7 +909,6 @@ export function InventoryDashboard() {
                     <th>Descripción</th>
                     <th>Metal principal</th>
                     <th>Ley/pureza</th>
-                    <th className="num">Peso total</th>
                     <th className="num">Stock</th>
                     <th aria-label="Acciones" />
                   </tr>
@@ -919,7 +921,6 @@ export function InventoryDashboard() {
                       <td>{item.description ?? "—"}</td>
                       <td>{item.material_type ?? "—"}</td>
                       <td>{item.purity ?? "—"}</td>
-                      <td className="num">{item.total_weight ? numericText(item.total_weight) : "—"}</td>
                       <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
                       <td>
                         <div className="rowActions">
@@ -931,15 +932,40 @@ export function InventoryDashboard() {
                       </td>
                     </tr>
                   ))}
+                  {!isLoading && displayItems.length === 0 ? (
+                    <tr><td colSpan={7}><div className="emptyState">No hay productos terminados.</div></td></tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr><td colSpan={7}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          ) : itemFilter === "ORDENES_TERMINADAS" ? (
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th>Codigo</th>
+                    <th>Proceso</th>
+                    <th className="num">Cantidad</th>
+                    <th className="num">Peso final</th>
+                    <th className="num">Merma %</th>
+                    <th>Recibida por</th>
+                    <th>Fecha recepcion</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
                   {receivedRuns.map((run) => (
-                    <tr key={`recibida-${run.id}`}>
-                      <td className="num">·</td>
-                      <td>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</td>
-                      <td>—</td>
-                      <td>—</td>
-                      <td>—</td>
-                      <td className="num">—</td>
-                      <td className="num">{run.quantity} und</td>
+                    <tr key={run.id}>
+                      <td>{run.production_code ?? "—"}</td>
+                      <td>{run.process_name}</td>
+                      <td className="num">{numericText(run.quantity)} und</td>
+                      <td className="num">{run.actual_finished_weight ? `${numericText(run.actual_finished_weight)} g` : "—"}</td>
+                      <td className="num">{run.waste_percent ? `${numericText(run.waste_percent)}%` : "—"}</td>
+                      <td>{run.received_by_name ?? "—"}</td>
+                      <td>{run.received_at ? new Date(run.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
                       <td>
                         <div className="rowActions">
                           <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
@@ -950,11 +976,8 @@ export function InventoryDashboard() {
                       </td>
                     </tr>
                   ))}
-                  {!isLoading && displayItems.length === 0 && receivedRuns.length === 0 ? (
-                    <tr><td colSpan={8}><div className="emptyState">No hay productos terminados.</div></td></tr>
-                  ) : null}
-                  {isLoading ? (
-                    <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  {receivedRuns.length === 0 ? (
+                    <tr><td colSpan={8}><div className="emptyState">No hay ordenes terminadas.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
