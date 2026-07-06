@@ -20,7 +20,6 @@ export function allowedRoutes(role: Role): string[] {
       return [
         "/dashboard",
         "/mantenimientos",
-        "/codificacion",
         "/produccion",
         "/inventario",
         "/documentos",

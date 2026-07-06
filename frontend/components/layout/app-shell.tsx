@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, Hash, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
+import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout } from "@/lib/auth-api";
 import { allowedRoutes, canAccess, homeRoute, normalizeRole } from "@/lib/roles";
@@ -13,7 +13,6 @@ import { useModalA11y } from "@/hooks/use-modal-a11y";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
-  { href: "/codificacion", label: "Codificacion", icon: Hash },
   { href: "/produccion", label: "Produccion", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/solicitudes", label: "Solicitudes", icon: ClipboardList },
@@ -33,10 +32,6 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
   "/mantenimientos": {
     title: "Mantenimientos",
     subtitle: "Procesos, usuarios y configuraciones del sistema",
-  },
-  "/codificacion": {
-    title: "Codificacion",
-    subtitle: "Codigos de productos, materiales y categorias",
   },
   "/inventario": {
     title: "Inventario",
