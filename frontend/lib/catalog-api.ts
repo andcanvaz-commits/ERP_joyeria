@@ -37,6 +37,14 @@ export function deleteCatalogSegment(segmentId: string) {
   return apiRequest<void>(`/api/catalog/segments/${segmentId}`, { method: "DELETE" });
 }
 
+/** Clase extra del sello de código según metal: primer dígito 1 = oro, 2 = plata. */
+export function metalTagClass(code: string | null | undefined): string {
+  if (!code) return "";
+  if (code.startsWith("1")) return " metalOro";
+  if (code.startsWith("2")) return " metalPlata";
+  return "";
+}
+
 /** Arma el código de producto de 11 dígitos: material(1)+categoría(2)+modelo(4)+medida(4).
  * El modelo/tipo es un valor real; solo la medida cae a 9999 cuando no hay talla. */
 export function buildProductCode(material: string, category: string, model: string, measure: string): string {

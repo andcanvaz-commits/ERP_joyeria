@@ -6,9 +6,14 @@
   --line: #E4DFD3;
   --text: #17150F;
   --ink: #17150F;
-  --muted: #6E675B;
+  /* 4.5:1+ sobre --paper para texto pequeño */
+  --muted: #5D5648;
   --gold: #A67C34;
   --gold-deep: #7A5A22;
+  /* Plata: segundo metal del taller (digito 2 del codigo de producto) */
+  --silver: #64707D;
+  --silver-deep: #47525E;
+  --silver-soft: #EDF0F3;
   /* Compat: nombres viejos remapeados al nuevo sistema */
   --background: var(--paper);
   --surface-muted: var(--surface-2);
@@ -17,10 +22,22 @@
   --primary-light: var(--line);
   --primary-soft: var(--surface-2);
   --success: #2F7D5B;
-  --warning: #9A6B1E;
+  --warning: #7E5615;
   --danger: #B23B3B;
-  --pending: #6E675B;
+  --pending: #5D5648;
+  /* Escala de elevacion: 1 superficie, 2 flotante (menus), 3 modal */
   --shadow: 0 1px 2px rgba(23, 21, 15, 0.05);
+  --shadow-2: 0 4px 12px rgba(23, 21, 15, 0.08);
+  --shadow-3: 0 12px 32px rgba(23, 21, 15, 0.14);
+  /* Ritmo de espaciado 4/8pt */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+  --space-8: 48px;
   /* Sidebar papel */
   --sidebar-bg: var(--paper);
   --sidebar-surface: var(--surface);
@@ -113,6 +130,7 @@ textarea {
   padding: 0 22px;
 }
 
+/* Monograma estilo punzon de contraste (sello del taller) */
 .brandMark {
   width: 34px;
   height: 34px;
@@ -120,10 +138,11 @@ textarea {
   place-items: center;
   border: 1px solid var(--gold);
   border-radius: 4px;
+  background: #F5EDDC;
   color: var(--gold-deep);
-  font-family: var(--font-display, sans-serif);
-  font-weight: 700;
-  font-size: 16px;
+  font-family: var(--font-serif, Georgia), serif;
+  font-weight: 400;
+  font-size: 17px;
 }
 
 .brandText {
@@ -132,10 +151,10 @@ textarea {
 }
 
 .brandName {
-  font-family: var(--font-display, "Arial Narrow"), sans-serif;
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
+  font-family: var(--font-serif, Georgia), serif;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   color: var(--ink);
 }
 
@@ -206,11 +225,11 @@ textarea {
 }
 
 .topbarTitle strong {
-  font-family: var(--font-display, "Arial Narrow"), sans-serif;
-  font-size: 26px;
-  font-weight: 600;
+  font-family: var(--font-serif, Georgia), serif;
+  font-size: 27px;
+  font-weight: 400;
   line-height: 1.15;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.01em;
 }
 
 .topbarTitle span {
@@ -310,11 +329,11 @@ textarea {
 
 .pageHeader h1 {
   margin: 0;
-  font-family: var(--font-display, "Arial Narrow"), sans-serif;
-  font-size: 32px;
-  font-weight: 600;
+  font-family: var(--font-serif, Georgia), serif;
+  font-size: 33px;
+  font-weight: 400;
   line-height: 1.15;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.01em;
 }
 
 .pageHeader p {
@@ -364,15 +383,15 @@ textarea {
 }
 
 .buttonPrimary {
-  border-color: var(--primary-strong);
-  background: linear-gradient(160deg, #c79a48 0%, #b8893a 60%, #a87c30 100%);
-  color: #211c12;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border-color: var(--gold-deep);
+  background: var(--gold-deep);
+  color: #FBF6EC;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
 }
 
 .buttonPrimary:hover:not(:disabled) {
-  background: var(--primary-strong);
-  color: #fbf6ec;
+  background: #66491B;
+  border-color: #66491B;
 }
 
 .iconOnlyButton {
@@ -1119,6 +1138,7 @@ textarea {
 }
 
 .segmentedControl {
+  position: relative;
   display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -1129,6 +1149,8 @@ textarea {
 }
 
 .segmentedControl button {
+  position: relative;
+  z-index: 1;
   min-height: 30px;
   border: 0;
   border-radius: 6px;
@@ -1138,11 +1160,27 @@ textarea {
   padding: 5px 9px;
   font-size: 12px;
   font-weight: 800;
+  transition: color 160ms ease-out;
 }
 
 .segmentedControl .segmentActive {
   background: #f3e9d6;
   color: var(--primary-strong);
+}
+
+/* Indicador deslizante: pastilla que viaja hasta la pestaña activa.
+   Cuando existe, la activa no pinta su propio fondo (lo pone la pastilla). */
+.segmentSlider {
+  position: absolute;
+  z-index: 0;
+  border-radius: 6px;
+  background: #f3e9d6;
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), width 220ms cubic-bezier(0.2, 0.8, 0.2, 1), height 220ms ease-out;
+  will-change: transform, width;
+}
+
+.segmentedControl.hasSlider .segmentActive {
+  background: transparent;
 }
 
 .searchField {
@@ -1601,10 +1639,10 @@ textarea {
 
 .panelTitle {
   margin: 0;
-  font-family: var(--font-display, "Arial Narrow"), sans-serif;
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-family: var(--font-serif, Georgia), serif;
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
 }
 
 .panelText {
@@ -1676,10 +1714,10 @@ textarea {
 
 .modalHeader h2 {
   margin: 0;
-  font-family: var(--font-display, "Arial Narrow"), sans-serif;
-  font-size: 23px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-family: var(--font-serif, Georgia), serif;
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
 }
 
 .modalHeader p {
@@ -1738,19 +1776,64 @@ textarea {
   color: #7b5960;
 }
 
+/* Ficha de taller: filas etiqueta—valor con lineas finas, sin cajas. */
 .userPreviewGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 0;
 }
 
-.userPreviewGrid span {
+.userPreviewGrid > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--line);
+  padding: 9px 2px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.userPreviewGrid > span:last-child {
+  border-bottom: 0;
+}
+
+.userPreviewGrid > span > strong {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+}
+
+/* Dato clave de la ficha: valor grande + etiqueta pequena debajo. */
+.fichaHero {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  padding: var(--space-1) 2px var(--space-3);
+}
+
+.fichaHeroItem {
   display: grid;
   gap: 2px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-muted);
-  padding: 8px;
+}
+
+.fichaHeroItem strong {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.fichaHeroItem span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .userPreviewGrid strong {
@@ -1835,11 +1918,11 @@ textarea {
 }
 
 .loginBrand h1 {
-  font-family: var(--font-display, sans-serif);
+  font-family: var(--font-serif, Georgia), serif;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 22px;
-  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-size: 23px;
+  font-weight: 400;
   color: var(--ink);
   margin: 0;
 }
@@ -3080,6 +3163,74 @@ textarea {
   padding: 1px 6px;
   vertical-align: middle;
 }
+/* Sello por metal: el primer digito del codigo de producto codifica el material
+   (1 = oro, 2 = plata). El tag lo refleja como un punzon de contraste. */
+.orderCodeTag.metalOro {
+  background: #F5EDDC;
+  color: var(--gold-deep);
+  border: 1px solid #E3D5B8;
+}
+.orderCodeTag.metalPlata {
+  background: var(--silver-soft);
+  color: var(--silver-deep);
+  border: 1px solid #D5DBE1;
+}
+
+/* Pasos del formulario de mantenimiento (crear tipo / categoria / producto).
+   Cada paso es una opcion alternativa: tarjeta delimitada + separador "o". */
+.formStep {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--paper);
+  padding: var(--space-4);
+}
+.formStepDivider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: calc(var(--space-1) * -1) 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.formStepDivider::before,
+.formStepDivider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.formStepTitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.formStepTitle strong {
+  color: var(--text);
+}
+.formStepGrid {
+  display: grid;
+  gap: var(--space-3);
+  align-items: end;
+}
+.formStepGrid.colsInputAction { grid-template-columns: minmax(0, 1fr) auto; }
+.formStepGrid.colsPairAction { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.formStepGrid.colsWideNarrow { grid-template-columns: 2fr 2fr 1fr; }
+.formStepFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+@media (max-width: 640px) {
+  .formStepGrid.colsInputAction,
+  .formStepGrid.colsPairAction,
+  .formStepGrid.colsWideNarrow { grid-template-columns: 1fr; }
+}
 .stageCarouselCard.stageTimelineEN_PROCESO {
   border-color: var(--primary);
   background: #fcf9f2;
@@ -3191,6 +3342,36 @@ select {
 .maintenanceTile:not(:disabled):hover {
   border-color: var(--primary-light);
   box-shadow: 0 6px 18px rgba(28, 26, 23, 0.12);
+}
+
+/* Drill-down con headers dinamicos: cada nivel (tipos, categorias, piezas)
+   es una tabla propia cuyos headers describen exactamente sus filas. */
+.drillBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.drillCrumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+.drillCrumbs button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--gold-deep);
+  cursor: pointer;
+}
+.drillCrumbs button:hover {
+  text-decoration: underline;
+}
+.drillCrumbSep {
+  color: var(--muted);
 }
 
 /* Filas de tabla: resaltado para seguir la línea con la vista */

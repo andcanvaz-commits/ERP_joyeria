@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -10,7 +10,7 @@ import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
-import { listCatalogSegments } from "@/lib/catalog-api";
+import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
 import {
   createInventoryItem,
@@ -213,9 +213,25 @@ export function InventoryDashboard() {
   const entryMenuRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
   const [itemFilter, setItemFilter] = useState<InventoryItemType | "TODOS" | "ORDENES_TERMINADAS">("RAW_MATERIAL");
+  // Pastilla deslizante del filtro: sigue a la pestaña activa.
+  const segmentedRef = useRef<HTMLDivElement | null>(null);
+  const [sliderRect, setSliderRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const active = segmentedRef.current?.querySelector<HTMLButtonElement>(".segmentActive");
+      if (active) {
+        setSliderRect({ left: active.offsetLeft, top: active.offsetTop, width: active.offsetWidth, height: active.offsetHeight });
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [itemFilter]);
   const [search, setSearch] = useState("");
   // Grupos de productos terminados expandidos (por nombre de categoria).
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
+  const [drillGroup, setDrillGroup] = useState<string | null>(null);
+  const [drillModel, setDrillModel] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -541,15 +557,8 @@ export function InventoryDashboard() {
       });
   }, [displayItems, catalogSegments]);
   const searchActive = search.trim().length > 0;
-
-  function toggleGroup(name: string) {
-    setExpandedGroups((current) => {
-      const next = new Set(current);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }
+  const drilledGroup = finishedGroups.find((g) => g.name === drillGroup) ?? null;
+  const drilledModel = drilledGroup?.models.find((m) => m.pcode === drillModel) ?? null;
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
@@ -884,7 +893,20 @@ export function InventoryDashboard() {
           </div>
 
           <div className="toolbar">
-            <div className="segmentedControl" aria-label="Filtrar por tipo">
+            <div className={`segmentedControl${sliderRect ? " hasSlider" : ""}`} aria-label="Filtrar por tipo" ref={segmentedRef}>
+              {sliderRect ? (
+                <span
+                  aria-hidden="true"
+                  className="segmentSlider"
+                  style={{
+                    height: sliderRect.height,
+                    top: 0,
+                    left: 0,
+                    transform: `translate(${sliderRect.left}px, ${sliderRect.top}px)`,
+                    width: sliderRect.width,
+                  }}
+                />
+              ) : null}
               {ITEM_TYPES.map((type) => (
                 <button
                   className={itemFilter === type.value ? "segmentActive" : ""}
@@ -964,77 +986,129 @@ export function InventoryDashboard() {
               </table>
             </div>
           ) : itemFilter === "FINISHED_PRODUCT" ? (
-            <div className="tableWrap">
-              <table className="table inventoryItemsTable">
-                <thead>
-                  <tr>
-                    <th className="num" style={{ width: 40 }}>#</th>
-                    <th>Producto</th>
-                    <th>Descripción</th>
-                    <th>Metal principal</th>
-                    <th>Ley/pureza</th>
-                    <th className="num">Stock</th>
-                    <th aria-label="Acciones" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {finishedGroups.map((group) => {
-                    const isExpanded = searchActive || expandedGroups.has(group.name);
-                    return (
-                      <Fragment key={group.name}>
-                        <tr onClick={() => toggleGroup(group.name)} style={{ cursor: "pointer" }}>
-                          <td className="num">
-                            {isExpanded ? <ChevronDown aria-hidden="true" size={15} /> : <ChevronRight aria-hidden="true" size={15} />}
+            <div style={{ display: "grid", gap: 10 }}>
+              {drilledGroup ? (
+                <div className="drillBar">
+                  <button
+                    className="button"
+                    onClick={() => (drilledModel ? setDrillModel(null) : setDrillGroup(null))}
+                    type="button"
+                  >
+                    <ChevronLeft aria-hidden="true" size={15} /> Volver
+                  </button>
+                  <span className="drillCrumbs">
+                    <button onClick={() => { setDrillGroup(null); setDrillModel(null); }} type="button">Productos</button>
+                    <span className="drillCrumbSep">/</span>
+                    {drilledModel ? (
+                      <>
+                        <button onClick={() => setDrillModel(null)} type="button">{drilledGroup.name}</button>
+                        <span className="drillCrumbSep">/</span>
+                        <span>{drilledModel.label}</span>
+                      </>
+                    ) : (
+                      <span>{drilledGroup.name}</span>
+                    )}
+                  </span>
+                </div>
+              ) : null}
+
+              {searchActive || drilledModel ? (
+                // Nivel piezas (o búsqueda global): headers de pieza.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable">
+                    <thead>
+                      <tr>
+                        <th>Lote</th>
+                        <th>Descripción</th>
+                        <th>Metal principal</th>
+                        <th>Ley/pureza</th>
+                        <th className="num">Stock</th>
+                        <th aria-label="Acciones" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(searchActive ? displayItems : drilledModel?.items ?? []).map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.sku}</td>
+                          <td>{item.description ?? "—"}</td>
+                          <td>{item.material_type ?? "—"}</td>
+                          <td>{item.purity ?? "—"}</td>
+                          <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                          <td>
+                            <div className="rowActions">
+                              <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} type="button">
+                                <Eye aria-hidden="true" size={15} />
+                                Visualizar
+                              </button>
+                            </div>
                           </td>
-                          <td colSpan={4}>
-                            <span className="orderCodeTag">#{group.categoryCode}</span> <strong>{group.name}</strong> · {group.models.length} {group.models.length === 1 ? "categoría" : "categorías"}
-                          </td>
-                          <td className="num"><strong>{numericText(String(group.totalStock))} {group.unitCode}</strong></td>
-                          <td />
                         </tr>
-                        {isExpanded
-                          ? group.models.map((model) => (
-                              <Fragment key={`${group.name}-${model.pcode}`}>
-                                <tr>
-                                  <td />
-                                  <td colSpan={4} style={{ paddingLeft: 18 }}>
-                                    <span className="orderCodeTag">#{model.pcode || "—"}</span> <strong>{model.label}</strong> · {model.items.length} {model.items.length === 1 ? "pieza" : "piezas"}
-                                  </td>
-                                  <td className="num">{numericText(String(model.totalStock))} {group.unitCode}</td>
-                                  <td />
-                                </tr>
-                                {model.items.map((item) => (
-                                  <tr key={item.id}>
-                                    <td />
-                                    <td style={{ paddingLeft: 34 }}>{item.sku}</td>
-                                    <td>{item.description ?? "—"}</td>
-                                    <td>{item.material_type ?? "—"}</td>
-                                    <td>{item.purity ?? "—"}</td>
-                                    <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                                    <td>
-                                      <div className="rowActions">
-                                        <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} type="button">
-                                          <Eye aria-hidden="true" size={15} />
-                                          Visualizar
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </Fragment>
-                            ))
-                          : null}
-                      </Fragment>
-                    );
-                  })}
-                  {!isLoading && finishedGroups.length === 0 ? (
-                    <tr><td colSpan={7}><div className="emptyState">No hay productos terminados.</div></td></tr>
-                  ) : null}
-                  {isLoading ? (
-                    <tr><td colSpan={7}><div className="emptyState">Cargando inventario...</div></td></tr>
-                  ) : null}
-                </tbody>
-              </table>
+                      ))}
+                      {searchActive && displayItems.length === 0 ? (
+                        <tr><td colSpan={6}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              ) : drilledGroup ? (
+                // Nivel categorías del tipo elegido: headers de categoría.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Categoría</th>
+                        <th className="num">Piezas</th>
+                        <th className="num">Stock</th>
+                        <th aria-label="Abrir" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drilledGroup.models.map((model) => (
+                        <tr key={model.pcode} onClick={() => setDrillModel(model.pcode)} style={{ cursor: "pointer" }}>
+                          <td><span className={`orderCodeTag${metalTagClass(model.pcode)}`}>#{model.pcode || "—"}</span></td>
+                          <td><strong>{model.label}</strong></td>
+                          <td className="num">{model.items.length}</td>
+                          <td className="num">{numericText(String(model.totalStock))} {drilledGroup.unitCode}</td>
+                          <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                // Nivel tipos: headers de tipo.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Tipo</th>
+                        <th className="num">Categorías</th>
+                        <th className="num">Stock</th>
+                        <th aria-label="Abrir" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {finishedGroups.map((group) => (
+                        <tr key={group.name} onClick={() => setDrillGroup(group.name)} style={{ cursor: "pointer" }}>
+                          <td><span className="orderCodeTag">#{group.categoryCode}</span></td>
+                          <td><strong>{group.name}</strong></td>
+                          <td className="num">{group.models.length}</td>
+                          <td className="num">{numericText(String(group.totalStock))} {group.unitCode}</td>
+                          <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
+                        </tr>
+                      ))}
+                      {!isLoading && finishedGroups.length === 0 ? (
+                        <tr><td colSpan={5}><div className="emptyState">No hay productos terminados.</div></td></tr>
+                      ) : null}
+                      {isLoading ? (
+                        <tr><td colSpan={5}><div className="emptyState">Cargando inventario...</div></td></tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : itemFilter === "ORDENES_TERMINADAS" ? (
             <div className="tableWrap">
@@ -1418,10 +1492,20 @@ export function InventoryDashboard() {
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
+            <div className="fichaHero">
+              <div className="fichaHeroItem">
+                <strong>{numericText(viewingItem.current_stock)} {viewingItem.unit_code}</strong>
+                <span>Stock actual</span>
+              </div>
+              {viewingItem.purity ? (
+                <div className="fichaHeroItem">
+                  <strong>{viewingItem.purity}</strong>
+                  <span>Ley / pureza</span>
+                </div>
+              ) : null}
+            </div>
             <div className="userPreviewGrid">
-              <span><strong>Stock actual</strong>{numericText(viewingItem.current_stock)} {viewingItem.unit_code}</span>
               {viewingItem.material_type ? <span><strong>Tipo</strong>{viewingItem.material_type}</span> : null}
-              {viewingItem.purity ? <span><strong>Ley/pureza</strong>{viewingItem.purity}</span> : null}
               <span><strong>Costo promedio</strong>{numericText(viewingItem.average_cost ?? "0")}</span>
               <span><strong>Lote</strong>{viewingItem.sku}</span>
             </div>
@@ -1444,8 +1528,13 @@ export function InventoryDashboard() {
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
+            <div className="fichaHero">
+              <div className="fichaHeroItem">
+                <strong>{numericText(viewingMovement.quantity)} {viewingMovement.unit_code}</strong>
+                <span>Cantidad</span>
+              </div>
+            </div>
             <div className="userPreviewGrid">
-              <span><strong>Cantidad</strong>{numericText(viewingMovement.quantity)} {viewingMovement.unit_code}</span>
               {viewingMovement.unit_cost ? <span><strong>Costo unitario</strong>{numericText(viewingMovement.unit_cost)}</span> : null}
               {viewingMovement.lot_code ? <span><strong>Lote (OP)</strong>{viewingMovement.lot_code}</span> : null}
               {viewingMovement.item.product_code ? <span><strong>Producto</strong>{viewingMovement.item.product_code}</span> : null}
