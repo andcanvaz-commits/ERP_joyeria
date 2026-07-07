@@ -8,7 +8,7 @@ class ProductTypeCreate(BaseModel):
 
     category_code: str = Field(min_length=1, max_length=10)
     model_code: str = Field(min_length=1, max_length=10)
-    raw_material_item_id: UUID
+    name: str = Field(min_length=1, max_length=180)
 
 
 class ProductTypeRead(BaseModel):
@@ -17,10 +17,7 @@ class ProductTypeRead(BaseModel):
     id: UUID
     category_code: str
     model_code: str
-    product_code: str
+    name: str | None = None
     category_label: str
     model_label: str
-    raw_material_item_id: UUID
-    raw_material_name: str
-    purity: str | None = None
     is_active: bool = True

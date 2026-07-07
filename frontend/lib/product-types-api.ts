@@ -4,12 +4,9 @@ export type ProductType = {
   id: string;
   category_code: string;
   model_code: string;
-  product_code: string;
+  name: string | null;
   category_label: string;
   model_label: string;
-  raw_material_item_id: string;
-  raw_material_name: string;
-  purity: string | null;
   is_active: boolean;
 };
 
@@ -20,7 +17,7 @@ export function listProductTypes() {
 export function createProductType(payload: {
   category_code: string;
   model_code: string;
-  raw_material_item_id: string;
+  name: string;
 }) {
   return apiRequest<ProductType>("/api/product-types", {
     method: "POST",
