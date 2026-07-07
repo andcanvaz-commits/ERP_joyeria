@@ -501,7 +501,7 @@ export function InventoryDashboard() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, groupItems]) => ({
         name,
-        items: groupItems,
+        items: [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku)),
         totalStock: groupItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
       }));
   }, [displayItems]);
