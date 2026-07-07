@@ -29,3 +29,11 @@ postgres_data/
 
 # Backups locales de PostgreSQL
 backups/
+backups_local/
+
+# Artefactos de herramientas (Ruflo security audit, superpowers)
+.claude-flow/
+.claude/memory.db
+.superpowers/
+.swarm/
+ruvector.db
