@@ -20,6 +20,8 @@ from backend.modules.auth.service import seed_default_users
 from backend.modules.catalog import models as catalog_models
 from backend.modules.catalog.router import router as catalog_router
 from backend.modules.catalog.service import seed_catalog
+from backend.modules.product_types import models as product_type_models
+from backend.modules.product_types.router import router as product_types_router
 from backend.modules.units import models as units_models
 from backend.modules.units.router import router as units_router
 from backend.modules.units.service import seed_units
@@ -273,4 +275,5 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(production_router, prefix="/api/production", tags=["production"])
 app.include_router(inventory_router, prefix="/api/inventory", tags=["inventory"])
 app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
+app.include_router(product_types_router, prefix="/api/product-types", tags=["product-types"])
 app.include_router(units_router, prefix="/api/units", tags=["units"])
