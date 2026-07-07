@@ -987,7 +987,7 @@ export function InventoryDashboard() {
                             {isExpanded ? <ChevronDown aria-hidden="true" size={15} /> : <ChevronRight aria-hidden="true" size={15} />}
                           </td>
                           <td colSpan={4}>
-                            <strong>{group.name}</strong> <span className="orderCodeTag">{group.categoryCode}</span> · {group.models.length} {group.models.length === 1 ? "categoría" : "categorías"}
+                            <span className="orderCodeTag">#{group.categoryCode}</span> <strong>{group.name}</strong> · {group.models.length} {group.models.length === 1 ? "categoría" : "categorías"}
                           </td>
                           <td className="num"><strong>{numericText(String(group.totalStock))} {group.unitCode}</strong></td>
                           <td />
@@ -998,7 +998,7 @@ export function InventoryDashboard() {
                                 <tr>
                                   <td />
                                   <td colSpan={4} style={{ paddingLeft: 18 }}>
-                                    <strong>{model.label}</strong> <span className="orderCodeTag">{model.pcode || "—"}</span> · {model.items.length} {model.items.length === 1 ? "pieza" : "piezas"}
+                                    <span className="orderCodeTag">#{model.pcode || "—"}</span> <strong>{model.label}</strong> · {model.items.length} {model.items.length === 1 ? "pieza" : "piezas"}
                                   </td>
                                   <td className="num">{numericText(String(model.totalStock))} {group.unitCode}</td>
                                   <td />
