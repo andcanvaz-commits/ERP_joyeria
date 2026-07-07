@@ -10,6 +10,7 @@ import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { listCatalogSegments } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
 import {
   createInventoryItem,
@@ -272,6 +273,13 @@ export function InventoryDashboard() {
     enabled: Boolean(currentUser),
   });
 
+  // Segmentos del catalogo para etiquetar modelos (FILIGRANA, VARIOS...).
+  const { data: catalogSegments = [] } = useQuery({
+    queryKey: ["catalog-segments"],
+    queryFn: listCatalogSegments,
+    enabled: Boolean(currentUser),
+  });
+
   const summary = data?.summary ?? null;
   const items = data?.items ?? [];
   const movements = data?.movements ?? [];
@@ -489,8 +497,15 @@ export function InventoryDashboard() {
   const displayItems =
     itemFilter === "FINISHED_PRODUCT" ? filteredItems.filter((item) => !receivedCodes.has(item.sku)) : filteredItems;
 
-  // Grupos por nombre (categoria): la descripcion de cada pieza es su modelo.
+  // Grupos por nombre (categoria) y dentro por modelo de catalogo
+  // (product_code = material+categoria+modelo); la descripcion es la variante.
   const finishedGroups = useMemo(() => {
+    const modelLabels = new Map<string, string>();
+    for (const segment of catalogSegments) {
+      if (segment.kind === "MODEL" && segment.parent_code) {
+        modelLabels.set(`${segment.parent_code}${segment.code}`, segment.label);
+      }
+    }
     const map = new Map<string, InventoryItem[]>();
     for (const item of displayItems) {
       const list = map.get(item.name);
@@ -499,12 +514,32 @@ export function InventoryDashboard() {
     }
     return [...map.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, groupItems]) => ({
-        name,
-        items: [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku)),
-        totalStock: groupItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
-      }));
-  }, [displayItems]);
+      .map(([name, groupItems]) => {
+        const sorted = [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku));
+        const byModel = new Map<string, InventoryItem[]>();
+        for (const item of sorted) {
+          const pcode = item.product_code ?? "";
+          const list = byModel.get(pcode);
+          if (list) list.push(item);
+          else byModel.set(pcode, [item]);
+        }
+        const models = [...byModel.entries()].map(([pcode, modelItems]) => ({
+          pcode,
+          // material(1)+categoria(2)+modelo(4): el label sale de categoria+modelo.
+          label: pcode.length === 7 ? modelLabels.get(pcode.slice(1)) ?? "SIN MODELO" : "SIN MODELO",
+          items: modelItems,
+          totalStock: modelItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+        }));
+        return {
+          name,
+          categoryCode: sorted[0]?.product_code?.slice(1, 3) ?? "—",
+          models,
+          pieceCount: sorted.length,
+          totalStock: sorted.reduce((acc, it) => acc + Number(it.current_stock), 0),
+          unitCode: sorted[0]?.unit_code ?? "g",
+        };
+      });
+  }, [displayItems, catalogSegments]);
   const searchActive = search.trim().length > 0;
 
   function toggleGroup(name: string) {
@@ -951,28 +986,42 @@ export function InventoryDashboard() {
                           <td className="num">
                             {isExpanded ? <ChevronDown aria-hidden="true" size={15} /> : <ChevronRight aria-hidden="true" size={15} />}
                           </td>
-                          <td colSpan={4}><strong>{group.name}</strong> · {group.items.length} {group.items.length === 1 ? "pieza" : "piezas"}</td>
-                          <td className="num"><strong>{numericText(String(group.totalStock))} {group.items[0]?.unit_code ?? "g"}</strong></td>
+                          <td colSpan={4}>
+                            <strong>{group.name}</strong> <span className="orderCodeTag">{group.categoryCode}</span> · {group.pieceCount} {group.pieceCount === 1 ? "pieza" : "piezas"}
+                          </td>
+                          <td className="num"><strong>{numericText(String(group.totalStock))} {group.unitCode}</strong></td>
                           <td />
                         </tr>
                         {isExpanded
-                          ? group.items.map((item) => (
-                              <tr key={item.id}>
-                                <td />
-                                <td>{item.sku}</td>
-                                <td>{item.description ?? "—"}</td>
-                                <td>{item.material_type ?? "—"}</td>
-                                <td>{item.purity ?? "—"}</td>
-                                <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                                <td>
-                                  <div className="rowActions">
-                                    <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} type="button">
-                                      <Eye aria-hidden="true" size={15} />
-                                      Visualizar
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
+                          ? group.models.map((model) => (
+                              <Fragment key={`${group.name}-${model.pcode}`}>
+                                <tr>
+                                  <td />
+                                  <td colSpan={4} style={{ paddingLeft: 18 }}>
+                                    <strong>{model.label}</strong> <span className="orderCodeTag">{model.pcode || "—"}</span> · {model.items.length} {model.items.length === 1 ? "pieza" : "piezas"}
+                                  </td>
+                                  <td className="num">{numericText(String(model.totalStock))} {group.unitCode}</td>
+                                  <td />
+                                </tr>
+                                {model.items.map((item) => (
+                                  <tr key={item.id}>
+                                    <td />
+                                    <td style={{ paddingLeft: 34 }}>{item.sku}</td>
+                                    <td>{item.description ?? "—"}</td>
+                                    <td>{item.material_type ?? "—"}</td>
+                                    <td>{item.purity ?? "—"}</td>
+                                    <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                                    <td>
+                                      <div className="rowActions">
+                                        <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} type="button">
+                                          <Eye aria-hidden="true" size={15} />
+                                          Visualizar
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </Fragment>
                             ))
                           : null}
                       </Fragment>
