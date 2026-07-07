@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Boxes, ChevronLeft, ChevronRight, Eye, Factory, FileText, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
 import { isAuthenticated } from "@/lib/api";
@@ -208,7 +209,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
-  const [dataModal, setDataModal] = useState<{ type: "units" | "materials"; mode: "create" | "view" } | null>(null);
+  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "productTypes"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -1085,6 +1086,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <Boxes aria-hidden="true" size={22} />
                 <strong>Materias primas</strong>
                 <span>{rawMaterialsList.length} materias primas creadas.</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="maintenanceSection" aria-label="Productos terminados">
+            <h2>Productos terminados</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "productTypes", mode: "create" })} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear tipo de producto</strong>
+                <span>Tipo, categoría y materia prima.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "productTypes", mode: "view" })} type="button">
+                <FileText aria-hidden="true" size={22} />
+                <strong>Tipos de producto</strong>
+                <span>Definidos y los ya presentes en inventario.</span>
               </button>
             </div>
           </section>
@@ -2033,6 +2050,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
       {dataModal?.type === "units" ? <UnitsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "materials" ? <RawMaterialsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
+      {dataModal?.type === "productTypes" ? <ProductTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
       {isProcessesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Procesos creados">
