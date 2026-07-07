@@ -987,7 +987,7 @@ export function InventoryDashboard() {
                             {isExpanded ? <ChevronDown aria-hidden="true" size={15} /> : <ChevronRight aria-hidden="true" size={15} />}
                           </td>
                           <td colSpan={4}>
-                            <strong>{group.name}</strong> <span className="orderCodeTag">{group.categoryCode}</span> · {group.pieceCount} {group.pieceCount === 1 ? "pieza" : "piezas"}
+                            <strong>{group.name}</strong> <span className="orderCodeTag">{group.categoryCode}</span> · {group.models.length} {group.models.length === 1 ? "categoría" : "categorías"}
                           </td>
                           <td className="num"><strong>{numericText(String(group.totalStock))} {group.unitCode}</strong></td>
                           <td />
