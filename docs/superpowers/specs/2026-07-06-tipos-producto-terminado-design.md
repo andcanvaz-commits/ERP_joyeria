@@ -1,7 +1,20 @@
 # Tipos de producto terminado (Mantenimientos)
 
 Fecha: 2026-07-06
-Estado: aprobado
+Estado: aprobado — ACTUALIZADO 2026-07-07 (ver nota final)
+
+> **NOTA 2026-07-07 — arquitectura cambiada en implementación:**
+> `product_types` ya NO tiene materia prima ni `product_code` con metal.
+> Definición = `category_code` (tipo) + `model_code` (categoría) + `name`
+> (nombre libre del producto), unicidad por la tripleta (migraciones
+> `b4c5d6e7f8a9` y `c5d6e7f8a9b0`). El metal/materia prima se definirá en
+> producción (diseño futuro). Los segmentos MODEL heredados del Excel que
+> eran nombres de producto quedaron `is_active=false`; las categorías reales
+> son genéricas (VARIOS, FILIGRANA). El formulario tiene 3 opciones
+> independientes (crear tipo / crear categoría en tipo / crear producto con
+> tipo+categoría) y la vista es drill-down tipos→categorías→productos,
+> incluyendo productos ya existentes en inventario (por código+descripción).
+> Lo que sigue abajo es el diseño original, conservado como historia.
 
 ## Problema
 
