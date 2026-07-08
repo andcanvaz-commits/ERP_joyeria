@@ -1024,6 +1024,16 @@ textarea {
   border-collapse: collapse;
 }
 
+/* Variante compacta: tablas con pocas columnas (drill-down, modales) que
+   deben ajustarse al contenedor en vez de forzar scroll horizontal. */
+.table.tableAuto {
+  min-width: 0;
+}
+.table.tableAuto td,
+.table.tableAuto th {
+  overflow-wrap: anywhere;
+}
+
 .table th,
 .table td {
   border-bottom: 1px solid var(--line);
@@ -1682,7 +1692,8 @@ textarea {
   gap: 14px;
   width: min(920px, 100%);
   max-height: calc(100vh - 48px);
-  overflow: hidden;
+  /* y: auto — si el contenido excede, el modal scrollea; nunca se corta. */
+  overflow: hidden auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);

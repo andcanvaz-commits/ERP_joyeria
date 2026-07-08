@@ -528,33 +528,35 @@ export function InventoryDashboard() {
       if (list) list.push(item);
       else map.set(item.name, [item]);
     }
-    return [...map.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, groupItems]) => {
-        const sorted = [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku));
-        const byModel = new Map<string, InventoryItem[]>();
-        for (const item of sorted) {
-          const pcode = item.product_code ?? "";
-          const list = byModel.get(pcode);
-          if (list) list.push(item);
-          else byModel.set(pcode, [item]);
-        }
-        const models = [...byModel.entries()].map(([pcode, modelItems]) => ({
+    const groups = [...map.entries()].map(([name, groupItems]) => {
+      const sorted = [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku));
+      const byModel = new Map<string, InventoryItem[]>();
+      for (const item of sorted) {
+        const pcode = item.product_code ?? "";
+        const list = byModel.get(pcode);
+        if (list) list.push(item);
+        else byModel.set(pcode, [item]);
+      }
+      const models = [...byModel.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([pcode, modelItems]) => ({
           pcode,
           // material(1)+categoria(2)+modelo(4): el label sale de categoria+modelo.
           label: pcode.length === 7 ? modelLabels.get(pcode.slice(1)) ?? "SIN MODELO" : "SIN MODELO",
           items: modelItems,
           totalStock: modelItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
         }));
-        return {
-          name,
-          categoryCode: sorted[0]?.product_code?.slice(1, 3) ?? "—",
-          models,
-          pieceCount: sorted.length,
-          totalStock: sorted.reduce((acc, it) => acc + Number(it.current_stock), 0),
-          unitCode: sorted[0]?.unit_code ?? "g",
-        };
-      });
+      return {
+        name,
+        categoryCode: sorted[0]?.product_code?.slice(1, 3) ?? "—",
+        models,
+        pieceCount: sorted.length,
+        totalStock: sorted.reduce((acc, it) => acc + Number(it.current_stock), 0),
+        unitCode: sorted[0]?.unit_code ?? "g",
+      };
+    });
+    // Orden fijo por codigo de tipo (#01, #02, ...), no alfabetico por nombre.
+    return groups.sort((a, b) => a.categoryCode.localeCompare(b.categoryCode) || a.name.localeCompare(b.name));
   }, [displayItems, catalogSegments]);
   const searchActive = search.trim().length > 0;
   const drilledGroup = finishedGroups.find((g) => g.name === drillGroup) ?? null;
@@ -986,7 +988,7 @@ export function InventoryDashboard() {
               </table>
             </div>
           ) : itemFilter === "FINISHED_PRODUCT" ? (
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ alignContent: "start", display: "grid", gap: 10, minHeight: 0, overflowY: "auto" }}>
               {drilledGroup ? (
                 <div className="drillBar">
                   <button
@@ -1015,7 +1017,7 @@ export function InventoryDashboard() {
               {searchActive || drilledModel ? (
                 // Nivel piezas (o búsqueda global): headers de pieza.
                 <div className="tableWrap">
-                  <table className="table inventoryItemsTable">
+                  <table className="table inventoryItemsTable tableAuto">
                     <thead>
                       <tr>
                         <th>Lote</th>
@@ -1053,7 +1055,7 @@ export function InventoryDashboard() {
               ) : drilledGroup ? (
                 // Nivel categorías del tipo elegido: headers de categoría.
                 <div className="tableWrap">
-                  <table className="table inventoryItemsTable">
+                  <table className="table inventoryItemsTable tableAuto">
                     <thead>
                       <tr>
                         <th>#</th>
@@ -1073,13 +1075,16 @@ export function InventoryDashboard() {
                           <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
                         </tr>
                       ))}
+                      {drilledGroup.models.length === 0 ? (
+                        <tr><td colSpan={5}><div className="emptyState">Este tipo aún no tiene piezas en inventario.</div></td></tr>
+                      ) : null}
                     </tbody>
                   </table>
                 </div>
               ) : (
                 // Nivel tipos: headers de tipo.
                 <div className="tableWrap">
-                  <table className="table inventoryItemsTable">
+                  <table className="table inventoryItemsTable tableAuto">
                     <thead>
                       <tr>
                         <th>#</th>

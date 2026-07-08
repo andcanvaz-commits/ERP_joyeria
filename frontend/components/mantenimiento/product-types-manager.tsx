@@ -307,7 +307,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
         ) : null}
 
         {mode === "view" ? (
-        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+        <div style={{ display: "grid", gap: 10, marginTop: 14, minHeight: 0, maxHeight: "min(480px, calc(100vh - 260px))", overflowY: "auto" }}>
           {drilledType ? (
             <div className="drillBar">
               <button
@@ -334,8 +334,8 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
           ) : null}
 
           {drilledCat && drilledType ? (
-            <div className="tableWrap" style={{ maxHeight: 400, overflowY: "auto" }}>
-              <table className="table">
+            <div className="tableWrap">
+              <table className="table tableAuto">
                 <thead>
                   <tr>
                     <th style={{ width: 110 }}>Código</th>
@@ -374,8 +374,8 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
               </table>
             </div>
           ) : drilledType ? (
-            <div className="tableWrap" style={{ maxHeight: 400, overflowY: "auto" }}>
-              <table className="table">
+            <div className="tableWrap">
+              <table className="table tableAuto">
                 <thead>
                   <tr>
                     <th style={{ width: 90 }}>#</th>
@@ -400,8 +400,8 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
               </table>
             </div>
           ) : (
-            <div className="tableWrap" style={{ maxHeight: 400, overflowY: "auto" }}>
-              <table className="table">
+            <div className="tableWrap">
+              <table className="table tableAuto">
                 <thead>
                   <tr>
                     <th style={{ width: 90 }}>#</th>
