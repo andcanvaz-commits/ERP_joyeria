@@ -1061,6 +1061,17 @@ textarea {
   text-align: right;
 }
 
+/* Titulo de columna numerica alineado con sus valores. */
+.table th.num {
+  text-align: right;
+}
+
+/* Tablas compactas (drill-down): numeros a la izquierda, bajo su titulo. */
+.table.tableAuto th.num,
+.table.tableAuto td.num {
+  text-align: left;
+}
+
 .table tfoot td,
 .table tr.totalRow td {
   border-top: 1px solid var(--gold);
