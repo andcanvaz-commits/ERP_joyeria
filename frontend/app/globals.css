@@ -1120,11 +1120,12 @@ textarea {
   gap: 16px;
 }
 
+/* Los dos paneles (items y movimientos) estiran a la misma altura de fila:
+   el más alto define el tamaño y el otro rellena, aunque tenga un solo item. */
 .inventoryShell {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
 }
 
 .inventoryPanel {
