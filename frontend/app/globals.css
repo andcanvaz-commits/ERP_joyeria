@@ -1132,12 +1132,14 @@ textarea {
   min-height: 0;
 }
 
-/* Paneles de inventario: sin tope ni scroll interno; los listados se paginan
-   y la altura la define la página actual. */
+/* Paneles de inventario: sin scroll interno (los listados se paginan) y con
+   piso de altura fijo para que el tamaño no cambie al pasar a una lista con
+   menos elementos; cabe una página completa (10 filas + drill + pager). */
 .inventoryShell > .inventoryPanel:first-child,
 .inventoryShell > .inventoryPanel:last-child {
   display: flex;
   flex-direction: column;
+  min-height: 640px;
 }
 
 .inventoryShell > .inventoryPanel:first-child > .inventoryList,
