@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 480
     login_rate_limit_max: int = 5
     login_rate_limit_window_seconds: int = 60
+    # Ventana (horas) para revertir la ultima entrada de inventario; pasada
+    # la ventana el movimiento queda inmutable y solo procede un ajuste.
+    inventory_revert_window_hours: int = 24
     seed_admin_username: str = "admin"
     seed_admin_password: str | None = None
     seed_admin_reset_on_boot: bool = False

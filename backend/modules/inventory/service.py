@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from backend.modules.config.settings import settings
 from backend.modules.inventory.models import InventoryItem, InventoryMovement
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.schemas import (
@@ -133,6 +134,15 @@ class InventoryService(InventoryIntegrationPort):
         if last.movement_type != "ENTRADA":
             raise InventoryDomainError(
                 "Solo se puede revertir la ultima entrada de lote registrada."
+            )
+        window_hours = settings.inventory_revert_window_hours
+        created = last.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created > timedelta(hours=window_hours):
+            raise InventoryDomainError(
+                f"La entrada tiene mas de {window_hours} horas y ya no se puede revertir. "
+                "Registra un ajuste de inventario."
             )
         self.repository.delete_movement(last)
 
