@@ -5,6 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Boxes, ListChecks, Package } from "lucide-react";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import type { InventoryItem, InventoryMovement } from "@/types/inventory";
+import { Pager, usePagination } from "@/components/shared/pager";
+
+const REPORT_PAGE_SIZE = 12;
 
 const MOVEMENT_LABELS: Record<string, string> = {
   ENTRADA: "Entrada",
@@ -126,6 +129,10 @@ export function InventoryReports() {
     [finishedIn],
   );
 
+  const byCategoryPager = usePagination(byCategory, REPORT_PAGE_SIZE, activeMonth);
+  const byLeyPager = usePagination(byLey, REPORT_PAGE_SIZE, activeMonth);
+  const kardexPager = usePagination(monthMovements, REPORT_PAGE_SIZE, activeMonth);
+
   return (
     <div className="content">
       {error ? <div className="alert alertError">{error}</div> : null}
@@ -172,7 +179,7 @@ export function InventoryReports() {
             <p className="panelText">Subtipos y cantidad producida en {monthLabel(activeMonth)}</p>
           </div>
         </div>
-        <div className="tableWrap tableScroll">
+        <div className="tableWrap">
           <table className="table">
             <thead>
               <tr>
@@ -182,7 +189,7 @@ export function InventoryReports() {
               </tr>
             </thead>
             <tbody>
-              {byCategory.map((row) => (
+              {byCategoryPager.pageItems.map((row) => (
                 <tr key={row.name}>
                   <td>{row.name}</td>
                   <td className="num">{row.subtipos}</td>
@@ -194,6 +201,7 @@ export function InventoryReports() {
               ) : null}
             </tbody>
           </table>
+          <Pager {...byCategoryPager} />
         </div>
       </section>
 
@@ -204,7 +212,7 @@ export function InventoryReports() {
             <p className="panelText">Productos y cantidad por ley/pureza en {monthLabel(activeMonth)}</p>
           </div>
         </div>
-        <div className="tableWrap tableScroll">
+        <div className="tableWrap">
           <table className="table">
             <thead>
               <tr>
@@ -214,7 +222,7 @@ export function InventoryReports() {
               </tr>
             </thead>
             <tbody>
-              {byLey.map((row) => (
+              {byLeyPager.pageItems.map((row) => (
                 <tr key={row.ley}>
                   <td>{row.ley}</td>
                   <td className="num">{row.productos}</td>
@@ -226,6 +234,7 @@ export function InventoryReports() {
               ) : null}
             </tbody>
           </table>
+          <Pager {...byLeyPager} />
         </div>
       </section>
 
@@ -236,7 +245,7 @@ export function InventoryReports() {
             <p className="panelText">{monthMovements.length} movimientos en {monthLabel(activeMonth)}</p>
           </div>
         </div>
-        <div className="tableWrap tableScroll">
+        <div className="tableWrap">
           <table className="table">
             <thead>
               <tr>
@@ -250,7 +259,7 @@ export function InventoryReports() {
               </tr>
             </thead>
             <tbody>
-              {monthMovements.map((movement) => (
+              {kardexPager.pageItems.map((movement) => (
                 <tr key={movement.id}>
                   <td>{dateLabel(movement.created_at)}</td>
                   <td>{movement.item.name}</td>
@@ -270,6 +279,7 @@ export function InventoryReports() {
               ) : null}
             </tbody>
           </table>
+          <Pager {...kardexPager} />
         </div>
       </section>
     </div>

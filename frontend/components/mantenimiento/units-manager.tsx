@@ -5,10 +5,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import { createUnit, deleteUnit, listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { Pager, usePagination } from "@/components/shared/pager";
 
 export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: units = [], isLoading } = useQuery({ queryKey: ["units"], queryFn: listUnits });
+  const unitsPager = usePagination(units, 8);
   const [label, setLabel] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
         ) : null}
 
         {mode === "view" ? (
-        <div className="tableWrap" style={{ marginTop: 14, maxHeight: 320, overflowY: "auto" }}>
+        <div className="tableWrap" style={{ marginTop: 14 }}>
           <table className="table">
             <thead>
               <tr>
@@ -118,9 +120,9 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
               </tr>
             </thead>
             <tbody>
-              {units.map((unit, index) => (
+              {unitsPager.pageItems.map((unit, index) => (
                 <tr key={unit.id}>
-                  <td className="num">{index + 1}</td>
+                  <td className="num">{unitsPager.page * unitsPager.pageSize + index + 1}</td>
                   <td>{unit.label}</td>
                   <td>{unit.code}</td>
                   <td style={{ textAlign: "right" }}>
@@ -144,6 +146,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
               ) : null}
             </tbody>
           </table>
+          <Pager {...unitsPager} />
         </div>
         ) : null}
       </section>

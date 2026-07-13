@@ -1131,20 +1131,10 @@ textarea {
   min-height: 0;
 }
 
-/* Panel de inventario: se ajusta al contenido, con tope maximo (scroll si hay muchos). */
-.inventoryShell > .inventoryPanel:first-child {
-  max-height: 580px;
-  display: flex;
-  flex-direction: column;
-}
-.inventoryShell > .inventoryPanel:first-child .tableWrap {
-  overflow-y: auto;
-}
-
-/* Panel de historial/movimientos: crece con el contenido hasta el tope del
-   panel de inventario; si hay más, scroll. */
+/* Paneles de inventario: sin tope ni scroll interno; los listados se paginan
+   y la altura la define la página actual. */
+.inventoryShell > .inventoryPanel:first-child,
 .inventoryShell > .inventoryPanel:last-child {
-  max-height: 580px;
   display: flex;
   flex-direction: column;
 }
@@ -1155,7 +1145,7 @@ textarea {
   min-height: 0;
   max-height: none;
   align-content: start;
-  overflow-y: auto;
+  overflow-y: visible;
 }
 
 .segmentedControl {
@@ -3145,9 +3135,13 @@ textarea {
   font-weight: 700;
 }
 
+/* Listado paginado: el pager queda pegado abajo; overflow solo como
+   respaldo si la página no cabe en pantallas muy bajas. */
 .catalogScroll {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   border-top: 1px solid var(--border);
 }
@@ -3156,10 +3150,8 @@ textarea {
   min-width: 0;
 }
 
-.catalogScroll .table th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+.catalogScroll .pager {
+  margin-top: auto;
 }
 
 @media (max-width: 960px) {
@@ -4123,5 +4115,18 @@ textarea:disabled {
 .noticeCompact { padding: 10px 14px; }
 .noticeCompact .noticeInner { padding-bottom: 0; }
 
-.tableScroll { max-height: 620px; overflow-y: auto; }
-.tableScroll thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+/* Paginación compacta de listados: flechas + rango, abajo a la derecha. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.pagerRange {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

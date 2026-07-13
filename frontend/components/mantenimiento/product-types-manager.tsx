@@ -7,6 +7,9 @@ import { createCatalogSegment, listCatalogSegments, metalTagClass } from "@/lib/
 import { listInventoryItems } from "@/lib/inventory-api";
 import { createProductType, deleteProductType, listProductTypes } from "@/lib/product-types-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { Pager, usePagination } from "@/components/shared/pager";
+
+const DRILL_PAGE_SIZE = 10;
 
 export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -97,6 +100,21 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
 
   const drilledType = typeGroups.find((g) => g.code === drillType) ?? null;
   const drilledCat = drilledType?.cats.find((c) => c.code === drillCat) ?? null;
+
+  // Paginación por nivel del drill-down; cada nivel vuelve a la página 1 al entrar.
+  const typesPager = usePagination(typeGroups, DRILL_PAGE_SIZE);
+  const catsPager = usePagination(drilledType?.cats ?? [], DRILL_PAGE_SIZE, drillType ?? "");
+  const productRows = useMemo(
+    () =>
+      drilledCat
+        ? [
+            ...drilledCat.defined.map((t) => ({ kind: "defined" as const, defined: t, inventory: null })),
+            ...drilledCat.inventory.map((p) => ({ kind: "inventory" as const, defined: null, inventory: p })),
+          ]
+        : [],
+    [drilledCat],
+  );
+  const productsPager = usePagination(productRows, DRILL_PAGE_SIZE, `${drillType ?? ""}/${drillCat ?? ""}`);
 
   useEffect(() => {
     if (!success) return;
@@ -307,7 +325,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
         ) : null}
 
         {mode === "view" ? (
-        <div style={{ display: "grid", gap: 10, marginTop: 14, minHeight: 0, maxHeight: "min(480px, calc(100vh - 260px))", overflowY: "auto" }}>
+        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
           {drilledType ? (
             <div className="drillBar">
               <button
@@ -344,34 +362,42 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                   </tr>
                 </thead>
                 <tbody>
-                  {drilledCat.defined.map((t) => (
-                    <tr key={t.id}>
-                      <td><span className="orderCodeTag">#{t.category_code}{t.model_code}</span></td>
-                      <td>{t.name ?? "—"}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <button
-                          aria-label={`Eliminar ${t.name ?? t.model_label}`}
-                          className="iconOnlyButton dangerIconButton"
-                          onClick={() => void handleDelete(t.id, t.name ?? `${t.category_label} / ${t.model_label}`)}
-                          type="button"
-                        >
-                          <Trash2 aria-hidden="true" size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {drilledCat.inventory.map((p) => (
-                    <tr key={`${p.code}-${p.name}`}>
-                      <td><span className={`orderCodeTag${metalTagClass(p.code)}`}>#{p.code}</span></td>
-                      <td>{p.name}</td>
-                      <td />
-                    </tr>
-                  ))}
+                  {productsPager.pageItems.map((row) => {
+                    if (row.kind === "defined" && row.defined) {
+                      const t = row.defined;
+                      return (
+                        <tr key={t.id}>
+                          <td><span className="orderCodeTag">#{t.category_code}{t.model_code}</span></td>
+                          <td>{t.name ?? "—"}</td>
+                          <td style={{ textAlign: "right" }}>
+                            <button
+                              aria-label={`Eliminar ${t.name ?? t.model_label}`}
+                              className="iconOnlyButton dangerIconButton"
+                              onClick={() => void handleDelete(t.id, t.name ?? `${t.category_label} / ${t.model_label}`)}
+                              type="button"
+                            >
+                              <Trash2 aria-hidden="true" size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    if (!row.inventory) return null;
+                    const p = row.inventory;
+                    return (
+                      <tr key={`${p.code}-${p.name}`}>
+                        <td><span className={`orderCodeTag${metalTagClass(p.code)}`}>#{p.code}</span></td>
+                        <td>{p.name}</td>
+                        <td />
+                      </tr>
+                    );
+                  })}
                   {drilledCat.defined.length === 0 && drilledCat.inventory.length === 0 ? (
                     <tr><td colSpan={3}><div className="emptyState">Sin productos en esta categoría.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
+              <Pager {...productsPager} />
             </div>
           ) : drilledType ? (
             <div className="tableWrap">
@@ -385,7 +411,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                   </tr>
                 </thead>
                 <tbody>
-                  {drilledType.cats.map((cat) => (
+                  {catsPager.pageItems.map((cat) => (
                     <tr key={cat.code} onClick={() => setDrillCat(cat.code)} style={{ cursor: "pointer" }}>
                       <td><span className="orderCodeTag">#{cat.code}</span></td>
                       <td><strong>{cat.label}</strong></td>
@@ -398,6 +424,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                   ) : null}
                 </tbody>
               </table>
+              <Pager {...catsPager} />
             </div>
           ) : (
             <div className="tableWrap">
@@ -412,7 +439,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                   </tr>
                 </thead>
                 <tbody>
-                  {typeGroups.map((group) => (
+                  {typesPager.pageItems.map((group) => (
                     <tr key={group.code} onClick={() => setDrillType(group.code)} style={{ cursor: "pointer" }}>
                       <td><span className="orderCodeTag">#{group.code}</span></td>
                       <td><strong>{group.label}</strong></td>
@@ -426,6 +453,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                   ) : null}
                 </tbody>
               </table>
+              <Pager {...typesPager} />
             </div>
           )}
         </div>

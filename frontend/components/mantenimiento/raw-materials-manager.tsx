@@ -7,6 +7,7 @@ import type { InventoryItem } from "@/types/inventory";
 import { createInventoryItem, deleteInventoryItem, listInventoryItems, updateInventoryItem } from "@/lib/inventory-api";
 import { listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { Pager, usePagination } from "@/components/shared/pager";
 
 export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -14,6 +15,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
     queryKey: ["raw-materials"],
     queryFn: () => listInventoryItems("RAW_MATERIAL"),
   });
+  const itemsPager = usePagination(items, 6);
   const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits });
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -163,7 +165,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
         ) : null}
 
         {mode === "view" ? (
-        <div className="tableWrap" style={{ marginTop: 14, maxHeight: 200, overflowY: "auto" }}>
+        <div className="tableWrap" style={{ marginTop: 14 }}>
           <table className="table">
             <thead>
               <tr>
@@ -175,9 +177,9 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
               </tr>
             </thead>
             <tbody>
-              {items.map((item, index) => (
+              {itemsPager.pageItems.map((item, index) => (
                 <tr key={item.id}>
-                  <td className="num">{index + 1}</td>
+                  <td className="num">{itemsPager.page * itemsPager.pageSize + index + 1}</td>
                   <td>{item.material_type ?? item.name}</td>
                   <td>{item.purity ?? "—"}</td>
                   <td>{item.unit_code}</td>
@@ -212,6 +214,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
               ) : null}
             </tbody>
           </table>
+          <Pager {...itemsPager} />
         </div>
         ) : null}
       </section>

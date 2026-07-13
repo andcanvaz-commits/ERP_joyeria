@@ -10,6 +10,35 @@ import {
   deleteCatalogSegment,
   listCatalogSegments
 } from "@/lib/catalog-api";
+import { Pager, usePagination } from "@/components/shared/pager";
+
+const SEGMENT_PAGE_SIZE = 8;
+
+function SegmentTable({ rows, resetKey, onDelete }: { rows: CatalogSegment[]; resetKey: string; onDelete: (row: CatalogSegment) => void }) {
+  const { pageItems, ...pager } = usePagination(rows, SEGMENT_PAGE_SIZE, resetKey);
+  if (rows.length === 0) return <div className="emptyState">Sin registros.</div>;
+  return (
+    <>
+      <table className="table">
+        <thead><tr><th style={{ width: "28%" }}>Código</th><th>Nombre</th><th aria-label="acciones" /></tr></thead>
+        <tbody>
+          {pageItems.map((row) => (
+            <tr key={row.id}>
+              <td style={{ fontFamily: "monospace", fontWeight: 700 }}>{row.code}</td>
+              <td>{row.label}</td>
+              <td style={{ textAlign: "right" }}>
+                <button className="iconTextButton dangerText" onClick={() => onDelete(row)} type="button">
+                  <Trash2 aria-hidden="true" size={14} /> Eliminar
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Pager {...pager} />
+    </>
+  );
+}
 
 export function CatalogDashboard() {
   const queryClient = useQueryClient();
@@ -75,28 +104,6 @@ export function CatalogDashboard() {
     };
   }, [lookup, materials, categories, segments]);
 
-  function SegmentTable({ rows }: { rows: CatalogSegment[] }) {
-    if (rows.length === 0) return <div className="emptyState">Sin registros.</div>;
-    return (
-      <table className="table">
-        <thead><tr><th style={{ width: "28%" }}>Código</th><th>Nombre</th><th aria-label="acciones" /></tr></thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td style={{ fontFamily: "monospace", fontWeight: 700 }}>{row.code}</td>
-              <td>{row.label}</td>
-              <td style={{ textAlign: "right" }}>
-                <button className="iconTextButton dangerText" onClick={() => setConfirmDelete(row)} type="button">
-                  <Trash2 aria-hidden="true" size={14} /> Eliminar
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  }
-
   return (
     <div className="content">
       <div className="pageHeader">
@@ -132,7 +139,7 @@ export function CatalogDashboard() {
             <input className="field" placeholder="Nuevo material" value={newMaterial} onChange={(e) => setNewMaterial(e.target.value)} />
             <button className="button buttonPrimary" type="submit"><Plus size={16} /> Agregar</button>
           </form>
-          <div className="catalogScroll"><SegmentTable rows={materials} /></div>
+          <div className="catalogScroll"><SegmentTable onDelete={setConfirmDelete} resetKey="materials" rows={materials} /></div>
         </article>
 
         <article className="card catalogCard">
@@ -141,7 +148,7 @@ export function CatalogDashboard() {
             <input className="field" placeholder="Nueva categoría" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} />
             <button className="button buttonPrimary" type="submit"><Plus size={16} /> Agregar</button>
           </form>
-          <div className="catalogScroll"><SegmentTable rows={categories} /></div>
+          <div className="catalogScroll"><SegmentTable onDelete={setConfirmDelete} resetKey="categories" rows={categories} /></div>
         </article>
 
         <article className="card catalogCard">
@@ -156,7 +163,7 @@ export function CatalogDashboard() {
               <button className="button buttonPrimary" type="submit"><Plus size={16} /> Agregar</button>
             </form>
           ) : null}
-          <div className="catalogScroll">{modelCat ? <SegmentTable rows={modelsOf(modelCat)} /> : <div className="emptyState">Selecciona una categoría.</div>}</div>
+          <div className="catalogScroll">{modelCat ? <SegmentTable onDelete={setConfirmDelete} resetKey={`models-${modelCat}`} rows={modelsOf(modelCat)} /> : <div className="emptyState">Selecciona una categoría.</div>}</div>
         </article>
       </section>
       )}

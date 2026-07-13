@@ -33,6 +33,7 @@ import {
 } from "@/lib/production-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
+import { Pager, usePagination } from "@/components/shared/pager";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
@@ -62,6 +63,13 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
 ];
 
 const RECENT_MOVEMENT_DAYS = 30;
+// Espeja INVENTORY_REVERT_WINDOW_HOURS del backend (el backend valida siempre).
+const REVERT_WINDOW_HOURS = 24;
+
+function withinRevertWindow(createdAt: string) {
+  const created = new Date(createdAt).getTime();
+  return Number.isFinite(created) && Date.now() - created <= REVERT_WINDOW_HOURS * 60 * 60 * 1000;
+}
 const WEEK_DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 
 const emptyItemForm = (): SaveInventoryItemPayload => ({
@@ -562,6 +570,23 @@ export function InventoryDashboard() {
   const drilledGroup = finishedGroups.find((g) => g.name === drillGroup) ?? null;
   const drilledModel = drilledGroup?.models.find((m) => m.pcode === drillModel) ?? null;
 
+  // Paginación de listados: reemplaza el scroll interno de los paneles.
+  const rawItemsPager = usePagination(displayItems, 10, `${itemFilter}|${search}`);
+  const finishedTypesPager = usePagination(finishedGroups, 10, `${itemFilter}|${search}`);
+  const finishedCatsPager = usePagination(drilledGroup?.models ?? [], 10, drillGroup ?? "");
+  const piecesPager = usePagination(
+    searchActive ? displayItems : drilledModel?.items ?? [],
+    10,
+    `${drillGroup ?? ""}|${drillModel ?? ""}|${search}`,
+  );
+  const receivedRunsPager = usePagination(receivedRuns, 10, itemFilter);
+  const wipRows = [
+    ...inProcessRuns.map((run) => ({ kind: "run" as const, run, item: null })),
+    ...displayItems.map((item) => ({ kind: "item" as const, run: null, item })),
+  ];
+  const wipPager = usePagination(wipRows, 10, `${itemFilter}|${search}`);
+  const movementsPager = usePagination(lastMonthMovements, 5);
+
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
   useEffect(() => {
@@ -947,12 +972,12 @@ export function InventoryDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayItems.map((item, index) => {
+                  {rawItemsPager.pageItems.map((item, index) => {
                     const averageCost = item.average_cost ?? "0";
                     const totalValue = Number(item.current_stock) * Number(averageCost);
                     return (
                       <tr key={item.id}>
-                        <td className="num">{index + 1}</td>
+                        <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
                         <td>{item.material_type ?? item.name}</td>
                         <td>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
@@ -986,9 +1011,10 @@ export function InventoryDashboard() {
                   ) : null}
                 </tbody>
               </table>
+              <Pager {...rawItemsPager} />
             </div>
           ) : itemFilter === "FINISHED_PRODUCT" ? (
-            <div style={{ alignContent: "start", display: "grid", gap: 10, minHeight: 0, overflowY: "auto" }}>
+            <div style={{ alignContent: "start", display: "grid", gap: 10, minHeight: 0 }}>
               {drilledGroup ? (
                 <div className="drillBar">
                   <button
@@ -1029,7 +1055,7 @@ export function InventoryDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(searchActive ? displayItems : drilledModel?.items ?? []).map((item) => (
+                      {piecesPager.pageItems.map((item) => (
                         <tr key={item.id}>
                           <td>{item.sku}</td>
                           <td>{item.description ?? "—"}</td>
@@ -1051,6 +1077,7 @@ export function InventoryDashboard() {
                       ) : null}
                     </tbody>
                   </table>
+                  <Pager {...piecesPager} />
                 </div>
               ) : drilledGroup ? (
                 // Nivel categorías del tipo elegido: headers de categoría.
@@ -1066,7 +1093,7 @@ export function InventoryDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {drilledGroup.models.map((model) => (
+                      {finishedCatsPager.pageItems.map((model) => (
                         <tr key={model.pcode} onClick={() => setDrillModel(model.pcode)} style={{ cursor: "pointer" }}>
                           <td><span className={`orderCodeTag${metalTagClass(model.pcode)}`}>#{model.pcode || "—"}</span></td>
                           <td><strong>{model.label}</strong></td>
@@ -1080,6 +1107,7 @@ export function InventoryDashboard() {
                       ) : null}
                     </tbody>
                   </table>
+                  <Pager {...finishedCatsPager} />
                 </div>
               ) : (
                 // Nivel tipos: headers de tipo.
@@ -1095,7 +1123,7 @@ export function InventoryDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {finishedGroups.map((group) => (
+                      {finishedTypesPager.pageItems.map((group) => (
                         <tr key={group.name} onClick={() => setDrillGroup(group.name)} style={{ cursor: "pointer" }}>
                           <td><span className="orderCodeTag">#{group.categoryCode}</span></td>
                           <td><strong>{group.name}</strong></td>
@@ -1112,6 +1140,7 @@ export function InventoryDashboard() {
                       ) : null}
                     </tbody>
                   </table>
+                  <Pager {...finishedTypesPager} />
                 </div>
               )}
             </div>
@@ -1131,7 +1160,7 @@ export function InventoryDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {receivedRuns.map((run) => (
+                  {receivedRunsPager.pageItems.map((run) => (
                     <tr key={run.id}>
                       <td>{run.production_code ?? "—"}</td>
                       <td>{run.process_name}</td>
@@ -1155,6 +1184,7 @@ export function InventoryDashboard() {
                   ) : null}
                 </tbody>
               </table>
+              <Pager {...receivedRunsPager} />
             </div>
           ) : (
           <div className="tableWrap">
@@ -1170,20 +1200,42 @@ export function InventoryDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {inProcessRuns.map((run) => {
-                  const currentStage = run.stages.find((stage) => stage.status === "EN_PROCESO")
-                    ?? run.stages.find((stage) => stage.status === "PENDIENTE")
-                    ?? null;
+                {wipPager.pageItems.map((row) => {
+                  if (row.kind === "run" && row.run) {
+                    const run = row.run;
+                    const currentStage = run.stages.find((stage) => stage.status === "EN_PROCESO")
+                      ?? run.stages.find((stage) => stage.status === "PENDIENTE")
+                      ?? null;
+                    return (
+                      <tr key={`run-${run.id}`}>
+                        <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
+                        <td>{run.process_name}</td>
+                        <td className="num">{numericText(run.quantity)} und</td>
+                        <td>{currentStage ? `${currentStage.stage_name} (${currentStage.stage_order}/${run.stages.length})` : "—"}</td>
+                        <td>{productionTimeLabel(run.started_at)}</td>
+                        <td>
+                          <div className="rowActions">
+                            <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
+                              <Eye aria-hidden="true" size={15} />
+                              Visualizar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  if (!row.item) return null;
+                  const item = row.item;
                   return (
-                    <tr key={`run-${run.id}`}>
-                      <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
-                      <td>{run.process_name}</td>
-                      <td className="num">{numericText(run.quantity)} und</td>
-                      <td>{currentStage ? `${currentStage.stage_name} (${currentStage.stage_order}/${run.stages.length})` : "—"}</td>
-                      <td>{productionTimeLabel(run.started_at)}</td>
+                    <tr key={item.id}>
+                      <td>{item.sku}</td>
+                      <td>{item.name}</td>
+                      <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                      <td>—</td>
+                      <td>—</td>
                       <td>
                         <div className="rowActions">
-                          <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
+                          <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
                             <Eye aria-hidden="true" size={15} />
                             Visualizar
                           </button>
@@ -1192,23 +1244,6 @@ export function InventoryDashboard() {
                     </tr>
                   );
                 })}
-                {displayItems.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.sku}</td>
-                    <td>{item.name}</td>
-                    <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>
-                      <div className="rowActions">
-                        <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
-                          <Eye aria-hidden="true" size={15} />
-                          Visualizar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
                 {!isLoading && displayItems.length === 0 && inProcessRuns.length === 0 ? (
                   <tr><td colSpan={6}><div className="emptyState">No hay productos en proceso.</div></td></tr>
                 ) : null}
@@ -1217,6 +1252,7 @@ export function InventoryDashboard() {
                 ) : null}
               </tbody>
             </table>
+            <Pager {...wipPager} />
           </div>
           )}
         </article>
@@ -1239,7 +1275,7 @@ export function InventoryDashboard() {
             </button>
           </div>
           <div className="movementList">
-            {lastMonthMovements.map((movement, index) => (
+            {movementsPager.pageItems.map((movement, index) => (
               <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                 <div>
                   <strong>{movementTypeLabel(movement.movement_type)}</strong>
@@ -1263,7 +1299,7 @@ export function InventoryDashboard() {
                       <Eye aria-hidden="true" size={15} />
                       Visualizar
                     </button>
-                    {index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" ? (
+                    {movementsPager.page === 0 && index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
                       <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
                         <RotateCcw aria-hidden="true" size={15} />
                         Revertir
@@ -1279,6 +1315,7 @@ export function InventoryDashboard() {
             ) : null}
             {isLoading ? <div className="emptyState">Cargando movimientos...</div> : null}
           </div>
+          <Pager {...movementsPager} />
         </article>
       </section>
 
