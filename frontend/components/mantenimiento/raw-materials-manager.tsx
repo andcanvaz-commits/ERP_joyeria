@@ -165,7 +165,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
         ) : null}
 
         {mode === "view" ? (
-        <div className="tableWrap pagedListFloor" style={{ marginTop: 14, minHeight: 320 }}>
+        <div className="tableWrap pagedListFloor" style={{ marginTop: 14, minHeight: itemsPager.total > itemsPager.pageSize ? 320 : undefined }}>
           <table className="table">
             <thead>
               <tr>

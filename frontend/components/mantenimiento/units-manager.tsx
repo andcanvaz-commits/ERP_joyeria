@@ -109,7 +109,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
         ) : null}
 
         {mode === "view" ? (
-        <div className="tableWrap pagedListFloor" style={{ marginTop: 14, minHeight: 400 }}>
+        <div className="tableWrap pagedListFloor" style={{ marginTop: 14, minHeight: unitsPager.total > unitsPager.pageSize ? 400 : undefined }}>
           <table className="table">
             <thead>
               <tr>
