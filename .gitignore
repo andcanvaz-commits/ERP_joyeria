@@ -31,9 +31,9 @@ postgres_data/
 backups/
 backups_local/
 
-# Artefactos de herramientas (Ruflo security audit, superpowers)
+# Artefactos de herramientas (Claude Code, Ruflo security audit, superpowers)
+.claude/
 .claude-flow/
-.claude/memory.db
 .superpowers/
 .swarm/
 ruvector.db
