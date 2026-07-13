@@ -200,6 +200,26 @@ textarea {
   color: var(--gold-deep);
 }
 
+/* Punto rojo de pendientes: aparece a la derecha del item del menu cuando hay
+   algo por aprobar/recibir/iniciar en esa seccion. */
+.navBadge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e03131;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 3px rgba(224, 49, 49, 0.45);
+}
+
 .mainArea {
   min-width: 0;
 }
@@ -419,7 +439,7 @@ textarea {
 
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
 }
 
@@ -895,6 +915,89 @@ textarea {
   letter-spacing: 0.3px;
 }
 
+/* KPI clickeable (ej. Stock bajo): mismo look que .metric pero interactivo. */
+.metricButton {
+  cursor: pointer;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--surface, #ffffff);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+.metricButton:hover {
+  border-color: var(--primary, #b7791f);
+}
+.metricButton:active {
+  transform: translateY(1px);
+}
+.metricButton.metricAlert .metricValue,
+.metricButton.metricAlert svg {
+  color: #c0392b;
+}
+.metricButton.metricActive {
+  border-color: var(--primary, #b7791f);
+  box-shadow: 0 0 0 2px var(--primary-soft, rgba(183, 121, 31, 0.25));
+}
+
+/* Semaforo de stock: OK / Bajo / Agotado. */
+.stockBadge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.stockBadge--ok {
+  background: rgba(39, 174, 96, 0.14);
+  color: #1e8449;
+}
+.stockBadge--low {
+  background: rgba(243, 156, 18, 0.16);
+  color: #b9770e;
+}
+.stockBadge--out {
+  background: rgba(192, 57, 43, 0.14);
+  color: #c0392b;
+}
+
+/* Kardex dentro de la ficha del item: historial con saldo corrido. */
+.kardexBlock {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.kardexHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.kardexHead h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.kardexHead span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.kardexScroll {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.kardexTable {
+  min-width: 0;
+}
+.kardexTable thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface, #ffffff);
+  z-index: 1;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -1149,6 +1252,21 @@ textarea {
   max-height: none;
   align-content: start;
   overflow-y: visible;
+}
+
+/* La zona de tabla del panel de inventario ocupa el alto sobrante: la tabla
+   se apila arriba y el pager (flechas) queda anclado al fondo del recuadro,
+   aunque la página tenga pocas filas. Asi el box no se encoge ni suben las
+   flechas al agregarse mas filas. */
+.inventoryShell > .inventoryPanel:first-child .tableWrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.inventoryShell > .inventoryPanel:first-child .tableWrap > .pager {
+  margin-top: auto;
 }
 
 .segmentedControl {

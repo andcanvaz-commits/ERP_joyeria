@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, Wallet, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -106,6 +106,12 @@ function movementTypeLabel(type: InventoryMovementType) {
   return MOVEMENT_TYPES.find((item) => item.value === type)?.label ?? type;
 }
 
+// Signo del movimiento sobre el stock: suma entradas/ingresos/ajustes+ y resta
+// salidas/consumos/merma/ajustes-. Base del saldo corrido del kardex.
+function movementSign(type: InventoryMovementType) {
+  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" ? 1 : -1;
+}
+
 function unitLabel(value: string) {
   return UNIT_OPTIONS.find((unit) => unit.value === value)?.label ?? `${value} (detectada)`;
 }
@@ -118,6 +124,28 @@ function numericText(value: string | null) {
   if (!value) return "0";
   const number = Number(value);
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
+}
+
+function moneyText(value: number) {
+  return value.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function itemTotalValue(item: InventoryItem) {
+  return Number(item.current_stock) * Number(item.average_cost ?? "0");
+}
+
+// Nivel de stock frente al mínimo configurado: agotado / bajo / ok. Espeja el
+// criterio del backend (minimum_stock definido y current_stock <= minimum_stock).
+function isLowStock(item: InventoryItem) {
+  if (item.minimum_stock == null || item.minimum_stock === "") return false;
+  const min = Number(item.minimum_stock);
+  return Number.isFinite(min) && min > 0 && Number(item.current_stock) <= min;
+}
+
+function stockStatus(item: InventoryItem): { level: "ok" | "low" | "out"; label: string } {
+  if (Number(item.current_stock) <= 0) return { level: "out", label: "Agotado" };
+  if (isLowStock(item)) return { level: "low", label: "Bajo" };
+  return { level: "ok", label: "OK" };
 }
 
 function dateKey(date: Date) {
@@ -236,6 +264,8 @@ export function InventoryDashboard() {
     return () => window.removeEventListener("resize", measure);
   }, [itemFilter]);
   const [search, setSearch] = useState("");
+  // Filtro rapido: mostrar solo items en o bajo su stock minimo (KPI clickeable).
+  const [lowStockOnly, setLowStockOnly] = useState(false);
   // Grupos de productos terminados expandidos (por nombre de categoria).
   // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
   const [drillGroup, setDrillGroup] = useState<string | null>(null);
@@ -352,9 +382,29 @@ export function InventoryDashboard() {
         term.length === 0 ||
         item.name.toLowerCase().includes(term) ||
         item.sku.toLowerCase().includes(term);
-      return matchesType && matchesSearch;
+      const matchesLowStock = !lowStockOnly || isLowStock(item);
+      return matchesType && matchesSearch && matchesLowStock;
     });
-  }, [items, itemFilter, search]);
+  }, [items, itemFilter, search, lowStockOnly]);
+  // Valor total del inventario: suma de stock x costo promedio de cada item.
+  const inventoryValue = useMemo(
+    () => items.reduce((total, item) => total + itemTotalValue(item), 0),
+    [items],
+  );
+  // Kardex del item abierto: sus movimientos con saldo corrido (mas reciente
+  // primero). El saldo se calcula en orden cronologico ascendente.
+  const viewingItemKardex = useMemo(() => {
+    if (!viewingItem) return [] as Array<{ movement: InventoryMovement; balanceAfter: number }>;
+    const ascending = movements
+      .filter((movement) => movement.item_id === viewingItem.id)
+      .sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime());
+    let balance = 0;
+    const withBalance = ascending.map((movement) => {
+      balance += movementSign(movement.movement_type) * Number(movement.quantity);
+      return { movement, balanceAfter: balance };
+    });
+    return withBalance.reverse();
+  }, [movements, viewingItem]);
   const unitOptions = useMemo(() => {
     // Base dinamica: unidades gestionadas desde Mantenimiento > Datos. Si aun no
     // cargan, cae a las unidades por defecto para no dejar el combo vacio.
@@ -462,6 +512,7 @@ export function InventoryDashboard() {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       setPrintPreview({ run: updated, mode: "entrega" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
@@ -484,6 +535,7 @@ export function InventoryDashboard() {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
     } finally {
@@ -503,6 +555,7 @@ export function InventoryDashboard() {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       setPrintPreview({ run: updated, mode: "recepcion" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
@@ -844,6 +897,30 @@ export function InventoryDashboard() {
           <span className="metricLabel">Terminados</span>
           <strong className="metricValue">{summary?.finished_products ?? 0}</strong>
         </article>
+        <article className="card metric">
+          <Wallet aria-hidden="true" size={22} />
+          <span className="metricLabel">Valor inventario</span>
+          <strong className="metricValue">$ {moneyText(inventoryValue)}</strong>
+        </article>
+        <button
+          className={`card metric metricButton${lowStockOnly ? " metricActive" : ""}${(summary?.low_stock_items ?? 0) > 0 ? " metricAlert" : ""}`}
+          onClick={() => {
+            const next = !lowStockOnly;
+            setLowStockOnly(next);
+            if (next) {
+              setItemFilter("RAW_MATERIAL");
+              setDrillGroup(null);
+              setDrillModel(null);
+            }
+          }}
+          type="button"
+          aria-pressed={lowStockOnly}
+          title={lowStockOnly ? "Quitar filtro de stock bajo" : "Ver solo items en stock bajo"}
+        >
+          <AlertTriangle aria-hidden="true" size={22} />
+          <span className="metricLabel">Stock bajo</span>
+          <strong className="metricValue">{summary?.low_stock_items ?? 0}</strong>
+        </button>
       </section>
 
       {topbarSlot
@@ -941,6 +1018,7 @@ export function InventoryDashboard() {
                   onClick={() => {
                     setIsEntryMenuOpen(false);
                     setItemFilter(type.value);
+                    setLowStockOnly(false);
                   }}
                   type="button"
                 >
@@ -966,6 +1044,8 @@ export function InventoryDashboard() {
                     <th>Descripción</th>
                     <th>Ley/pureza</th>
                     <th className="num">Stock</th>
+                    <th className="num">Mínimo</th>
+                    <th>Estado</th>
                     <th className="num">Costo promedio</th>
                     <th className="num">Valor total</th>
                     <th aria-label="Acciones" />
@@ -975,6 +1055,7 @@ export function InventoryDashboard() {
                   {rawItemsPager.pageItems.map((item, index) => {
                     const averageCost = item.average_cost ?? "0";
                     const totalValue = Number(item.current_stock) * Number(averageCost);
+                    const status = stockStatus(item);
                     return (
                       <tr key={item.id}>
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
@@ -982,6 +1063,8 @@ export function InventoryDashboard() {
                         <td>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
                         <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                        <td className="num">{item.minimum_stock ? `${numericText(item.minimum_stock)} ${item.unit_code}` : "—"}</td>
+                        <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
                         <td className="num">$ {numericText(String(totalValue))}</td>
                         <td>
@@ -997,14 +1080,14 @@ export function InventoryDashboard() {
                   })}
                   {!isLoading && displayItems.length === 0 ? (
                     <tr>
-                      <td colSpan={8}>
-                        <div className="emptyState">No hay items para este filtro.</div>
+                      <td colSpan={10}>
+                        <div className="emptyState">{lowStockOnly ? "No hay items en stock bajo." : "No hay items para este filtro."}</div>
                       </td>
                     </tr>
                   ) : null}
                   {isLoading ? (
                     <tr>
-                      <td colSpan={8}>
+                      <td colSpan={10}>
                         <div className="emptyState">Cargando inventario...</div>
                       </td>
                     </tr>
@@ -1014,7 +1097,7 @@ export function InventoryDashboard() {
               <Pager {...rawItemsPager} />
             </div>
           ) : itemFilter === "FINISHED_PRODUCT" ? (
-            <div style={{ alignContent: "start", display: "grid", gap: 10, minHeight: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 10, minHeight: 0 }}>
               {drilledGroup ? (
                 <div className="drillBar">
                   <button
@@ -1548,10 +1631,47 @@ export function InventoryDashboard() {
             </div>
             <div className="userPreviewGrid">
               {viewingItem.material_type ? <span><strong>Tipo</strong>{viewingItem.material_type}</span> : null}
-              <span><strong>Costo promedio</strong>{numericText(viewingItem.average_cost ?? "0")}</span>
+              <span><strong>Costo promedio</strong>$ {numericText(viewingItem.average_cost ?? "0")}</span>
+              <span><strong>Valor total</strong>$ {moneyText(itemTotalValue(viewingItem))}</span>
+              <span><strong>Stock mínimo</strong>{viewingItem.minimum_stock ? `${numericText(viewingItem.minimum_stock)} ${viewingItem.unit_code}` : "—"}</span>
+              <span>
+                <strong>Estado</strong>
+                <span className={`stockBadge stockBadge--${stockStatus(viewingItem).level}`}>{stockStatus(viewingItem).label}</span>
+              </span>
               <span><strong>Lote</strong>{viewingItem.sku}</span>
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
+            <div className="kardexBlock">
+              <div className="kardexHead">
+                <h3>Kardex</h3>
+                <span>{viewingItemKardex.length} movimientos</span>
+              </div>
+              <div className="kardexScroll">
+                <table className="table tableAuto kardexTable">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Tipo</th>
+                      <th className="num">Cantidad</th>
+                      <th className="num">Saldo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewingItemKardex.map(({ movement, balanceAfter }) => (
+                      <tr key={movement.id}>
+                        <td>{movementDateLabel(movement.created_at)}</td>
+                        <td>{movementTypeLabel(movement.movement_type)}</td>
+                        <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{numericText(movement.quantity)} {movement.unit_code}</td>
+                        <td className="num">{numericText(String(balanceAfter))} {movement.unit_code}</td>
+                      </tr>
+                    ))}
+                    {viewingItemKardex.length === 0 ? (
+                      <tr><td colSpan={4}><div className="emptyState">Sin movimientos para este item.</div></td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </section>
         </div>
       ) : null}

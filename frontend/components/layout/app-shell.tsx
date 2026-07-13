@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout } from "@/lib/auth-api";
+import { listProductionRuns } from "@/lib/production-api";
 import { allowedRoutes, canAccess, homeRoute, normalizeRole } from "@/lib/roles";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
 
@@ -71,6 +72,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const role = normalizeRole(currentUser?.role);
   const visibleNav = currentUser ? navItems.filter((item) => allowedRoutes(role).includes(item.href)) : [];
 
+  // Ordenes de produccion (cache compartida con Solicitudes). Se refresca sola
+  // cada 30s para que el punto rojo del menu no quede desactualizado.
+  const { data: navRuns = [] } = useQuery({
+    queryKey: ["solicitudes"],
+    queryFn: listProductionRuns,
+    enabled: isAuthenticated() && Boolean(currentUser),
+    refetchInterval: 30000,
+  });
+
+  // Pendientes por seccion: inventario aprueba/recibe; produccion inicia las
+  // ordenes con materiales aprobados. El punto rojo aparece donde hay accion.
+  const invPending = navRuns.filter(
+    (run) => run.status === "PENDIENTE_INVENTARIO" || run.status === "PENDIENTE_RECEPCION",
+  ).length;
+  const prodPending = navRuns.filter((run) => run.status === "MATERIALES_APROBADOS").length;
+  const navBadges: Record<string, number> = {
+    "/inventario": invPending,
+    "/produccion": prodPending,
+    "/solicitudes": role === "inventario" ? invPending : prodPending,
+  };
+
   // Cambio forzado de contrasena temporal: se realiza en la pantalla de login.
   useEffect(() => {
     if (currentUser?.must_change_password && pathname !== "/login") {
@@ -126,6 +148,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {visibleNav.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
+            const badge = navBadges[item.href] ?? 0;
             return (
               <Link
                 className={`navItem ${isActive ? "navItemActive" : ""}`}
@@ -134,6 +157,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon aria-hidden="true" size={18} />
                 <span>{item.label}</span>
+                {badge > 0 ? (
+                  <span className="navBadge" aria-label={`${badge} pendientes`}>{badge > 9 ? "9+" : badge}</span>
+                ) : null}
               </Link>
             );
           })}

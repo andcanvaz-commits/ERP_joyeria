@@ -23,6 +23,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
   const [description, setDescription] = useState("");
   const [purity, setPurity] = useState("");
   const [unitCode, setUnitCode] = useState("");
+  const [minimumStock, setMinimumStock] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -40,6 +41,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
     setDescription("");
     setPurity("");
     setUnitCode("");
+    setMinimumStock("");
   }
 
   function startEdit(item: InventoryItem) {
@@ -48,6 +50,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
     setDescription(item.description ?? "");
     setPurity(item.purity ?? "");
     setUnitCode(item.unit_code);
+    setMinimumStock(item.minimum_stock ?? "");
     setError(null);
   }
 
@@ -85,7 +88,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
       description: description.trim() || null,
       purity: purity.trim() || null,
       unit_code: unit,
-      minimum_stock: null,
+      minimum_stock: minimumStock.trim() || null,
     };
     setIsSaving(true);
     try {
@@ -148,6 +151,21 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
               </select>
             </label>
             <label className="fieldGroup">
+              <span>Stock mínimo</span>
+              <input
+                className="field"
+                disabled={isSaving}
+                min="0"
+                onChange={(e) => setMinimumStock(e.target.value)}
+                placeholder="Alerta bajo este nivel"
+                step="0.0001"
+                type="number"
+                value={minimumStock}
+              />
+            </label>
+          </div>
+          <div className="materialRow">
+            <label className="fieldGroup">
               <span>Descripción</span>
               <input className="field" disabled={isSaving} maxLength={1000} onChange={(e) => setDescription(e.target.value)} value={description} />
             </label>
@@ -173,6 +191,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
                 <th>Tipo</th>
                 <th>Ley/pureza</th>
                 <th>Unidad</th>
+                <th className="num">Mínimo</th>
                 <th aria-label="Acciones" />
               </tr>
             </thead>
@@ -183,6 +202,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
                   <td>{item.material_type ?? item.name}</td>
                   <td>{item.purity ?? "—"}</td>
                   <td>{item.unit_code}</td>
+                  <td className="num">{item.minimum_stock ? `${item.minimum_stock} ${item.unit_code}` : "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     <span className="rowActions" style={{ justifyContent: "flex-end" }}>
                       <button
@@ -209,7 +229,7 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
               ))}
               {!isLoading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={5}><div className="emptyState">Sin materias primas. Crea la primera.</div></td>
+                  <td colSpan={6}><div className="emptyState">Sin materias primas. Crea la primera.</div></td>
                 </tr>
               ) : null}
             </tbody>
