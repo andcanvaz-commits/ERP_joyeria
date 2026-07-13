@@ -1224,7 +1224,9 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/* Altura fija: la ventana de historial no cambia de tamaño según el día. */
 .movementHistoryEntries {
+  min-height: 490px;
   max-height: 490px;
 }
 
@@ -4117,6 +4119,18 @@ textarea:disabled {
 
 .noticeCompact { padding: 10px 14px; }
 .noticeCompact .noticeInner { padding-bottom: 0; }
+
+/* Piso de altura para listados paginados en modales: la ventana mantiene su
+   tamaño aunque la página o el nivel del drill tenga menos elementos; el
+   pager queda anclado abajo. El minHeight lo pone cada modal en línea. */
+.pagedListFloor {
+  display: flex;
+  flex-direction: column;
+}
+
+.pagedListFloor > .pager {
+  margin-top: auto;
+}
 
 /* Paginación compacta de listados: flechas + rango, abajo a la derecha. */
 .pager {

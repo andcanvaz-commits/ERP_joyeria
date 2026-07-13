@@ -325,7 +325,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
         ) : null}
 
         {mode === "view" ? (
-        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: 540 }}>
           {drilledType ? (
             <div className="drillBar">
               <button
@@ -352,7 +352,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
           ) : null}
 
           {drilledCat && drilledType ? (
-            <div className="tableWrap">
+            <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
@@ -400,7 +400,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
               <Pager {...productsPager} />
             </div>
           ) : drilledType ? (
-            <div className="tableWrap">
+            <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
@@ -427,7 +427,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
               <Pager {...catsPager} />
             </div>
           ) : (
-            <div className="tableWrap">
+            <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
