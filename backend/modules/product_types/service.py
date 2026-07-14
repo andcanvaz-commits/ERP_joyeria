@@ -28,6 +28,7 @@ class ProductTypeService:
             category_code=row.category_code,
             model_code=row.model_code,
             name=row.name,
+            price=row.price,
             category_label=category.label if category else row.category_code,
             model_label=model.label if model else row.model_code,
             is_active=row.is_active,
@@ -60,6 +61,7 @@ class ProductTypeService:
             category_code=payload.category_code,
             model_code=payload.model_code,
             name=name,
+            price=payload.price,
         )
         self.session.add(row)
         self.session.flush()

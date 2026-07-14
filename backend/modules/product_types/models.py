@@ -1,7 +1,8 @@
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID as PyUUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,5 +21,7 @@ class ProductType(Base):
     model_code: Mapped[str] = mapped_column(String(10), nullable=False)
     # Nombre libre del producto; unicidad (category_code, model_code, name).
     name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    # Precio referencial de venta (opcional).
+    price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

@@ -32,6 +32,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
   const [prodTypeCode, setProdTypeCode] = useState("");
   const [prodCatCode, setProdCatCode] = useState("");
   const [prodName, setProdName] = useState("");
+  const [prodPrice, setProdPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -196,8 +197,10 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
         category_code: prodTypeCode,
         model_code: prodCatCode,
         name: prodName.trim().toUpperCase(),
+        price: prodPrice.trim() || null,
       });
       setProdName("");
+      setProdPrice("");
       setSuccess(`Producto ${created.name ?? ""} creado.`);
       await queryClient.invalidateQueries({ queryKey: ["product-types"] });
     } catch (err) {
@@ -311,10 +314,14 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                 </select>
               </label>
             </div>
-            <div className="formStepGrid colsInputAction">
+            <div className="formStepGrid colsPairAction">
               <label className="fieldGroup">
                 <span>Nombre del producto</span>
                 <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setProdName(e.target.value)} placeholder="Ej. ORQUIDEA FILIGRANA" value={prodName} />
+              </label>
+              <label className="fieldGroup">
+                <span>Precio referencial (opcional)</span>
+                <input className="field" disabled={isSaving} min="0" onChange={(e) => setProdPrice(e.target.value)} placeholder="Ej. 120.00" step="0.01" type="number" value={prodPrice} />
               </label>
               <button className="button buttonPrimary" disabled={isSaving || !prodTypeCode || !prodCatCode || !prodName.trim()} type="submit">
                 <Plus aria-hidden="true" size={14} /> Crear producto
@@ -358,6 +365,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                   <tr>
                     <th style={{ width: 110 }}>Código</th>
                     <th>Nombre</th>
+                    <th className="num">Precio</th>
                     <th aria-label="Acciones" />
                   </tr>
                 </thead>
@@ -369,6 +377,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                         <tr key={t.id}>
                           <td><span className="orderCodeTag">#{t.category_code}{t.model_code}</span></td>
                           <td>{t.name ?? "—"}</td>
+                          <td className="num">{t.price ? `$ ${Number(t.price).toLocaleString("es-EC", { minimumFractionDigits: 2 })}` : "—"}</td>
                           <td style={{ textAlign: "right" }}>
                             <button
                               aria-label={`Eliminar ${t.name ?? t.model_label}`}
@@ -388,12 +397,13 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
                       <tr key={`${p.code}-${p.name}`}>
                         <td><span className={`orderCodeTag${metalTagClass(p.code)}`}>#{p.code}</span></td>
                         <td>{p.name}</td>
+                        <td className="num">—</td>
                         <td />
                       </tr>
                     );
                   })}
                   {drilledCat.defined.length === 0 && drilledCat.inventory.length === 0 ? (
-                    <tr><td colSpan={3}><div className="emptyState">Sin productos en esta categoría.</div></td></tr>
+                    <tr><td colSpan={4}><div className="emptyState">Sin productos en esta categoría.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
