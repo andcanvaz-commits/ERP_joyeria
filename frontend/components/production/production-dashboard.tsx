@@ -2,10 +2,11 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, ChevronLeft, ChevronRight, Eye, Factory, FileText, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
+import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import {
@@ -142,17 +143,19 @@ function processToForm(process: ProductionProcess): ProcessForm {
 }
 
 async function fetchProductionBundle(variant: "production" | "maintenance") {
-  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials] = await Promise.all([
+  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies] = await Promise.all([
     listProcesses(),
     variant === "maintenance" ? listUsers() : Promise.resolve([]),
     variant === "production" ? listProductionRuns() : Promise.resolve([]),
     listInventoryItems("RAW_MATERIAL"),
+    listInventoryItems("SUPPLY"),
   ]);
   return {
     processes: nextProcesses,
     users: nextUsers,
     runs: nextRuns,
-    rawMaterials: nextRawMaterials,
+    // Materiales elegibles para procesos: materia prima + insumos.
+    rawMaterials: [...nextRawMaterials, ...nextSupplies],
   };
 }
 
@@ -192,6 +195,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: () => listInventoryItems("RAW_MATERIAL"),
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
+  const { data: suppliesList = EMPTY_RAW_MATERIALS } = useQuery({
+    queryKey: ["supplies"],
+    queryFn: () => listInventoryItems("SUPPLY"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
+  });
 
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
   const users = bundle?.users ?? EMPTY_USERS;
@@ -209,7 +217,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
-  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "productTypes"; mode: "create" | "view" } | null>(null);
+  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "productTypes"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -1090,6 +1098,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </section>
 
+          <section className="maintenanceSection" aria-label="Insumos">
+            <h2>Insumos</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "supplies", mode: "create" })} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear insumo</strong>
+                <span>Nuevo quimico o material auxiliar.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "supplies", mode: "view" })} type="button">
+                <FlaskConical aria-hidden="true" size={22} />
+                <strong>Insumos</strong>
+                <span>{suppliesList.length} insumos creados.</span>
+              </button>
+            </div>
+          </section>
+
           <section className="maintenanceSection" aria-label="Productos terminados">
             <h2>Productos terminados</h2>
             <div className="maintenanceGrid">
@@ -1275,7 +1299,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           ) : null}
 
           {/* History */}
-          <section className="card panelBody" aria-label="Movimientos de produccion">
+          <section className="card panelBody productionMovementsPanel" aria-label="Movimientos de produccion">
             <div className="panelHeader">
               <div>
                 <h2 className="panelTitle">Movimientos</h2>
@@ -1983,9 +2007,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             style={{ flex: 2 }}
                           >
                             <option value="">Seleccionar material</option>
-                            {rawMaterials.map((m) => (
-                              <option key={m.id} value={m.id}>{m.name} ({m.unit_code})</option>
-                            ))}
+                            {rawMaterials.map((m) => {
+                              // Sin stock no se puede elegir: la etapa lo consumiría al avanzar.
+                              const isOut = Number(m.current_stock) <= 0;
+                              return (
+                                <option disabled={isOut} key={m.id} value={m.id}>
+                                  {m.name} ({m.unit_code}){isOut ? " — agotado" : ""}
+                                </option>
+                              );
+                            })}
                           </select>
                           <input
                             className="field"
@@ -2050,6 +2080,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
       {dataModal?.type === "units" ? <UnitsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "materials" ? <RawMaterialsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
+      {dataModal?.type === "supplies" ? <SuppliesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "productTypes" ? <ProductTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
       {isProcessesOpen ? (

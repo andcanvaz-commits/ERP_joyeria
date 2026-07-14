@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, Wallet, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -37,6 +37,7 @@ import { Pager, usePagination } from "@/components/shared/pager";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
+  { value: "SUPPLY", label: "Insumos" },
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
   { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Productos terminados" },
@@ -62,7 +63,6 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "MERMA", label: "Merma" },
 ];
 
-const RECENT_MOVEMENT_DAYS = 30;
 // Espeja INVENTORY_REVERT_WINDOW_HOURS del backend (el backend valida siempre).
 const REVERT_WINDOW_HOURS = 24;
 
@@ -134,17 +134,9 @@ function itemTotalValue(item: InventoryItem) {
   return Number(item.current_stock) * Number(item.average_cost ?? "0");
 }
 
-// Nivel de stock frente al mínimo configurado: agotado / bajo / ok. Espeja el
-// criterio del backend (minimum_stock definido y current_stock <= minimum_stock).
-function isLowStock(item: InventoryItem) {
-  if (item.minimum_stock == null || item.minimum_stock === "") return false;
-  const min = Number(item.minimum_stock);
-  return Number.isFinite(min) && min > 0 && Number(item.current_stock) <= min;
-}
-
-function stockStatus(item: InventoryItem): { level: "ok" | "low" | "out"; label: string } {
+// Nivel de stock: agotado / ok (sin concepto de stock mínimo).
+function stockStatus(item: InventoryItem): { level: "ok" | "out"; label: string } {
   if (Number(item.current_stock) <= 0) return { level: "out", label: "Agotado" };
-  if (isLowStock(item)) return { level: "low", label: "Bajo" };
   return { level: "ok", label: "OK" };
 }
 
@@ -265,7 +257,6 @@ export function InventoryDashboard() {
   }, [itemFilter]);
   const [search, setSearch] = useState("");
   // Filtro rapido: mostrar solo items en o bajo su stock minimo (KPI clickeable).
-  const [lowStockOnly, setLowStockOnly] = useState(false);
   // Grupos de productos terminados expandidos (por nombre de categoria).
   // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
   const [drillGroup, setDrillGroup] = useState<string | null>(null);
@@ -287,6 +278,7 @@ export function InventoryDashboard() {
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
+  const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
@@ -352,6 +344,11 @@ export function InventoryDashboard() {
     setMovementForm((current) => ({ ...current, item_id: current.item_id || items[0]?.id || "" }));
   }, [items]);
 
+  // El kardex se abre desde la ficha; al cambiar o cerrar el item vuelve cerrado.
+  useEffect(() => {
+    setIsKardexOpen(false);
+  }, [viewingItem?.id]);
+
   useEffect(() => {
     if (!error && !success) return;
     const timeout = window.setTimeout(() => {
@@ -382,13 +379,16 @@ export function InventoryDashboard() {
         term.length === 0 ||
         item.name.toLowerCase().includes(term) ||
         item.sku.toLowerCase().includes(term);
-      const matchesLowStock = !lowStockOnly || isLowStock(item);
-      return matchesType && matchesSearch && matchesLowStock;
+      return matchesType && matchesSearch;
     });
-  }, [items, itemFilter, search, lowStockOnly]);
-  // Valor total del inventario: suma de stock x costo promedio de cada item.
-  const inventoryValue = useMemo(
-    () => items.reduce((total, item) => total + itemTotalValue(item), 0),
+  }, [items, itemFilter, search]);
+  // Valor total de la materia prima listada: suma de stock x costo promedio.
+  // Se muestra como fila de total en la columna "Valor total" de esa pestaña.
+  const rawMaterialsValue = useMemo(
+    () =>
+      items
+        .filter((item) => item.item_type === "RAW_MATERIAL")
+        .reduce((total, item) => total + itemTotalValue(item), 0),
     [items],
   );
   // Kardex del item abierto: sus movimientos con saldo corrido (mas reciente
@@ -426,27 +426,18 @@ export function InventoryDashboard() {
   const canSeeMovementAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const editingItem = editingItemId ? items.find((item) => item.id === editingItemId) ?? null : null;
   const isEditingXmlItem = editingItem ? isXmlInvoiceItem(editingItem) : false;
-  const movementItemType: InventoryItemType = movementForm.movement_type === "SALIDA" ? "FINISHED_PRODUCT" : "RAW_MATERIAL";
+  // Salidas: productos terminados. Entradas: materia prima e insumos.
+  const movementItemTypes: InventoryItemType[] =
+    movementForm.movement_type === "SALIDA" ? ["FINISHED_PRODUCT"] : ["RAW_MATERIAL", "SUPPLY"];
   const movementItems = useMemo(
-    () => items.filter((item) => item.item_type === movementItemType),
-    [items, movementItemType],
+    () => items.filter((item) => movementItemTypes.includes(item.item_type)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, movementForm.movement_type],
   );
   const sortedMovements = useMemo(
     () => [...movements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [movements],
   );
-  const lastMonthMovements = useMemo(() => {
-    const minimumDate = new Date();
-    minimumDate.setDate(minimumDate.getDate() - RECENT_MOVEMENT_DAYS);
-    minimumDate.setHours(0, 0, 0, 0);
-    return sortedMovements.filter((movement) => {
-      const movementDate = new Date(movement.created_at);
-      const inRange = !Number.isNaN(movementDate.getTime()) && movementDate >= minimumDate;
-      // Los movimientos siguen la pestaña activa (materia prima / proceso / terminado).
-      const matchesTab = itemFilter === "TODOS" || movement.item.item_type === itemFilter;
-      return inRange && matchesTab;
-    });
-  }, [sortedMovements, itemFilter]);
   const movementCountsByDate = useMemo(() => {
     return sortedMovements.reduce<Map<string, number>>((counts, movement) => {
       const key = movementDateKey(movement);
@@ -624,21 +615,28 @@ export function InventoryDashboard() {
   const drilledModel = drilledGroup?.models.find((m) => m.pcode === drillModel) ?? null;
 
   // Paginación de listados: reemplaza el scroll interno de los paneles.
-  const rawItemsPager = usePagination(displayItems, 10, `${itemFilter}|${search}`);
-  const finishedTypesPager = usePagination(finishedGroups, 10, `${itemFilter}|${search}`);
-  const finishedCatsPager = usePagination(drilledGroup?.models ?? [], 10, drillGroup ?? "");
+  // Pestañas del panel principal: 10 por página (llenan el recuadro fijo).
+  // Movimientos, kardex e historial: de 3 en 3.
+  const TAB_PAGE_SIZE = 10;
+  const MOVEMENTS_PAGE_SIZE = 3;
+  const rawItemsPager = usePagination(displayItems, TAB_PAGE_SIZE, `${itemFilter}|${search}`);
+  const finishedTypesPager = usePagination(finishedGroups, TAB_PAGE_SIZE, `${itemFilter}|${search}`);
+  const finishedCatsPager = usePagination(drilledGroup?.models ?? [], TAB_PAGE_SIZE, drillGroup ?? "");
   const piecesPager = usePagination(
     searchActive ? displayItems : drilledModel?.items ?? [],
-    10,
+    TAB_PAGE_SIZE,
     `${drillGroup ?? ""}|${drillModel ?? ""}|${search}`,
   );
-  const receivedRunsPager = usePagination(receivedRuns, 10, itemFilter);
+  const receivedRunsPager = usePagination(receivedRuns, TAB_PAGE_SIZE, itemFilter);
   const wipRows = [
     ...inProcessRuns.map((run) => ({ kind: "run" as const, run, item: null })),
     ...displayItems.map((item) => ({ kind: "item" as const, run: null, item })),
   ];
-  const wipPager = usePagination(wipRows, 10, `${itemFilter}|${search}`);
-  const movementsPager = usePagination(lastMonthMovements, 5);
+  const wipPager = usePagination(wipRows, TAB_PAGE_SIZE, `${itemFilter}|${search}`);
+  // Últimos movimientos de todo el inventario, sin filtro por pestaña ni fecha.
+  const movementsPager = usePagination(sortedMovements, MOVEMENTS_PAGE_SIZE);
+  const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, viewingItem?.id ?? "");
+  const historyDayPager = usePagination(selectedDateMovements, MOVEMENTS_PAGE_SIZE, selectedHistoryDate);
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
@@ -665,9 +663,18 @@ export function InventoryDashboard() {
     setIsItemFormOpen(true);
   }
 
+  function openCreateSupply() {
+    setEditingItemId(null);
+    setItemForm({ ...emptyItemForm(), item_type: "SUPPLY", unit_code: "und" });
+    setIsItemFormOpen(true);
+    setIsEntryMenuOpen(false);
+  }
+
   function openManualEntry() {
-    const firstRawMaterial = items.find((item) => item.item_type === "RAW_MATERIAL");
-    setMovementForm({ ...emptyMovementForm(), item_id: firstRawMaterial?.id || "", movement_type: "ENTRADA" });
+    // Preselecciona un item del tipo de la pestaña activa (materia prima o insumo).
+    const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
+    const firstItem = items.find((item) => item.item_type === entryType);
+    setMovementForm({ ...emptyMovementForm(), item_id: firstItem?.id || "", movement_type: "ENTRADA" });
     setIsMovementFormOpen(true);
     setIsEntryMenuOpen(false);
   }
@@ -720,22 +727,22 @@ export function InventoryDashboard() {
     setIsSaving(true);
     setError(null);
     try {
+      const isSupply = itemForm.item_type === "SUPPLY";
       const materialType = itemForm.material_type?.trim() || "";
       if (!isEditingXmlItem && !materialType) {
-        setError("Escribe el tipo de materia prima.");
+        setError(isSupply ? "Escribe el nombre del insumo." : "Escribe el tipo de materia prima.");
         setIsSaving(false);
         return;
       }
       const payload = {
         ...itemForm,
-        item_type: "RAW_MATERIAL" as const,
-        // Para materia prima el nombre ES el tipo (ya no hay campo Nombre aparte).
+        // Para materia prima el nombre ES el tipo (ya no hay campo Nombre aparte);
+        // para insumos el campo es directamente el nombre.
         name: isEditingXmlItem ? itemForm.name : materialType,
         description: isEditingXmlItem ? editingItem?.description ?? null : itemForm.description?.trim() || null,
         unit_code: isEditingXmlItem ? editingItem?.unit_code ?? itemForm.unit_code : itemForm.unit_code,
-        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : materialType,
-        purity: isEditingXmlItem ? editingItem?.purity ?? null : itemForm.purity?.trim() || null,
-        minimum_stock: null,
+        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : isSupply ? null : materialType,
+        purity: isEditingXmlItem ? editingItem?.purity ?? null : isSupply ? null : itemForm.purity?.trim() || null,
       };
       if (editingItemId) {
         await updateInventoryItem(editingItemId, payload);
@@ -746,6 +753,9 @@ export function InventoryDashboard() {
       }
       setIsItemFormOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      // Los selectores de materiales de procesos mezclan materia prima + insumos.
+      await queryClient.invalidateQueries({ queryKey: ["process-materials"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo guardar el item.");
     } finally {
@@ -798,8 +808,14 @@ export function InventoryDashboard() {
 
       let imported = 0;
       let nextItems = items;
+      // La factura crea items del tipo de la pestaña activa: insumos o materia prima.
+      const xmlItemType: InventoryItemType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
       for (const detail of details) {
-        let item = nextItems.find((candidate) => candidate.name.toLowerCase() === detail.description.toLowerCase());
+        let item = nextItems.find(
+          (candidate) =>
+            candidate.item_type === xmlItemType &&
+            candidate.name.toLowerCase() === detail.description.toLowerCase(),
+        );
         if (!item) {
           const metadata = [
             "Creado desde factura XML.",
@@ -807,11 +823,10 @@ export function InventoryDashboard() {
             invoice.supplier ? `Proveedor: ${invoice.supplier}.` : null,
           ].filter(Boolean).join(" ");
           item = await createInventoryItem({
-            item_type: "RAW_MATERIAL",
+            item_type: xmlItemType,
             name: detail.description,
             description: metadata,
             unit_code: detail.unitCode || "und",
-            minimum_stock: null,
           });
           nextItems = [...nextItems, item];
         }
@@ -888,6 +903,11 @@ export function InventoryDashboard() {
           <strong className="metricValue">{summary?.raw_materials ?? 0}</strong>
         </article>
         <article className="card metric">
+          <FlaskConical aria-hidden="true" size={22} />
+          <span className="metricLabel">Insumos</span>
+          <strong className="metricValue">{summary?.supplies ?? 0}</strong>
+        </article>
+        <article className="card metric">
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">En proceso</span>
           <strong className="metricValue">{summary?.work_in_progress ?? 0}</strong>
@@ -897,30 +917,6 @@ export function InventoryDashboard() {
           <span className="metricLabel">Terminados</span>
           <strong className="metricValue">{summary?.finished_products ?? 0}</strong>
         </article>
-        <article className="card metric">
-          <Wallet aria-hidden="true" size={22} />
-          <span className="metricLabel">Valor inventario</span>
-          <strong className="metricValue">$ {moneyText(inventoryValue)}</strong>
-        </article>
-        <button
-          className={`card metric metricButton${lowStockOnly ? " metricActive" : ""}${(summary?.low_stock_items ?? 0) > 0 ? " metricAlert" : ""}`}
-          onClick={() => {
-            const next = !lowStockOnly;
-            setLowStockOnly(next);
-            if (next) {
-              setItemFilter("RAW_MATERIAL");
-              setDrillGroup(null);
-              setDrillModel(null);
-            }
-          }}
-          type="button"
-          aria-pressed={lowStockOnly}
-          title={lowStockOnly ? "Quitar filtro de stock bajo" : "Ver solo items en stock bajo"}
-        >
-          <AlertTriangle aria-hidden="true" size={22} />
-          <span className="metricLabel">Stock bajo</span>
-          <strong className="metricValue">{summary?.low_stock_items ?? 0}</strong>
-        </button>
       </section>
 
       {topbarSlot
@@ -949,11 +945,13 @@ export function InventoryDashboard() {
               <p className="panelText">
                 {itemFilter === "RAW_MATERIAL"
                   ? "Ingresos manuales y facturas XML de materia prima"
-                  : itemFilter === "FINISHED_PRODUCT"
-                    ? "Salidas comerciales de productos terminados"
-                    : itemFilter === "ORDENES_TERMINADAS"
-                      ? "Ordenes de produccion recibidas en inventario"
-                      : "Seguimiento de productos en proceso"}
+                  : itemFilter === "SUPPLY"
+                    ? "Quimicos y materiales auxiliares de fabricacion"
+                    : itemFilter === "FINISHED_PRODUCT"
+                      ? "Salidas comerciales de productos terminados"
+                      : itemFilter === "ORDENES_TERMINADAS"
+                        ? "Ordenes de produccion recibidas en inventario"
+                        : "Seguimiento de productos en proceso"}
               </p>
             </div>
             <div className="rowActions">
@@ -985,6 +983,40 @@ export function InventoryDashboard() {
                     ) : null}
                   </div>
                 </>
+              ) : null}
+              {itemFilter === "SUPPLY" ? (
+                <div className="actionMenu" ref={entryMenuRef}>
+                  <button className="button" onClick={() => setIsEntryMenuOpen((current) => !current)} type="button">
+                    <Plus aria-hidden="true" size={17} />
+                    Entrada
+                    <ChevronDown aria-hidden="true" size={15} />
+                  </button>
+                  {isEntryMenuOpen ? (
+                    <div className="actionMenuPanel">
+                      <button onClick={openManualEntry} type="button">
+                        <Plus aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Manual</strong>
+                          <small>Registrar ingreso directo</small>
+                        </span>
+                      </button>
+                      <button onClick={openXmlInvoiceInput} type="button">
+                        <Upload aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Factura XML</strong>
+                          <small>Importar lineas de compra</small>
+                        </span>
+                      </button>
+                      <button onClick={openCreateSupply} type="button">
+                        <FlaskConical aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Crear insumo</strong>
+                          <small>Nuevo quimico o material auxiliar</small>
+                        </span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {itemFilter === "FINISHED_PRODUCT" ? (
                 <button className="button" onClick={openFinishedProductExit} type="button">
@@ -1018,7 +1050,6 @@ export function InventoryDashboard() {
                   onClick={() => {
                     setIsEntryMenuOpen(false);
                     setItemFilter(type.value);
-                    setLowStockOnly(false);
                   }}
                   type="button"
                 >
@@ -1044,7 +1075,6 @@ export function InventoryDashboard() {
                     <th>Descripción</th>
                     <th>Ley/pureza</th>
                     <th className="num">Stock</th>
-                    <th className="num">Mínimo</th>
                     <th>Estado</th>
                     <th className="num">Costo promedio</th>
                     <th className="num">Valor total</th>
@@ -1063,7 +1093,6 @@ export function InventoryDashboard() {
                         <td>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
                         <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                        <td className="num">{item.minimum_stock ? `${numericText(item.minimum_stock)} ${item.unit_code}` : "—"}</td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
                         <td className="num">$ {numericText(String(totalValue))}</td>
@@ -1080,17 +1109,76 @@ export function InventoryDashboard() {
                   })}
                   {!isLoading && displayItems.length === 0 ? (
                     <tr>
-                      <td colSpan={10}>
-                        <div className="emptyState">{lowStockOnly ? "No hay items en stock bajo." : "No hay items para este filtro."}</div>
+                      <td colSpan={9}>
+                        <div className="emptyState">No hay items para este filtro.</div>
                       </td>
                     </tr>
                   ) : null}
                   {isLoading ? (
                     <tr>
-                      <td colSpan={10}>
+                      <td colSpan={9}>
                         <div className="emptyState">Cargando inventario...</div>
                       </td>
                     </tr>
+                  ) : null}
+                </tbody>
+                {!isLoading && displayItems.length > 0 ? (
+                  <tfoot>
+                    <tr className="totalRow">
+                      <td colSpan={7}>Valor total de materia prima</td>
+                      <td className="num">$ {moneyText(rawMaterialsValue)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
+              </table>
+              <Pager {...rawItemsPager} />
+            </div>
+          ) : itemFilter === "SUPPLY" ? (
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th className="num" style={{ width: 40 }}>#</th>
+                    <th>Insumo</th>
+                    <th>Descripción</th>
+                    <th className="num">Stock</th>
+                    <th>Estado</th>
+                    <th className="num">Costo promedio</th>
+                    <th className="num">Valor total</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawItemsPager.pageItems.map((item, index) => {
+                    const averageCost = item.average_cost ?? "0";
+                    const totalValue = Number(item.current_stock) * Number(averageCost);
+                    const status = stockStatus(item);
+                    return (
+                      <tr key={item.id}>
+                        <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
+                        <td>{item.name}</td>
+                        <td>{item.description ?? "—"}</td>
+                        <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                        <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
+                        <td className="num">$ {numericText(averageCost)}</td>
+                        <td className="num">$ {numericText(String(totalValue))}</td>
+                        <td>
+                          <div className="rowActions">
+                            <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                              <Eye aria-hidden="true" size={15} />
+                              Visualizar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!isLoading && displayItems.length === 0 ? (
+                    <tr><td colSpan={8}><div className="emptyState">Sin insumos registrados. Crea el primero.</div></td></tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -1344,7 +1432,7 @@ export function InventoryDashboard() {
           <div className="panelHeader">
             <div>
               <h2 className="panelTitle">Movimientos</h2>
-              <p className="panelText">Movimientos de los ultimos 30 dias</p>
+              <p className="panelText">Ultimos movimientos registrados</p>
             </div>
             <button
               aria-label="Visualizar historial completo"
@@ -1369,8 +1457,11 @@ export function InventoryDashboard() {
                 </div>
                 <div>
                   <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
-                  <span>{movementTimeLabel(movement.created_at)}{movement.reason ? ` - ${movement.reason}` : ""}</span>
-                  {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
+                  <span>
+                    {movementTimeLabel(movement.created_at)}
+                    {movement.reason ? ` - ${movement.reason}` : ""}
+                    {movement.created_by_name ? ` · ${movement.created_by_name}` : ""}
+                  </span>
                   <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
                     {movement.source_file_name ? (
                       <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
@@ -1393,9 +1484,6 @@ export function InventoryDashboard() {
               </article>
             ))}
             {!isLoading && movements.length === 0 ? <div className="emptyState">No hay movimientos registrados.</div> : null}
-            {!isLoading && movements.length > 0 && lastMonthMovements.length === 0 ? (
-              <div className="emptyState">No hay movimientos en los ultimos 30 dias.</div>
-            ) : null}
             {isLoading ? <div className="emptyState">Cargando movimientos...</div> : null}
           </div>
           <Pager {...movementsPager} />
@@ -1453,8 +1541,8 @@ export function InventoryDashboard() {
                   <h3>{movementDateLabel(`${selectedHistoryDate}T00:00:00`)}</h3>
                   <p>{selectedDateMovements.length} movimientos registrados</p>
                 </div>
-                <div className="movementList movementHistoryEntries">
-                  {selectedDateMovements.map((movement) => (
+                <div className="movementList movementHistoryEntries pagedListFloor">
+                  {historyDayPager.pageItems.map((movement) => (
                     <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                       <div>
                         <strong>{movementTypeLabel(movement.movement_type)}</strong>
@@ -1465,8 +1553,10 @@ export function InventoryDashboard() {
                       </div>
                       <div>
                         <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
-                        <span>{movement.reason || "Sin motivo registrado"}</span>
-                        {movement.created_by_name ? <span>Por: {movement.created_by_name}</span> : null}
+                        <span>
+                          {movement.reason || "Sin motivo registrado"}
+                          {movement.created_by_name ? ` · ${movement.created_by_name}` : ""}
+                        </span>
                         <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
                           {movement.source_file_name ? (
                             <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
@@ -1483,6 +1573,7 @@ export function InventoryDashboard() {
                     </article>
                   ))}
                   {selectedDateMovements.length === 0 ? <div className="emptyState">No hay movimientos en esta fecha.</div> : null}
+                  <Pager {...historyDayPager} />
                 </div>
               </section>
             </div>
@@ -1495,7 +1586,7 @@ export function InventoryDashboard() {
           <form className="modalWindow processFormWindow" onSubmit={handleSaveItem}>
             <div className="modalHeader">
               <div>
-                <h2>{editingItemId ? "Editar item" : "Crear item"}</h2>
+                <h2>{editingItemId ? "Editar item" : itemForm.item_type === "SUPPLY" ? "Crear insumo" : "Crear item"}</h2>
                 <p>Mantenimiento de inventario</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsItemFormOpen(false)} type="button">
@@ -1509,11 +1600,11 @@ export function InventoryDashboard() {
               </label>
             ) : (
               <label className="fieldGroup">
-                <span>Tipo</span>
+                <span>{itemForm.item_type === "SUPPLY" ? "Nombre" : "Tipo"}</span>
                 <input
                   className="field"
                   onChange={(event) => setItemForm((current) => ({ ...current, material_type: event.target.value }))}
-                  placeholder="Ej. Oro, Plata"
+                  placeholder={itemForm.item_type === "SUPPLY" ? "Ej. Bórax, Ácido para baño" : "Ej. Oro, Plata"}
                   value={itemForm.material_type ?? ""}
                 />
               </label>
@@ -1528,7 +1619,7 @@ export function InventoryDashboard() {
                 </select>
               </label>
             ) : null}
-            {!isEditingXmlItem ? (
+            {!isEditingXmlItem && itemForm.item_type !== "SUPPLY" ? (
               <label className="fieldGroup">
                 <span>Ley / pureza</span>
                 <input
@@ -1633,44 +1724,59 @@ export function InventoryDashboard() {
               {viewingItem.material_type ? <span><strong>Tipo</strong>{viewingItem.material_type}</span> : null}
               <span><strong>Costo promedio</strong>$ {numericText(viewingItem.average_cost ?? "0")}</span>
               <span><strong>Valor total</strong>$ {moneyText(itemTotalValue(viewingItem))}</span>
-              <span><strong>Stock mínimo</strong>{viewingItem.minimum_stock ? `${numericText(viewingItem.minimum_stock)} ${viewingItem.unit_code}` : "—"}</span>
               <span>
                 <strong>Estado</strong>
                 <span className={`stockBadge stockBadge--${stockStatus(viewingItem).level}`}>{stockStatus(viewingItem).label}</span>
               </span>
-              <span><strong>Lote</strong>{viewingItem.sku}</span>
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
-            <div className="kardexBlock">
-              <div className="kardexHead">
-                <h3>Kardex</h3>
-                <span>{viewingItemKardex.length} movimientos</span>
+            <div className="modalActions">
+              <button className="button" onClick={() => setIsKardexOpen(true)} type="button">
+                <History aria-hidden="true" size={15} />
+                Kardex ({viewingItemKardex.length})
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {viewingItem && isKardexOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Kardex del item">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Kardex</h2>
+                <p>{viewingItem.name} · {viewingItemKardex.length} movimientos</p>
               </div>
-              <div className="kardexScroll">
-                <table className="table tableAuto kardexTable">
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Tipo</th>
-                      <th className="num">Cantidad</th>
-                      <th className="num">Saldo</th>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsKardexOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="tableWrap pagedListFloor" style={{ minHeight: 180 }}>
+              <table className="table tableAuto kardexTable">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th className="num">Cantidad</th>
+                    <th className="num">Saldo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kardexPager.pageItems.map(({ movement, balanceAfter }) => (
+                    <tr key={movement.id}>
+                      <td>{movementDateLabel(movement.created_at)}</td>
+                      <td>{movementTypeLabel(movement.movement_type)}</td>
+                      <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{numericText(movement.quantity)} {movement.unit_code}</td>
+                      <td className="num">{numericText(String(balanceAfter))} {movement.unit_code}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {viewingItemKardex.map(({ movement, balanceAfter }) => (
-                      <tr key={movement.id}>
-                        <td>{movementDateLabel(movement.created_at)}</td>
-                        <td>{movementTypeLabel(movement.movement_type)}</td>
-                        <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{numericText(movement.quantity)} {movement.unit_code}</td>
-                        <td className="num">{numericText(String(balanceAfter))} {movement.unit_code}</td>
-                      </tr>
-                    ))}
-                    {viewingItemKardex.length === 0 ? (
-                      <tr><td colSpan={4}><div className="emptyState">Sin movimientos para este item.</div></td></tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                  {viewingItemKardex.length === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">Sin movimientos para este item.</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+              <Pager {...kardexPager} />
             </div>
           </section>
         </div>

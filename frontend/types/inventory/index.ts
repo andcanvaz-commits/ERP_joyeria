@@ -1,4 +1,4 @@
-export type InventoryItemType = "RAW_MATERIAL" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
+export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
 
 export type InventoryMovementType =
   | "ENTRADA"
@@ -46,6 +46,7 @@ export type InventoryMovement = {
 
 export type InventorySummary = {
   raw_materials: number;
+  supplies: number;
   work_in_progress: number;
   finished_products: number;
   low_stock_items: number;

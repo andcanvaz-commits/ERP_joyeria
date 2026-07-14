@@ -57,9 +57,14 @@ POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION"}
 NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA"}
 ITEM_TYPE_PREFIXES = {
     "RAW_MATERIAL": "MP",
+    "SUPPLY": "IN",
     "WORK_IN_PROGRESS": "PP",
     "FINISHED_PRODUCT": "PT",
 }
+
+# Tipos que el usuario gestiona directamente (crear/editar/eliminar);
+# los demás los administra el flujo de producción.
+MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "FINISHED_PRODUCT")
 
 
 class InventoryService(InventoryIntegrationPort):
@@ -67,9 +72,9 @@ class InventoryService(InventoryIntegrationPort):
         self.repository = repository
 
     def create_item(self, payload: InventoryItemCreate) -> InventoryItemRead:
-        if payload.item_type not in ("RAW_MATERIAL", "FINISHED_PRODUCT"):
+        if payload.item_type not in MANUALLY_MANAGED_TYPES:
             raise InventoryDomainError(
-                "Solo se pueden crear manualmente materias primas o productos terminados."
+                "Solo se pueden crear manualmente materias primas, insumos o productos terminados."
             )
         item = InventoryItem(
             item_type=payload.item_type,
@@ -89,10 +94,10 @@ class InventoryService(InventoryIntegrationPort):
 
     def update_item(self, item_id: UUID, payload: InventoryItemUpdate) -> InventoryItemRead:
         item = self._get_item_or_raise(item_id)
-        editable = ("RAW_MATERIAL", "FINISHED_PRODUCT")
+        editable = MANUALLY_MANAGED_TYPES
         if item.item_type not in editable or payload.item_type not in editable:
             raise InventoryDomainError(
-                "Solo se pueden editar manualmente materias primas o productos terminados."
+                "Solo se pueden editar manualmente materias primas, insumos o productos terminados."
             )
 
         item.item_type = payload.item_type
@@ -109,8 +114,8 @@ class InventoryService(InventoryIntegrationPort):
 
     def delete_item(self, item_id: UUID) -> None:
         item = self._get_item_or_raise(item_id)
-        if item.item_type not in ("RAW_MATERIAL", "FINISHED_PRODUCT"):
-            raise InventoryDomainError("Solo se pueden eliminar materias primas o productos terminados.")
+        if item.item_type not in MANUALLY_MANAGED_TYPES:
+            raise InventoryDomainError("Solo se pueden eliminar materias primas, insumos o productos terminados.")
         if item.current_stock > 0:
             raise InventoryDomainError(
                 "No se puede eliminar un item con stock. Deja el stock en cero primero."
@@ -288,6 +293,7 @@ class InventoryService(InventoryIntegrationPort):
         )
         return InventorySummary(
             raw_materials=sum(1 for item in items if item.item_type == "RAW_MATERIAL"),
+            supplies=sum(1 for item in items if item.item_type == "SUPPLY"),
             work_in_progress=sum(1 for item in items if item.item_type == "WORK_IN_PROGRESS"),
             finished_products=sum(1 for item in items if item.item_type == "FINISHED_PRODUCT"),
             low_stock_items=low_stock_items,
