@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, UserCircle, Wrench } from "lucide-react";
+import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, Menu, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout } from "@/lib/auth-api";
 import { listProductionRuns } from "@/lib/production-api";
@@ -56,6 +56,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Drawer del sidebar en móvil (≤680px); en pantallas grandes no aplica.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const currentPage = pageTitles[pathname] ?? pageTitles["/dashboard"];
 
@@ -127,6 +129,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [menuOpen]);
 
+  // Al navegar se cierra el drawer; con Escape también.
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setSidebarOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [sidebarOpen]);
+
   function handleLogout() {
     setMenuOpen(false);
     void logout().finally(() => {
@@ -136,7 +152,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="appShell">
-      <aside className="sidebar">
+      {sidebarOpen ? (
+        <div aria-hidden="true" className="sidebarBackdrop" onClick={() => setSidebarOpen(false)} />
+      ) : null}
+      <aside className={`sidebar${sidebarOpen ? " sidebarOpen" : ""}`}>
         <div className="brand">
           <div className="brandMark">Au</div>
           <div className="brandText">
@@ -154,6 +173,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className={`navItem ${isActive ? "navItemActive" : ""}`}
                 href={item.href}
                 key={item.href}
+                title={item.label}
               >
                 <Icon aria-hidden="true" size={18} />
                 <span>{item.label}</span>
@@ -205,6 +225,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
       <main className="mainArea">
         <header className="topbar">
+          <button
+            aria-expanded={sidebarOpen}
+            aria-label="Abrir menu de navegacion"
+            className="iconOnlyButton menuButton"
+            onClick={() => setSidebarOpen(true)}
+            type="button"
+          >
+            <Menu aria-hidden="true" size={20} />
+          </button>
           <div className="topbarTitle">
             <strong>{currentPage.title}</strong>
             <span>{currentPage.subtitle}</span>

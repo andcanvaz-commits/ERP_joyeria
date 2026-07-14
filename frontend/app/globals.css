@@ -92,6 +92,7 @@ textarea {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .sidebar {
@@ -105,6 +106,7 @@ textarea {
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
 }
 /* Perfil justo debajo del ultimo item del menu (Estadistica). */
@@ -897,9 +899,15 @@ textarea {
 }
 
 .summaryGrid .metric {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
   align-items: center;
   min-height: 76px;
+}
+
+/* Si aun asi el valor no cabe, se parte de línea en vez de salirse. */
+.summaryGrid .metricValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .metricLabel {
@@ -938,7 +946,7 @@ textarea {
   box-shadow: 0 0 0 2px var(--primary-soft, rgba(183, 121, 31, 0.25));
 }
 
-/* Semaforo de stock: OK / Bajo / Agotado. */
+/* Semaforo de stock: OK / Agotado. */
 .stockBadge {
   display: inline-block;
   padding: 2px 9px;
@@ -952,50 +960,14 @@ textarea {
   background: rgba(39, 174, 96, 0.14);
   color: #1e8449;
 }
-.stockBadge--low {
-  background: rgba(243, 156, 18, 0.16);
-  color: #b9770e;
-}
 .stockBadge--out {
   background: rgba(192, 57, 43, 0.14);
   color: #c0392b;
 }
 
-/* Kardex dentro de la ficha del item: historial con saldo corrido. */
-.kardexBlock {
-  margin-top: 14px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-.kardexHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.kardexHead h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-}
-.kardexHead span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-.kardexScroll {
-  max-height: 260px;
-  overflow-y: auto;
-}
+/* Kardex (modal propio): historial con saldo corrido. */
 .kardexTable {
   min-width: 0;
-}
-.kardexTable thead th {
-  position: sticky;
-  top: 0;
-  background: var(--surface, #ffffff);
-  z-index: 1;
 }
 
 .toolbar {
@@ -1123,7 +1095,7 @@ textarea {
 
 .table {
   width: 100%;
-  min-width: 860px;
+  min-width: 640px;
   border-collapse: collapse;
 }
 
@@ -1140,7 +1112,7 @@ textarea {
 .table th,
 .table td {
   border-bottom: 1px solid var(--line);
-  padding: 9px 10px;
+  padding: 8px;
   text-align: left;
   vertical-align: middle;
   font-size: 13px;
@@ -1173,6 +1145,11 @@ textarea {
 .table.tableAuto th.num,
 .table.tableAuto td.num {
   text-align: left;
+}
+
+/* La celda que contiene un estado vacío no dibuja la línea inferior. */
+.table td:has(> .emptyState) {
+  border-bottom: 0;
 }
 
 .table tfoot td,
@@ -1236,13 +1213,30 @@ textarea {
 }
 
 /* Paneles de inventario: sin scroll interno (los listados se paginan) y con
-   piso de altura fijo para que el tamaño no cambie al pasar a una lista con
-   menos elementos; cabe una página completa (10 filas + drill + pager). */
+   piso de altura fijo para que el tamaño no cambie al pasar de pestaña o de
+   página; el pager queda anclado al fondo del recuadro. */
 .inventoryShell > .inventoryPanel:first-child,
 .inventoryShell > .inventoryPanel:last-child {
   display: flex;
   flex-direction: column;
+}
+
+.inventoryShell > .inventoryPanel:first-child {
   min-height: 640px;
+}
+
+/* Panel de movimientos: ventana fija del alto de 3 movimientos (su página);
+   no se estira hasta igualar al panel de items. */
+.inventoryShell > .inventoryPanel:last-child {
+  align-self: start;
+}
+
+.inventoryShell > .inventoryPanel:last-child > .movementList {
+  min-height: 260px;
+}
+
+.inventoryShell > .inventoryPanel:last-child > .movementList:has(> .emptyState) {
+  align-content: stretch;
 }
 
 .inventoryShell > .inventoryPanel:first-child > .inventoryList,
@@ -1267,6 +1261,17 @@ textarea {
 
 .inventoryShell > .inventoryPanel:first-child .tableWrap > .pager {
   margin-top: auto;
+}
+
+/* Pestañas vacías: la tabla se estira para llenar el panel fijo y la fila del
+   estado vacío absorbe el alto sobrante, dejando la leyenda centrada en la
+   mitad del recuadro (el thead mantiene su alto normal). */
+.inventoryShell > .inventoryPanel:first-child .tableWrap > .table:has(.emptyState) {
+  flex: 1 1 auto;
+}
+
+.inventoryShell > .inventoryPanel:first-child .tableWrap > .table:has(.emptyState) thead tr {
+  height: 1px;
 }
 
 .segmentedControl {
@@ -1322,7 +1327,7 @@ textarea {
 .inventoryList,
 .movementList {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -1342,10 +1347,11 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-/* Altura fija: la ventana de historial no cambia de tamaño según el día. */
+/* Altura fija: la ventana de historial no cambia de tamaño según el día
+   (3 movimientos por página + pager). */
 .movementHistoryEntries {
-  min-height: 490px;
-  max-height: 490px;
+  min-height: 400px;
+  max-height: none;
 }
 
 .movementHistoryLayout {
@@ -1456,11 +1462,11 @@ textarea {
 .inventoryItemRow,
 .movementRow {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #ffffff;
-  padding: 12px;
+  padding: 7px 10px;
 }
 
 .inventoryItemRow {
@@ -1475,8 +1481,14 @@ textarea {
 .inventoryItemRow div,
 .movementRow div {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
+}
+
+/* Botones dentro del movimiento: más bajos para que la fila sea compacta. */
+.movementRow .iconTextButton {
+  min-height: 24px;
+  height: 24px;
 }
 
 .inventoryItemRow strong,
@@ -2086,20 +2098,124 @@ textarea {
   gap: 10px;
 }
 
-@media (max-width: 960px) {
+/* ── Sidebar adaptativo ───────────────────────────────────────────
+   ≥1025px: barra completa (248px). 681–1024px: riel de iconos (64px)
+   con tooltips. ≤680px: oculta, se abre como drawer con la hamburguesa
+   del topbar. */
+.menuButton {
+  display: none;
+}
+
+.sidebarBackdrop {
+  display: none;
+}
+
+@media (max-width: 1024px) and (min-width: 681px) {
   .appShell {
-    grid-template-columns: 1fr;
+    grid-template-columns: 64px minmax(0, 1fr);
   }
 
-  .sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+  .brand {
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .brandText {
+    display: none;
   }
 
   .nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0 8px;
   }
 
+  .navItem {
+    position: relative;
+    justify-content: center;
+    padding: 12px 0;
+    border-left: 0;
+  }
+
+  .navItem span {
+    display: none;
+  }
+
+  .navItemActive {
+    border-left: 0;
+    box-shadow: inset 2px 0 0 var(--gold);
+  }
+
+  .navBadge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    margin-left: 0;
+    min-width: 16px;
+    height: 16px;
+    font-size: 10px;
+  }
+
+  .profileMenu.sidebarProfile {
+    margin: 14px 8px 0;
+  }
+
+  .sidebarProfile .profileTrigger {
+    justify-content: center;
+    padding: 8px 0;
+  }
+
+  .sidebarProfile .profileText,
+  .sidebarProfile .profileTrigger > svg:last-child {
+    display: none;
+  }
+
+  /* El menú de perfil sale como flyout a la derecha del riel. */
+  .sidebarProfile .profileDropdown {
+    top: auto;
+    bottom: 0;
+    left: calc(100% + 8px);
+    right: auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .appShell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .menuButton {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    width: min(280px, 84vw);
+    height: 100dvh;
+    border-right: 1px solid var(--line);
+    box-shadow: none;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+  }
+
+  .sidebar.sidebarOpen {
+    transform: none;
+    box-shadow: 0 0 40px rgba(31, 27, 22, 0.28);
+  }
+
+  .sidebarBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 65;
+    background: rgba(23, 32, 51, 0.42);
+  }
+}
+
+@media (max-width: 960px) {
   .summaryGrid,
   .dashboardGrid,
   .dashboardVisualGrid,
@@ -2132,7 +2248,6 @@ textarea {
     justify-content: flex-start;
   }
 
-  .summaryGrid,
   .dashboardGrid,
   .dashboardVisualGrid,
   .formGrid,
@@ -2143,6 +2258,11 @@ textarea {
   .inventoryShell,
   .integrationPanel {
     grid-template-columns: 1fr;
+  }
+
+  /* Métricas en 2 columnas: 5 tarjetas apiladas ocupan media pantalla. */
+  .summaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboardVisualGridCompact,
@@ -2172,10 +2292,6 @@ textarea {
     justify-content: space-between;
   }
 
-  .profileText {
-    display: none;
-  }
-
   .stageTopActions {
     align-items: flex-start;
     flex-direction: column;
@@ -2197,8 +2313,44 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .nav {
-    grid-template-columns: 1fr;
+  /* Título del topbar más contenido para dejar sitio a la hamburguesa. */
+  .topbarTitle strong {
+    font-size: 20px;
+  }
+
+  .topbarTitle span {
+    font-size: 12px;
+  }
+
+  /* Táctil: controles con área mínima cómoda. */
+  .button,
+  .field,
+  select.field,
+  .iconOnlyButton {
+    min-height: 44px;
+  }
+
+  .iconOnlyButton {
+    min-width: 44px;
+  }
+
+  .segmentedControl button {
+    min-height: 40px;
+  }
+
+  .navItem {
+    min-height: 46px;
+  }
+
+  /* Modales a pantalla casi completa. */
+  .modalBackdrop {
+    padding: 10px;
+  }
+
+  /* Nada debe generar scroll horizontal de página; las tablas scrollean
+     dentro de su .tableWrap. */
+  body {
+    overflow-x: clip;
   }
 }
 
@@ -2750,6 +2902,16 @@ textarea {
   gap: 10px;
 }
 
+/* Movimientos de produccion: ventana fija del alto de 3 movimientos. */
+.productionMovementsPanel .readyToStartList,
+.productionMovementsPanel .emptyState {
+  min-height: 180px;
+}
+
+.productionMovementsPanel .readyToStartList {
+  align-content: start;
+}
+
 .readyToStartRow {
   display: flex;
   align-items: center;
@@ -2757,12 +2919,12 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #ffffff;
-  padding: 12px 14px;
+  padding: 7px 12px;
 }
 
 .readyToStartInfo {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   flex: 1;
   min-width: 0;
 }
@@ -3516,6 +3678,10 @@ select {
   background: #fcf9f2;
 }
 
+.table tbody tr:has(.emptyState):hover {
+  background: transparent;
+}
+
 /* Filas/tarjetas de lista interactivas */
 .inventoryItemRow:hover,
 .movementRow:hover,
@@ -4192,7 +4358,7 @@ textarea:disabled {
   padding: 7px 9px;
   font-size: 13px;
 }
-@media (max-width: 640px) {
+@media (max-width: 680px) {
   .materialRow { grid-template-columns: 1fr; }
 }
 

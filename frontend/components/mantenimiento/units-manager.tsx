@@ -60,7 +60,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
 
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Unidades de medida">
-      <section className="modalWindow">
+      <section className="modalWindow" style={mode === "create" ? { width: "min(520px, 100%)" } : undefined}>
         <div className="modalHeader">
           <div>
             <h2>{mode === "create" ? "Crear unidad de medida" : "Unidades de medida"}</h2>

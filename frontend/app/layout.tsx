@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans, IBM_Plex_Mono, Marcellus } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -36,6 +36,12 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Fenix Global - ERP Joyeria",
   description: "Sistema ERP para produccion e inventario de joyeria"
+};
+
+// Escala correcta en celulares y tablets; el zoom del usuario queda permitido.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
