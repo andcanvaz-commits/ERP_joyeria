@@ -1607,6 +1607,13 @@ textarea {
   color: var(--danger);
 }
 
+/* Archivado sugerido: item agotado y sin movimientos hace 90+ dias (ambar). */
+.iconTextButton.archiveSuggested {
+  color: var(--warning);
+  border-color: #ecd9ab;
+  background: #fdf6e7;
+}
+
 .button.dangerText {
   border-color: #efb8b8;
   background: #fff2f2;
@@ -4397,7 +4404,18 @@ textarea:disabled {
   text-align: right;
   padding-left: 28px;
 }
-.inventoryItemsTable td:last-child .rowActions { justify-content: flex-end; }
+/* Acciones de fila en tablas: siempre en línea, ancladas a la derecha; la
+   celda no debe apilar botones aunque aparezca una acción extra. */
+.inventoryItemsTable td:last-child { white-space: nowrap; }
+.inventoryItemsTable td:last-child .rowActions { justify-content: flex-end; flex-wrap: nowrap; }
+
+/* Modal Archivados: Restaurar y Eliminar lado a lado, mismo tamaño. */
+.archivedTable td:last-child { width: 1%; white-space: nowrap; }
+.archivedTable .rowActions { flex-wrap: nowrap; }
+.archivedTable .rowActions .iconTextButton {
+  min-width: 104px;
+  justify-content: center;
+}
 
 .confirmWindow { width: min(460px, 100%); }
 

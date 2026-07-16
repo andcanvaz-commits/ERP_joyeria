@@ -119,12 +119,42 @@ def delete_item(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.post("/items/{item_id}/revert-last-entry", response_model=InventoryItemRead)
-def revert_last_entry(
+@router.post("/items/{item_id}/archive", response_model=InventoryItemRead)
+def archive_item(
     item_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> InventoryItemRead:
+    ensure_permission(current_user, "inventory.items.update")
+    try:
+        return service.archive_item(item_id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/items/{item_id}/unarchive", response_model=InventoryItemRead)
+def unarchive_item(
+    item_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> InventoryItemRead:
+    ensure_permission(current_user, "inventory.items.update")
+    try:
+        return service.unarchive_item(item_id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/items/{item_id}/revert-last-entry", response_model=InventoryItemRead | None)
+def revert_last_entry(
+    item_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> InventoryItemRead | None:
     ensure_permission(current_user, "inventory.items.update")
     try:
         return service.revert_last_entry(item_id)

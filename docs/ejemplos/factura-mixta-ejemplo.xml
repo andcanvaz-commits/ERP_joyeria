@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<factura id="comprobante" version="1.1.0">
+  <infoTributaria>
+    <ambiente>1</ambiente>
+    <tipoEmision>1</tipoEmision>
+    <razonSocial>QUIMICORP S.A.</razonSocial>
+    <nombreComercial>QUIMICORP</nombreComercial>
+    <ruc>1790012345001</ruc>
+    <claveAcceso>1607202601179001234500110010020000123451234567813</claveAcceso>
+    <codDoc>01</codDoc>
+    <estab>001</estab>
+    <ptoEmi>002</ptoEmi>
+    <secuencial>000012345</secuencial>
+    <dirMatriz>Av. Amazonas N34-120 y Republica, Quito</dirMatriz>
+  </infoTributaria>
+  <infoFactura>
+    <fechaEmision>16/07/2026</fechaEmision>
+    <dirEstablecimiento>Av. Amazonas N34-120 y Republica, Quito</dirEstablecimiento>
+    <obligadoContabilidad>SI</obligadoContabilidad>
+    <tipoIdentificacionComprador>04</tipoIdentificacionComprador>
+    <razonSocialComprador>JOYERIA EJEMPLO CIA. LTDA.</razonSocialComprador>
+    <identificacionComprador>0190155722001</identificacionComprador>
+    <totalSinImpuestos>1264.50</totalSinImpuestos>
+    <totalDescuento>0.00</totalDescuento>
+    <importeTotal>1416.24</importeTotal>
+    <moneda>DOLAR</moneda>
+  </infoFactura>
+  <detalles>
+    <detalle>
+      <codigoPrincipal>MP-PLATA-925</codigoPrincipal>
+      <descripcion>PLATA 925 EN GRANALLA</descripcion>
+      <cantidad>120.0000</cantidad>
+      <unidadMedida>g</unidadMedida>
+      <precioUnitario>1.4500</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>174.00</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>MP-ORO-18K</codigoPrincipal>
+      <descripcion>ORO 18K EN LAMINA</descripcion>
+      <cantidad>15.0000</cantidad>
+      <unidadMedida>g</unidadMedida>
+      <precioUnitario>68.0000</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>1020.00</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>IN-BORAX-500</codigoPrincipal>
+      <descripcion>BORAX EN POLVO 500G</descripcion>
+      <cantidad>2.0000</cantidad>
+      <unidadMedida>und</unidadMedida>
+      <precioUnitario>6.5000</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>13.00</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>IN-ACIDO-SULF</codigoPrincipal>
+      <descripcion>ACIDO SULFURICO INDUSTRIAL 1L</descripcion>
+      <cantidad>3.0000</cantidad>
+      <unidadMedida>und</unidadMedida>
+      <precioUnitario>12.5000</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>37.50</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>IN-PANO-PULIR</codigoPrincipal>
+      <descripcion>PAÑO DE PULIR PROFESIONAL</descripcion>
+      <cantidad>10.0000</cantidad>
+      <unidadMedida>und</unidadMedida>
+      <precioUnitario>2.0000</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>20.00</precioTotalSinImpuesto>
+    </detalle>
+  </detalles>
+  <infoAdicional>
+    <campoAdicional nombre="Observacion">Factura de ejemplo para pruebas: mezcla materias primas e insumos.</campoAdicional>
+  </infoAdicional>
+</factura>

@@ -29,6 +29,9 @@ class InventoryItem(Base):
     # Costo promedio ponderado por unidad (kardex). Se recalcula en cada ENTRADA.
     average_cost: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Archivado: item agotado que se oculta del inventario activo sin perder
+    # historial. Una nueva entrada lo desarchiva automaticamente.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

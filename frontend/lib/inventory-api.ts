@@ -59,8 +59,18 @@ export function deleteInventoryItem(itemId: string) {
   return apiRequest<void>(`/api/inventory/items/${itemId}`, { method: "DELETE" });
 }
 
+export function archiveInventoryItem(itemId: string) {
+  return apiRequest<InventoryItem>(`/api/inventory/items/${itemId}/archive`, { method: "POST" });
+}
+
+export function unarchiveInventoryItem(itemId: string) {
+  return apiRequest<InventoryItem>(`/api/inventory/items/${itemId}/unarchive`, { method: "POST" });
+}
+
+// Devuelve null cuando el item nacio de una factura XML y se elimino junto
+// con su unica entrada al revertir.
 export function revertLastEntry(itemId: string) {
-  return apiRequest<InventoryItem>(`/api/inventory/items/${itemId}/revert-last-entry`, {
+  return apiRequest<InventoryItem | null>(`/api/inventory/items/${itemId}/revert-last-entry`, {
     method: "POST",
   });
 }

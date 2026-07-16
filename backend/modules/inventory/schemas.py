@@ -63,6 +63,7 @@ class InventoryItemRead(BaseModel):
     minimum_stock: Decimal | None = None
     current_stock: Decimal
     average_cost: Decimal = Decimal("0")
+    archived_at: datetime | None = None
 
 
 class InventoryMovementCreate(BaseModel):

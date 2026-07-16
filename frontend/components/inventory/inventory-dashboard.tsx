@@ -13,6 +13,7 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
 import {
+  archiveInventoryItem,
   createInventoryItem,
   createInventoryMovement,
   deleteInventoryItem,
@@ -21,6 +22,7 @@ import {
   listInventoryItems,
   listInventoryMovements,
   revertLastEntry,
+  unarchiveInventoryItem,
   updateInventoryItem,
   type CreateInventoryMovementPayload,
   type SaveInventoryItemPayload,
@@ -32,7 +34,7 @@ import {
   receiveProductionRunFinishedProduct,
 } from "@/lib/production-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
-import type { ProductionRun } from "@/types/production";
+import type { ProductionRun, ProductionRunStage } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
@@ -98,6 +100,22 @@ type XmlInvoiceDetail = {
   unitCode: string | null;
 };
 
+// Linea de factura en revision: tipo elegible solo si el item no existe aun.
+type XmlImportLine = XmlInvoiceDetail & {
+  itemType: InventoryItemType;
+  existingItem: InventoryItem | null;
+};
+
+type XmlImportDraft = {
+  fileName: string;
+  fileMime: string;
+  content: string;
+  supplier: string | null;
+  invoiceNumber: string;
+  accessKey: string | null;
+  lines: XmlImportLine[];
+};
+
 function itemTypeLabel(type: InventoryItemType) {
   return ITEM_TYPES.find((item) => item.value === type)?.label ?? type;
 }
@@ -118,6 +136,23 @@ function unitLabel(value: string) {
 
 function isXmlInvoiceItem(item: InventoryItem) {
   return item.description?.startsWith("Creado desde factura XML.") ?? false;
+}
+
+// Dias sin movimientos (con stock agotado) a partir de los cuales se sugiere archivar.
+const ARCHIVE_SUGGEST_DAYS = 90;
+
+// Busqueda tolerante: ignora mayusculas y acentos. Cada palabra del termino
+// debe aparecer en ALGUN campo del registro (nombre, tipo, SKU, fecha...),
+// asi la busqueda funciona sin importar por cual dato empiece el usuario.
+function normalizeSearchText(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+function matchesSearchTokens(term: string, fields: Array<string | null | undefined>) {
+  const tokens = normalizeSearchText(term).split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+  const haystack = normalizeSearchText(fields.filter(Boolean).join(" "));
+  return tokens.every((token) => haystack.includes(token));
 }
 
 function numericText(value: string | null) {
@@ -269,6 +304,8 @@ export function InventoryDashboard() {
   const [isEntryMenuOpen, setIsEntryMenuOpen] = useState(false);
   const [isMovementHistoryOpen, setIsMovementHistoryOpen] = useState(false);
   const [historyMonth, setHistoryMonth] = useState(() => monthKey(new Date()));
+  // Busqueda global dentro del historial: item, tipo, motivo, usuario, lote o fecha.
+  const [historySearch, setHistorySearch] = useState("");
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => dateKey(new Date()));
   const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
   const [viewingRun, setViewingRun] = useState<ProductionRun | null>(null);
@@ -278,6 +315,15 @@ export function InventoryDashboard() {
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
+  // Borrador de factura XML: se revisa y clasifica cada linea antes de importar.
+  const [xmlImportDraft, setXmlImportDraft] = useState<XmlImportDraft | null>(null);
+  const [isArchivedOpen, setIsArchivedOpen] = useState(false);
+  // Orden cuya etapa actual se consulta (quien avanzo a esa etapa y cuando).
+  const [stageInfoRun, setStageInfoRun] = useState<ProductionRun | null>(null);
+  // Orden terminada cuyo historial de merma por fase se revisa.
+  const [wasteHistoryRun, setWasteHistoryRun] = useState<ProductionRun | null>(null);
+  // Orden terminada cuya recepcion se consulta (quien la recibio y cuando).
+  const [receptionInfoRun, setReceptionInfoRun] = useState<ProductionRun | null>(null);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -372,13 +418,22 @@ export function InventoryDashboard() {
   }, [isEntryMenuOpen]);
 
   const filteredItems = useMemo(() => {
-    const term = search.trim().toLowerCase();
     return items.filter((item) => {
+      // Archivados fuera del inventario activo; se consultan en su propio panel.
+      if (item.archived_at) return false;
       const matchesType = itemFilter === "TODOS" || item.item_type === itemFilter;
-      const matchesSearch =
-        term.length === 0 ||
-        item.name.toLowerCase().includes(term) ||
-        item.sku.toLowerCase().includes(term);
+      // Busqueda descentralizada: cualquier dato visible del item cuenta.
+      const matchesSearch = matchesSearchTokens(search, [
+        item.name,
+        item.sku,
+        item.material_type,
+        item.purity,
+        item.description,
+        item.product_code,
+        item.unit_code,
+        itemTypeLabel(item.item_type),
+        stockStatus(item).label,
+      ]);
       return matchesType && matchesSearch;
     });
   }, [items, itemFilter, search]);
@@ -388,6 +443,14 @@ export function InventoryDashboard() {
     () =>
       items
         .filter((item) => item.item_type === "RAW_MATERIAL")
+        .reduce((total, item) => total + itemTotalValue(item), 0),
+    [items],
+  );
+  // Mismo total para la pestaña de insumos.
+  const suppliesValue = useMemo(
+    () =>
+      items
+        .filter((item) => item.item_type === "SUPPLY")
         .reduce((total, item) => total + itemTotalValue(item), 0),
     [items],
   );
@@ -430,10 +493,68 @@ export function InventoryDashboard() {
   const movementItemTypes: InventoryItemType[] =
     movementForm.movement_type === "SALIDA" ? ["FINISHED_PRODUCT"] : ["RAW_MATERIAL", "SUPPLY"];
   const movementItems = useMemo(
-    () => items.filter((item) => movementItemTypes.includes(item.item_type)),
+    () => items.filter((item) => !item.archived_at && movementItemTypes.includes(item.item_type)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, movementForm.movement_type],
   );
+  const archivedItems = useMemo(
+    () =>
+      items
+        .filter((item) => item.archived_at)
+        .sort((left, right) => (right.archived_at ?? "").localeCompare(left.archived_at ?? "")),
+    [items],
+  );
+  // Fecha del ultimo movimiento por item: base para sugerir archivado de
+  // items agotados sin actividad reciente.
+  const lastMovementByItem = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const movement of movements) {
+      const time = new Date(movement.created_at).getTime();
+      if (!Number.isNaN(time)) map.set(movement.item_id, Math.max(map.get(movement.item_id) ?? 0, time));
+    }
+    return map;
+  }, [movements]);
+
+  // Todo item agotado se puede archivar; si ademas lleva meses sin movimiento,
+  // el tooltip lo sugiere explicitamente.
+  function canArchive(item: InventoryItem) {
+    return !item.archived_at && Number(item.current_stock) <= 0;
+  }
+
+  // Peso actual de una orden en proceso: ultimo peso final registrado en sus
+  // etapas; si aun no hay, el peso inicial mas reciente; si nada, el material
+  // total entregado a la orden.
+  function runCurrentWeight(run: ProductionRun) {
+    const stages = [...run.stages].sort((left, right) => left.stage_order - right.stage_order);
+    let weight: string | null = null;
+    for (const stage of stages) {
+      if (stage.initial_weight) weight = stage.initial_weight;
+      if (stage.final_weight) weight = stage.final_weight;
+    }
+    return weight ?? run.total_required_material;
+  }
+
+  // Merma acumulada: suma de la merma registrada etapa por etapa.
+  function runCurrentWaste(run: ProductionRun) {
+    return run.stages.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
+  }
+
+  function runCurrentStage(run: ProductionRun) {
+    return (
+      run.stages.find((stage) => stage.status === "EN_PROCESO") ??
+      run.stages.find((stage) => stage.status === "PENDIENTE") ??
+      null
+    );
+  }
+
+  function archiveSuggestion(item: InventoryItem) {
+    if (!canArchive(item)) return null;
+    const lastMovement = lastMovementByItem.get(item.id);
+    if (!lastMovement) return null;
+    const days = Math.floor((Date.now() - lastMovement) / 86_400_000);
+    if (days < ARCHIVE_SUGGEST_DAYS) return null;
+    return `Agotado y sin movimientos hace ${Math.floor(days / 30)} meses`;
+  }
   const sortedMovements = useMemo(
     () => [...movements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [movements],
@@ -474,6 +595,29 @@ export function InventoryDashboard() {
     if (Number.isNaN(date.getTime())) return "Sin fecha";
     return date.toLocaleDateString("es-EC", { day: "2-digit", month: "long", year: "numeric" });
   }
+
+  // Resultados globales del buscador del historial: cruza item, tipo de
+  // movimiento, motivo, usuario, lote, unidad y fecha (texto o 2026-07-16).
+  const historySearchActive = historySearch.trim().length > 0;
+  const historySearchResults = useMemo(() => {
+    if (!historySearchActive) return [] as InventoryMovement[];
+    return sortedMovements.filter((movement) =>
+      matchesSearchTokens(historySearch, [
+        movement.item.name,
+        movement.item.sku,
+        movement.item.material_type,
+        itemTypeLabel(movement.item.item_type),
+        movementTypeLabel(movement.movement_type),
+        movement.reason,
+        movement.lot_code,
+        movement.created_by_name,
+        movement.unit_code,
+        movementDateLabel(movement.created_at),
+        movementDateKey(movement),
+      ]),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historySearch, historySearchActive, sortedMovements]);
 
   function moveHistoryMonth(direction: -1 | 1) {
     const [year, month] = historyMonth.split("-").map(Number);
@@ -636,7 +780,18 @@ export function InventoryDashboard() {
   // Últimos movimientos de todo el inventario, sin filtro por pestaña ni fecha.
   const movementsPager = usePagination(sortedMovements, MOVEMENTS_PAGE_SIZE);
   const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, viewingItem?.id ?? "");
+  // Archivados: 5 por página dentro del modal; vuelve a la primera al abrir.
+  const archivedPager = usePagination(archivedItems, 5, String(isArchivedOpen));
+  // Lineas de factura XML en revision: 5 por página dentro del modal.
+  const xmlLinesPager = usePagination(xmlImportDraft?.lines ?? [], 5, xmlImportDraft?.fileName ?? "");
+  // Etapas del historial de merma: en orden de proceso, 5 por página.
+  const wasteStages = useMemo(
+    () => (wasteHistoryRun ? [...wasteHistoryRun.stages].sort((left, right) => left.stage_order - right.stage_order) : []),
+    [wasteHistoryRun],
+  );
+  const wasteStagesPager = usePagination(wasteStages, 5, wasteHistoryRun?.id ?? "");
   const historyDayPager = usePagination(selectedDateMovements, MOVEMENTS_PAGE_SIZE, selectedHistoryDate);
+  const historyResultsPager = usePagination(historySearchResults, MOVEMENTS_PAGE_SIZE, historySearch);
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
@@ -654,6 +809,7 @@ export function InventoryDashboard() {
     const firstDateKey = firstMovement ? movementDateKey(firstMovement) : dateKey(new Date());
     setSelectedHistoryDate(firstDateKey ?? dateKey(new Date()));
     setHistoryMonth((firstDateKey ?? dateKey(new Date())).slice(0, 7));
+    setHistorySearch("");
     setIsMovementHistoryOpen(true);
   }
 
@@ -661,13 +817,6 @@ export function InventoryDashboard() {
     setEditingItemId(null);
     setItemForm(emptyItemForm());
     setIsItemFormOpen(true);
-  }
-
-  function openCreateSupply() {
-    setEditingItemId(null);
-    setItemForm({ ...emptyItemForm(), item_type: "SUPPLY", unit_code: "und" });
-    setIsItemFormOpen(true);
-    setIsEntryMenuOpen(false);
   }
 
   function openManualEntry() {
@@ -713,12 +862,55 @@ export function InventoryDashboard() {
     if (!ok) return;
     setError(null);
     try {
-      await revertLastEntry(item.id);
-      setSuccess("Último lote revertido.");
+      const remainingItem = await revertLastEntry(item.id);
+      setSuccess(remainingItem ? "Último lote revertido." : "Último lote revertido; el item creado por la factura también se eliminó.");
       setViewingItem(null);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo revertir el lote.");
+    }
+  }
+
+  async function handleArchiveItem(item: InventoryItem) {
+    const ok = await confirm({
+      title: "Archivar item",
+      message: `¿Archivar "${item.material_type ?? item.name}"? Se oculta del inventario activo conservando su historial. Una nueva entrada lo reactiva automáticamente.`,
+      confirmLabel: "Archivar",
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await archiveInventoryItem(item.id);
+      setViewingItem(null);
+      setSuccess("Item archivado.");
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo archivar el item.");
+    }
+  }
+
+  async function handleUnarchiveItem(item: InventoryItem) {
+    setError(null);
+    try {
+      await unarchiveInventoryItem(item.id);
+      setSuccess("Item restaurado al inventario activo.");
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo restaurar el item.");
+    }
+  }
+
+  async function handleDeleteArchivedItem(item: InventoryItem) {
+    // Doble confirmacion: borra el item y todo su kardex, sin vuelta atras.
+    const ok = await confirmDelete(confirm, item.material_type ?? item.name);
+    if (!ok) return;
+    setError(null);
+    try {
+      await deleteInventoryItem(item.id);
+      setSuccess("Item eliminado permanentemente junto con su historial.");
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar el item.");
     }
   }
 
@@ -796,60 +988,89 @@ export function InventoryDashboard() {
     event.target.value = "";
     if (!file) return;
 
-    setIsSaving(true);
     setError(null);
     try {
       const content = await file.text();
       const invoice = parseInvoiceDetails(content);
-      const details = invoice.details;
-      if (details.length === 0) {
+      if (invoice.details.length === 0) {
         throw new Error("No encontramos productos dentro de esta factura XML.");
       }
 
-      let imported = 0;
-      let nextItems = items;
-      // La factura crea items del tipo de la pestaña activa: insumos o materia prima.
-      const xmlItemType: InventoryItemType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
-      for (const detail of details) {
-        let item = nextItems.find(
+      // Pre-clasifica cada linea: si el nombre ya existe en inventario entra a ese
+      // item (tipo bloqueado); si es nueva, default segun la pestaña activa.
+      const defaultType: InventoryItemType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
+      const lines = invoice.details.map<XmlImportLine>((detail) => {
+        const matches = items.filter(
           (candidate) =>
-            candidate.item_type === xmlItemType &&
+            (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY") &&
             candidate.name.toLowerCase() === detail.description.toLowerCase(),
         );
+        const existingItem = matches.find((candidate) => candidate.item_type === defaultType) ?? matches[0] ?? null;
+        return { ...detail, itemType: existingItem?.item_type ?? defaultType, existingItem };
+      });
+
+      setIsEntryMenuOpen(false);
+      setXmlImportDraft({
+        fileName: file.name,
+        fileMime: file.type || "application/xml",
+        content,
+        supplier: invoice.supplier,
+        invoiceNumber: invoice.invoiceNumber,
+        accessKey: invoice.accessKey,
+        lines,
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo leer la factura XML.");
+    }
+  }
+
+  async function handleConfirmXmlImport() {
+    if (!xmlImportDraft) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      let imported = 0;
+      let nextItems = items;
+      for (const line of xmlImportDraft.lines) {
+        let item =
+          line.existingItem ??
+          nextItems.find(
+            (candidate) =>
+              candidate.item_type === line.itemType &&
+              candidate.name.toLowerCase() === line.description.toLowerCase(),
+          );
         if (!item) {
           const metadata = [
             "Creado desde factura XML.",
-            detail.code ? `Codigo factura: ${detail.code}.` : null,
-            invoice.supplier ? `Proveedor: ${invoice.supplier}.` : null,
+            line.code ? `Codigo factura: ${line.code}.` : null,
+            xmlImportDraft.supplier ? `Proveedor: ${xmlImportDraft.supplier}.` : null,
           ].filter(Boolean).join(" ");
           item = await createInventoryItem({
-            item_type: xmlItemType,
-            name: detail.description,
+            item_type: line.itemType,
+            name: line.description,
             description: metadata,
-            unit_code: detail.unitCode || "und",
+            unit_code: line.unitCode || "und",
           });
           nextItems = [...nextItems, item];
         }
 
-        const invoiceReference = invoice.invoiceNumber || invoice.accessKey || file.name;
+        const invoiceReference = xmlImportDraft.invoiceNumber || xmlImportDraft.accessKey || xmlImportDraft.fileName;
         await createInventoryMovement({
           item_id: item.id,
           movement_type: "ENTRADA",
-          quantity: detail.quantity,
+          quantity: line.quantity,
           unit_cost: null,
           reason: `Ingreso por factura XML ${invoiceReference}`,
           reference_type: null,
           reference_id: null,
-          source_file_name: file.name,
-          source_file_mime: file.type || "application/xml",
-          source_file_content: content,
+          source_file_name: xmlImportDraft.fileName,
+          source_file_mime: xmlImportDraft.fileMime,
+          source_file_content: xmlImportDraft.content,
         });
         imported += 1;
       }
 
-      if (imported === 0) {
-        throw new Error("No encontramos cantidades validas para ingresar al inventario.");
-      }
+      setXmlImportDraft(null);
       setSuccess(`Factura XML importada: ${imported} lineas registradas.`);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
@@ -1007,16 +1228,15 @@ export function InventoryDashboard() {
                           <small>Importar lineas de compra</small>
                         </span>
                       </button>
-                      <button onClick={openCreateSupply} type="button">
-                        <FlaskConical aria-hidden="true" size={16} />
-                        <span>
-                          <strong>Crear insumo</strong>
-                          <small>Nuevo quimico o material auxiliar</small>
-                        </span>
-                      </button>
                     </div>
                   ) : null}
                 </div>
+              ) : null}
+              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY") && archivedItems.length > 0 ? (
+                <button className="button" onClick={() => setIsArchivedOpen(true)} type="button">
+                  <Inbox aria-hidden="true" size={17} />
+                  Archivados ({archivedItems.length})
+                </button>
               ) : null}
               {itemFilter === "FINISHED_PRODUCT" ? (
                 <button className="button" onClick={openFinishedProductExit} type="button">
@@ -1060,7 +1280,7 @@ export function InventoryDashboard() {
             <input
               className="field searchField"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nombre o SKU"
+              placeholder="Buscar por nombre, tipo, SKU, ley, descripción o estado"
               value={search}
             />
           </div>
@@ -1086,6 +1306,7 @@ export function InventoryDashboard() {
                     const averageCost = item.average_cost ?? "0";
                     const totalValue = Number(item.current_stock) * Number(averageCost);
                     const status = stockStatus(item);
+                    const suggestion = archiveSuggestion(item);
                     return (
                       <tr key={item.id}>
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
@@ -1098,6 +1319,17 @@ export function InventoryDashboard() {
                         <td className="num">$ {numericText(String(totalValue))}</td>
                         <td>
                           <div className="rowActions">
+                            {canArchive(item) ? (
+                              <button
+                                className={`iconTextButton${suggestion ? " archiveSuggested" : ""}`}
+                                onClick={() => void handleArchiveItem(item)}
+                                title={suggestion ?? "Archivar item agotado"}
+                                type="button"
+                              >
+                                <Inbox aria-hidden="true" size={15} />
+                                Archivar
+                              </button>
+                            ) : null}
                             <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
                               <Eye aria-hidden="true" size={15} />
                               Visualizar
@@ -1154,6 +1386,7 @@ export function InventoryDashboard() {
                     const averageCost = item.average_cost ?? "0";
                     const totalValue = Number(item.current_stock) * Number(averageCost);
                     const status = stockStatus(item);
+                    const suggestion = archiveSuggestion(item);
                     return (
                       <tr key={item.id}>
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
@@ -1165,6 +1398,17 @@ export function InventoryDashboard() {
                         <td className="num">$ {numericText(String(totalValue))}</td>
                         <td>
                           <div className="rowActions">
+                            {canArchive(item) ? (
+                              <button
+                                className={`iconTextButton${suggestion ? " archiveSuggested" : ""}`}
+                                onClick={() => void handleArchiveItem(item)}
+                                title={suggestion ?? "Archivar item agotado"}
+                                type="button"
+                              >
+                                <Inbox aria-hidden="true" size={15} />
+                                Archivar
+                              </button>
+                            ) : null}
                             <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
                               <Eye aria-hidden="true" size={15} />
                               Visualizar
@@ -1181,6 +1425,15 @@ export function InventoryDashboard() {
                     <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
                   ) : null}
                 </tbody>
+                {!isLoading && displayItems.length > 0 ? (
+                  <tfoot>
+                    <tr className="totalRow">
+                      <td colSpan={6}>Valor total de insumos</td>
+                      <td className="num">$ {moneyText(suppliesValue)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
               <Pager {...rawItemsPager} />
             </div>
@@ -1324,22 +1577,41 @@ export function InventoryDashboard() {
                     <th>Proceso</th>
                     <th className="num">Cantidad</th>
                     <th className="num">Peso final</th>
-                    <th className="num">Merma %</th>
-                    <th>Recibida por</th>
-                    <th>Fecha recepcion</th>
+                    <th className="num">Merma final</th>
+                    <th>Fecha de recepción</th>
                     <th aria-label="Acciones" />
                   </tr>
                 </thead>
                 <tbody>
-                  {receivedRunsPager.pageItems.map((run) => (
+                  {receivedRunsPager.pageItems.map((run) => {
+                    const finalWaste = run.waste_weight ? Number(run.waste_weight) : runCurrentWaste(run);
+                    return (
                     <tr key={run.id}>
                       <td>{run.production_code ?? "—"}</td>
                       <td>{run.process_name}</td>
                       <td className="num">{numericText(run.quantity)} und</td>
                       <td className="num">{run.actual_finished_weight ? `${numericText(run.actual_finished_weight)} g` : "—"}</td>
-                      <td className="num">{run.waste_percent ? `${numericText(run.waste_percent)}%` : "—"}</td>
-                      <td>{run.received_by_name ?? "—"}</td>
-                      <td>{run.received_at ? new Date(run.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
+                      <td className="num">
+                        <button
+                          className="iconTextButton"
+                          onClick={() => setWasteHistoryRun(run)}
+                          title="Ver historial de merma por fase"
+                          type="button"
+                        >
+                          {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
+                          {run.waste_percent ? ` · ${numericText(run.waste_percent)}%` : ""}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          className="iconTextButton"
+                          onClick={() => setReceptionInfoRun(run)}
+                          title="Ver quien recibio esta orden"
+                          type="button"
+                        >
+                          {run.received_at ? new Date(run.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                        </button>
+                      </td>
                       <td>
                         <div className="rowActions">
                           <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
@@ -1349,9 +1621,10 @@ export function InventoryDashboard() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {receivedRuns.length === 0 ? (
-                    <tr><td colSpan={8}><div className="emptyState">No hay procesos terminados.</div></td></tr>
+                    <tr><td colSpan={7}><div className="emptyState">No hay procesos terminados.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -1365,8 +1638,10 @@ export function InventoryDashboard() {
                   <th>#</th>
                   <th>Proceso</th>
                   <th className="num">Cantidad</th>
+                  <th className="num">Peso actual</th>
+                  <th className="num">Merma actual</th>
                   <th>Etapa actual</th>
-                  <th>Inicio</th>
+                  <th>Fecha de inicio</th>
                   <th aria-label="Acciones" />
                 </tr>
               </thead>
@@ -1374,16 +1649,33 @@ export function InventoryDashboard() {
                 {wipPager.pageItems.map((row) => {
                   if (row.kind === "run" && row.run) {
                     const run = row.run;
-                    const currentStage = run.stages.find((stage) => stage.status === "EN_PROCESO")
-                      ?? run.stages.find((stage) => stage.status === "PENDIENTE")
-                      ?? null;
+                    const currentStage = runCurrentStage(run);
+                    const currentWaste = runCurrentWaste(run);
                     return (
                       <tr key={`run-${run.id}`}>
                         <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
                         <td>{run.process_name}</td>
                         <td className="num">{numericText(run.quantity)} und</td>
-                        <td>{currentStage ? `${currentStage.stage_name} (${currentStage.stage_order}/${run.stages.length})` : "—"}</td>
-                        <td>{productionTimeLabel(run.started_at)}</td>
+                        <td className="num">{numericText(runCurrentWeight(run))} {run.raw_material_unit_code}</td>
+                        <td className="num">{currentWaste > 0 ? `${numericText(String(currentWaste))} ${run.raw_material_unit_code}` : "—"}</td>
+                        <td>
+                          {currentStage ? (
+                            <button
+                              className="iconTextButton"
+                              onClick={() => setStageInfoRun(run)}
+                              title="Ver quien avanzo a esta etapa"
+                              type="button"
+                            >
+                              {currentStage.stage_name} ({currentStage.stage_order}/{run.stages.length})
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {productionTimeLabel(run.started_at)}
+                          {run.started_by_name ? <><br /><small>Inició: {run.started_by_name}</small></> : null}
+                        </td>
                         <td>
                           <div className="rowActions">
                             <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
@@ -1402,6 +1694,8 @@ export function InventoryDashboard() {
                       <td>{item.sku}</td>
                       <td>{item.name}</td>
                       <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                      <td className="num">—</td>
+                      <td className="num">—</td>
                       <td>—</td>
                       <td>—</td>
                       <td>
@@ -1416,10 +1710,10 @@ export function InventoryDashboard() {
                   );
                 })}
                 {!isLoading && displayItems.length === 0 && inProcessRuns.length === 0 ? (
-                  <tr><td colSpan={6}><div className="emptyState">No hay productos en proceso.</div></td></tr>
+                  <tr><td colSpan={8}><div className="emptyState">No hay productos en proceso.</div></td></tr>
                 ) : null}
                 {isLoading ? (
-                  <tr><td colSpan={6}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -1537,19 +1831,37 @@ export function InventoryDashboard() {
               </section>
 
               <section className="movementDateDetail">
+                <input
+                  className="field searchField"
+                  onChange={(event) => setHistorySearch(event.target.value)}
+                  placeholder="Buscar por item, tipo, motivo, usuario, lote o fecha"
+                  value={historySearch}
+                />
                 <div>
-                  <h3>{movementDateLabel(`${selectedHistoryDate}T00:00:00`)}</h3>
-                  <p>{selectedDateMovements.length} movimientos registrados</p>
+                  {historySearchActive ? (
+                    <>
+                      <h3>Resultados de búsqueda</h3>
+                      <p>{historySearchResults.length} movimientos en todo el historial</p>
+                    </>
+                  ) : (
+                    <>
+                      <h3>{movementDateLabel(`${selectedHistoryDate}T00:00:00`)}</h3>
+                      <p>{selectedDateMovements.length} movimientos registrados</p>
+                    </>
+                  )}
                 </div>
                 <div className="movementList movementHistoryEntries pagedListFloor">
-                  {historyDayPager.pageItems.map((movement) => (
+                  {(historySearchActive ? historyResultsPager : historyDayPager).pageItems.map((movement) => (
                     <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                       <div>
                         <strong>{movementTypeLabel(movement.movement_type)}</strong>
                         {movement.lot_code ? (
                           <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{movement.lot_code}</span>
                         ) : null}
-                        <span>{movementTimeLabel(movement.created_at)} - {movement.item.name}</span>
+                        <span>
+                          {historySearchActive ? `${movementDateLabel(movement.created_at)} · ` : ""}
+                          {movementTimeLabel(movement.created_at)} - {movement.item.name}
+                        </span>
                       </div>
                       <div>
                         <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
@@ -1572,8 +1884,13 @@ export function InventoryDashboard() {
                       </div>
                     </article>
                   ))}
-                  {selectedDateMovements.length === 0 ? <div className="emptyState">No hay movimientos en esta fecha.</div> : null}
-                  <Pager {...historyDayPager} />
+                  {historySearchActive && historySearchResults.length === 0 ? (
+                    <div className="emptyState">Sin coincidencias en el historial. Prueba con otro dato: nombre, tipo, usuario o fecha.</div>
+                  ) : null}
+                  {!historySearchActive && selectedDateMovements.length === 0 ? (
+                    <div className="emptyState">No hay movimientos en esta fecha.</div>
+                  ) : null}
+                  <Pager {...(historySearchActive ? historyResultsPager : historyDayPager)} />
                 </div>
               </section>
             </div>
@@ -1693,6 +2010,260 @@ export function InventoryDashboard() {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {stageInfoRun ? (() => {
+        const stage = runCurrentStage(stageInfoRun);
+        const previousStage = stage
+          ? [...stageInfoRun.stages]
+              .sort((left, right) => left.stage_order - right.stage_order)
+              .filter((candidate) => candidate.stage_order < stage.stage_order)
+              .pop() ?? null
+          : null;
+        // Quien avanzo: el que finalizo la etapa anterior; en la primera etapa,
+        // quien inicio la produccion.
+        const advancedBy = previousStage ? previousStage.finished_by_name : stageInfoRun.started_by_name;
+        const advancedAt = stage?.started_at ?? previousStage?.finished_at ?? stageInfoRun.started_at;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de etapa actual">
+            <section className="modalWindow processViewWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>{stage?.stage_name ?? "Etapa actual"}</h2>
+                  <p>
+                    {stageInfoRun.production_code ?? stageInfoRun.process_name} · etapa {stage?.stage_order ?? "—"} de {stageInfoRun.stages.length}
+                  </p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setStageInfoRun(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="userPreviewGrid">
+                <span><strong>Avanzó a esta etapa</strong>{advancedBy ?? "—"}</span>
+                <span><strong>Cuándo</strong>{advancedAt ? productionTimeLabel(advancedAt) : "—"}</span>
+                <span><strong>Estado</strong>{stage?.status === "EN_PROCESO" ? "En proceso" : stage?.status === "PENDIENTE" ? "Pendiente" : stage?.status ?? "—"}</span>
+                {previousStage ? (
+                  <span><strong>Etapa anterior</strong>{previousStage.stage_name}{previousStage.finished_by_name ? ` · finalizó ${previousStage.finished_by_name}` : ""}</span>
+                ) : null}
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {wasteHistoryRun ? (() => {
+        const stagesWithWaste = wasteStages.filter((stage) => Number(stage.waste_weight ?? "0") > 0);
+        const totalWaste = stagesWithWaste.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
+        const averageWaste = stagesWithWaste.length > 0 ? totalWaste / stagesWithWaste.length : 0;
+        const worstStage = stagesWithWaste.reduce<ProductionRunStage | null>(
+          (worst, stage) => (!worst || Number(stage.waste_weight ?? "0") > Number(worst.waste_weight ?? "0") ? stage : worst),
+          null,
+        );
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de merma por fase">
+            <section className="modalWindow processViewWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>Merma por fase</h2>
+                  <p>{wasteHistoryRun.production_code ?? wasteHistoryRun.process_name} · {wasteStages.length} etapas</p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setWasteHistoryRun(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="fichaHero">
+                <div className="fichaHeroItem">
+                  <strong>{numericText(String(totalWaste))} g</strong>
+                  <span>Merma total{wasteHistoryRun.waste_percent ? ` (${numericText(wasteHistoryRun.waste_percent)}%)` : ""}</span>
+                </div>
+                <div className="fichaHeroItem">
+                  <strong>{numericText(String(averageWaste))} g</strong>
+                  <span>Promedio por etapa con merma</span>
+                </div>
+                <div className="fichaHeroItem">
+                  <strong>{worstStage ? worstStage.stage_name : "—"}</strong>
+                  <span>Etapa con mayor merma{worstStage ? ` (${numericText(worstStage.waste_weight ?? "0")} g)` : ""}</span>
+                </div>
+              </div>
+              <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
+                <table className="table tableAuto">
+                  <thead>
+                    <tr>
+                      <th>Etapa</th>
+                      <th className="num">Peso inicial</th>
+                      <th className="num">Peso final</th>
+                      <th className="num">Merma</th>
+                      <th className="num">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wasteStagesPager.pageItems.map((stage) => (
+                      <tr key={stage.id}>
+                        <td>{stage.stage_order}. {stage.stage_name}{stage.phase_name ? ` · ${stage.phase_name}` : ""}</td>
+                        <td className="num">{stage.initial_weight ? `${numericText(stage.initial_weight)} g` : "—"}</td>
+                        <td className="num">{stage.final_weight ? `${numericText(stage.final_weight)} g` : "—"}</td>
+                        <td className="num">{stage.waste_weight ? `${numericText(stage.waste_weight)} g` : "—"}</td>
+                        <td className="num">{stage.waste_percent ? `${numericText(stage.waste_percent)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                    {wasteStages.length === 0 ? (
+                      <tr><td colSpan={5}><div className="emptyState">Esta orden no tiene etapas registradas.</div></td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
+                <Pager {...wasteStagesPager} />
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {receptionInfoRun ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de recepcion">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Recepción de orden</h2>
+                <p>{receptionInfoRun.production_code ?? receptionInfoRun.process_name} · {receptionInfoRun.process_name}</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setReceptionInfoRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="userPreviewGrid">
+              <span><strong>Recibida por</strong>{receptionInfoRun.received_by_name ?? "—"}</span>
+              <span><strong>Cuándo</strong>{productionTimeLabel(receptionInfoRun.received_at)}</span>
+              <span><strong>Cantidad</strong>{numericText(receptionInfoRun.quantity)} und</span>
+              <span><strong>Peso final</strong>{receptionInfoRun.actual_finished_weight ? `${numericText(receptionInfoRun.actual_finished_weight)} g` : "—"}</span>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isArchivedOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Items archivados">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Archivados</h2>
+                <p>{archivedItems.length} items fuera del inventario activo</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsArchivedOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <p className="panelText">Un item archivado conserva todo su kardex y vuelve solo al inventario si recibe una nueva entrada. Eliminar borra el item y su historial para siempre.</p>
+            <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
+              <table className="table tableAuto archivedTable">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Seccion</th>
+                    <th>Archivado</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedPager.pageItems.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.material_type ?? item.name} · {item.sku}</td>
+                      <td>{itemTypeLabel(item.item_type)}</td>
+                      <td>{item.archived_at ? movementDateLabel(item.archived_at) : "—"}</td>
+                      <td>
+                        <div className="rowActions">
+                          <button className="iconTextButton" onClick={() => void handleUnarchiveItem(item)} type="button">
+                            <RotateCcw aria-hidden="true" size={15} />
+                            Restaurar
+                          </button>
+                          <button className="iconTextButton dangerText" onClick={() => void handleDeleteArchivedItem(item)} type="button">
+                            <Trash2 aria-hidden="true" size={15} />
+                            Eliminar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {archivedItems.length === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">No hay items archivados.</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+              <Pager {...archivedPager} />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {xmlImportDraft ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Importar factura XML">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Importar factura XML</h2>
+                <p>{[xmlImportDraft.supplier, xmlImportDraft.invoiceNumber].filter(Boolean).join(" · ") || xmlImportDraft.fileName}</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setXmlImportDraft(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <p className="panelText">Revisa a que seccion entra cada linea. Las lineas que ya existen en inventario entran a su item actual.</p>
+            <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Linea</th>
+                    <th>Cantidad</th>
+                    <th>Seccion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {xmlLinesPager.pageItems.map((line, index) => {
+                    // Índice real dentro del borrador (la página solo muestra un tramo).
+                    const lineIndex = xmlLinesPager.page * xmlLinesPager.pageSize + index;
+                    return (
+                    <tr key={`${line.description}-${lineIndex}`}>
+                      <td>{line.description}</td>
+                      <td>{numericText(line.quantity)} {line.unitCode || "und"}</td>
+                      <td>
+                        {line.existingItem ? (
+                          <span>{itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}</span>
+                        ) : (
+                          <select
+                            className="field"
+                            onChange={(event) =>
+                              setXmlImportDraft((current) => {
+                                if (!current) return current;
+                                const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                  candidateIndex === lineIndex ? { ...candidate, itemType: event.target.value as InventoryItemType } : candidate,
+                                );
+                                return { ...current, lines: nextLines };
+                              })
+                            }
+                            value={line.itemType}
+                          >
+                            <option value="RAW_MATERIAL">Materia prima</option>
+                            <option value="SUPPLY">Insumo</option>
+                          </select>
+                        )}
+                      </td>
+                    </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <Pager {...xmlLinesPager} />
+            </div>
+            <div className="modalActions">
+              <button className="button" disabled={isSaving} onClick={() => setXmlImportDraft(null)} type="button">
+                Cancelar
+              </button>
+              <button className="button buttonPrimary" disabled={isSaving} onClick={handleConfirmXmlImport} type="button">
+                <Save aria-hidden="true" size={17} />
+                {isSaving ? "Importando" : `Importar ${xmlImportDraft.lines.length} ${xmlImportDraft.lines.length === 1 ? "linea" : "lineas"}`}
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
 

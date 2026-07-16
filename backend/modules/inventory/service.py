@@ -126,9 +126,29 @@ class InventoryService(InventoryIntegrationPort):
             self.repository.delete_movement(movement)
         self.repository.delete_item(item)
 
-    def revert_last_entry(self, item_id: UUID) -> InventoryItemRead:
+    def archive_item(self, item_id: UUID) -> InventoryItemRead:
+        """Oculta un item agotado del inventario activo conservando su historial."""
+        item = self._get_item_or_raise(item_id)
+        if item.item_type not in MANUALLY_MANAGED_TYPES:
+            raise InventoryDomainError("Solo se pueden archivar materias primas, insumos o productos terminados.")
+        if item.current_stock > 0:
+            raise InventoryDomainError("Solo se pueden archivar items agotados (stock en cero).")
+        item.archived_at = datetime.now(timezone.utc)
+        self.repository.flush()
+        return InventoryItemRead.model_validate(item)
+
+    def unarchive_item(self, item_id: UUID) -> InventoryItemRead:
+        item = self._get_item_or_raise(item_id)
+        item.archived_at = None
+        self.repository.flush()
+        return InventoryItemRead.model_validate(item)
+
+    def revert_last_entry(self, item_id: UUID) -> InventoryItemRead | None:
         """Revierte SOLO la ultima entrada de lote registrada del item: la borra y
-        recalcula el stock y el costo promedio replayando los movimientos restantes."""
+        recalcula el stock y el costo promedio replayando los movimientos restantes.
+        Si la entrada revertida era el unico movimiento y el item nacio de una
+        factura XML, el item tambien se elimina (retorna None): revertir la factura
+        no debe dejar items vacios que nunca existieron antes de ella."""
         item = self._get_item_or_raise(item_id)
         movements = sorted(
             self.repository.list_movements(item_id), key=lambda m: m.created_at
@@ -151,9 +171,15 @@ class InventoryService(InventoryIntegrationPort):
             )
         self.repository.delete_movement(last)
 
+        remaining = movements[:-1]
+        if not remaining and (item.description or "").startswith("Creado desde factura XML."):
+            self.repository.delete_item(item)
+            self.repository.flush()
+            return None
+
         stock = Decimal("0")
         avg = Decimal("0")
-        for movement in movements[:-1]:
+        for movement in remaining:
             if movement.movement_type == "ENTRADA" and movement.unit_cost is not None:
                 total = stock + movement.quantity
                 if total > 0:
@@ -176,6 +202,11 @@ class InventoryService(InventoryIntegrationPort):
         next_stock = item.current_stock + delta
         if next_stock < 0:
             raise InventoryDomainError("El movimiento dejaria el stock en negativo.")
+
+        # Un movimiento sobre un item archivado lo reactiva: archivar nunca
+        # bloquea entradas futuras (ej. reaparece en una factura XML).
+        if item.archived_at is not None:
+            item.archived_at = None
 
         movement = InventoryMovement(
             item_id=item.id,
