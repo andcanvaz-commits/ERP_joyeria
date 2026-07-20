@@ -61,6 +61,8 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
       await queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
       await queryClient.invalidateQueries({ queryKey: ["process-materials"] });
+      // El combo de materiales del formulario de procesos lee del bundle de produccion.
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
     }
@@ -100,6 +102,8 @@ export function RawMaterialsManager({ mode, onClose }: { mode: "create" | "view"
       await queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
       await queryClient.invalidateQueries({ queryKey: ["process-materials"] });
+      // El combo de materiales del formulario de procesos lee del bundle de produccion.
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar la materia prima.");
     } finally {
