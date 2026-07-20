@@ -1294,7 +1294,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <div className="readyToStartRow" key={run.id}>
                     <div className="readyToStartInfo">
                       <strong>{run.process_name}</strong>
-                      <span>{run.quantity} unidades · Material: {numericText(run.total_required_material)} {run.raw_material_unit_code} · Aprobado: {timeLabel(run.materials_approved_at)}</span>
+                      <span>{numericText(run.quantity)} unidades · Material: {numericText(run.total_required_material)} {run.raw_material_unit_code} · Aprobado: {timeLabel(run.materials_approved_at)}</span>
                     </div>
                     <button
                       className="button buttonPrimary"
@@ -1337,7 +1337,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
                         {run.process_name}
                       </strong>
-                      <span>{run.quantity} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
+                      <span>{numericText(run.quantity)} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
                     </div>
                     <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); openStatsModal(run); }} type="button">
                       <Eye aria-hidden="true" size={14} />
@@ -1620,7 +1620,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>{selectedStatsRun.process_name}</h2>
-                <p>{selectedStatsRun.quantity} unidades</p>
+                <p>{numericText(selectedStatsRun.quantity)} unidades</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
@@ -1728,7 +1728,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <span>Finalizó: {runFinisherName(run)}</span>
                       </div>
                       <div>
-                        <strong>{run.quantity} unidades</strong>
+                        <strong>{numericText(run.quantity)} unidades</strong>
                         <span>{numericText(run.waste_percent)}% merma</span>
                         <span>{numericText(run.waste_weight)} {run.raw_material_unit_code}</span>
                       </div>
