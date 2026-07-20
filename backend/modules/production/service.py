@@ -339,29 +339,41 @@ class ProductionService:
         if not process.materials:
             raise ProductionDomainError("El proceso no tiene materias primas configuradas.")
 
-        # Solo se puede fabricar con un material configurado en el proceso.
+        # Cualquier materia prima del inventario es utilizable en cualquier
+        # proceso. Si esta configurada en el proceso se usa su cantidad por
+        # unidad; si no, se usa la cantidad estandar del proceso (la de su
+        # primer material configurado).
         selected = next(
             (m for m in process.materials if m.inventory_item_id == payload.raw_material_item_id),
             None,
         )
-        if selected is None:
-            raise ProductionDomainError(
-                "El material seleccionado no esta configurado en este proceso."
-            )
+        if selected is not None:
+            quantity_per_unit = selected.quantity_per_unit
+            unit_code = selected.unit_code
+        else:
+            from backend.modules.inventory.models import InventoryItem
+
+            item = self.repository.session.get(InventoryItem, payload.raw_material_item_id)
+            if item is None or item.item_type != "RAW_MATERIAL":
+                raise ProductionDomainError(
+                    "La materia prima seleccionada no existe en el inventario."
+                )
+            quantity_per_unit = process.materials[0].quantity_per_unit
+            unit_code = item.unit_code
 
         active_stages = [stage for stage in process.stages if stage.is_active]
         if not active_stages:
             raise ProductionDomainError("El proceso debe tener al menos una etapa activa.")
 
-        total_required = selected.quantity_per_unit * payload.quantity
+        total_required = quantity_per_unit * payload.quantity
         run = ProductionRun(
             process_id=process.id,
             process_name=process.name,
             quantity=payload.quantity,
             status=ProductionRunStatus.PENDING_INVENTORY,
-            raw_material_item_id=selected.inventory_item_id,
-            raw_material_quantity_per_unit=selected.quantity_per_unit,
-            raw_material_unit_code=selected.unit_code,
+            raw_material_item_id=payload.raw_material_item_id,
+            raw_material_quantity_per_unit=quantity_per_unit,
+            raw_material_unit_code=unit_code,
             total_required_material=total_required,
             waste_limit_percent=process.waste_limit_percent,
             expected_finished_weight=total_required,

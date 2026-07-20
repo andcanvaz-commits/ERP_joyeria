@@ -326,20 +326,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
+  // Cualquier materia prima del inventario es utilizable: si está configurada
+  // en el proceso se usa su cantidad por unidad; si no, la cantidad estándar
+  // del proceso (la de su primer material configurado). Igual que el backend.
   const selectedProcessMaterial = selectedProcess?.materials.find((material) => material.inventory_item_id === selectedMaterialId) ?? null;
-  const selectedMaterial = rawMaterials.find((item) => item.id === selectedProcessMaterial?.inventory_item_id) ?? null;
-  const requiredMaterial = selectedProcessMaterial?.quantity_per_unit && runQuantity
-    ? Number(selectedProcessMaterial.quantity_per_unit) * Number(runQuantity)
+  const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
+  const effectiveQuantityPerUnit = selectedProcessMaterial?.quantity_per_unit ?? selectedProcess?.materials[0]?.quantity_per_unit ?? null;
+  const requiredMaterial = effectiveQuantityPerUnit && runQuantity
+    ? Number(effectiveQuantityPerUnit) * Number(runQuantity)
     : 0;
 
   useEffect(() => {
+    // Al cambiar de proceso se sugiere su primer material configurado, pero se
+    // respeta cualquier materia prima ya elegida (todas son utilizables).
     const materials = selectedProcess?.materials ?? [];
-    setSelectedMaterialId((current) => {
-      if (current && materials.some((material) => material.inventory_item_id === current)) {
-        return current;
-      }
-      return materials[0]?.inventory_item_id ?? "";
-    });
+    setSelectedMaterialId((current) => current || (materials[0]?.inventory_item_id ?? ""));
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
@@ -750,10 +751,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Ingresa una cantidad valida para fabricar.");
       return;
     }
-    const materialBelongsToProcess = selectedProcess.materials.some(
-      (material) => material.inventory_item_id === selectedMaterialId
-    );
-    if (!selectedMaterialId || !materialBelongsToProcess) {
+    if (!selectedMaterialId) {
       setError("Selecciona la materia prima con la que se fabricará esta orden.");
       return;
     }
@@ -1203,9 +1201,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <span>Material</span>
                   <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
                     <option value="">Seleccionar material</option>
-                    {(selectedProcess?.materials ?? []).map((material) => (
-                      <option key={material.id} value={material.inventory_item_id}>
-                        {rawMaterials.find((item) => item.id === material.inventory_item_id)?.name ?? material.inventory_item_id}
+                    {rawMaterials.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} · {numericText(item.current_stock)} {item.unit_code}
                       </option>
                     ))}
                   </select>
