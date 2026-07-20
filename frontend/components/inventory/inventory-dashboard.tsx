@@ -385,6 +385,10 @@ export function InventoryDashboard() {
     queryKey: ["inventory"],
     queryFn: () => fetchInventoryBundle(canSeeAudit),
     enabled: Boolean(currentUser),
+    // Las órdenes nacen en la ventana del jefe de producción: esta vista debe
+    // ver solicitudes nuevas sola (sin F5), igual que el badge del menú.
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
   });
 
   const { data: units = [] } = useQuery({

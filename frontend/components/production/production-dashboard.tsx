@@ -181,6 +181,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryKey: ["production", variant],
     queryFn: () => fetchProductionBundle(variant),
     enabled: Boolean(currentUser),
+    // La aprobación de materiales ocurre en la ventana del jefe de inventario:
+    // esta vista debe enterarse sola (sin F5), igual que el badge del menú.
+    refetchInterval: variant === "production" ? 30000 : false,
+    refetchOnWindowFocus: variant === "production",
   });
 
   // Mismas queryKeys que los managers de mantenimiento: al crear/eliminar alli
