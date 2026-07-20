@@ -1970,7 +1970,16 @@ export function InventoryDashboard() {
                         <td>{run.process_name}</td>
                         <td className="num">{numericText(run.quantity)} und</td>
                         <td className="num">{numericText(runCurrentWeight(run))} {run.raw_material_unit_code}</td>
-                        <td className="num">{numericText(String(currentWaste))} {run.raw_material_unit_code}</td>
+                        <td className="num">
+                          <button
+                            className="iconTextButton"
+                            onClick={() => setWasteHistoryRun(run)}
+                            title="Ver merma por fase"
+                            type="button"
+                          >
+                            {numericText(String(currentWaste))} {run.raw_material_unit_code}
+                          </button>
+                        </td>
                         <td>
                           {currentStage ? (
                             <button
@@ -2978,21 +2987,7 @@ export function InventoryDashboard() {
                     </div>
                   )}
                   {viewingRun.status !== "RECIBIDA" ? (
-                    <div className="stageTimelineList">
-                      {stages.map((stage) => (
-                        <div className={`stageTimelineItem stageTimelineItem${stage.status}`} key={stage.id}>
-                          <div className="stageTimelineHead">
-                            <div className="stageTimelineLeft">
-                              <span className={`stageTimelineNum ${stage.status === "FINALIZADA" ? "stageTimelineNumDone" : stage.status === "EN_PROCESO" ? "stageTimelineNumActive" : ""}`}>{stage.stage_order}</span>
-                              <div>
-                                <strong>{stage.stage_name}</strong>
-                                <span>{stage.status === "FINALIZADA" ? "Finalizada" : stage.status === "EN_PROCESO" ? "En proceso" : "Pendiente"}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <RunStageSummaryTable run={viewingRun} />
                   ) : null}
                 </>
               );
