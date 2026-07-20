@@ -542,6 +542,16 @@ class ProductionService:
 
         # Condición de peso: el límite de merma se controla sobre la merma ACUMULADA
         # (desde el material inicial hasta esta etapa), no sobre una sola fase.
+        # El material no puede crecer: un peso mayor al que entró a la fase es
+        # error de captura y contaminaría la merma de las fases siguientes.
+        if stage.requires_weighing and payload.final_weight is not None:
+            reference = self._previous_stage_weight(run, stage)
+            if reference is not None and reference > 0 and payload.final_weight > reference:
+                raise ProductionDomainError(
+                    f"El peso final ({payload.final_weight} {run.raw_material_unit_code}) no puede ser "
+                    f"mayor que el material en proceso ({reference} {run.raw_material_unit_code})."
+                )
+
         weight_based = False
         auto_justification: str | None = None
         if stage.requires_weighing and payload.final_weight is not None:
