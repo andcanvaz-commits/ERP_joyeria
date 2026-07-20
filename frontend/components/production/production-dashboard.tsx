@@ -35,6 +35,7 @@ import {
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 import { CaliperScale } from "@/components/ui/caliper-scale";
+import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusPunch } from "@/components/ui/status-punch";
 
@@ -787,7 +788,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setIsSaving(true);
     try {
       const finalWeight = stageWeights[stage.id]?.trim() || null;
-      await finishProductionRunStage(stage.id, {
+      const updatedRun = await finishProductionRunStage(stage.id, {
         final_weight: finalWeight,
         decision: options.decision,
         justification: options.justification,
@@ -805,6 +806,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           : "Etapa registrada correctamente."
       );
       await reload();
+      if (updatedRun.status === "PENDIENTE_RECEPCION") {
+        // Última fase terminada: se cierra el detalle de etapas y se abre el
+        // resumen del proceso (pesos, merma y decisiones por fase).
+        setSelectedRunForStages(null);
+        setSuccess("Producción finalizada. Pendiente de recepción en inventario.");
+        openStatsModal(updatedRun);
+        return;
+      }
       if (options.decision === "REJECTED") {
         // Volver en pantalla a la tarjeta de la etapa destino.
         const targetOrder = stage.rework_target_order ?? (stage.stage_order > 1 ? stage.stage_order - 1 : stage.stage_order);
@@ -1647,6 +1656,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 {runFinisherName(selectedStatsRun)}
               </span>
             </div>
+            <RunStageSummaryTable run={selectedStatsRun} />
           </section>
         </div>
       ) : null}

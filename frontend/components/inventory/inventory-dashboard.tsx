@@ -38,6 +38,7 @@ import {
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import type { ProductionRun, ProductionRunStage } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
+import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
@@ -938,7 +939,6 @@ export function InventoryDashboard() {
     () => (wasteHistoryRun ? [...wasteHistoryRun.stages].sort((left, right) => left.stage_order - right.stage_order) : []),
     [wasteHistoryRun],
   );
-  const wasteStagesPager = usePagination(wasteStages, 5, wasteHistoryRun?.id ?? "");
   const historyDayPager = usePagination(selectedDateMovements, MOVEMENTS_PAGE_SIZE, selectedHistoryDate);
   const historyResultsPager = usePagination(historySearchResults, MOVEMENTS_PAGE_SIZE, historySearch);
 
@@ -1913,7 +1913,7 @@ export function InventoryDashboard() {
                         <td>{run.process_name}</td>
                         <td className="num">{numericText(run.quantity)} und</td>
                         <td className="num">{numericText(runCurrentWeight(run))} {run.raw_material_unit_code}</td>
-                        <td className="num">{currentWaste > 0 ? `${numericText(String(currentWaste))} ${run.raw_material_unit_code}` : "—"}</td>
+                        <td className="num">{numericText(String(currentWaste))} {run.raw_material_unit_code}</td>
                         <td>
                           {currentStage ? (
                             <button
@@ -2342,34 +2342,7 @@ export function InventoryDashboard() {
                   <span>Etapa con mayor merma{worstStage ? ` (${numericText(worstStage.waste_weight ?? "0")} g)` : ""}</span>
                 </div>
               </div>
-              <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
-                <table className="table tableAuto">
-                  <thead>
-                    <tr>
-                      <th>Etapa</th>
-                      <th className="num">Peso inicial</th>
-                      <th className="num">Peso final</th>
-                      <th className="num">Merma</th>
-                      <th className="num">%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {wasteStagesPager.pageItems.map((stage) => (
-                      <tr key={stage.id}>
-                        <td>{stage.stage_order}. {stage.stage_name}{stage.phase_name ? ` · ${stage.phase_name}` : ""}</td>
-                        <td className="num">{stage.initial_weight ? `${numericText(stage.initial_weight)} g` : "—"}</td>
-                        <td className="num">{stage.final_weight ? `${numericText(stage.final_weight)} g` : "—"}</td>
-                        <td className="num">{stage.waste_weight ? `${numericText(stage.waste_weight)} g` : "—"}</td>
-                        <td className="num">{stage.waste_percent ? `${numericText(stage.waste_percent)}%` : "—"}</td>
-                      </tr>
-                    ))}
-                    {wasteStages.length === 0 ? (
-                      <tr><td colSpan={5}><div className="emptyState">Esta orden no tiene etapas registradas.</div></td></tr>
-                    ) : null}
-                  </tbody>
-                </table>
-                <Pager {...wasteStagesPager} />
-              </div>
+              <RunStageSummaryTable run={wasteHistoryRun} />
             </section>
           </div>
         );
