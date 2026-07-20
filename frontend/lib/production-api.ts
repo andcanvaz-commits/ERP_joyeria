@@ -28,6 +28,8 @@ export type CreateProductionProcessPayload = {
       unit_code: string;
     }>;
   }>;
+  // Tipos de producto del catálogo que el proceso puede producir (vacío = todos).
+  product_type_ids?: string[];
 };
 
 export function listProcesses() {

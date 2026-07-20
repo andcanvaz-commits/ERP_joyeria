@@ -37,6 +37,8 @@ export type ProductionProcess = {
   waste_limit_percent: string;
   is_active: boolean;
   stages: ProductionProcessStage[];
+  // Tipos de producto del catálogo que este proceso puede producir (vacío = todos).
+  product_type_ids?: string[];
 };
 
 export type ProductionRunStage = {
@@ -110,4 +112,6 @@ export type ProductionRun = {
   finished_at: string | null;
   received_at: string | null;
   stages: ProductionRunStage[];
+  // Tipos de producto que el proceso de esta orden puede producir (vacío = todos).
+  allowed_product_type_ids?: string[];
 };

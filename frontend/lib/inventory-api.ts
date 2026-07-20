@@ -90,6 +90,22 @@ export function convertLotToProduct(lotItemId: string, payload: ConvertLotPayloa
   });
 }
 
+export type CombineProductsPayload = {
+  sources: Array<{ item_id: string; quantity: string }>;
+  material_code: string;
+  product_type_id: string;
+  quantity: string;
+};
+
+// Ensambla varias piezas de productos terminados en un producto nuevo del
+// catálogo (ej. cadena + dije = collar), todo por movimientos.
+export function combineProducts(payload: CombineProductsPayload) {
+  return apiRequest<InventoryItem>("/api/inventory/products/combine", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listInventoryMovements(itemId?: string) {
   const query = itemId ? `?item_id=${itemId}` : "";
   return apiRequest<InventoryMovement[]>(`/api/inventory/movements${query}`);

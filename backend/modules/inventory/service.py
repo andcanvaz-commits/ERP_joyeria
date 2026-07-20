@@ -13,6 +13,7 @@ from backend.modules.inventory.schemas import (
     InventoryMovementRead,
     InventorySummary,
     LotConversionCreate,
+    ProductCombineCreate,
 )
 from backend.modules.shared.contracts.inventory import (
     InventoryAvailabilityLine,
@@ -402,6 +403,29 @@ class InventoryService(InventoryIntegrationPort):
         self.create_movement(payload, user_id=received_by_user_id, lot_code=production_code)
         return item
 
+    def _resolve_catalog_target(self, material_code: str, product_type_id: UUID):
+        """Valida material y tipo de producto del catálogo y devuelve
+        (product_code, product_type). Compartido por conversión y ensamble."""
+        from sqlalchemy import select
+        from backend.modules.catalog.models import CatalogSegment
+        from backend.modules.product_types.models import ProductType
+
+        session = self.repository.session
+        material = session.execute(
+            select(CatalogSegment).where(
+                CatalogSegment.kind == "MATERIAL",
+                CatalogSegment.code == material_code,
+                CatalogSegment.is_active.is_(True),
+            )
+        ).scalar_one_or_none()
+        if material is None:
+            raise InventoryDomainError("Material no existe en el catalogo.")
+        product_type = session.get(ProductType, product_type_id)
+        if product_type is None or not product_type.is_active:
+            raise InventoryNotFoundError("Tipo de producto no encontrado o inactivo.")
+        product_code = f"{material_code}{product_type.category_code}{product_type.model_code}"
+        return product_code, product_type
+
     def convert_lot_to_product(
         self, lot_item_id: UUID, payload: LotConversionCreate, user_id: UUID | None
     ) -> InventoryItemRead:
@@ -411,8 +435,6 @@ class InventoryService(InventoryIntegrationPort):
         directo. Repetir la conversión mismo tipo + mismo lote suma al mismo
         item; lotes distintos nunca se consolidan."""
         from sqlalchemy import select
-        from backend.modules.catalog.models import CatalogSegment
-        from backend.modules.product_types.models import ProductType
 
         lot = self._get_item_or_raise(lot_item_id)
         if lot.item_type != "FINISHED_PRODUCT":
@@ -427,20 +449,32 @@ class InventoryService(InventoryIntegrationPort):
             raise InventoryDomainError("Stock insuficiente en el lote.")
 
         session = self.repository.session
-        material = session.execute(
-            select(CatalogSegment).where(
-                CatalogSegment.kind == "MATERIAL",
-                CatalogSegment.code == payload.material_code,
-                CatalogSegment.is_active.is_(True),
-            )
-        ).scalar_one_or_none()
-        if material is None:
-            raise InventoryDomainError("Material no existe en el catalogo.")
-        product_type = session.get(ProductType, payload.product_type_id)
-        if product_type is None or not product_type.is_active:
-            raise InventoryNotFoundError("Tipo de producto no encontrado o inactivo.")
+        product_code, product_type = self._resolve_catalog_target(
+            payload.material_code, payload.product_type_id
+        )
 
-        product_code = f"{payload.material_code}{product_type.category_code}{product_type.model_code}"
+        # Filtro por proceso: si el proceso de la orden de este lote declara qué
+        # tipos puede producir, la conversión solo acepta esos tipos.
+        from backend.modules.production.models import (
+            ProductionProcessProductType,
+            ProductionRun,
+        )
+
+        run = session.execute(
+            select(ProductionRun).where(ProductionRun.production_code == lot.sku)
+        ).scalar_one_or_none()
+        if run is not None:
+            allowed = set(
+                session.execute(
+                    select(ProductionProcessProductType.product_type_id).where(
+                        ProductionProcessProductType.process_id == run.process_id
+                    )
+                ).scalars()
+            )
+            if allowed and payload.product_type_id not in allowed:
+                raise InventoryDomainError(
+                    "El proceso de esta orden no produce ese tipo de producto."
+                )
         target = next(
             (
                 item
@@ -484,6 +518,81 @@ class InventoryService(InventoryIntegrationPort):
             ),
             user_id=user_id,
             lot_code=lot.sku,
+        )
+        self.repository.flush()
+        return InventoryItemRead.model_validate(target)
+
+    def combine_products(
+        self, payload: ProductCombineCreate, user_id: UUID | None
+    ) -> InventoryItemRead:
+        """Ensambla varias piezas de productos terminados en un producto nuevo del
+        catálogo (ej. cadena + dije = collar). Cada pieza de origen registra una
+        CONVERSION_SALIDA y el producto resultante una CONVERSION_ENTRADA; nada
+        de edición directa de stock. El item resultante se identifica por su
+        código de producto con la marca de ensamblado."""
+        ids = [line.item_id for line in payload.sources]
+        if len(ids) != len(set(ids)):
+            raise InventoryDomainError("No repitas la misma pieza en el ensamble.")
+        sources = []
+        for line in payload.sources:
+            item = self._get_item_or_raise(line.item_id)
+            if item.item_type != "FINISHED_PRODUCT":
+                raise InventoryDomainError("Solo se pueden ensamblar productos terminados.")
+            if item.current_stock < line.quantity:
+                raise InventoryDomainError(f"Stock insuficiente de '{item.name}'.")
+            sources.append((item, line.quantity))
+
+        product_code, product_type = self._resolve_catalog_target(
+            payload.material_code, payload.product_type_id
+        )
+
+        ASSEMBLED_MARK = "Producto ensamblado."
+        target = next(
+            (
+                item
+                for item in self.repository.list_items("FINISHED_PRODUCT")
+                if item.product_code == product_code
+                and item.source_lot_sku is None
+                and (item.description or "") == ASSEMBLED_MARK
+            ),
+            None,
+        )
+        if target is None:
+            target = InventoryItem(
+                item_type="FINISHED_PRODUCT",
+                name=product_type.name or product_code,
+                sku=self._generate_sku("FINISHED_PRODUCT"),
+                product_code=product_code,
+                description=ASSEMBLED_MARK,
+                unit_code=sources[0][0].unit_code,
+                minimum_stock=None,
+            )
+            self.repository.add_item(target)
+            self.repository.flush()
+
+        for item, quantity in sources:
+            self.create_movement(
+                InventoryMovementCreate(
+                    item_id=item.id,
+                    movement_type="CONVERSION_SALIDA",
+                    quantity=quantity,
+                    reason=f"Ensamble en producto {product_code}",
+                    reference_type="product_assembly",
+                    reference_id=target.id,
+                ),
+                user_id=user_id,
+            )
+        detail = " + ".join(f"{item.name}" for item, _ in sources)
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=target.id,
+                movement_type="CONVERSION_ENTRADA",
+                quantity=payload.quantity,
+                reason=f"Ensamble de: {detail}"[:240],
+                reference_type="product_assembly",
+                reference_id=sources[0][0].id,
+            ),
+            user_id=user_id,
         )
         self.repository.flush()
         return InventoryItemRead.model_validate(target)

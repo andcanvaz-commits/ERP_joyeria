@@ -77,6 +77,22 @@ class LotConversionCreate(BaseModel):
     quantity: Decimal = Field(gt=0)
 
 
+class CombineSourceLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
+class ProductCombineCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sources: list[CombineSourceLine] = Field(min_length=2)
+    material_code: str = Field(min_length=1, max_length=1)
+    product_type_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
 class InventoryMovementCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

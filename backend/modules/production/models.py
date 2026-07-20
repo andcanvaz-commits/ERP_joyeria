@@ -33,6 +33,30 @@ class ProductionProcess(Base):
         back_populates="process",
         cascade="all, delete-orphan",
     )
+    # Tipos de producto del catalogo que este proceso puede producir. Vacio =
+    # produce cualquier tipo. Gobierna el combo de conversion de lotes.
+    product_types: Mapped[list["ProductionProcessProductType"]] = relationship(
+        back_populates="process",
+        cascade="all, delete-orphan",
+    )
+
+
+class ProductionProcessProductType(Base):
+    __tablename__ = "production_process_product_types"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    process_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_processes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_type_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("product_types.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    process: Mapped["ProductionProcess"] = relationship(back_populates="product_types")
 
 
 class ProductionProcessMaterial(Base):

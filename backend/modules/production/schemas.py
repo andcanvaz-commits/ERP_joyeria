@@ -66,6 +66,8 @@ class ProductionProcessCreate(BaseModel):
     waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
+    # Tipos de producto del catalogo que este proceso puede producir (vacio = todos).
+    product_type_ids: list[UUID] = Field(default_factory=list)
 
 
 class ProductionProcessUpdate(BaseModel):
@@ -78,6 +80,7 @@ class ProductionProcessUpdate(BaseModel):
     waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
+    product_type_ids: list[UUID] = Field(default_factory=list)
 
 
 class ProductionProcessStageRead(BaseModel):
@@ -109,6 +112,7 @@ class ProductionProcessRead(BaseModel):
     waste_limit_percent: Decimal
     is_active: bool
     stages: list[ProductionProcessStageRead] = Field(default_factory=list)
+    product_type_ids: list[UUID] = Field(default_factory=list)
 
 
 class ProductionRunCreate(BaseModel):
@@ -206,3 +210,6 @@ class ProductionRunRead(BaseModel):
     finished_at: datetime | None = None
     received_at: datetime | None = None
     stages: list[ProductionRunStageRead] = Field(default_factory=list)
+    # Tipos de producto que el proceso de esta orden puede producir (vacio = todos).
+    # Gobierna el combo al convertir el lote en productos terminados.
+    allowed_product_type_ids: list[UUID] = Field(default_factory=list)

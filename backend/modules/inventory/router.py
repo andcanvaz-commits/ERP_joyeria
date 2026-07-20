@@ -15,6 +15,7 @@ from backend.modules.inventory.schemas import (
     InventoryMovementRead,
     InventorySummary,
     LotConversionCreate,
+    ProductCombineCreate,
 )
 from backend.modules.inventory.service import InventoryDomainError, InventoryNotFoundError, InventoryService
 from backend.modules.security.permissions import require_permission
@@ -175,6 +176,21 @@ def convert_lot_to_product(
     ensure_permission(current_user, "inventory.movements.create")
     try:
         return service.convert_lot_to_product(lot_item_id, payload, user_id=current_user.id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/products/combine", response_model=InventoryItemRead)
+def combine_products(
+    payload: ProductCombineCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> InventoryItemRead:
+    ensure_permission(current_user, "inventory.movements.create")
+    try:
+        return service.combine_products(payload, user_id=current_user.id)
     except InventoryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except InventoryDomainError as exc:

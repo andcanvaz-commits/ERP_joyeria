@@ -21,6 +21,7 @@ import {
   updateUser,
 } from "@/lib/auth-api";
 import { listInventoryItems } from "@/lib/inventory-api";
+import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
   createProcess,
@@ -63,6 +64,8 @@ type ProcessForm = {
   materials: ProcessMaterialForm[];
   wasteLimitPercent: string;
   stages: StageForm[];
+  // Tipos de producto del catálogo que el proceso puede producir (vacío = todos).
+  productTypeIds: string[];
 };
 
 type FormMode = "create" | "edit";
@@ -104,6 +107,7 @@ const emptyProcessForm = (): ProcessForm => ({
   materials: [emptyProcessMaterial()],
   wasteLimitPercent: "1",
   stages: [emptyStage()],
+  productTypeIds: [],
 });
 
 const emptyUserForm = () => ({
@@ -140,6 +144,7 @@ function processToForm(process: ProductionProcess): ProcessForm {
         unitCode: ing.unit_code,
       })),
     })) : [emptyStage()],
+    productTypeIds: (process.product_type_ids ?? []).map(String),
   };
 }
 
@@ -198,6 +203,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const { data: rawMaterialsList = EMPTY_RAW_MATERIALS } = useQuery({
     queryKey: ["raw-materials"],
     queryFn: () => listInventoryItems("RAW_MATERIAL"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
+  });
+  // Tipos de producto del catálogo: conteo del tile y selector del form de proceso.
+  const { data: productTypesList = [] } = useQuery({
+    queryKey: ["product-types"],
+    queryFn: listProductTypes,
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
   const { data: suppliesList = EMPTY_RAW_MATERIALS } = useQuery({
@@ -660,6 +671,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       })),
       waste_limit_percent: "1",
       is_active: true,
+      product_type_ids: form.productTypeIds,
       stages: form.stages.map((stage, index) => ({
         name: stage.name.trim(),
         description: stage.description.trim() || null,
@@ -1138,7 +1150,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <button className="maintenanceTile" onClick={() => setDataModal({ type: "productTypes", mode: "view" })} type="button">
                 <FileText aria-hidden="true" size={22} />
                 <strong>Tipos de producto</strong>
-                <span>Definidos y los ya presentes en inventario.</span>
+                <span>{productTypesList.length} tipos de producto creados.</span>
               </button>
             </div>
           </section>
@@ -1842,6 +1854,33 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <Plus aria-hidden="true" size={14} />
                 Agregar materia prima
               </button>
+            </div>
+
+            <div className="fieldGroup">
+              <span>Productos que puede producir (opcional — sin marcar produce cualquiera)</span>
+              <div style={{ display: "grid", gap: 4, maxHeight: 140, overflowY: "auto", padding: "4px 2px" }}>
+                {productTypesList.filter((type) => type.is_active).map((type) => (
+                  <label key={type.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                    <input
+                      checked={form.productTypeIds.includes(type.id)}
+                      disabled={isSaving}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          productTypeIds: event.target.checked
+                            ? [...current.productTypeIds, type.id]
+                            : current.productTypeIds.filter((id) => id !== type.id),
+                        }))
+                      }
+                      type="checkbox"
+                    />
+                    <span>{type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}</span>
+                  </label>
+                ))}
+                {productTypesList.filter((type) => type.is_active).length === 0 ? (
+                  <span style={{ color: "var(--muted)", fontSize: 13 }}>No hay tipos de producto en el catálogo.</span>
+                ) : null}
+              </div>
             </div>
 
             <section className="stageSingleWindow">

@@ -15,6 +15,7 @@ import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
 import {
   archiveInventoryItem,
+  combineProducts,
   convertLotToProduct,
   createInventoryItem,
   createInventoryMovement,
@@ -353,6 +354,18 @@ export function InventoryDashboard() {
   const [convertRun, setConvertRun] = useState<ProductionRun | null>(null);
   const [convertForm, setConvertForm] = useState({ material_code: "", product_type_id: "", quantity: "" });
   const [isConverting, setIsConverting] = useState(false);
+  // Ensamble de piezas de productos terminados en un producto nuevo.
+  const [isCombineOpen, setIsCombineOpen] = useState(false);
+  const [combineForm, setCombineForm] = useState({
+    sources: [
+      { itemId: "", quantity: "" },
+      { itemId: "", quantity: "" },
+    ],
+    material_code: "",
+    product_type_id: "",
+    quantity: "",
+  });
+  const [isCombining, setIsCombining] = useState(false);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -836,6 +849,29 @@ export function InventoryDashboard() {
       setError(nextError instanceof Error ? nextError.message : "No se pudo convertir el lote.");
     } finally {
       setIsConverting(false);
+    }
+  }
+
+  async function handleCombineProducts(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setIsCombining(true);
+    try {
+      await combineProducts({
+        sources: combineForm.sources
+          .filter((line) => line.itemId && line.quantity)
+          .map((line) => ({ item_id: line.itemId, quantity: line.quantity })),
+        material_code: combineForm.material_code,
+        product_type_id: combineForm.product_type_id,
+        quantity: combineForm.quantity,
+      });
+      setSuccess("Piezas ensambladas en producto terminado.");
+      setIsCombineOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo ensamblar el producto.");
+    } finally {
+      setIsCombining(false);
     }
   }
 
@@ -1388,10 +1424,31 @@ export function InventoryDashboard() {
                 </button>
               ) : null}
               {itemFilter === "FINISHED_PRODUCT" ? (
-                <button className="button" onClick={openFinishedProductExit} type="button">
-                  <Minus aria-hidden="true" size={17} />
-                  Salida
-                </button>
+                <>
+                  <button className="button" onClick={openFinishedProductExit} type="button">
+                    <Minus aria-hidden="true" size={17} />
+                    Salida
+                  </button>
+                  <button
+                    className="button"
+                    onClick={() => {
+                      setCombineForm({
+                        sources: [
+                          { itemId: "", quantity: "" },
+                          { itemId: "", quantity: "" },
+                        ],
+                        material_code: "",
+                        product_type_id: "",
+                        quantity: "",
+                      });
+                      setIsCombineOpen(true);
+                    }}
+                    type="button"
+                  >
+                    <Repeat aria-hidden="true" size={17} />
+                    Ensamblar
+                  </button>
+                </>
               ) : null}
               <input accept=".xml,text/xml" hidden onChange={handleXmlInvoice} ref={xmlInputRef} type="file" />
             </div>
@@ -2374,7 +2431,12 @@ export function InventoryDashboard() {
         const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
         const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
         const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
-        const activeTypes = productTypes.filter((type) => type.is_active);
+        // Si el proceso de la orden declara qué tipos puede producir, el combo
+        // solo ofrece esos; sin asociación ofrece todo el catálogo.
+        const allowedTypeIds = convertRun.allowed_product_type_ids ?? [];
+        const activeTypes = productTypes.filter(
+          (type) => type.is_active && (allowedTypeIds.length === 0 || allowedTypeIds.includes(type.id)),
+        );
         const selectedType = activeTypes.find((type) => type.id === convertForm.product_type_id) ?? null;
         const previewCode = convertForm.material_code && selectedType
           ? `${convertForm.material_code}${selectedType.category_code}${selectedType.model_code}`
@@ -2447,6 +2509,175 @@ export function InventoryDashboard() {
                 >
                   <Repeat aria-hidden="true" size={17} />
                   {isConverting ? "Convirtiendo" : "Convertir"}
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })() : null}
+
+      {isCombineOpen ? (() => {
+        const combinable = items.filter(
+          (item) => item.item_type === "FINISHED_PRODUCT" && Number(item.current_stock) > 0,
+        );
+        const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+        const activeTypes = productTypes.filter((type) => type.is_active);
+        const selectedType = activeTypes.find((type) => type.id === combineForm.product_type_id) ?? null;
+        const previewCode = combineForm.material_code && selectedType
+          ? `${combineForm.material_code}${selectedType.category_code}${selectedType.model_code}`
+          : null;
+        const validLines = combineForm.sources.filter((line) => {
+          if (!line.itemId) return false;
+          const item = combinable.find((candidate) => candidate.id === line.itemId);
+          const quantity = Number(line.quantity);
+          return Boolean(item) && Number.isFinite(quantity) && quantity > 0 && quantity <= Number(item?.current_stock ?? 0);
+        });
+        const quantityOut = Number(combineForm.quantity);
+        const canSubmit =
+          validLines.length >= 2 &&
+          validLines.length === combineForm.sources.filter((line) => line.itemId || line.quantity).length &&
+          Boolean(combineForm.material_code) &&
+          Boolean(combineForm.product_type_id) &&
+          Number.isFinite(quantityOut) &&
+          quantityOut > 0;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Ensamblar producto">
+            <form className="modalWindow processFormWindow" onSubmit={handleCombineProducts}>
+              <div className="modalHeader">
+                <div>
+                  <h2>Ensamblar producto</h2>
+                  <p>Combina piezas existentes en un producto nuevo del catálogo</p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCombineOpen(false)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="fieldGroup">
+                <span>Piezas que se combinan</span>
+                {combineForm.sources.map((line, index) => {
+                  const lineItem = combinable.find((candidate) => candidate.id === line.itemId);
+                  return (
+                    <div key={index} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <select
+                        className="field"
+                        onChange={(event) =>
+                          setCombineForm((current) => ({
+                            ...current,
+                            sources: current.sources.map((item, idx) =>
+                              idx === index ? { ...item, itemId: event.target.value } : item,
+                            ),
+                          }))
+                        }
+                        style={{ flex: 2 }}
+                        value={line.itemId}
+                      >
+                        <option value="">Seleccionar pieza</option>
+                        {combinable.map((item) => (
+                          <option
+                            disabled={combineForm.sources.some((other, idx) => idx !== index && other.itemId === item.id)}
+                            key={item.id}
+                            value={item.id}
+                          >
+                            {item.name} · {item.sku} ({numericText(item.current_stock)} {item.unit_code})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="field"
+                        max={lineItem ? Number(lineItem.current_stock) : undefined}
+                        min="1"
+                        onChange={(event) =>
+                          setCombineForm((current) => ({
+                            ...current,
+                            sources: current.sources.map((item, idx) =>
+                              idx === index ? { ...item, quantity: event.target.value } : item,
+                            ),
+                          }))
+                        }
+                        placeholder="Cantidad"
+                        step="1"
+                        style={{ flex: 1, minWidth: 90 }}
+                        type="number"
+                        value={line.quantity}
+                      />
+                      {combineForm.sources.length > 2 ? (
+                        <button
+                          aria-label="Quitar pieza"
+                          className="iconOnlyButton dangerIconButton"
+                          onClick={() =>
+                            setCombineForm((current) => ({
+                              ...current,
+                              sources: current.sources.filter((_, idx) => idx !== index),
+                            }))
+                          }
+                          type="button"
+                        >
+                          <X aria-hidden="true" size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <button
+                  className="button"
+                  onClick={() =>
+                    setCombineForm((current) => ({
+                      ...current,
+                      sources: [...current.sources, { itemId: "", quantity: "" }],
+                    }))
+                  }
+                  type="button"
+                >
+                  <Plus aria-hidden="true" size={14} />
+                  Agregar pieza
+                </button>
+              </div>
+              <label className="fieldGroup">
+                <span>Material del producto resultante</span>
+                <select
+                  className="field"
+                  onChange={(event) => setCombineForm((current) => ({ ...current, material_code: event.target.value }))}
+                  value={combineForm.material_code}
+                >
+                  <option value="">Seleccionar material</option>
+                  {materials.map((segment) => (
+                    <option key={segment.id} value={segment.code}>{segment.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Tipo de producto resultante</span>
+                <select
+                  className="field"
+                  onChange={(event) => setCombineForm((current) => ({ ...current, product_type_id: event.target.value }))}
+                  value={combineForm.product_type_id}
+                >
+                  <option value="">Seleccionar tipo</option>
+                  {activeTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Cantidad de productos resultantes</span>
+                <input
+                  className="field"
+                  min="1"
+                  onChange={(event) => setCombineForm((current) => ({ ...current, quantity: event.target.value }))}
+                  step="1"
+                  type="number"
+                  value={combineForm.quantity}
+                />
+              </label>
+              {previewCode ? (
+                <p className="panelText">Código de producto resultante: <strong>{previewCode}</strong></p>
+              ) : null}
+              <div className="modalActions">
+                <button className="button buttonPrimary" disabled={isCombining || !canSubmit} type="submit">
+                  <Repeat aria-hidden="true" size={17} />
+                  {isCombining ? "Ensamblando" : "Ensamblar"}
                 </button>
               </div>
             </form>

@@ -8,6 +8,7 @@ from backend.modules.inventory.service import InventoryDomainError, InventorySer
 from backend.modules.production.models import (
     ProductionProcess,
     ProductionProcessMaterial,
+    ProductionProcessProductType,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
@@ -135,9 +136,32 @@ class ProductionService:
         nums = [int(code) for code in codes if code and code.isdigit()]
         return str(max(nums) + 1 if nums else 2000)
 
+    def _process_read(self, process: ProductionProcess) -> ProductionProcessRead:
+        read = ProductionProcessRead.model_validate(process)
+        read.product_type_ids = [link.product_type_id for link in process.product_types]
+        return read
+
+    def _validate_product_types(self, product_type_ids: list) -> None:
+        if not product_type_ids:
+            return
+        if len(product_type_ids) != len(set(product_type_ids)):
+            raise ProductionDomainError("No repitas el mismo tipo de producto en el proceso.")
+        from sqlalchemy import select
+        from backend.modules.product_types.models import ProductType
+
+        found = set(
+            self.repository.session.execute(
+                select(ProductType.id).where(ProductType.id.in_(product_type_ids))
+            ).scalars()
+        )
+        missing = [pid for pid in product_type_ids if pid not in found]
+        if missing:
+            raise ProductionDomainError("Un tipo de producto seleccionado no existe en el catalogo.")
+
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
         self._validate_materials(payload.materials)
+        self._validate_product_types(payload.product_type_ids)
 
         stages = []
         for stage_data in payload.stages:
@@ -179,17 +203,22 @@ class ProductionService:
                 )
                 for material in payload.materials
             ],
+            product_types=[
+                ProductionProcessProductType(product_type_id=type_id)
+                for type_id in payload.product_type_ids
+            ],
         )
         self.repository.add(process)
         self.repository.flush()
-        return ProductionProcessRead.model_validate(process)
+        return self._process_read(process)
 
     def list_processes(self) -> list[ProductionProcessRead]:
-        return [ProductionProcessRead.model_validate(process) for process in self.repository.list()]
+        return [self._process_read(process) for process in self.repository.list()]
 
     def update_process(self, process_id: UUID, payload: ProductionProcessUpdate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
         self._validate_materials(payload.materials)
+        self._validate_product_types(payload.product_type_ids)
         process = self.repository.get(process_id)
         if process is None:
             raise ProductionNotFoundError("Proceso no encontrado.")
@@ -232,8 +261,12 @@ class ProductionService:
             new_stages.append(stage)
 
         process.stages = new_stages
+        process.product_types = [
+            ProductionProcessProductType(product_type_id=type_id)
+            for type_id in payload.product_type_ids
+        ]
         self.repository.flush()
-        return ProductionProcessRead.model_validate(process)
+        return self._process_read(process)
 
     def delete_process(self, process_id: UUID) -> None:
         process = self.repository.get(process_id)
@@ -444,15 +477,37 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(run)
 
+    def _attach_allowed_types(self, reads: list, runs: list) -> None:
+        """Copia a cada orden los tipos de producto que su proceso puede producir
+        (para filtrar el combo al convertir el lote). Vacio = todos."""
+        from sqlalchemy import select
+
+        process_ids = list({run.process_id for run in runs})
+        if not process_ids:
+            return
+        links = self.repository.session.execute(
+            select(
+                ProductionProcessProductType.process_id,
+                ProductionProcessProductType.product_type_id,
+            ).where(ProductionProcessProductType.process_id.in_(process_ids))
+        ).all()
+        by_process: dict = {}
+        for process_id, type_id in links:
+            by_process.setdefault(process_id, []).append(type_id)
+        for read, run in zip(reads, runs):
+            read.allowed_product_type_ids = by_process.get(run.process_id, [])
+
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
+        self._attach_allowed_types([read], [run])
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
         runs = self.repository.list_runs()
         reads = [ProductionRunRead.model_validate(run) for run in runs]
         _populate_run_names(self.repository.session, reads, runs)
+        self._attach_allowed_types(reads, runs)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:
