@@ -30,6 +30,16 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
   });
   const pager = usePagination(rows, pageSize, run.id);
   const muted = { color: "var(--muted)" } as const;
+  // Altura de fila fija + relleno hasta completar la página: el modal no debe
+  // cambiar de tamaño al pasar de página (preferencia de UI del proyecto).
+  const ROW_HEIGHT = 42;
+  const fillerCount = rows.length > 0 ? Math.max(0, pageSize - pager.pageItems.length) : 0;
+  const oneLine = {
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 240,
+  } as const;
   return (
     <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
       <table className="table tableAuto">
@@ -45,18 +55,17 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
         </thead>
         <tbody>
           {pager.pageItems.map(({ stage, pending, initial, hasInitial, final, hasFinal, decision }) => (
-            <tr key={stage.id}>
-              <td>
+            <tr key={stage.id} style={{ height: ROW_HEIGHT }}>
+              <td style={oneLine} title={stage.phase_name ? `${stage.stage_name} · ${stage.phase_name}` : stage.stage_name}>
                 {stage.stage_order}. {stage.stage_name}
-                {stage.phase_name ? <><br /><small style={muted}>{stage.phase_name}</small></> : null}
               </td>
               <td className="num" style={hasInitial ? undefined : muted}>{pending ? "—" : `${num(initial)} ${unit}`}</td>
               <td className="num" style={hasFinal ? undefined : muted}>{pending ? "—" : `${num(final)} ${unit}`}</td>
               <td className="num">{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit}`}</td>
               <td className="num">{pending ? "—" : `${num(stage.waste_percent ?? 0)}%`}</td>
-              <td>
+              <td style={oneLine}>
                 {decision ? (
-                  <span title={decision.justification ?? undefined}>
+                  <span title={`${decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}${decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}${decision.justification ? ` — ${decision.justification}` : ""}`}>
                     {decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}
                     {decision.attempt_no > 1 ? ` (intento ${decision.attempt_no})` : ""}
                     {decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}
@@ -65,6 +74,11 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
                   "—"
                 )}
               </td>
+            </tr>
+          ))}
+          {Array.from({ length: fillerCount }).map((_, index) => (
+            <tr aria-hidden="true" key={`filler-${index}`} style={{ height: ROW_HEIGHT }}>
+              <td colSpan={6} style={{ border: "none" }}>&nbsp;</td>
             </tr>
           ))}
           {rows.length === 0 ? (
