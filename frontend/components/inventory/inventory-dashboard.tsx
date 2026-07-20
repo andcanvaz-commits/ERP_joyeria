@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -63,6 +63,16 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "CONSUMO_PRODUCCION", label: "Consumo produccion" },
   { value: "INGRESO_PRODUCCION", label: "Ingreso produccion" },
   { value: "MERMA", label: "Merma" },
+];
+
+// Estados de orden de produccion para el filtro de las pestañas de procesos.
+const ORDER_STATUS_OPTIONS: Array<{ value: ProductionRun["status"]; label: string }> = [
+  { value: "PENDIENTE_INVENTARIO", label: "Pendiente de inventario" },
+  { value: "MATERIALES_APROBADOS", label: "Materiales aprobados" },
+  { value: "EN_PROCESO", label: "En proceso" },
+  { value: "PENDIENTE_RECEPCION", label: "Pendiente de recepción" },
+  { value: "RECIBIDA", label: "Recibida" },
+  { value: "CANCELADA", label: "Cancelada" },
 ];
 
 // Espeja INVENTORY_REVERT_WINDOW_HOURS del backend (el backend valida siempre).
@@ -291,6 +301,16 @@ export function InventoryDashboard() {
     return () => window.removeEventListener("resize", measure);
   }, [itemFilter]);
   const [search, setSearch] = useState("");
+  // Panel de filtros avanzados (se abre con el icono junto a la busqueda).
+  const [showFilters, setShowFilters] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const [stockFilter, setStockFilter] = useState<"TODOS" | "ok" | "low" | "out">("TODOS");
+  const [typeText, setTypeText] = useState("");
+  const [descText, setDescText] = useState("");
+  const [purityText, setPurityText] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<"TODOS" | ProductionRun["status"]>("TODOS");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   // Filtro rapido: mostrar solo items en o bajo su stock minimo (KPI clickeable).
   // Grupos de productos terminados expandidos (por nombre de categoria).
   // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
@@ -417,7 +437,76 @@ export function InventoryDashboard() {
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [isEntryMenuOpen]);
 
+  // Rango de fechas activo (aplica a las órdenes: recepción / inicio).
+  const withinDateRange = (value: string | null | undefined) => {
+    if (!dateFrom && !dateTo) return true;
+    if (!value) return false;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    if (dateFrom && date < new Date(`${dateFrom}T00:00:00`)) return false;
+    if (dateTo && date > new Date(`${dateTo}T23:59:59`)) return false;
+    return true;
+  };
+  const anyAdvancedFilter =
+    stockFilter !== "TODOS" ||
+    typeText.trim() !== "" ||
+    descText.trim() !== "" ||
+    purityText.trim() !== "" ||
+    orderStatusFilter !== "TODOS" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+  function clearFilters() {
+    setStockFilter("TODOS");
+    setTypeText("");
+    setDescText("");
+    setPurityText("");
+    setOrderStatusFilter("TODOS");
+    setDateFrom("");
+    setDateTo("");
+  }
+  // Cierra el panel de filtros al hacer clic fuera o presionar Escape.
+  useEffect(() => {
+    if (!showFilters) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && filterMenuRef.current?.contains(target)) return;
+      setShowFilters(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setShowFilters(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showFilters]);
+
+  // Opciones de los combos Tipo y Pureza: valores distintos de los items del
+  // tipo activo (materia prima, insumos, terminados...). Vacio = todos.
+  const typeOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      if (item.archived_at) continue;
+      if (itemFilter !== "TODOS" && item.item_type !== itemFilter) continue;
+      // Solo el metal/tipo (Oro, Plata). La ley (18K/925) va en el combo Pureza.
+      if (item.material_type?.trim()) set.add(item.material_type.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [items, itemFilter]);
+  const purityOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      if (item.archived_at) continue;
+      if (itemFilter !== "TODOS" && item.item_type !== itemFilter) continue;
+      if (item.purity?.trim()) set.add(item.purity.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [items, itemFilter]);
+
   const filteredItems = useMemo(() => {
+    const desc = descText.trim().toLowerCase();
     return items.filter((item) => {
       // Archivados fuera del inventario activo; se consultan en su propio panel.
       if (item.archived_at) return false;
@@ -434,9 +523,13 @@ export function InventoryDashboard() {
         itemTypeLabel(item.item_type),
         stockStatus(item).label,
       ]);
-      return matchesType && matchesSearch;
+      const matchesStock = stockFilter === "TODOS" || stockStatus(item).level === stockFilter;
+      const matchesTypeSel = !typeText || item.material_type === typeText;
+      const matchesDesc = !desc || (item.description ?? "").toLowerCase().includes(desc);
+      const matchesPuritySel = !purityText || item.purity === purityText;
+      return matchesType && matchesSearch && matchesStock && matchesTypeSel && matchesDesc && matchesPuritySel;
     });
-  }, [items, itemFilter, search]);
+  }, [items, itemFilter, search, stockFilter, typeText, descText, purityText]);
   // Valor total de la materia prima listada: suma de stock x costo promedio.
   // Se muestra como fila de total en la columna "Valor total" de esa pestaña.
   const rawMaterialsValue = useMemo(
@@ -703,6 +796,13 @@ export function InventoryDashboard() {
   const pendingReceptionRuns = productionRuns.filter((run) => run.status === "PENDIENTE_RECEPCION");
   const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
   const inProcessRuns = productionRuns.filter((run) => run.status === "EN_PROCESO");
+  // Órdenes tras aplicar los filtros de fecha y estado (pestañas de procesos).
+  const receivedRunsFiltered = receivedRuns.filter(
+    (run) => (orderStatusFilter === "TODOS" || run.status === orderStatusFilter) && withinDateRange(run.received_at),
+  );
+  const inProcessRunsFiltered = inProcessRuns.filter(
+    (run) => (orderStatusFilter === "TODOS" || run.status === orderStatusFilter) && withinDateRange(run.started_at ?? run.requested_at),
+  );
   const receivedCodes = new Set(receivedRuns.map((run) => run.production_code).filter(Boolean) as string[]);
   // En "Producto terminado": las órdenes recibidas se muestran como filas (con id OP);
   // ocultamos el item de stock auto-creado con ese mismo código para no duplicar.
@@ -763,20 +863,23 @@ export function InventoryDashboard() {
   // Movimientos, kardex e historial: de 3 en 3.
   const TAB_PAGE_SIZE = 10;
   const MOVEMENTS_PAGE_SIZE = 3;
-  const rawItemsPager = usePagination(displayItems, TAB_PAGE_SIZE, `${itemFilter}|${search}`);
-  const finishedTypesPager = usePagination(finishedGroups, TAB_PAGE_SIZE, `${itemFilter}|${search}`);
+  // Clave de reinicio de paginación: incluye los filtros para volver a la
+  // primera página cuando cambian.
+  const filterKey = `${itemFilter}|${search}|${stockFilter}|${typeText}|${descText}|${purityText}|${orderStatusFilter}|${dateFrom}|${dateTo}`;
+  const rawItemsPager = usePagination(displayItems, TAB_PAGE_SIZE, filterKey);
+  const finishedTypesPager = usePagination(finishedGroups, TAB_PAGE_SIZE, filterKey);
   const finishedCatsPager = usePagination(drilledGroup?.models ?? [], TAB_PAGE_SIZE, drillGroup ?? "");
   const piecesPager = usePagination(
     searchActive ? displayItems : drilledModel?.items ?? [],
     TAB_PAGE_SIZE,
     `${drillGroup ?? ""}|${drillModel ?? ""}|${search}`,
   );
-  const receivedRunsPager = usePagination(receivedRuns, TAB_PAGE_SIZE, itemFilter);
+  const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
   const wipRows = [
-    ...inProcessRuns.map((run) => ({ kind: "run" as const, run, item: null })),
+    ...inProcessRunsFiltered.map((run) => ({ kind: "run" as const, run, item: null })),
     ...displayItems.map((item) => ({ kind: "item" as const, run: null, item })),
   ];
-  const wipPager = usePagination(wipRows, TAB_PAGE_SIZE, `${itemFilter}|${search}`);
+  const wipPager = usePagination(wipRows, TAB_PAGE_SIZE, filterKey);
   // Últimos movimientos de todo el inventario, sin filtro por pestaña ni fecha.
   const movementsPager = usePagination(sortedMovements, MOVEMENTS_PAGE_SIZE);
   const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, viewingItem?.id ?? "");
@@ -1277,12 +1380,104 @@ export function InventoryDashboard() {
                 </button>
               ))}
             </div>
-            <input
-              className="field searchField"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Buscar por nombre, tipo, SKU, ley, descripción o estado"
-              value={search}
-            />
+            <div className="searchGroup" ref={filterMenuRef}>
+              <input
+                className="field searchField"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar por nombre, tipo, SKU, ley, descripción o estado"
+                value={search}
+              />
+              <button
+                className={`iconOnlyButton filterToggle${showFilters || anyAdvancedFilter ? " filterToggleActive" : ""}`}
+                onClick={() => setShowFilters((open) => !open)}
+                type="button"
+                aria-label="Filtros"
+                aria-expanded={showFilters}
+                title="Filtros"
+              >
+                <SlidersHorizontal aria-hidden="true" size={17} />
+                {anyAdvancedFilter ? <span className="filterDot" aria-hidden="true" /> : null}
+              </button>
+
+              {showFilters ? (
+                <div className="filterPanel" role="dialog" aria-label="Filtros de inventario">
+                  <div className="filterPanelHead">
+                    <strong>Filtros</strong>
+                    <button className="iconOnlyButton" onClick={() => setShowFilters(false)} type="button" aria-label="Cerrar filtros">
+                      <X aria-hidden="true" size={16} />
+                    </button>
+                  </div>
+
+                  {itemFilter !== "ORDENES_TERMINADAS" ? (
+                    <>
+                      <label className="filterField">
+                        <span>Tipo</span>
+                        <select className="field" value={typeText} onChange={(event) => setTypeText(event.target.value)}>
+                          <option value="">Todos</option>
+                          {typeOptions.map((type) => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="filterField">
+                        <span>Ley / pureza</span>
+                        <select className="field" value={purityText} onChange={(event) => setPurityText(event.target.value)}>
+                          <option value="">Todas</option>
+                          {purityOptions.map((purity) => (
+                            <option key={purity} value={purity}>{purity}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="filterField">
+                        <span>Descripción</span>
+                        <input className="field" value={descText} onChange={(event) => setDescText(event.target.value)} placeholder="Texto en la descripción" />
+                      </label>
+                      <label className="filterField">
+                        <span>Estado de stock</span>
+                        <select className="field" value={stockFilter} onChange={(event) => setStockFilter(event.target.value as typeof stockFilter)}>
+                          <option value="TODOS">Todos</option>
+                          <option value="ok">OK</option>
+                          <option value="low">Bajo</option>
+                          <option value="out">Agotado</option>
+                        </select>
+                      </label>
+                    </>
+                  ) : null}
+
+                  {itemFilter === "ORDENES_TERMINADAS" || itemFilter === "WORK_IN_PROGRESS" ? (
+                    <>
+                      <label className="filterField">
+                        <span>Estado de orden</span>
+                        <select className="field" value={orderStatusFilter} onChange={(event) => setOrderStatusFilter(event.target.value as typeof orderStatusFilter)}>
+                          <option value="TODOS">Todos</option>
+                          {ORDER_STATUS_OPTIONS.map((status) => (
+                            <option key={status.value} value={status.value}>{status.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="filterField">
+                        <span>Desde</span>
+                        <input className="field" type="date" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} />
+                      </label>
+                      <label className="filterField">
+                        <span>Hasta</span>
+                        <input className="field" type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} />
+                      </label>
+                    </>
+                  ) : null}
+
+                  <div className="filterPanelActions">
+                    <button className="button" onClick={clearFilters} type="button" disabled={!anyAdvancedFilter}>
+                      <X aria-hidden="true" size={14} />
+                      Limpiar
+                    </button>
+                    <button className="button buttonPrimary" onClick={() => setShowFilters(false)} type="button">
+                      Aplicar
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           {itemFilter === "RAW_MATERIAL" ? (
@@ -1623,8 +1818,8 @@ export function InventoryDashboard() {
                     </tr>
                     );
                   })}
-                  {receivedRuns.length === 0 ? (
-                    <tr><td colSpan={7}><div className="emptyState">No hay procesos terminados.</div></td></tr>
+                  {receivedRunsFiltered.length === 0 ? (
+                    <tr><td colSpan={7}><div className="emptyState">{anyAdvancedFilter ? "Sin procesos para los filtros." : "No hay procesos terminados."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -1709,8 +1904,8 @@ export function InventoryDashboard() {
                     </tr>
                   );
                 })}
-                {!isLoading && displayItems.length === 0 && inProcessRuns.length === 0 ? (
-                  <tr><td colSpan={8}><div className="emptyState">No hay productos en proceso.</div></td></tr>
+                {!isLoading && displayItems.length === 0 && inProcessRunsFiltered.length === 0 ? (
+                  <tr><td colSpan={8}><div className="emptyState">{anyAdvancedFilter ? "Sin productos en proceso para los filtros." : "No hay productos en proceso."}</div></td></tr>
                 ) : null}
                 {isLoading ? (
                   <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>

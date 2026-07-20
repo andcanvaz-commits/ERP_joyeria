@@ -1324,6 +1324,82 @@ textarea {
   max-width: 260px;
 }
 
+/* Busqueda + icono de filtros. El panel emerge anclado al icono. */
+.searchGroup {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filterToggle {
+  position: relative;
+  border: 1px solid var(--border);
+}
+.filterToggleActive {
+  border-color: var(--primary, #b7791f);
+  color: var(--primary-strong, #8a5a12);
+}
+.filterDot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e03131;
+}
+
+/* Panel emergente de filtros. */
+.filterPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(300px, 90vw);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #ffffff);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+.filterPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.filterPanelHead strong {
+  font-size: 15px;
+}
+.filterField {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.filterField > span {
+  color: var(--muted);
+  font-weight: 700;
+}
+.filterField .field {
+  height: 38px;
+  padding: 6px 10px;
+}
+.filterPanelActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+@media (max-width: 680px) {
+  .searchGroup {
+    flex: 1 1 auto;
+  }
+  .searchGroup .searchField {
+    flex: 1 1 auto;
+  }
+}
+
 .inventoryList,
 .movementList {
   display: grid;
