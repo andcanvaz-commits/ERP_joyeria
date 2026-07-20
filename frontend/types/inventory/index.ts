@@ -7,7 +7,9 @@ export type InventoryMovementType =
   | "AJUSTE_NEGATIVO"
   | "CONSUMO_PRODUCCION"
   | "INGRESO_PRODUCCION"
-  | "MERMA";
+  | "MERMA"
+  | "CONVERSION_SALIDA"
+  | "CONVERSION_ENTRADA";
 
 export type InventoryItem = {
   id: string;
@@ -15,6 +17,7 @@ export type InventoryItem = {
   name: string;
   sku: string;
   product_code?: string | null;
+  source_lot_sku?: string | null;
   description: string | null;
   unit_code: string;
   minimum_stock: string | null;

@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -12,8 +12,10 @@ import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
+import { listProductTypes } from "@/lib/product-types-api";
 import {
   archiveInventoryItem,
+  convertLotToProduct,
   createInventoryItem,
   createInventoryMovement,
   deleteInventoryItem,
@@ -63,6 +65,8 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "CONSUMO_PRODUCCION", label: "Consumo produccion" },
   { value: "INGRESO_PRODUCCION", label: "Ingreso produccion" },
   { value: "MERMA", label: "Merma" },
+  { value: "CONVERSION_SALIDA", label: "Conversion salida" },
+  { value: "CONVERSION_ENTRADA", label: "Conversion entrada" },
 ];
 
 // Estados de orden de produccion para el filtro de las pestañas de procesos.
@@ -137,7 +141,7 @@ function movementTypeLabel(type: InventoryMovementType) {
 // Signo del movimiento sobre el stock: suma entradas/ingresos/ajustes+ y resta
 // salidas/consumos/merma/ajustes-. Base del saldo corrido del kardex.
 function movementSign(type: InventoryMovementType) {
-  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" ? 1 : -1;
+  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" ? 1 : -1;
 }
 
 function unitLabel(value: string) {
@@ -344,6 +348,10 @@ export function InventoryDashboard() {
   const [wasteHistoryRun, setWasteHistoryRun] = useState<ProductionRun | null>(null);
   // Orden terminada cuya recepcion se consulta (quien la recibio y cuando).
   const [receptionInfoRun, setReceptionInfoRun] = useState<ProductionRun | null>(null);
+  // Conversión de lote de proceso terminado a producto del catálogo.
+  const [convertRun, setConvertRun] = useState<ProductionRun | null>(null);
+  const [convertForm, setConvertForm] = useState({ material_code: "", product_type_id: "", quantity: "" });
+  const [isConverting, setIsConverting] = useState(false);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -389,6 +397,13 @@ export function InventoryDashboard() {
   const { data: catalogSegments = [] } = useQuery({
     queryKey: ["catalog-segments"],
     queryFn: listCatalogSegments,
+    enabled: Boolean(currentUser),
+  });
+
+  // Tipos de producto del catálogo para la conversión de lotes.
+  const { data: productTypes = [] } = useQuery({
+    queryKey: ["product-types"],
+    queryFn: listProductTypes,
     enabled: Boolean(currentUser),
   });
 
@@ -789,6 +804,33 @@ export function InventoryDashboard() {
       setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
     } finally {
       setIsSavingProduction(false);
+    }
+  }
+
+  async function handleConvertLot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!convertRun) return;
+    const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
+    if (!lotItem) {
+      setError("No se encontró el lote de esta orden en el inventario.");
+      return;
+    }
+    setError(null);
+    setIsConverting(true);
+    try {
+      await convertLotToProduct(lotItem.id, {
+        material_code: convertForm.material_code,
+        product_type_id: convertForm.product_type_id,
+        quantity: convertForm.quantity,
+      });
+      setSuccess("Lote convertido en productos terminados.");
+      setConvertRun(null);
+      setConvertForm({ material_code: "", product_type_id: "", quantity: "" });
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo convertir el lote.");
+    } finally {
+      setIsConverting(false);
     }
   }
 
@@ -1780,6 +1822,8 @@ export function InventoryDashboard() {
                 <tbody>
                   {receivedRunsPager.pageItems.map((run) => {
                     const finalWaste = run.waste_weight ? Number(run.waste_weight) : runCurrentWaste(run);
+                    const lotItem = items.find((item) => item.sku === run.production_code) ?? null;
+                    const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
                     return (
                     <tr key={run.id}>
                       <td>{run.production_code ?? "—"}</td>
@@ -1812,6 +1856,19 @@ export function InventoryDashboard() {
                           <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
                             <Eye aria-hidden="true" size={15} />
                             Visualizar
+                          </button>
+                          <button
+                            className="iconTextButton"
+                            disabled={!lotItem || lotStock <= 0}
+                            onClick={() => {
+                              setConvertForm({ material_code: "", product_type_id: "", quantity: "" });
+                              setConvertRun(run);
+                            }}
+                            title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Convertir lote en productos del catálogo"}
+                            type="button"
+                          >
+                            <Repeat aria-hidden="true" size={15} />
+                            Convertir
                           </button>
                         </div>
                       </td>
@@ -2336,6 +2393,90 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
+      {convertRun ? (() => {
+        const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
+        const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
+        const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+        const activeTypes = productTypes.filter((type) => type.is_active);
+        const selectedType = activeTypes.find((type) => type.id === convertForm.product_type_id) ?? null;
+        const previewCode = convertForm.material_code && selectedType
+          ? `${convertForm.material_code}${selectedType.category_code}${selectedType.model_code}`
+          : null;
+        const quantityNumber = Number(convertForm.quantity);
+        const quantityValid = Number.isFinite(quantityNumber) && quantityNumber > 0 && quantityNumber <= lotStock;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Convertir lote en productos">
+            <form className="modalWindow processFormWindow" onSubmit={handleConvertLot}>
+              <div className="modalHeader">
+                <div>
+                  <h2>Convertir lote</h2>
+                  <p>
+                    {convertRun.production_code ?? "Sin folio"} · {convertRun.process_name} · Disponible:{" "}
+                    {numericText(String(lotStock))} und
+                  </p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setConvertRun(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <label className="fieldGroup">
+                <span>Material</span>
+                <select
+                  className="field"
+                  onChange={(event) => setConvertForm((current) => ({ ...current, material_code: event.target.value }))}
+                  value={convertForm.material_code}
+                >
+                  <option value="">Seleccionar material</option>
+                  {materials.map((segment) => (
+                    <option key={segment.id} value={segment.code}>{segment.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Tipo de producto</span>
+                <select
+                  className="field"
+                  onChange={(event) => setConvertForm((current) => ({ ...current, product_type_id: event.target.value }))}
+                  value={convertForm.product_type_id}
+                >
+                  <option value="">Seleccionar tipo</option>
+                  {activeTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Cantidad a convertir (máx. {numericText(String(lotStock))})</span>
+                <input
+                  className="field"
+                  max={lotStock}
+                  min="1"
+                  onChange={(event) => setConvertForm((current) => ({ ...current, quantity: event.target.value }))}
+                  step="1"
+                  type="number"
+                  value={convertForm.quantity}
+                />
+              </label>
+              {previewCode ? (
+                <p className="panelText">Código de producto resultante: <strong>{previewCode}</strong></p>
+              ) : null}
+              <div className="modalActions">
+                <button
+                  className="button buttonPrimary"
+                  disabled={isConverting || !convertForm.material_code || !convertForm.product_type_id || !quantityValid}
+                  type="submit"
+                >
+                  <Repeat aria-hidden="true" size={17} />
+                  {isConverting ? "Convirtiendo" : "Convertir"}
+                </button>
+              </div>
+            </form>
+          </div>
+        );
+      })() : null}
+
       {isArchivedOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Items archivados">
           <section className="modalWindow processViewWindow">
@@ -2367,13 +2508,11 @@ export function InventoryDashboard() {
                       <td>{item.archived_at ? movementDateLabel(item.archived_at) : "—"}</td>
                       <td>
                         <div className="rowActions">
-                          <button className="iconTextButton" onClick={() => void handleUnarchiveItem(item)} type="button">
+                          <button aria-label="Restaurar" className="iconOnlyButton" onClick={() => void handleUnarchiveItem(item)} title="Restaurar" type="button">
                             <RotateCcw aria-hidden="true" size={15} />
-                            Restaurar
                           </button>
-                          <button className="iconTextButton dangerText" onClick={() => void handleDeleteArchivedItem(item)} type="button">
+                          <button aria-label="Eliminar" className="iconOnlyButton dangerText" onClick={() => void handleDeleteArchivedItem(item)} title="Eliminar" type="button">
                             <Trash2 aria-hidden="true" size={15} />
-                            Eliminar
                           </button>
                         </div>
                       </td>
@@ -2488,6 +2627,7 @@ export function InventoryDashboard() {
             </div>
             <div className="userPreviewGrid">
               {viewingItem.material_type ? <span><strong>Tipo</strong>{viewingItem.material_type}</span> : null}
+              {viewingItem.source_lot_sku ? <span><strong>Lote de origen</strong>{viewingItem.source_lot_sku}</span> : null}
               <span><strong>Costo promedio</strong>$ {numericText(viewingItem.average_cost ?? "0")}</span>
               <span><strong>Valor total</strong>$ {moneyText(itemTotalValue(viewingItem))}</span>
               <span>

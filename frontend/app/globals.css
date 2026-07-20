@@ -4485,13 +4485,9 @@ textarea:disabled {
 .inventoryItemsTable td:last-child { white-space: nowrap; }
 .inventoryItemsTable td:last-child .rowActions { justify-content: flex-end; flex-wrap: nowrap; }
 
-/* Modal Archivados: Restaurar y Eliminar lado a lado, mismo tamaño. */
+/* Modal Archivados: acciones solo icono para no comer ancho de la tabla. */
 .archivedTable td:last-child { width: 1%; white-space: nowrap; }
 .archivedTable .rowActions { flex-wrap: nowrap; }
-.archivedTable .rowActions .iconTextButton {
-  min-width: 104px;
-  justify-content: center;
-}
 
 .confirmWindow { width: min(460px, 100%); }
 

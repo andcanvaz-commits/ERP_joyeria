@@ -75,6 +75,21 @@ export function revertLastEntry(itemId: string) {
   });
 }
 
+export type ConvertLotPayload = {
+  material_code: string;
+  product_type_id: string;
+  quantity: string;
+};
+
+// Convierte parcialmente un lote de proceso terminado en un producto del
+// catálogo (par de movimientos CONVERSION_SALIDA/CONVERSION_ENTRADA).
+export function convertLotToProduct(lotItemId: string, payload: ConvertLotPayload) {
+  return apiRequest<InventoryItem>(`/api/inventory/lots/${lotItemId}/convert`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listInventoryMovements(itemId?: string) {
   const query = itemId ? `?item_id=${itemId}` : "";
   return apiRequest<InventoryMovement[]>(`/api/inventory/movements${query}`);

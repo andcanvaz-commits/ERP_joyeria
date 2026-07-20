@@ -17,6 +17,8 @@ const MOVEMENT_LABELS: Record<string, string> = {
   CONSUMO_PRODUCCION: "Consumo produccion",
   INGRESO_PRODUCCION: "Ingreso produccion",
   MERMA: "Merma",
+  CONVERSION_SALIDA: "Conversion salida",
+  CONVERSION_ENTRADA: "Conversion entrada",
 };
 
 // Movimientos que representan ingreso de producto terminado (produccion del mes).
