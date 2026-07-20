@@ -15,6 +15,8 @@ InventoryMovementType = Literal[
     "CONSUMO_PRODUCCION",
     "INGRESO_PRODUCCION",
     "MERMA",
+    "CONVERSION_SALIDA",
+    "CONVERSION_ENTRADA",
 ]
 
 
@@ -54,6 +56,7 @@ class InventoryItemRead(BaseModel):
     name: str
     sku: str
     product_code: str | None = None
+    source_lot_sku: str | None = None
     description: str | None = None
     material_type: str | None = None
     purity: str | None = None
@@ -64,6 +67,14 @@ class InventoryItemRead(BaseModel):
     current_stock: Decimal
     average_cost: Decimal = Decimal("0")
     archived_at: datetime | None = None
+
+
+class LotConversionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    material_code: str = Field(min_length=1, max_length=1)
+    product_type_id: UUID
+    quantity: Decimal = Field(gt=0)
 
 
 class InventoryMovementCreate(BaseModel):

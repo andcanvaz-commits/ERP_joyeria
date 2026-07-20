@@ -12,6 +12,7 @@ from backend.modules.inventory.schemas import (
     InventoryMovementCreate,
     InventoryMovementRead,
     InventorySummary,
+    LotConversionCreate,
 )
 from backend.modules.shared.contracts.inventory import (
     InventoryAvailabilityLine,
@@ -53,8 +54,8 @@ class InventoryNotFoundError(LookupError):
     pass
 
 
-POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION"}
-NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA"}
+POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION", "CONVERSION_ENTRADA"}
+NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA", "CONVERSION_SALIDA"}
 ITEM_TYPE_PREFIXES = {
     "RAW_MATERIAL": "MP",
     "SUPPLY": "IN",
@@ -399,6 +400,92 @@ class InventoryService(InventoryIntegrationPort):
         )
         self.create_movement(payload, user_id=received_by_user_id, lot_code=production_code)
         return item
+
+    def convert_lot_to_product(
+        self, lot_item_id: UUID, payload: LotConversionCreate, user_id: UUID | None
+    ) -> InventoryItemRead:
+        """Convierte parcialmente un lote de proceso terminado (SKU = código OP)
+        en un producto del catálogo. Consumo y producción quedan como el par de
+        movimientos CONVERSION_SALIDA/CONVERSION_ENTRADA; nunca se edita stock
+        directo. Repetir la conversión mismo tipo + mismo lote suma al mismo
+        item; lotes distintos nunca se consolidan."""
+        from sqlalchemy import select
+        from backend.modules.catalog.models import CatalogSegment
+        from backend.modules.product_types.models import ProductType
+
+        lot = self._get_item_or_raise(lot_item_id)
+        if lot.item_type != "FINISHED_PRODUCT":
+            raise InventoryDomainError("Solo se pueden convertir lotes de procesos terminados.")
+        is_production_lot = any(
+            movement.reference_type == "production_order"
+            for movement in self.repository.list_movements(lot.id)
+        )
+        if not is_production_lot:
+            raise InventoryDomainError("El item no es un lote de una orden de produccion.")
+        if lot.current_stock < payload.quantity:
+            raise InventoryDomainError("Stock insuficiente en el lote.")
+
+        session = self.repository.session
+        material = session.execute(
+            select(CatalogSegment).where(
+                CatalogSegment.kind == "MATERIAL",
+                CatalogSegment.code == payload.material_code,
+                CatalogSegment.is_active.is_(True),
+            )
+        ).scalar_one_or_none()
+        if material is None:
+            raise InventoryDomainError("Material no existe en el catalogo.")
+        product_type = session.get(ProductType, payload.product_type_id)
+        if product_type is None or not product_type.is_active:
+            raise InventoryNotFoundError("Tipo de producto no encontrado o inactivo.")
+
+        product_code = f"{payload.material_code}{product_type.category_code}{product_type.model_code}"
+        target = next(
+            (
+                item
+                for item in self.repository.list_items("FINISHED_PRODUCT")
+                if item.product_code == product_code and item.source_lot_sku == lot.sku
+            ),
+            None,
+        )
+        if target is None:
+            target = InventoryItem(
+                item_type="FINISHED_PRODUCT",
+                name=product_type.name or lot.name,
+                sku=self._generate_sku("FINISHED_PRODUCT"),
+                product_code=product_code,
+                source_lot_sku=lot.sku,
+                unit_code=lot.unit_code,
+                minimum_stock=None,
+            )
+            self.repository.add_item(target)
+            self.repository.flush()
+
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=lot.id,
+                movement_type="CONVERSION_SALIDA",
+                quantity=payload.quantity,
+                reason=f"Conversion a producto {product_code}",
+                reference_type="lot_conversion",
+                reference_id=target.id,
+            ),
+            user_id=user_id,
+        )
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=target.id,
+                movement_type="CONVERSION_ENTRADA",
+                quantity=payload.quantity,
+                reason=f"Conversion desde lote {lot.sku}",
+                reference_type="lot_conversion",
+                reference_id=lot.id,
+            ),
+            user_id=user_id,
+            lot_code=lot.sku,
+        )
+        self.repository.flush()
+        return InventoryItemRead.model_validate(target)
 
     def commit_finished_production(
         self,

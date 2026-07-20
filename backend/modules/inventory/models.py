@@ -17,6 +17,9 @@ class InventoryItem(Base):
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     sku: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
     product_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # SKU (código OP) del lote de origen cuando el item nació por conversión
+    # de un lote de proceso terminado a producto del catálogo.
+    source_lot_sku: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     material_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     purity: Mapped[str | None] = mapped_column(String(40), nullable=True)
