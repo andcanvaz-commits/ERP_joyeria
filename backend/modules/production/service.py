@@ -382,6 +382,30 @@ class ProductionService:
             )
         except InventoryDomainError as exc:
             raise ProductionDomainError(str(exc)) from exc
+        # Insumos configurados por etapa: se entregan junto con la materia prima
+        # (cantidad fija por orden) y quedan como un movimiento por insumo.
+        # Si falta stock de algun insumo, la aprobacion completa se revierte.
+        process = self.repository.get(run.process_id)
+        if process is not None:
+            from backend.modules.inventory.models import InventoryItem
+
+            for stage in sorted(process.stages, key=lambda item: item.stage_order):
+                if not stage.is_active:
+                    continue
+                for ingredient in stage.ingredients:
+                    supply = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
+                    supply_name = supply.name if supply is not None else "insumo"
+                    try:
+                        self.inventory_service.consume_material_for_production(
+                            item_id=ingredient.inventory_item_id,
+                            quantity=ingredient.quantity,
+                            production_run_id=run.id,
+                            user_id=current_user.id,
+                            production_code=run.production_code,
+                            reason=f"Consumo de insumo en etapa {stage.stage_order}. {stage.name}.",
+                        )
+                    except InventoryDomainError as exc:
+                        raise ProductionDomainError(f"Insumo '{supply_name}': {exc}") from exc
         run.status = ProductionRunStatus.MATERIALS_APPROVED
         run.materials_approved_at = datetime.utcnow()
         run.materials_approved_by_user_id = current_user.id

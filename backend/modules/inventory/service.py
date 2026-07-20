@@ -282,12 +282,13 @@ class InventoryService(InventoryIntegrationPort):
         production_run_id: UUID,
         user_id: UUID | None,
         production_code: str | None = None,
+        reason: str | None = None,
     ) -> InventoryMovementRead:
         payload = InventoryMovementCreate(
             item_id=item_id,
             movement_type="CONSUMO_PRODUCCION",
             quantity=quantity,
-            reason="Consumo de materia prima por inicio de produccion.",
+            reason=reason or "Consumo de materia prima por inicio de produccion.",
             reference_type="production_run",
             reference_id=production_run_id,
         )
