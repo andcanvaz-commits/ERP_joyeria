@@ -1549,7 +1549,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             key={decisionIndex}
                           >
                             <strong>
-                              {decision.decision === "REJECTED" ? "Rechazo" : "Aprobación"} · intento {decision.attempt_no}
+                              {decision.decision === "REJECTED" ? "Rechazo" : "Aprobación"}
+                              {(stage.decisions?.length ?? 0) > 1 || decision.attempt_no > 1 ? ` · intento ${decision.attempt_no}` : ""}
                             </strong>
                             {decision.justification ? <span>{decision.justification}</span> : null}
                             <small>
