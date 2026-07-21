@@ -2122,9 +2122,10 @@ export function InventoryDashboard() {
                 return (
                   <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
                     <div style={{ gridColumn: "1 / -2" }}>
-                      <strong className="dangerText">
-                        Solicitud rechazada · {run.production_code ?? run.process_name}
-                      </strong>
+                      <strong className="dangerText">Solicitud rechazada</strong>
+                      {run.production_code ? (
+                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{run.production_code}</span>
+                      ) : null}
                       <span>
                         {movementDateLabel(run.rejected_at ?? "")} · {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
                         {numericText(run.total_required_material)} {run.raw_material_unit_code}
@@ -2260,9 +2261,10 @@ export function InventoryDashboard() {
                       return (
                         <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
                           <div style={{ gridColumn: "1 / -2" }}>
-                            <strong className="dangerText">
-                              Solicitud rechazada · {run.production_code ?? run.process_name}
-                            </strong>
+                            <strong className="dangerText">Solicitud rechazada</strong>
+                            {run.production_code ? (
+                              <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{run.production_code}</span>
+                            ) : null}
                             <span>
                               {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
                               {numericText(run.total_required_material)} {run.raw_material_unit_code}
