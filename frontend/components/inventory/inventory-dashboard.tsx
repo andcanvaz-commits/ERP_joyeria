@@ -1784,9 +1784,8 @@ export function InventoryDashboard() {
                           <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
                           <td>
                             <div className="rowActions">
-                              <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} type="button">
+                              <button aria-label="Visualizar" className="iconOnlyButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} title="Visualizar" type="button">
                                 <Eye aria-hidden="true" size={15} />
-                                Visualizar
                               </button>
                             </div>
                           </td>
@@ -1912,12 +1911,12 @@ export function InventoryDashboard() {
                       </td>
                       <td>
                         <div className="rowActions">
-                          <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
+                          <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingRun(run)} title="Visualizar" type="button">
                             <Eye aria-hidden="true" size={15} />
-                            Visualizar
                           </button>
                           <button
-                            className="iconTextButton"
+                            aria-label="Convertir lote en productos"
+                            className="iconOnlyButton"
                             disabled={!lotItem || lotStock <= 0}
                             onClick={() => {
                               setConvertForm({ material_code: "", product_type_id: "", quantity: "" });
@@ -1927,7 +1926,6 @@ export function InventoryDashboard() {
                             type="button"
                           >
                             <Repeat aria-hidden="true" size={15} />
-                            Convertir
                           </button>
                         </div>
                       </td>
@@ -1998,9 +1996,8 @@ export function InventoryDashboard() {
                         </td>
                         <td>
                           <div className="rowActions">
-                            <button className="iconTextButton" onClick={() => setViewingRun(run)} type="button">
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingRun(run)} title="Visualizar" type="button">
                               <Eye aria-hidden="true" size={15} />
-                              Visualizar
                             </button>
                           </div>
                         </td>
@@ -2020,9 +2017,8 @@ export function InventoryDashboard() {
                       <td>—</td>
                       <td>
                         <div className="rowActions">
-                          <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                          <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
                             <Eye aria-hidden="true" size={15} />
-                            Visualizar
                           </button>
                         </div>
                       </td>
@@ -2078,19 +2074,16 @@ export function InventoryDashboard() {
                   </span>
                   <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
                     {movement.source_file_name ? (
-                      <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
+                      <button aria-label="Descargar XML" className="iconOnlyButton" onClick={() => void handleDownloadMovementSourceFile(movement)} title="Descargar XML" type="button">
                         <Download aria-hidden="true" size={15} />
-                        XML
                       </button>
                     ) : null}
-                    <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
+                    <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingMovement(movement)} title="Visualizar" type="button">
                       <Eye aria-hidden="true" size={15} />
-                      Visualizar
                     </button>
                     {movementsPager.page === 0 && index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
-                      <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
+                      <button aria-label="Revertir última entrada" className="iconOnlyButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} title="Revertir última entrada" type="button">
                         <RotateCcw aria-hidden="true" size={15} />
-                        Revertir
                       </button>
                     ) : null}
                   </span>
@@ -2191,14 +2184,12 @@ export function InventoryDashboard() {
                         </span>
                         <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
                           {movement.source_file_name ? (
-                            <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
+                            <button aria-label="Descargar XML" className="iconOnlyButton" onClick={() => void handleDownloadMovementSourceFile(movement)} title="Descargar XML" type="button">
                               <Download aria-hidden="true" size={15} />
-                              XML
                             </button>
                           ) : null}
-                          <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
+                          <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingMovement(movement)} title="Visualizar" type="button">
                             <Eye aria-hidden="true" size={15} />
-                            Visualizar
                           </button>
                         </span>
                       </div>
