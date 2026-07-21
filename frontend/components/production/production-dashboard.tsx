@@ -359,14 +359,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     // respeta cualquier materia prima ya elegida (todas son utilizables).
     const materials = selectedProcess?.materials ?? [];
     setSelectedMaterialId((current) => current || (materials[0]?.inventory_item_id ?? ""));
-    // Producto objetivo: si el proceso produce exactamente UN tipo, se asigna
-    // solo (no hay nada que preguntar). Si permite varios o cualquiera, se
-    // conserva la elección mientras siga siendo válida.
+    // Producto objetivo: un único tipo asociado se asigna solo; con varios se
+    // conserva la elección si sigue siendo válida; sin asociaciones no aplica.
     const allowed = selectedProcess?.product_type_ids ?? [];
     setTargetProductTypeId((current) => {
       if (allowed.length === 1) return allowed[0];
-      if (!current) return current;
-      return allowed.length === 0 || allowed.includes(current) ? current : "";
+      if (allowed.length === 0) return "";
+      return current && allowed.includes(current) ? current : "";
     });
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
@@ -1255,19 +1254,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   </select>
                 </label>
               </div>
-              {(selectedProcess?.product_type_ids ?? []).length !== 1 ? (
-                // Solo cuando el proceso puede producir varios tipos (o cualquiera)
-                // hay algo que elegir; con un único tipo se asigna solo.
+              {(selectedProcess?.product_type_ids ?? []).length > 1 ? (
+                // El combo solo existe para procesos que producen VARIOS tipos
+                // (ej. casting, según lo asociado en mantenimientos). Con un
+                // tipo se asigna solo; sin asociaciones no se pregunta nada.
                 <label className="fieldGroup">
                   <span>Producto objetivo (opcional)</span>
                   <select className="field" onChange={(e) => setTargetProductTypeId(e.target.value)} value={targetProductTypeId}>
                     <option value="">Sin definir (se clasifica al recibir)</option>
                     {productTypesList
-                      .filter((type) => type.is_active)
-                      .filter((type) => {
-                        const allowed = selectedProcess?.product_type_ids ?? [];
-                        return allowed.length === 0 || allowed.includes(type.id);
-                      })
+                      .filter((type) => type.is_active && (selectedProcess?.product_type_ids ?? []).includes(type.id))
                       .map((type) => (
                         <option key={type.id} value={type.id}>
                           {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
