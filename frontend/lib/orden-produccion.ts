@@ -1,19 +1,16 @@
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
-/** Una fila de la tabla GRAMOS / DETALLES del comprobante. La unidad permite
- * listar insumos que no van en gramos (und, ml…). Solo las filas marcadas con
- * `suma` (la materia prima / el producto) entran al total: los insumos se
- * listan pero nunca se suman con el metal. */
-export type DocRow = { gramos: number; unidad: string; detalle: string; suma: boolean };
+/** Una fila de la tabla CANTIDAD / DETALLES del comprobante: cada una lleva su
+ * propia unidad (g, und, ml…). */
+export type DocRow = { gramos: number; unidad: string; detalle: string };
 
+// Sin subtotal/total: las filas pueden mezclar unidades (g, und, ml…) y una
+// suma única no tendría sentido.
 export type DocSide = {
   fecha: string | null;
   responsable: string;
   rows: DocRow[];
-  total: number;
-  /** Unidad del total (la del metal de la orden). */
-  totalUnidad: string;
 };
 
 export type OrdenProduccionModel = {
@@ -49,16 +46,15 @@ export function buildOrdenProduccion(
 
   const materialUnit = run.raw_material_unit_code || "g";
   const entregaRows: DocRow[] = [
-    { gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName, suma: true }
+    { gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }
   ];
-  // Insumos que salieron de inventario junto con la materia prima: se listan
-  // con su unidad real pero NUNCA suman con el metal.
+  // Insumos que salieron de inventario junto con la materia prima, cada uno
+  // con su unidad real.
   for (const supply of run.supply_consumptions ?? []) {
     entregaRows.push({
       gramos: num(supply.quantity),
       unidad: supply.unit_code || "g",
-      detalle: `Insumo: ${supply.name}`,
-      suma: false
+      detalle: `Insumo: ${supply.name}`
     });
   }
 
@@ -69,15 +65,9 @@ export function buildOrdenProduccion(
     recepcionRows.push({
       gramos: num(run.actual_finished_weight),
       unidad: materialUnit,
-      detalle: `Producto terminado: ${run.process_name}`,
-      suma: true
+      detalle: `Producto terminado: ${run.process_name}`
     });
   }
-
-  // El total es solo del metal (materia prima / producto): los insumos no
-  // entran aunque estén en gramos, y menos si tienen otra unidad.
-  const sum = (rows: DocRow[]) =>
-    rows.filter((row) => row.suma).reduce((acc, row) => acc + row.gramos, 0);
 
   return {
     folio: run.production_code ?? DASH,
@@ -88,16 +78,12 @@ export function buildOrdenProduccion(
     entrega: {
       fecha: run.materials_approved_at,
       responsable: run.materials_approved_by_name ?? DASH,
-      rows: entregaRows,
-      total: sum(entregaRows),
-      totalUnidad: materialUnit
+      rows: entregaRows
     },
     recepcion: {
       fecha: run.received_at,
       responsable: run.received_by_name ?? DASH,
-      rows: recepcionRows,
-      total: sum(recepcionRows),
-      totalUnidad: materialUnit
+      rows: recepcionRows
     },
     cancelada: run.status === "CANCELADA"
   };

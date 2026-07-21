@@ -43,18 +43,8 @@ function SideColumn({
               <td>{row ? <span className={dataClass}>{row.detalle}</span> : " "}</td>
             </tr>
           ))}
-          <tr className="opSubtotalRow">
-            <td />
-            <td className="opTdGramos">
-              <span className={dataClass}>{formatGramos(side.total)} {side.totalUnidad}</span>
-            </td>
-            <td>Subtotal</td>
-          </tr>
         </tbody>
       </table>
-      <div className="opTotal">
-        TOTAL: <span className={dataClass}>{formatGramos(side.total)} {side.totalUnidad}</span>
-      </div>
     </section>
   );
 }
