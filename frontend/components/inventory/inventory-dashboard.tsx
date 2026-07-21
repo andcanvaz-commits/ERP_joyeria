@@ -357,6 +357,8 @@ export function InventoryDashboard() {
   // Rechazo de solicitud de materiales: modal con motivo.
   const [rejectRun, setRejectRun] = useState<ProductionRun | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  // Detalle de un rechazo ya registrado (desde movimientos/historial).
+  const [rejectionInfoRun, setRejectionInfoRun] = useState<ProductionRun | null>(null);
   // Ensamble de piezas de productos terminados en un producto nuevo.
   const [isCombineOpen, setIsCombineOpen] = useState(false);
   const [combineForm, setCombineForm] = useState({
@@ -2118,18 +2120,23 @@ export function InventoryDashboard() {
               if (entry.kind === "rejection" && entry.run) {
                 const run = entry.run;
                 return (
-                  <article className="movementRow" key={`rej-${run.id}`}>
+                  <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
                     <div style={{ gridColumn: "1 / -2" }}>
                       <strong className="dangerText">
                         Solicitud rechazada · {run.production_code ?? run.process_name}
                       </strong>
                       <span>
                         {movementDateLabel(run.rejected_at ?? "")} · {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
-                        {numericText(run.total_required_material)} {run.raw_material_unit_code} ·{" "}
-                        {run.rejection_reason || "Sin motivo"}
+                        {numericText(run.total_required_material)} {run.raw_material_unit_code}
                         {run.rejected_by_name ? ` · ${run.rejected_by_name}` : ""}
                       </span>
                     </div>
+                    <span className="rowActions" onClick={stopClick}>
+                      <button className="iconTextButton" onClick={() => setRejectionInfoRun(run)} type="button">
+                        <Eye aria-hidden="true" size={15} />
+                        Visualizar
+                      </button>
+                    </span>
                   </article>
                 );
               }
@@ -2251,18 +2258,23 @@ export function InventoryDashboard() {
                     if (entry.kind === "rejection" && entry.run) {
                       const run = entry.run;
                       return (
-                        <article className="movementRow" key={`rej-${run.id}`}>
+                        <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
                           <div style={{ gridColumn: "1 / -2" }}>
                             <strong className="dangerText">
                               Solicitud rechazada · {run.production_code ?? run.process_name}
                             </strong>
                             <span>
                               {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
-                              {numericText(run.total_required_material)} {run.raw_material_unit_code} ·{" "}
-                              {run.rejection_reason || "Sin motivo"}
+                              {numericText(run.total_required_material)} {run.raw_material_unit_code}
                               {run.rejected_by_name ? ` · ${run.rejected_by_name}` : ""}
                             </span>
                           </div>
+                          <span className="rowActions" onClick={stopClick}>
+                            <button className="iconTextButton" onClick={() => setRejectionInfoRun(run)} type="button">
+                              <Eye aria-hidden="true" size={15} />
+                              Visualizar
+                            </button>
+                          </span>
                         </article>
                       );
                     }
@@ -2486,6 +2498,30 @@ export function InventoryDashboard() {
               <RunWasteHero run={wasteHistoryRun} />
             </div>
             <RunStageSummaryTable run={wasteHistoryRun} />
+          </section>
+        </div>
+      ) : null}
+
+      {rejectionInfoRun ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Detalle del rechazo">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Solicitud rechazada</h2>
+                <p>{rejectionInfoRun.production_code ?? rejectionInfoRun.process_name} · {rejectionInfoRun.process_name}</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setRejectionInfoRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="userPreviewGrid">
+              <span><strong>Rechazada por</strong>{rejectionInfoRun.rejected_by_name ?? "—"}</span>
+              <span><strong>Cuándo</strong>{rejectionInfoRun.rejected_at ? productionTimeLabel(rejectionInfoRun.rejected_at) : "—"}</span>
+              <span><strong>Solicitada por</strong>{rejectionInfoRun.created_by_name ?? "—"}{rejectionInfoRun.requested_at ? ` · ${productionTimeLabel(rejectionInfoRun.requested_at)}` : ""}</span>
+              <span><strong>Cantidad</strong>{numericText(rejectionInfoRun.quantity)} und</span>
+              <span><strong>Material solicitado</strong>{numericText(rejectionInfoRun.total_required_material)} {rejectionInfoRun.raw_material_unit_code}</span>
+              <span><strong>Motivo</strong>{rejectionInfoRun.rejection_reason || "Sin motivo registrado"}</span>
+            </div>
           </section>
         </div>
       ) : null}
