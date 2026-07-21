@@ -39,7 +39,7 @@ function SideColumn({
           {rows.map((row, index) => (
             <tr key={index}>
               <td>{row && index === 0 ? <span className={dataClass}>{formatDocDate(side.fecha)}</span> : " "}</td>
-              <td className="opTdGramos">{row ? <span className={dataClass}>{formatGramos(row.gramos)}</span> : " "}</td>
+              <td className="opTdGramos">{row ? <span className={dataClass}>{formatGramos(row.gramos)}{row.unidad !== "g" ? ` ${row.unidad}` : ""}</span> : " "}</td>
               <td>{row ? <span className={dataClass}>{row.detalle}</span> : " "}</td>
             </tr>
           ))}

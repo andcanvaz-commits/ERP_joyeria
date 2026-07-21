@@ -1418,8 +1418,10 @@ textarea {
   overflow-y: auto;
 }
 
+/* Mismo ancho que la ventana de vista previa (processViewWindow): el historial
+   no debe ser más grande; si hay pocos registros, el área queda en blanco. */
 .movementHistoryWindow {
-  width: min(960px, 100%);
+  width: min(680px, 100%);
   grid-template-rows: auto minmax(0, 1fr);
 }
 
@@ -1432,8 +1434,8 @@ textarea {
 
 .movementHistoryLayout {
   display: grid;
-  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
-  gap: 16px;
+  grid-template-columns: minmax(250px, 0.85fr) minmax(0, 1.15fr);
+  gap: 12px;
   min-height: 0;
 }
 

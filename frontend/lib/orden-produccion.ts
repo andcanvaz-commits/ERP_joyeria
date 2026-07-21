@@ -1,8 +1,10 @@
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
-/** Una fila de la tabla GRAMOS / DETALLES del comprobante. */
-export type DocRow = { gramos: number; detalle: string };
+/** Una fila de la tabla GRAMOS / DETALLES del comprobante. La unidad permite
+ * listar insumos que no van en gramos (und, ml…); solo las filas en gramos
+ * suman al total. */
+export type DocRow = { gramos: number; unidad: string; detalle: string };
 
 export type DocSide = {
   fecha: string | null;
@@ -42,12 +44,18 @@ export function buildOrdenProduccion(
 ): OrdenProduccionModel {
   const materialName = itemNames.get(run.raw_material_item_id) ?? run.process_name;
 
+  const materialUnit = run.raw_material_unit_code || "g";
   const entregaRows: DocRow[] = [
-    { gramos: num(run.total_required_material), detalle: materialName }
+    { gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }
   ];
-  // Insumos que salieron de inventario junto con la materia prima.
+  // Insumos que salieron de inventario junto con la materia prima (pueden
+  // tener otra unidad de medida: se listan con ella y no suman al total).
   for (const supply of run.supply_consumptions ?? []) {
-    entregaRows.push({ gramos: num(supply.quantity), detalle: `Insumo: ${supply.name}` });
+    entregaRows.push({
+      gramos: num(supply.quantity),
+      unidad: supply.unit_code || "g",
+      detalle: `Insumo: ${supply.name}`
+    });
   }
 
   // Recepción: solo lo que realmente entra a inventario (el producto). La merma
@@ -56,11 +64,14 @@ export function buildOrdenProduccion(
   if (run.actual_finished_weight !== null) {
     recepcionRows.push({
       gramos: num(run.actual_finished_weight),
+      unidad: materialUnit,
       detalle: `Producto terminado: ${run.process_name}`
     });
   }
 
-  const sum = (rows: DocRow[]) => rows.reduce((acc, row) => acc + row.gramos, 0);
+  // Total solo en gramos: no se mezclan unidades distintas en una misma suma.
+  const sum = (rows: DocRow[]) =>
+    rows.filter((row) => row.unidad === "g").reduce((acc, row) => acc + row.gramos, 0);
 
   return {
     folio: run.production_code ?? DASH,
