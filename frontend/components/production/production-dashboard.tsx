@@ -1897,33 +1897,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
 
-            <div className="fieldGroup">
-              <span>Productos que puede producir (opcional — sin marcar produce cualquiera)</span>
-              <div style={{ display: "grid", gap: 4, maxHeight: 140, overflowY: "auto", padding: "4px 2px" }}>
-                {productTypesList.filter((type) => type.is_active).map((type) => (
-                  <label key={type.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
-                    <input
-                      checked={form.productTypeIds.includes(type.id)}
-                      disabled={isSaving}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          productTypeIds: event.target.checked
-                            ? [...current.productTypeIds, type.id]
-                            : current.productTypeIds.filter((id) => id !== type.id),
-                        }))
-                      }
-                      type="checkbox"
-                    />
-                    <span>{type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}</span>
-                  </label>
-                ))}
-                {productTypesList.filter((type) => type.is_active).length === 0 ? (
-                  <span style={{ color: "var(--muted)", fontSize: 13 }}>No hay tipos de producto en el catálogo.</span>
-                ) : null}
-              </div>
-            </div>
-
             <section className="stageSingleWindow">
               <div className="stageTopActions">
                 <strong>Etapa {selectedStageIndex + 1}</strong>
