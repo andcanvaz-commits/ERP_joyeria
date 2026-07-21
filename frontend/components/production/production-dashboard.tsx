@@ -269,6 +269,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [showResponsables, setShowResponsables] = useState(false);
+  // Tick por minuto para el tiempo transcurrido de las ordenes en proceso.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -380,6 +386,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "Pendiente";
     return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  // Tiempo transcurrido desde el inicio: "3 d 4 h", "2 h 15 min" o "45 min".
+  function elapsedLabel(startedAt: string | null, now: number) {
+    if (!startedAt) return "—";
+    const start = new Date(startedAt).getTime();
+    if (Number.isNaN(start) || now <= start) return "0 min";
+    const minutes = Math.floor((now - start) / 60000);
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor((minutes % 1440) / 60);
+    const mins = minutes % 60;
+    if (days > 0) return `${days} d ${hours} h`;
+    if (hours > 0) return `${hours} h ${mins} min`;
+    return `${mins} min`;
   }
 
   function hourLabel(value: string | null) {
@@ -1282,16 +1302,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           ticks={run.stages.length}
                           value={doneCount}
                         />
-                        {run.waste_limit_percent ? (
-                          <CaliperScale
-                            ariaLabel="Merma frente al limite"
-                            label={`${Number(run.waste_percent ?? 0).toFixed(1)}%`}
-                            limit={Number(run.waste_limit_percent)}
-                            limitMode="ceiling"
-                            max={Math.max(Number(run.waste_limit_percent) * 2, 1)}
-                            value={Number(run.waste_percent ?? 0)}
-                          />
-                        ) : null}
+                        {/* Tiempo transcurrido desde el inicio de la orden. */}
+                        <div className="productionRunListRowMeta">
+                          <span>Tiempo en proceso: {elapsedLabel(run.started_at, nowTick)}</span>
+                        </div>
                       </div>
                     );
                   })}
