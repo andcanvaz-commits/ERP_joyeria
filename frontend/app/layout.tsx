@@ -31,6 +31,9 @@ const mono = IBM_Plex_Mono({
   display: "swap",
   weight: ["400", "500"],
   variable: "--font-mono",
+  // Solo aparece en códigos de lote (tras cargar datos): sin preload para no
+  // disparar la advertencia de "preloaded but not used" del navegador.
+  preload: false,
 });
 
 export const metadata: Metadata = {
