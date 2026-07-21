@@ -206,11 +206,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: () => listInventoryItems("RAW_MATERIAL"),
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
-  // Tipos de producto del catálogo: conteo del tile y selector del form de proceso.
+  // Tipos de producto del catálogo: tile, selector del form de proceso y
+  // combo de producto objetivo al crear orden.
   const { data: productTypesList = [] } = useQuery({
     queryKey: ["product-types"],
     queryFn: listProductTypes,
-    enabled: Boolean(currentUser) && variant === "maintenance",
+    enabled: Boolean(currentUser),
   });
   const { data: suppliesList = EMPTY_RAW_MATERIALS } = useQuery({
     queryKey: ["supplies"],
@@ -262,6 +263,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   } | null>(null);
   const [selectedProcessId, setSelectedProcessId] = useState("");
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [targetProductTypeId, setTargetProductTypeId] = useState("");
   const [runQuantity, setRunQuantity] = useState("1");
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
   const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
@@ -357,6 +359,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     // respeta cualquier materia prima ya elegida (todas son utilizables).
     const materials = selectedProcess?.materials ?? [];
     setSelectedMaterialId((current) => current || (materials[0]?.inventory_item_id ?? ""));
+    // El producto objetivo se limpia si el proceso nuevo no lo permite.
+    setTargetProductTypeId((current) => {
+      if (!current) return current;
+      const allowed = selectedProcess?.product_type_ids ?? [];
+      return allowed.length === 0 || allowed.includes(current) ? current : "";
+    });
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
@@ -797,7 +805,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         process_id: selectedProcess.id,
         quantity: runQuantity,
         raw_material_item_id: selectedMaterialId,
+        target_product_type_id: targetProductTypeId || null,
       });
+      setTargetProductTypeId("");
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima.");
       await reload();
     } catch (nextError) {
@@ -1243,6 +1253,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </label>
               </div>
               <label className="fieldGroup">
+                <span>Producto objetivo (opcional)</span>
+                <select className="field" onChange={(e) => setTargetProductTypeId(e.target.value)} value={targetProductTypeId}>
+                  <option value="">Sin definir (se clasifica al recibir)</option>
+                  {productTypesList
+                    .filter((type) => type.is_active)
+                    .filter((type) => {
+                      const allowed = selectedProcess?.product_type_ids ?? [];
+                      return allowed.length === 0 || allowed.includes(type.id);
+                    })
+                    .map((type) => (
+                      <option key={type.id} value={type.id}>
+                        {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
                 <span>Cantidad a fabricar</span>
                 <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
               </label>
@@ -1682,6 +1709,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <strong>Resultado</strong>
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
+              {selectedStatsRun.target_product_type_id ? (
+                <span>
+                  <strong>Producto objetivo</strong>
+                  {(() => {
+                    const type = productTypesList.find((candidate) => candidate.id === selectedStatsRun.target_product_type_id);
+                    return type ? `${type.category_label} · ${type.model_label}${type.name ? ` · ${type.name}` : ""}` : "—";
+                  })()}
+                </span>
+              ) : null}
               <RunWasteHero run={selectedStatsRun} />
               <span>
                 <button

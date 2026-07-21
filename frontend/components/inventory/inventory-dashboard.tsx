@@ -1978,7 +1978,8 @@ export function InventoryDashboard() {
                             className="iconOnlyButton"
                             disabled={!lotItem || lotStock <= 0}
                             onClick={() => {
-                              setConvertForm({ material_code: "", product_type_id: "", quantity: "" });
+                              // Pre-llena con el producto objetivo declarado en la orden.
+                              setConvertForm({ material_code: "", product_type_id: run.target_product_type_id ?? "", quantity: "" });
                               setConvertRun(run);
                             }}
                             title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Convertir lote en productos del catálogo"}
@@ -3273,6 +3274,17 @@ export function InventoryDashboard() {
                             <strong>Proceso</strong>
                             <span>{run.process_name}</span>
                           </div>
+                          {run.target_product_type_id ? (
+                            <div className="solicitudDetailItem">
+                              <strong>Producto objetivo</strong>
+                              <span>
+                                {(() => {
+                                  const type = productTypes.find((candidate) => candidate.id === run.target_product_type_id);
+                                  return type ? `${type.category_label} · ${type.model_label}${type.name ? ` · ${type.name}` : ""}` : "—";
+                                })()}
+                              </span>
+                            </div>
+                          ) : null}
                           <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>
                             <span>{numericText(run.quantity)} unidades</span>

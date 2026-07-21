@@ -60,7 +60,12 @@ export function listProductionRuns() {
   return apiRequest<ProductionRun[]>("/api/production/runs");
 }
 
-export function createProductionRun(payload: { process_id: string; quantity: string; raw_material_item_id: string }) {
+export function createProductionRun(payload: {
+  process_id: string;
+  quantity: string;
+  raw_material_item_id: string;
+  target_product_type_id?: string | null;
+}) {
   return apiRequest<ProductionRun>("/api/production/runs", {
     method: "POST",
     body: JSON.stringify(payload),

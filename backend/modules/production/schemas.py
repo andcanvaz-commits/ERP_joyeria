@@ -122,6 +122,9 @@ class ProductionRunCreate(BaseModel):
     # Material con el que se fabricara: debe ser uno de los configurados en el proceso.
     raw_material_item_id: UUID
     quantity: Decimal = Field(gt=0)
+    # Producto objetivo declarado (opcional); si el proceso restringe tipos,
+    # debe ser uno de ellos.
+    target_product_type_id: UUID | None = None
 
 
 class MaterialRejectPayload(BaseModel):
@@ -213,6 +216,7 @@ class ProductionRunRead(BaseModel):
     rejected_by_name: str | None = None
     rejection_reason: str | None = None
     rejected_at: datetime | None = None
+    target_product_type_id: UUID | None = None
     requested_at: datetime
     materials_approved_at: datetime | None = None
     started_at: datetime | None = None

@@ -107,6 +107,8 @@ export type ProductionRun = {
   rejected_by_name?: string | null;
   rejection_reason?: string | null;
   rejected_at?: string | null;
+  // Producto objetivo declarado al crear la orden (opcional).
+  target_product_type_id?: string | null;
   requested_at: string;
   materials_approved_at: string | null;
   started_at: string | null;
