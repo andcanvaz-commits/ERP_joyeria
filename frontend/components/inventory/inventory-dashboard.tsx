@@ -2518,7 +2518,11 @@ export function InventoryDashboard() {
               <span><strong>Rechazada por</strong>{rejectionInfoRun.rejected_by_name ?? "—"}{rejectionInfoRun.rejected_at ? ` · ${productionTimeLabel(rejectionInfoRun.rejected_at)}` : ""}</span>
               <span><strong>Solicitada por</strong>{rejectionInfoRun.created_by_name ?? "—"}{rejectionInfoRun.requested_at ? ` · ${productionTimeLabel(rejectionInfoRun.requested_at)}` : ""}</span>
               <span><strong>Cantidad</strong>{numericText(rejectionInfoRun.quantity)} und</span>
-              <span><strong>Material solicitado</strong>{numericText(rejectionInfoRun.total_required_material)} {rejectionInfoRun.raw_material_unit_code}</span>
+              <span>
+                <strong>Material solicitado</strong>
+                {items.find((item) => item.id === rejectionInfoRun.raw_material_item_id)?.name ?? "—"} ·{" "}
+                {numericText(rejectionInfoRun.total_required_material)} {rejectionInfoRun.raw_material_unit_code}
+              </span>
               <span><strong>Motivo</strong>{rejectionInfoRun.rejection_reason || "Sin motivo registrado"}</span>
             </div>
           </section>
