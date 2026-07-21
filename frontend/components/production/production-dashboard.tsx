@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -259,6 +259,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
+  const [showResponsables, setShowResponsables] = useState(false);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -507,6 +508,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   function openStatsModal(run: ProductionRun) {
     setSelectedStatsRun(run);
+    setShowResponsables(false);
     setIsStatsModalOpen(true);
   }
 
@@ -1662,10 +1664,26 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
               <span>
-                <strong>Finalizó</strong>
-                {runFinisherName(selectedStatsRun)}
+                <button
+                  className="iconTextButton"
+                  onClick={() => setShowResponsables((current) => !current)}
+                  type="button"
+                >
+                  <strong>Responsables</strong>
+                  <ChevronDown
+                    aria-hidden="true"
+                    size={14}
+                    style={{ transform: showResponsables ? "rotate(180deg)" : undefined, transition: "transform 0.15s" }}
+                  />
+                </button>
               </span>
             </div>
+            {showResponsables ? (
+              <div className="userPreviewGrid">
+                <span><strong>Inició</strong>{selectedStatsRun.started_by_name ?? "—"}</span>
+                <span><strong>Finalizó</strong>{runFinisherName(selectedStatsRun)}</span>
+              </div>
+            ) : null}
             <RunStageSummaryTable run={selectedStatsRun} />
           </section>
         </div>

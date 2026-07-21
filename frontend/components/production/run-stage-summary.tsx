@@ -38,18 +38,19 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
-    maxWidth: 240,
   } as const;
   return (
     <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
-      <table className="table tableAuto">
+      {/* Layout fijo: los anchos no se recalculan por página (la ventana no
+          debe cambiar de tamaño al paginar). */}
+      <table className="table tableAuto" style={{ tableLayout: "fixed", width: "100%", minWidth: 560 }}>
         <thead>
           <tr>
-            <th>Etapa</th>
-            <th className="num">Peso inicial</th>
-            <th className="num">Peso final</th>
-            <th className="num">Merma</th>
-            <th>Decisión</th>
+            <th style={{ width: "28%" }}>Etapa</th>
+            <th className="num" style={{ width: "15%" }}>Peso inicial</th>
+            <th className="num" style={{ width: "15%" }}>Peso final</th>
+            <th className="num" style={{ width: "20%" }}>Merma</th>
+            <th style={{ width: "22%" }}>Decisión</th>
           </tr>
         </thead>
         <tbody>
@@ -58,9 +59,9 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
               <td style={oneLine} title={stage.phase_name ? `${stage.stage_name} · ${stage.phase_name}` : stage.stage_name}>
                 {stage.stage_order}. {stage.stage_name}
               </td>
-              <td className="num" style={hasInitial ? undefined : muted}>{pending ? "—" : `${num(initial)} ${unit}`}</td>
-              <td className="num" style={hasFinal ? undefined : muted}>{pending ? "—" : `${num(final)} ${unit}`}</td>
-              <td className="num">{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit} · ${num(stage.waste_percent ?? 0)}%`}</td>
+              <td className="num" style={hasInitial ? oneLine : { ...oneLine, ...muted }}>{pending ? "—" : `${num(initial)} ${unit}`}</td>
+              <td className="num" style={hasFinal ? oneLine : { ...oneLine, ...muted }}>{pending ? "—" : `${num(final)} ${unit}`}</td>
+              <td className="num" style={oneLine}>{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit} · ${num(stage.waste_percent ?? 0)}%`}</td>
               <td style={oneLine}>
                 {decision ? (
                   <span title={`${decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}${decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}${decision.justification ? ` — ${decision.justification}` : ""}`}>
