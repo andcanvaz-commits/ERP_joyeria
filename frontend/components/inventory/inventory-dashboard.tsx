@@ -2074,16 +2074,19 @@ export function InventoryDashboard() {
                   </span>
                   <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
                     {movement.source_file_name ? (
-                      <button aria-label="Descargar XML" className="iconOnlyButton" onClick={() => void handleDownloadMovementSourceFile(movement)} title="Descargar XML" type="button">
+                      <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
                         <Download aria-hidden="true" size={15} />
+                        XML
                       </button>
                     ) : null}
-                    <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingMovement(movement)} title="Visualizar" type="button">
+                    <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
                       <Eye aria-hidden="true" size={15} />
+                      Visualizar
                     </button>
                     {movementsPager.page === 0 && index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
-                      <button aria-label="Revertir última entrada" className="iconOnlyButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} title="Revertir última entrada" type="button">
+                      <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
                         <RotateCcw aria-hidden="true" size={15} />
+                        Revertir
                       </button>
                     ) : null}
                   </span>
@@ -2184,12 +2187,14 @@ export function InventoryDashboard() {
                         </span>
                         <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
                           {movement.source_file_name ? (
-                            <button aria-label="Descargar XML" className="iconOnlyButton" onClick={() => void handleDownloadMovementSourceFile(movement)} title="Descargar XML" type="button">
+                            <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
                               <Download aria-hidden="true" size={15} />
+                              XML
                             </button>
                           ) : null}
-                          <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingMovement(movement)} title="Visualizar" type="button">
+                          <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
                             <Eye aria-hidden="true" size={15} />
+                            Visualizar
                           </button>
                         </span>
                       </div>
