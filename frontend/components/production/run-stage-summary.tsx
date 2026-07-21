@@ -9,6 +9,36 @@ function num(value: string | number | null | undefined) {
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
 }
 
+// Tarjetas de merma de una orden: total, promedio por etapa con merma y etapa
+// con mayor merma. Compartidas entre el resumen de producción y "Merma por
+// fase" de inventario.
+export function RunWasteHero({ run }: { run: ProductionRun }) {
+  const unit = run.raw_material_unit_code || "g";
+  const stagesWithWaste = run.stages.filter((stage) => Number(stage.waste_weight ?? "0") > 0);
+  const totalWaste = stagesWithWaste.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
+  const averageWaste = stagesWithWaste.length > 0 ? totalWaste / stagesWithWaste.length : 0;
+  const worstStage = stagesWithWaste.reduce<ProductionRun["stages"][number] | null>(
+    (worst, stage) => (!worst || Number(stage.waste_weight ?? "0") > Number(worst.waste_weight ?? "0") ? stage : worst),
+    null,
+  );
+  return (
+    <div className="fichaHero">
+      <div className="fichaHeroItem">
+        <strong>{num(totalWaste)} {unit}</strong>
+        <span>Merma total{run.waste_percent ? ` (${num(run.waste_percent)}%)` : ""}</span>
+      </div>
+      <div className="fichaHeroItem">
+        <strong>{num(averageWaste)} {unit}</strong>
+        <span>Promedio por etapa con merma</span>
+      </div>
+      <div className="fichaHeroItem">
+        <strong>{worstStage ? worstStage.stage_name : "—"}</strong>
+        <span>Etapa con mayor merma{worstStage ? ` (${num(worstStage.waste_weight ?? "0")} ${unit})` : ""}</span>
+      </div>
+    </div>
+  );
+}
+
 // Resumen por etapa de una orden: pesos, merma y decisiones. Compartido entre
 // producción (fin de orden e historial) e inventario (merma por fase).
 // En etapas que no pesan, el peso se hereda de la última etapa pesada anterior

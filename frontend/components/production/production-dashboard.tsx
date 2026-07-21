@@ -36,7 +36,7 @@ import {
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 import { CaliperScale } from "@/components/ui/caliper-scale";
-import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
+import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusPunch } from "@/components/ui/status-punch";
 
@@ -1644,10 +1644,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <StatusPunch label={runStatusLabel(selectedStatsRun.status)} tone={runStatusTone(selectedStatsRun.status)} />
               </span>
               <span>
-                <strong>Merma</strong>
-                {numericText(selectedStatsRun.waste_weight)} {selectedStatsRun.raw_material_unit_code} · {numericText(selectedStatsRun.waste_percent)}%
-              </span>
-              <span>
                 <strong>Resultado</strong>
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
@@ -1678,6 +1674,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </span>
               </div>
             ) : null}
+            <RunWasteHero run={selectedStatsRun} />
             <RunStageSummaryTable run={selectedStatsRun} />
           </section>
         </div>

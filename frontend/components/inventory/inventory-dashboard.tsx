@@ -39,7 +39,7 @@ import {
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import type { ProductionRun, ProductionRunStage } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
-import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
+import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
@@ -2374,45 +2374,23 @@ export function InventoryDashboard() {
         );
       })() : null}
 
-      {wasteHistoryRun ? (() => {
-        const stagesWithWaste = wasteStages.filter((stage) => Number(stage.waste_weight ?? "0") > 0);
-        const totalWaste = stagesWithWaste.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
-        const averageWaste = stagesWithWaste.length > 0 ? totalWaste / stagesWithWaste.length : 0;
-        const worstStage = stagesWithWaste.reduce<ProductionRunStage | null>(
-          (worst, stage) => (!worst || Number(stage.waste_weight ?? "0") > Number(worst.waste_weight ?? "0") ? stage : worst),
-          null,
-        );
-        return (
-          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de merma por fase">
-            <section className="modalWindow processViewWindow">
-              <div className="modalHeader">
-                <div>
-                  <h2>Merma por fase</h2>
-                  <p>{wasteHistoryRun.production_code ?? wasteHistoryRun.process_name} · {wasteStages.length} etapas</p>
-                </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setWasteHistoryRun(null)} type="button">
-                  <X aria-hidden="true" size={18} />
-                </button>
+      {wasteHistoryRun ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de merma por fase">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Merma por fase</h2>
+                <p>{wasteHistoryRun.production_code ?? wasteHistoryRun.process_name} · {wasteStages.length} etapas</p>
               </div>
-              <div className="fichaHero">
-                <div className="fichaHeroItem">
-                  <strong>{numericText(String(totalWaste))} g</strong>
-                  <span>Merma total{wasteHistoryRun.waste_percent ? ` (${numericText(wasteHistoryRun.waste_percent)}%)` : ""}</span>
-                </div>
-                <div className="fichaHeroItem">
-                  <strong>{numericText(String(averageWaste))} g</strong>
-                  <span>Promedio por etapa con merma</span>
-                </div>
-                <div className="fichaHeroItem">
-                  <strong>{worstStage ? worstStage.stage_name : "—"}</strong>
-                  <span>Etapa con mayor merma{worstStage ? ` (${numericText(worstStage.waste_weight ?? "0")} g)` : ""}</span>
-                </div>
-              </div>
-              <RunStageSummaryTable run={wasteHistoryRun} />
-            </section>
-          </div>
-        );
-      })() : null}
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setWasteHistoryRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <RunWasteHero run={wasteHistoryRun} />
+            <RunStageSummaryTable run={wasteHistoryRun} />
+          </section>
+        </div>
+      ) : null}
 
       {receptionInfoRun ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de recepcion">

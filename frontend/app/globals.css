@@ -4480,6 +4480,10 @@ textarea:disabled {
   text-align: right;
   padding-left: 28px;
 }
+/* Ninguna celda debe partir su contenido en dos líneas: si falta espacio, la
+   tabla crece y se desplaza horizontal dentro de .tableWrap. */
+.inventoryItemsTable th,
+.inventoryItemsTable td { white-space: nowrap; }
 /* Acciones de fila en tablas: siempre en línea, ancladas a la derecha; la
    celda no debe apilar botones aunque aparezca una acción extra. */
 .inventoryItemsTable td:last-child { white-space: nowrap; }
