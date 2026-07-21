@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
+import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Pencil, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -13,6 +13,7 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
+import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import {
   archiveInventoryItem,
   combineProducts,
@@ -367,10 +368,15 @@ export function InventoryDashboard() {
       { itemId: "", quantity: "" },
     ],
     material_code: "",
+    material_type: "",
     product_type_id: "",
     quantity: "",
   });
   const [isCombining, setIsCombining] = useState(false);
+  // Destino del ensamble: modal de catálogo para elegir el producto y, si no
+  // existe, mantenimiento de productos terminados para crearlo al vuelo.
+  const [isCombineTargetOpen, setIsCombineTargetOpen] = useState(false);
+  const [isCombineCreateOpen, setIsCombineCreateOpen] = useState(false);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -884,6 +890,26 @@ export function InventoryDashboard() {
     }
   }
 
+  // Material del ensamble derivado de las piezas: segmento del catálogo (1er
+  // carácter del código de producto de la primera pieza con código válido) y
+  // texto combinado de todos los materiales ("ORO 18K + PLATA 925"), editable.
+  function deriveCombineMaterial(sources: { itemId: string; quantity: string }[]) {
+    const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+    const selected = sources
+      .map((line) => items.find((item) => item.id === line.itemId))
+      .filter((item): item is InventoryItem => Boolean(item));
+    const labels: string[] = [];
+    for (const item of selected) {
+      const code = item.product_code?.[0];
+      const label = materialSegments.find((segment) => segment.code === code)?.label ?? item.material_type?.trim();
+      if (label && !labels.includes(label)) labels.push(label);
+    }
+    const firstCode = selected
+      .map((item) => item.product_code?.[0])
+      .find((code) => code && materialSegments.some((segment) => segment.code === code));
+    return { material_code: firstCode ?? "", material_type: labels.join(" + ") };
+  }
+
   async function handleCombineProducts(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -894,6 +920,7 @@ export function InventoryDashboard() {
           .filter((line) => line.itemId && line.quantity)
           .map((line) => ({ item_id: line.itemId, quantity: line.quantity })),
         material_code: combineForm.material_code,
+        material_type: combineForm.material_type.trim() || null,
         product_type_id: combineForm.product_type_id,
         quantity: combineForm.quantity,
       });
@@ -1497,6 +1524,7 @@ export function InventoryDashboard() {
                           { itemId: "", quantity: "" },
                         ],
                         material_code: "",
+                        material_type: "",
                         product_type_id: "",
                         quantity: "",
                       });
@@ -2697,12 +2725,12 @@ export function InventoryDashboard() {
                       <select
                         className="field"
                         onChange={(event) =>
-                          setCombineForm((current) => ({
-                            ...current,
-                            sources: current.sources.map((item, idx) =>
+                          setCombineForm((current) => {
+                            const sources = current.sources.map((item, idx) =>
                               idx === index ? { ...item, itemId: event.target.value } : item,
-                            ),
-                          }))
+                            );
+                            return { ...current, sources, ...deriveCombineMaterial(sources) };
+                          })
                         }
                         style={{ flex: 2 }}
                         value={line.itemId}
@@ -2741,10 +2769,10 @@ export function InventoryDashboard() {
                           aria-label="Quitar pieza"
                           className="iconOnlyButton dangerIconButton"
                           onClick={() =>
-                            setCombineForm((current) => ({
-                              ...current,
-                              sources: current.sources.filter((_, idx) => idx !== index),
-                            }))
+                            setCombineForm((current) => {
+                              const sources = current.sources.filter((_, idx) => idx !== index);
+                              return { ...current, sources, ...deriveCombineMaterial(sources) };
+                            })
                           }
                           type="button"
                         >
@@ -2768,8 +2796,24 @@ export function InventoryDashboard() {
                   Agregar pieza
                 </button>
               </div>
+              <div className="fieldGroup">
+                <span>Producto resultante</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <button className="button" onClick={() => setIsCombineTargetOpen(true)} type="button">
+                    <Pencil aria-hidden="true" size={14} />
+                    {combineForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
+                  </button>
+                  {selectedType ? (
+                    <span style={{ fontSize: 13 }}>
+                      {selectedType.category_label} · {selectedType.model_label}{selectedType.name ? ` · ${selectedType.name}` : ""}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 13, color: "var(--muted)" }}>Sin elegir</span>
+                  )}
+                </div>
+              </div>
               <label className="fieldGroup">
-                <span>Material del producto resultante</span>
+                <span>Material del código resultante</span>
                 <select
                   className="field"
                   onChange={(event) => setCombineForm((current) => ({ ...current, material_code: event.target.value }))}
@@ -2782,19 +2826,14 @@ export function InventoryDashboard() {
                 </select>
               </label>
               <label className="fieldGroup">
-                <span>Tipo de producto resultante</span>
-                <select
+                <span>Material de la pieza (auto desde las piezas, editable)</span>
+                <input
                   className="field"
-                  onChange={(event) => setCombineForm((current) => ({ ...current, product_type_id: event.target.value }))}
-                  value={combineForm.product_type_id}
-                >
-                  <option value="">Seleccionar tipo</option>
-                  {activeTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
-                    </option>
-                  ))}
-                </select>
+                  maxLength={80}
+                  onChange={(event) => setCombineForm((current) => ({ ...current, material_type: event.target.value }))}
+                  placeholder="Ej. ORO 18K + PLATA 925"
+                  value={combineForm.material_type}
+                />
               </label>
               <label className="fieldGroup">
                 <span>Cantidad de productos resultantes</span>
@@ -2820,6 +2859,96 @@ export function InventoryDashboard() {
           </div>
         );
       })() : null}
+
+      {isCombineTargetOpen ? (() => {
+        // Catálogo agrupado por categoría (orden por código), igual que el
+        // modal "qué se fabrica" de producción.
+        const active = productTypes.filter((type) => type.is_active);
+        const groups = new Map<string, typeof active>();
+        for (const type of active) {
+          const key = `${type.category_code} · ${type.category_label}`;
+          const list = groups.get(key);
+          if (list) list.push(type);
+          else groups.set(key, [type]);
+        }
+        const sortedGroups = [...groups.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([label, types]) => [
+            label,
+            [...types].sort((a, b) => a.model_code.localeCompare(b.model_code) || (a.name ?? "").localeCompare(b.name ?? "")),
+          ] as const);
+        return (
+          <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Elegir producto resultante">
+            <section className="modalWindow processViewWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>¿Qué producto resulta?</h2>
+                  <p>Catálogo de productos terminados · elige uno</p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCombineTargetOpen(false)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+                {sortedGroups.map(([groupLabel, types]) => (
+                  <div key={groupLabel}>
+                    <h3 style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {groupLabel}
+                    </h3>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {types.map((type) => (
+                        <button
+                          className={`processPicker${combineForm.product_type_id === type.id ? " processPickerActive" : ""}`}
+                          key={type.id}
+                          onClick={() => {
+                            setCombineForm((current) => ({ ...current, product_type_id: type.id }));
+                            setIsCombineTargetOpen(false);
+                          }}
+                          type="button"
+                        >
+                          #{type.model_code} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {active.length === 0 ? (
+                  <div className="emptyState">No hay productos en el catálogo. Crea el primero.</div>
+                ) : null}
+              </div>
+              <div className="modalActions">
+                <button
+                  className="button"
+                  onClick={() => {
+                    // El mantenimiento reemplaza al picker; al cerrar o crear se vuelve.
+                    setIsCombineTargetOpen(false);
+                    setIsCombineCreateOpen(true);
+                  }}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" size={14} />
+                  Crear producto nuevo
+                </button>
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {isCombineCreateOpen ? (
+        <ProductTypesManager
+          mode="create"
+          onClose={() => {
+            setIsCombineCreateOpen(false);
+            setIsCombineTargetOpen(true);
+          }}
+          onProductCreated={(created) => {
+            // El recién creado queda como destino del ensamble.
+            setCombineForm((current) => ({ ...current, product_type_id: created.id }));
+            setIsCombineCreateOpen(false);
+          }}
+        />
+      ) : null}
 
       {rejectRun ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">

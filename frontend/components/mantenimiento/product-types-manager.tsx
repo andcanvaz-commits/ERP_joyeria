@@ -5,13 +5,23 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
 import { createCatalogSegment, listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listInventoryItems } from "@/lib/inventory-api";
-import { createProductType, deleteProductType, listProductTypes } from "@/lib/product-types-api";
+import { createProductType, deleteProductType, listProductTypes, type ProductType } from "@/lib/product-types-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { Pager, usePagination } from "@/components/shared/pager";
 
 const DRILL_PAGE_SIZE = 10;
 
-export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
+export function ProductTypesManager({
+  mode,
+  onClose,
+  onProductCreated,
+}: {
+  mode: "create" | "view";
+  onClose: () => void;
+  // Avisa al padre cuando se crea un producto (opción 3) para poder
+  // auto-seleccionarlo, ej. como destino de un ensamble.
+  onProductCreated?: (created: ProductType) => void;
+}) {
   const queryClient = useQueryClient();
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const { data: types = [], isLoading } = useQuery({ queryKey: ["product-types"], queryFn: listProductTypes });
@@ -203,6 +213,7 @@ export function ProductTypesManager({ mode, onClose }: { mode: "create" | "view"
       setProdPrice("");
       setSuccess(`Producto ${created.name ?? ""} creado.`);
       await queryClient.invalidateQueries({ queryKey: ["product-types"] });
+      onProductCreated?.(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el producto.");
     } finally {

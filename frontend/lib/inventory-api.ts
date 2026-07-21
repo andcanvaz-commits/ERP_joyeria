@@ -95,6 +95,7 @@ export type CombineProductsPayload = {
   material_code: string;
   product_type_id: string;
   quantity: string;
+  material_type?: string | null;
 };
 
 // Ensambla varias piezas de productos terminados en un producto nuevo del
