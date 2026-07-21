@@ -179,6 +179,14 @@ class ProductionRunStageRead(BaseModel):
     decisions: list[StageDecisionRead] = Field(default_factory=list)
 
 
+class SupplyConsumptionRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    quantity: Decimal
+    unit_code: str
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -213,3 +221,6 @@ class ProductionRunRead(BaseModel):
     # Tipos de producto que el proceso de esta orden puede producir (vacio = todos).
     # Gobierna el combo al convertir el lote en productos terminados.
     allowed_product_type_ids: list[UUID] = Field(default_factory=list)
+    # Insumos realmente consumidos al aprobar materiales (desde los movimientos
+    # de inventario de la orden). Alimenta el acta de entrega.
+    supply_consumptions: list[SupplyConsumptionRead] = Field(default_factory=list)

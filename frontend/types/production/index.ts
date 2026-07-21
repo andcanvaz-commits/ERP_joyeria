@@ -114,4 +114,6 @@ export type ProductionRun = {
   stages: ProductionRunStage[];
   // Tipos de producto que el proceso de esta orden puede producir (vacío = todos).
   allowed_product_type_ids?: string[];
+  // Insumos consumidos al aprobar materiales (para el acta de entrega).
+  supply_consumptions?: Array<{ name: string; quantity: string; unit_code: string }>;
 };

@@ -27,6 +27,7 @@ from backend.modules.production.schemas import (
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunStageFinish,
+    SupplyConsumptionRead,
 )
 
 
@@ -509,10 +510,47 @@ class ProductionService:
         for read, run in zip(reads, runs):
             read.allowed_product_type_ids = by_process.get(run.process_id, [])
 
+    def _attach_supply_consumptions(self, reads: list, runs: list) -> None:
+        """Insumos consumidos por cada orden (movimientos CONSUMO_PRODUCCION que
+        no son la materia prima principal). Alimenta el acta de entrega."""
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem, InventoryMovement
+
+        run_ids = [run.id for run in runs]
+        if not run_ids:
+            return
+        movements = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.movement_type == "CONSUMO_PRODUCCION",
+                InventoryMovement.reference_id.in_(run_ids),
+            )
+        ).scalars().all()
+        item_ids = list({m.item_id for m in movements})
+        names = {}
+        if item_ids:
+            rows = self.repository.session.execute(
+                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            names = {row[0]: row[1] for row in rows}
+        by_run: dict = {}
+        for movement in movements:
+            by_run.setdefault(movement.reference_id, []).append(movement)
+        for read, run in zip(reads, runs):
+            read.supply_consumptions = [
+                SupplyConsumptionRead(
+                    name=names.get(m.item_id, "Insumo"),
+                    quantity=m.quantity,
+                    unit_code=m.unit_code,
+                )
+                for m in by_run.get(run.id, [])
+                if m.item_id != run.raw_material_item_id
+            ]
+
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
         self._attach_allowed_types([read], [run])
+        self._attach_supply_consumptions([read], [run])
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
@@ -520,6 +558,7 @@ class ProductionService:
         reads = [ProductionRunRead.model_validate(run) for run in runs]
         _populate_run_names(self.repository.session, reads, runs)
         self._attach_allowed_types(reads, runs)
+        self._attach_supply_consumptions(reads, runs)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:

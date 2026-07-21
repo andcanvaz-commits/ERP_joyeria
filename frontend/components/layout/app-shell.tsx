@@ -80,7 +80,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     queryKey: ["solicitudes"],
     queryFn: listProductionRuns,
     enabled: isAuthenticated() && Boolean(currentUser),
-    refetchInterval: 30000,
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
   });
 
   // Pendientes por seccion: inventario aprueba/recibe; produccion inicia las

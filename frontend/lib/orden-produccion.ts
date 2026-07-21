@@ -45,16 +45,19 @@ export function buildOrdenProduccion(
   const entregaRows: DocRow[] = [
     { gramos: num(run.total_required_material), detalle: materialName }
   ];
+  // Insumos que salieron de inventario junto con la materia prima.
+  for (const supply of run.supply_consumptions ?? []) {
+    entregaRows.push({ gramos: num(supply.quantity), detalle: `Insumo: ${supply.name}` });
+  }
 
+  // Recepción: solo lo que realmente entra a inventario (el producto). La merma
+  // no se "recibe": queda registrada en el kardex y el resumen del proceso.
   const recepcionRows: DocRow[] = [];
   if (run.actual_finished_weight !== null) {
     recepcionRows.push({
       gramos: num(run.actual_finished_weight),
       detalle: `Producto terminado: ${run.process_name}`
     });
-  }
-  if (num(run.waste_weight) > 0) {
-    recepcionRows.push({ gramos: num(run.waste_weight), detalle: "Merma" });
   }
 
   const sum = (rows: DocRow[]) => rows.reduce((acc, row) => acc + row.gramos, 0);
