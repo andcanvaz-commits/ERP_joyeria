@@ -2733,7 +2733,7 @@ export function InventoryDashboard() {
       })() : null}
 
       {rejectRun ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">
           <form
             className="modalWindow processFormWindow"
             onSubmit={(event) => {
