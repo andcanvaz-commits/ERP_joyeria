@@ -212,6 +212,7 @@ class ProductionRunRead(BaseModel):
     received_by_name: str | None = None
     rejected_by_name: str | None = None
     rejection_reason: str | None = None
+    rejected_at: datetime | None = None
     requested_at: datetime
     materials_approved_at: datetime | None = None
     started_at: datetime | None = None

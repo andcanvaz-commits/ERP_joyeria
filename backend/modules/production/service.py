@@ -467,6 +467,7 @@ class ProductionService:
         run.status = ProductionRunStatus.CANCELLED
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = (reason or "").strip() or None
+        run.rejected_at = datetime.utcnow()
         self.repository.flush()
         return self._read_with_names(run)
 

@@ -106,6 +106,7 @@ export type ProductionRun = {
   received_by_name?: string | null;
   rejected_by_name?: string | null;
   rejection_reason?: string | null;
+  rejected_at?: string | null;
   requested_at: string;
   materials_approved_at: string | null;
   started_at: string | null;

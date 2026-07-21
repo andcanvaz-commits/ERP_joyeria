@@ -354,6 +354,9 @@ export function InventoryDashboard() {
   const [convertRun, setConvertRun] = useState<ProductionRun | null>(null);
   const [convertForm, setConvertForm] = useState({ material_code: "", product_type_id: "", quantity: "" });
   const [isConverting, setIsConverting] = useState(false);
+  // Rechazo de solicitud de materiales: modal con motivo.
+  const [rejectRun, setRejectRun] = useState<ProductionRun | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   // Ensamble de piezas de productos terminados en un producto nuevo.
   const [isCombineOpen, setIsCombineOpen] = useState(false);
   const [combineForm, setCombineForm] = useState({
@@ -685,18 +688,38 @@ export function InventoryDashboard() {
     () => [...movements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [movements],
   );
-  const movementCountsByDate = useMemo(() => {
-    return sortedMovements.reduce<Map<string, number>>((counts, movement) => {
-      const key = movementDateKey(movement);
-      if (!key) return counts;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-      return counts;
-    }, new Map());
-  }, [sortedMovements]);
-  const selectedDateMovements = useMemo(
-    () => sortedMovements.filter((movement) => movementDateKey(movement) === selectedHistoryDate),
-    [selectedHistoryDate, sortedMovements],
+  // Solicitudes rechazadas: también son parte del historial de inventario.
+  const rejectedRuns = useMemo(
+    () => productionRuns.filter((run) => run.status === "CANCELADA" && run.rejected_at),
+    [productionRuns],
   );
+  const rejectionDateKey = (run: ProductionRun) => {
+    const date = new Date(run.rejected_at ?? "");
+    return Number.isNaN(date.getTime()) ? null : dateKey(date);
+  };
+  const movementCountsByDate = useMemo(() => {
+    const counts = sortedMovements.reduce<Map<string, number>>((acc, movement) => {
+      const key = movementDateKey(movement);
+      if (!key) return acc;
+      acc.set(key, (acc.get(key) ?? 0) + 1);
+      return acc;
+    }, new Map());
+    for (const run of rejectedRuns) {
+      const key = rejectionDateKey(run);
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [sortedMovements, rejectedRuns]);
+  // Registros del día: movimientos + rechazos de solicitudes, en orden temporal.
+  const selectedDateEntries = useMemo(() => {
+    const moves = sortedMovements
+      .filter((movement) => movementDateKey(movement) === selectedHistoryDate)
+      .map((movement) => ({ kind: "movement" as const, movement, run: null, at: new Date(movement.created_at).getTime() }));
+    const rejections = rejectedRuns
+      .filter((run) => rejectionDateKey(run) === selectedHistoryDate)
+      .map((run) => ({ kind: "rejection" as const, movement: null, run, at: new Date(run.rejected_at ?? "").getTime() }));
+    return [...moves, ...rejections].sort((left, right) => right.at - left.at);
+  }, [selectedHistoryDate, sortedMovements, rejectedRuns]);
   const calendarDays = useMemo(() => buildCalendarDays(historyMonth), [historyMonth]);
   const historyMonthLabel = useMemo(() => {
     const [year, month] = historyMonth.split("-").map(Number);
@@ -783,13 +806,17 @@ export function InventoryDashboard() {
     }
   }
 
-  async function handleRejectMaterials(run: ProductionRun) {
-    const reason = window.prompt("Motivo del rechazo (opcional):", "");
-    if (reason === null) return;
+  function openRejectModal(run: ProductionRun) {
+    setRejectReason("");
+    setRejectRun(run);
+  }
+
+  async function handleRejectMaterials(run: ProductionRun, reason: string) {
     setError(null);
     setIsSavingProduction(true);
     try {
       await rejectProductionRunMaterials(run.id, reason);
+      setRejectRun(null);
       setSuccess("Solicitud rechazada. La orden fue cancelada.");
       const nextRuns = await listProductionRuns();
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
@@ -979,8 +1006,18 @@ export function InventoryDashboard() {
     [wasteHistoryRun],
   );
   // Historial por calendario: 4 por página (el panel de movimientos sigue en 3).
-  const historyDayPager = usePagination(selectedDateMovements, 4, selectedHistoryDate);
-  const historyResultsPager = usePagination(historySearchResults, 4, historySearch);
+  const historyDayPager = usePagination(selectedDateEntries, 4, selectedHistoryDate);
+  const historySearchEntries = useMemo(
+    () =>
+      historySearchResults.map((movement) => ({
+        kind: "movement" as const,
+        movement,
+        run: null,
+        at: new Date(movement.created_at).getTime(),
+      })),
+    [historySearchResults],
+  );
+  const historyResultsPager = usePagination(historySearchEntries, 4, historySearch);
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
@@ -2167,12 +2204,33 @@ export function InventoryDashboard() {
                   ) : (
                     <>
                       <h3>{movementDateLabel(`${selectedHistoryDate}T00:00:00`)}</h3>
-                      <p>{selectedDateMovements.length} movimientos registrados</p>
+                      <p>{selectedDateEntries.length} registros</p>
                     </>
                   )}
                 </div>
                 <div className="movementList movementHistoryEntries pagedListFloor">
-                  {(historySearchActive ? historyResultsPager : historyDayPager).pageItems.map((movement) => (
+                  {(historySearchActive ? historyResultsPager : historyDayPager).pageItems.map((entry) => {
+                    if (entry.kind === "rejection" && entry.run) {
+                      const run = entry.run;
+                      return (
+                        <article className="movementRow" key={`rej-${run.id}`}>
+                          <div style={{ gridColumn: "1 / -2" }}>
+                            <strong className="dangerText">
+                              Solicitud rechazada · {run.production_code ?? run.process_name}
+                            </strong>
+                            <span>
+                              {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
+                              {numericText(run.total_required_material)} {run.raw_material_unit_code} ·{" "}
+                              {run.rejection_reason || "Sin motivo"}
+                              {run.rejected_by_name ? ` · ${run.rejected_by_name}` : ""}
+                            </span>
+                          </div>
+                        </article>
+                      );
+                    }
+                    if (!entry.movement) return null;
+                    const movement = entry.movement;
+                    return (
                     <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                       <div>
                         <strong>{movementTypeLabel(movement.movement_type)}</strong>
@@ -2204,11 +2262,12 @@ export function InventoryDashboard() {
                         </button>
                       </span>
                     </article>
-                  ))}
+                    );
+                  })}
                   {historySearchActive && historySearchResults.length === 0 ? (
                     <div className="emptyState">Sin coincidencias en el historial. Prueba con otro dato: nombre, tipo, usuario o fecha.</div>
                   ) : null}
-                  {!historySearchActive && selectedDateMovements.length === 0 ? (
+                  {!historySearchActive && selectedDateEntries.length === 0 ? (
                     <div className="emptyState">No hay movimientos en esta fecha.</div>
                   ) : null}
                   <Pager {...(historySearchActive ? historyResultsPager : historyDayPager)} />
@@ -2671,6 +2730,51 @@ export function InventoryDashboard() {
         );
       })() : null}
 
+      {rejectRun ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">
+          <form
+            className="modalWindow processFormWindow"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (rejectRun) void handleRejectMaterials(rejectRun, rejectReason);
+            }}
+          >
+            <div className="modalHeader">
+              <div>
+                <h2>Rechazar solicitud</h2>
+                <p>
+                  {rejectRun.production_code ? `${rejectRun.production_code} · ` : ""}{rejectRun.process_name} ·{" "}
+                  {numericText(rejectRun.total_required_material)} {rejectRun.raw_material_unit_code}
+                </p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setRejectRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Motivo del rechazo (opcional)</span>
+              <textarea
+                className="field textarea"
+                maxLength={1000}
+                onChange={(event) => setRejectReason(event.target.value)}
+                placeholder="Ej: stock reservado para otra orden, material en revisión…"
+                rows={3}
+                value={rejectReason}
+              />
+            </label>
+            <p className="panelText">La orden quedará cancelada y el rechazo se registrará en el historial de inventario.</p>
+            <div className="modalActions">
+              <button className="button" onClick={() => setRejectRun(null)} type="button">
+                Cancelar
+              </button>
+              <button className="button buttonDanger" disabled={isSavingProduction} type="submit">
+                {isSavingProduction ? "Rechazando" : "Rechazar solicitud"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       {isArchivedOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Items archivados">
           <section className="modalWindow processViewWindow">
@@ -3053,7 +3157,7 @@ export function InventoryDashboard() {
                           <button
                             className="button buttonDanger"
                             disabled={isSavingProduction}
-                            onClick={() => void handleRejectMaterials(run)}
+                            onClick={() => openRejectModal(run)}
                             type="button"
                           >
                             Rechazar
