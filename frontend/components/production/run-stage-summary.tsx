@@ -21,8 +21,10 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
     (worst, stage) => (!worst || Number(stage.waste_weight ?? "0") > Number(worst.waste_weight ?? "0") ? stage : worst),
     null,
   );
+  // Devuelve solo filas: el llamador las mete en su propio .userPreviewGrid
+  // para que todo el resumen comparta espaciado y líneas separadoras.
   return (
-    <div className="userPreviewGrid">
+    <>
       <span>
         <strong>Merma total</strong>
         {num(totalWaste)} {unit}{run.waste_percent ? ` · ${num(run.waste_percent)}%` : ""}
@@ -35,7 +37,7 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
         <strong>Mayor merma</strong>
         {worstStage ? `${worstStage.stage_name} (${num(worstStage.waste_weight ?? "0")} ${unit})` : "—"}
       </span>
-    </div>
+    </>
   );
 }
 

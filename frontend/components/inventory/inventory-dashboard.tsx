@@ -2444,7 +2444,9 @@ export function InventoryDashboard() {
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            <RunWasteHero run={wasteHistoryRun} />
+            <div className="userPreviewGrid">
+              <RunWasteHero run={wasteHistoryRun} />
+            </div>
             <RunStageSummaryTable run={wasteHistoryRun} />
           </section>
         </div>

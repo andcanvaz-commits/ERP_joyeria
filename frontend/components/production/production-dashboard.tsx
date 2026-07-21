@@ -1660,9 +1660,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <strong>Resultado</strong>
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
-            </div>
-            <RunWasteHero run={selectedStatsRun} />
-            <div className="userPreviewGrid">
+              <RunWasteHero run={selectedStatsRun} />
               <span>
                 <button
                   className="iconTextButton"
