@@ -359,10 +359,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     // respeta cualquier materia prima ya elegida (todas son utilizables).
     const materials = selectedProcess?.materials ?? [];
     setSelectedMaterialId((current) => current || (materials[0]?.inventory_item_id ?? ""));
-    // El producto objetivo se limpia si el proceso nuevo no lo permite.
+    // Producto objetivo: si el proceso produce exactamente UN tipo, se asigna
+    // solo (no hay nada que preguntar). Si permite varios o cualquiera, se
+    // conserva la elección mientras siga siendo válida.
+    const allowed = selectedProcess?.product_type_ids ?? [];
     setTargetProductTypeId((current) => {
+      if (allowed.length === 1) return allowed[0];
       if (!current) return current;
-      const allowed = selectedProcess?.product_type_ids ?? [];
       return allowed.length === 0 || allowed.includes(current) ? current : "";
     });
   }, [selectedProcess]);
@@ -1252,23 +1255,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   </select>
                 </label>
               </div>
-              <label className="fieldGroup">
-                <span>Producto objetivo (opcional)</span>
-                <select className="field" onChange={(e) => setTargetProductTypeId(e.target.value)} value={targetProductTypeId}>
-                  <option value="">Sin definir (se clasifica al recibir)</option>
-                  {productTypesList
-                    .filter((type) => type.is_active)
-                    .filter((type) => {
-                      const allowed = selectedProcess?.product_type_ids ?? [];
-                      return allowed.length === 0 || allowed.includes(type.id);
-                    })
-                    .map((type) => (
-                      <option key={type.id} value={type.id}>
-                        {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              {(selectedProcess?.product_type_ids ?? []).length !== 1 ? (
+                // Solo cuando el proceso puede producir varios tipos (o cualquiera)
+                // hay algo que elegir; con un único tipo se asigna solo.
+                <label className="fieldGroup">
+                  <span>Producto objetivo (opcional)</span>
+                  <select className="field" onChange={(e) => setTargetProductTypeId(e.target.value)} value={targetProductTypeId}>
+                    <option value="">Sin definir (se clasifica al recibir)</option>
+                    {productTypesList
+                      .filter((type) => type.is_active)
+                      .filter((type) => {
+                        const allowed = selectedProcess?.product_type_ids ?? [];
+                        return allowed.length === 0 || allowed.includes(type.id);
+                      })
+                      .map((type) => (
+                        <option key={type.id} value={type.id}>
+                          {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="fieldGroup">
                 <span>Cantidad a fabricar</span>
                 <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
