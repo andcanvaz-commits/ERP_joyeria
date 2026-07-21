@@ -12,6 +12,8 @@ export type DocSide = {
   responsable: string;
   rows: DocRow[];
   total: number;
+  /** Unidad del total (la del metal de la orden). */
+  totalUnidad: string;
 };
 
 export type OrdenProduccionModel = {
@@ -87,13 +89,15 @@ export function buildOrdenProduccion(
       fecha: run.materials_approved_at,
       responsable: run.materials_approved_by_name ?? DASH,
       rows: entregaRows,
-      total: sum(entregaRows)
+      total: sum(entregaRows),
+      totalUnidad: materialUnit
     },
     recepcion: {
       fecha: run.received_at,
       responsable: run.received_by_name ?? DASH,
       rows: recepcionRows,
-      total: sum(recepcionRows)
+      total: sum(recepcionRows),
+      totalUnidad: materialUnit
     },
     cancelada: run.status === "CANCELADA"
   };

@@ -31,7 +31,7 @@ function SideColumn({
         <thead>
           <tr>
             <th className="opThFecha">FECHA</th>
-            <th className="opThGramos">GRAMOS</th>
+            <th className="opThGramos">CANTIDAD</th>
             <th>DETALLES</th>
           </tr>
         </thead>
@@ -39,21 +39,21 @@ function SideColumn({
           {rows.map((row, index) => (
             <tr key={index}>
               <td>{row && index === 0 ? <span className={dataClass}>{formatDocDate(side.fecha)}</span> : " "}</td>
-              <td className="opTdGramos">{row ? <span className={dataClass}>{formatGramos(row.gramos)}{!row.suma || row.unidad !== "g" ? ` ${row.unidad}` : ""}</span> : " "}</td>
+              <td className="opTdGramos">{row ? <span className={dataClass}>{formatGramos(row.gramos)} {row.unidad}</span> : " "}</td>
               <td>{row ? <span className={dataClass}>{row.detalle}</span> : " "}</td>
             </tr>
           ))}
           <tr className="opSubtotalRow">
             <td />
             <td className="opTdGramos">
-              <span className={dataClass}>{formatGramos(side.total)}</span>
+              <span className={dataClass}>{formatGramos(side.total)} {side.totalUnidad}</span>
             </td>
             <td>Subtotal</td>
           </tr>
         </tbody>
       </table>
       <div className="opTotal">
-        TOTAL: <span className={dataClass}>{formatGramos(side.total)}</span>
+        TOTAL: <span className={dataClass}>{formatGramos(side.total)} {side.totalUnidad}</span>
       </div>
     </section>
   );
