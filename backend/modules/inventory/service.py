@@ -564,11 +564,14 @@ class InventoryService(InventoryIntegrationPort):
                 sku=self._generate_sku("FINISHED_PRODUCT"),
                 product_code=product_code,
                 description=ASSEMBLED_MARK,
+                material_type=payload.material_type,
                 unit_code=sources[0][0].unit_code,
                 minimum_stock=None,
             )
             self.repository.add_item(target)
             self.repository.flush()
+        elif payload.material_type:
+            target.material_type = payload.material_type
 
         for item, quantity in sources:
             self.create_movement(

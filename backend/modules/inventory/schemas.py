@@ -91,6 +91,9 @@ class ProductCombineCreate(BaseModel):
     material_code: str = Field(min_length=1, max_length=1)
     product_type_id: UUID
     quantity: Decimal = Field(gt=0)
+    # Texto libre del material del resultado (ej. "ORO 18K + PLATA 925"),
+    # derivado de las piezas en el frontend pero editable por el usuario.
+    material_type: str | None = Field(default=None, max_length=80)
 
 
 class InventoryMovementCreate(BaseModel):
