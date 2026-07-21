@@ -366,17 +366,14 @@ class ProductionService:
         if not active_stages:
             raise ProductionDomainError("El proceso debe tener al menos una etapa activa.")
 
-        # Producto objetivo (opcional): debe existir, estar activo y — si el
-        # proceso restringe qué puede producir — ser uno de los permitidos.
+        # Producto objetivo (opcional): es la intención declarada, cualquier
+        # tipo activo del catálogo vale.
         if payload.target_product_type_id is not None:
             from backend.modules.product_types.models import ProductType
 
             target_type = self.repository.session.get(ProductType, payload.target_product_type_id)
             if target_type is None or not target_type.is_active:
                 raise ProductionDomainError("El producto objetivo no existe o esta inactivo.")
-            allowed = {link.product_type_id for link in process.product_types}
-            if allowed and payload.target_product_type_id not in allowed:
-                raise ProductionDomainError("Este proceso no produce ese tipo de producto.")
 
         total_required = quantity_per_unit * payload.quantity
         run = ProductionRun(
