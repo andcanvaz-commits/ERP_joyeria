@@ -2759,7 +2759,6 @@ export function InventoryDashboard() {
                 className="field textarea"
                 maxLength={1000}
                 onChange={(event) => setRejectReason(event.target.value)}
-                placeholder="Ej: stock reservado para otra orden, material en revisión…"
                 rows={3}
                 value={rejectReason}
               />
