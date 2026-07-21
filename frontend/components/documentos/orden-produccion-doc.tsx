@@ -77,6 +77,12 @@ export function OrdenProduccionDoc({
         </div>
 
         {model.cancelada ? <div className="opStamp opStampCancel">CANCELADO</div> : null}
+        {model.rechazo ? (
+          <div className="opRechazo">
+            SOLICITUD RECHAZADA{model.rechazo.fecha ? ` · ${formatDocDate(model.rechazo.fecha)}` : ""} ·{" "}
+            {model.rechazo.por} — {model.rechazo.motivo}
+          </div>
+        ) : null}
       </article>
     </div>
   );

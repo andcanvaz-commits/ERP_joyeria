@@ -22,6 +22,8 @@ export type OrdenProduccionModel = {
   entrega: DocSide;
   recepcion: DocSide;
   cancelada: boolean;
+  /** Detalle del rechazo de materiales, si la orden fue rechazada. */
+  rechazo: { fecha: string | null; por: string; motivo: string } | null;
 };
 
 const DASH = "—"; // —
@@ -85,7 +87,15 @@ export function buildOrdenProduccion(
       responsable: run.received_by_name ?? DASH,
       rows: recepcionRows
     },
-    cancelada: run.status === "CANCELADA"
+    cancelada: run.status === "CANCELADA",
+    rechazo:
+      run.status === "CANCELADA"
+        ? {
+            fecha: run.rejected_at ?? null,
+            por: run.rejected_by_name ?? DASH,
+            motivo: run.rejection_reason || "Sin motivo registrado"
+          }
+        : null
   };
 }
 
