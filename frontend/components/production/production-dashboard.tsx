@@ -36,6 +36,7 @@ import {
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 import { CaliperScale } from "@/components/ui/caliper-scale";
+import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusPunch } from "@/components/ui/status-punch";
@@ -530,6 +531,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const selectedDateRuns = selectedHistoryDate
     ? finishedRuns.filter((run) => (run.finished_at ?? "").slice(0, 10) === selectedHistoryDate)
     : [];
+  // Como en inventario: 3 procesos por página, la ventana no se estira.
+  const historyRunsPager = usePagination(selectedDateRuns, 3, selectedHistoryDate);
 
   function openCreateForm() {
     setForm(emptyProcessForm());
@@ -1749,7 +1752,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <p>{selectedDateRuns.length} procesos registrados</p>
                 </div>
                 <div className="movementList movementHistoryEntries">
-                  {selectedDateRuns.map((run) => (
+                  {historyRunsPager.pageItems.map((run) => (
                     <article className="movementRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
                       <div style={{ gridColumn: "1 / -2" }}>
                         <strong>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</strong>
@@ -1770,6 +1773,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   ))}
                   {selectedDateRuns.length === 0 ? <div className="emptyState">No hay procesos en esta fecha.</div> : null}
                 </div>
+                <Pager {...historyRunsPager} />
               </section>
             </div>
           </section>
