@@ -49,7 +49,6 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
             <th className="num">Peso inicial</th>
             <th className="num">Peso final</th>
             <th className="num">Merma</th>
-            <th className="num">%</th>
             <th>Decisión</th>
           </tr>
         </thead>
@@ -61,8 +60,7 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
               </td>
               <td className="num" style={hasInitial ? undefined : muted}>{pending ? "—" : `${num(initial)} ${unit}`}</td>
               <td className="num" style={hasFinal ? undefined : muted}>{pending ? "—" : `${num(final)} ${unit}`}</td>
-              <td className="num">{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit}`}</td>
-              <td className="num">{pending ? "—" : `${num(stage.waste_percent ?? 0)}%`}</td>
+              <td className="num">{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit} · ${num(stage.waste_percent ?? 0)}%`}</td>
               <td style={oneLine}>
                 {decision ? (
                   <span title={`${decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}${decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}${decision.justification ? ` — ${decision.justification}` : ""}`}>
@@ -78,11 +76,11 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
           ))}
           {Array.from({ length: fillerCount }).map((_, index) => (
             <tr aria-hidden="true" key={`filler-${index}`} style={{ height: ROW_HEIGHT }}>
-              <td colSpan={6} style={{ border: "none" }}>&nbsp;</td>
+              <td colSpan={5} style={{ border: "none" }}>&nbsp;</td>
             </tr>
           ))}
           {rows.length === 0 ? (
-            <tr><td colSpan={6}><div className="emptyState">Esta orden no tiene etapas registradas.</div></td></tr>
+            <tr><td colSpan={5}><div className="emptyState">Esta orden no tiene etapas registradas.</div></td></tr>
           ) : null}
         </tbody>
       </table>
