@@ -978,8 +978,9 @@ export function InventoryDashboard() {
     () => (wasteHistoryRun ? [...wasteHistoryRun.stages].sort((left, right) => left.stage_order - right.stage_order) : []),
     [wasteHistoryRun],
   );
-  const historyDayPager = usePagination(selectedDateMovements, MOVEMENTS_PAGE_SIZE, selectedHistoryDate);
-  const historyResultsPager = usePagination(historySearchResults, MOVEMENTS_PAGE_SIZE, historySearch);
+  // Historial por calendario: 4 por página (el panel de movimientos sigue en 3).
+  const historyDayPager = usePagination(selectedDateMovements, 4, selectedHistoryDate);
+  const historyResultsPager = usePagination(historySearchResults, 4, historySearch);
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 

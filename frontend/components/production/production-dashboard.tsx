@@ -531,8 +531,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const selectedDateRuns = selectedHistoryDate
     ? finishedRuns.filter((run) => (run.finished_at ?? "").slice(0, 10) === selectedHistoryDate)
     : [];
-  // Como en inventario: 3 procesos por página, la ventana no se estira.
-  const historyRunsPager = usePagination(selectedDateRuns, 3, selectedHistoryDate);
+  // Historial por calendario: 4 procesos por página, la ventana no se estira.
+  const historyRunsPager = usePagination(selectedDateRuns, 4, selectedHistoryDate);
 
   function openCreateForm() {
     setForm(emptyProcessForm());
