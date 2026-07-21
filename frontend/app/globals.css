@@ -1430,6 +1430,9 @@ textarea {
 .movementHistoryEntries {
   min-height: 400px;
   max-height: none;
+  /* Filas con altura natural: con pocos registros el resto queda en blanco,
+     no se estiran las tarjetas para llenar el piso de 400px. */
+  align-content: start;
 }
 
 .movementHistoryLayout {
