@@ -1609,7 +1609,7 @@ export function InventoryDashboard() {
                       <tr key={item.id}>
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
                         <td>{item.material_type ?? item.name}</td>
-                        <td>{item.description ?? "—"}</td>
+                        <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
                         <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
@@ -1619,18 +1619,17 @@ export function InventoryDashboard() {
                           <div className="rowActions">
                             {canArchive(item) ? (
                               <button
-                                className={`iconTextButton${suggestion ? " archiveSuggested" : ""}`}
+                                aria-label="Archivar item agotado"
+                                className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
                                 onClick={() => void handleArchiveItem(item)}
                                 title={suggestion ?? "Archivar item agotado"}
                                 type="button"
                               >
                                 <Inbox aria-hidden="true" size={15} />
-                                Archivar
                               </button>
                             ) : null}
-                            <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
                               <Eye aria-hidden="true" size={15} />
-                              Visualizar
                             </button>
                           </div>
                         </td>
@@ -1689,7 +1688,7 @@ export function InventoryDashboard() {
                       <tr key={item.id}>
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
                         <td>{item.name}</td>
-                        <td>{item.description ?? "—"}</td>
+                        <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
                         <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
@@ -1698,18 +1697,17 @@ export function InventoryDashboard() {
                           <div className="rowActions">
                             {canArchive(item) ? (
                               <button
-                                className={`iconTextButton${suggestion ? " archiveSuggested" : ""}`}
+                                aria-label="Archivar item agotado"
+                                className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
                                 onClick={() => void handleArchiveItem(item)}
                                 title={suggestion ?? "Archivar item agotado"}
                                 type="button"
                               >
                                 <Inbox aria-hidden="true" size={15} />
-                                Archivar
                               </button>
                             ) : null}
-                            <button className="iconTextButton" onClick={() => setViewingItem(item)} type="button">
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
                               <Eye aria-hidden="true" size={15} />
-                              Visualizar
                             </button>
                           </div>
                         </td>
