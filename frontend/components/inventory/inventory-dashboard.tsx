@@ -2121,14 +2121,18 @@ export function InventoryDashboard() {
                 const run = entry.run;
                 return (
                   <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
-                    <div style={{ gridColumn: "1 / -2" }}>
+                    <div>
                       <strong className="dangerText">Solicitud rechazada</strong>
                       {run.production_code ? (
                         <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{run.production_code}</span>
                       ) : null}
+                      <span>{movementDateLabel(run.rejected_at ?? "")} - {run.process_name}</span>
+                    </div>
+                    <div>
+                      <strong className="num">{numericText(run.total_required_material)} {run.raw_material_unit_code}</strong>
                       <span>
-                        {movementDateLabel(run.rejected_at ?? "")} · {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
-                        {numericText(run.total_required_material)} {run.raw_material_unit_code}
+                        {movementTimeLabel(run.rejected_at ?? "")}
+                        {run.rejection_reason ? ` - ${run.rejection_reason}` : " - Sin motivo"}
                         {run.rejected_by_name ? ` · ${run.rejected_by_name}` : ""}
                       </span>
                     </div>
@@ -2260,14 +2264,20 @@ export function InventoryDashboard() {
                       const run = entry.run;
                       return (
                         <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
-                          <div style={{ gridColumn: "1 / -2" }}>
+                          <div>
                             <strong className="dangerText">Solicitud rechazada</strong>
                             {run.production_code ? (
                               <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{run.production_code}</span>
                             ) : null}
                             <span>
-                              {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
-                              {numericText(run.total_required_material)} {run.raw_material_unit_code}
+                              {historySearchActive ? `${movementDateLabel(run.rejected_at ?? "")} · ` : ""}
+                              {movementTimeLabel(run.rejected_at ?? "")} - {run.process_name}
+                            </span>
+                          </div>
+                          <div>
+                            <strong className="num">{numericText(run.total_required_material)} {run.raw_material_unit_code}</strong>
+                            <span>
+                              {run.rejection_reason || "Sin motivo registrado"}
                               {run.rejected_by_name ? ` · ${run.rejected_by_name}` : ""}
                             </span>
                           </div>
