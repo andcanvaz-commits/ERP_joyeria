@@ -3014,7 +3014,12 @@ export function InventoryDashboard() {
             else setCombineForm((current) => ({ ...current, product_type_id: type.id }));
             setTargetPickerFor(null);
           }}
-          onClose={() => setTargetPickerFor(null)}
+          onClose={() => {
+            // Cerrar sin elegir: si el formulario de conversión aún no tiene
+            // producto, no hay nada que mostrar; vuelve a la ventana principal.
+            if (targetPickerFor === "convert" && !convertForm.product_type_id) setLotAction(null);
+            setTargetPickerFor(null);
+          }}
         />
       ) : null}
 
