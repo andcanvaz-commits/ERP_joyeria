@@ -14,11 +14,11 @@ import { useModalA11y } from "@/hooks/use-modal-a11y";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
-  { href: "/produccion", label: "Produccion", icon: Factory },
+  { href: "/produccion", label: "Producción", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/solicitudes", label: "Solicitudes", icon: ClipboardList },
   { href: "/documentos", label: "Documentos", icon: FileText },
-  { href: "/reportes", label: "Estadisticas", icon: BarChart3 }
+  { href: "/reportes", label: "Estadísticas", icon: BarChart3 }
 ];
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -27,8 +27,8 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Resumen de procesos y usuarios",
   },
   "/produccion": {
-    title: "Produccion",
-    subtitle: "Ejecucion de procesos y seguimiento de etapas",
+    title: "Producción",
+    subtitle: "Ejecución de procesos y seguimiento de etapas",
   },
   "/mantenimientos": {
     title: "Mantenimientos",
@@ -39,8 +39,8 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Materia prima, productos en proceso y productos terminados",
   },
   "/reportes": {
-    title: "Estadisticas",
-    subtitle: "Resumenes y salidas de informacion",
+    title: "Estadísticas",
+    subtitle: "Resúmenes y salidas de información",
   },
   "/documentos": {
     title: "Documentos",
