@@ -21,7 +21,8 @@
   --primary-strong: var(--gold-deep);
   --primary-light: var(--line);
   --primary-soft: var(--surface-2);
-  --success: #2F7D5B;
+  /* "Éxito" en la identidad papel+oro: café dorado, no verde. */
+  --success: var(--gold-deep);
   --warning: #7E5615;
   --danger: #B23B3B;
   --pending: #5D5648;
@@ -2562,7 +2563,7 @@ textarea {
 .processFlowStagePROCESS  { border-left-color: #5b6470; }
 .processFlowStageTHERMAL  { border-left-color: #ef4444; }
 .processFlowStageCHEMICAL { border-left-color: #f59e0b; }
-.processFlowStageCONTROL  { border-left-color: #10b981; }
+.processFlowStageCONTROL  { border-left-color: var(--gold); }
 .processFlowStageDECISION { border-left-color: #8b5cf6; }
 
 .processFlowStageHead {
@@ -2594,7 +2595,7 @@ textarea {
 .processFlowStagePROCESS  .processFlowStageOrder { background: #5b6470; }
 .processFlowStageTHERMAL  .processFlowStageOrder { background: #ef4444; }
 .processFlowStageCHEMICAL .processFlowStageOrder { background: #f59e0b; }
-.processFlowStageCONTROL  .processFlowStageOrder { background: #10b981; }
+.processFlowStageCONTROL  .processFlowStageOrder { background: var(--gold-deep); }
 .processFlowStageDECISION .processFlowStageOrder { background: #8b5cf6; }
 
 .processFlowStageName {
@@ -2617,7 +2618,7 @@ textarea {
 .processFlowStagePROCESS  .processFlowTypeBadge { background: #eceef1; color: #3f4753; }
 .processFlowStageTHERMAL  .processFlowTypeBadge { background: #fee2e2; color: #b91c1c; }
 .processFlowStageCHEMICAL .processFlowTypeBadge { background: #fef3c7; color: #92400e; }
-.processFlowStageCONTROL  .processFlowTypeBadge { background: #d1fae5; color: #065f46; }
+.processFlowStageCONTROL  .processFlowTypeBadge { background: #f3e9d6; color: var(--gold-deep); }
 .processFlowStageDECISION .processFlowTypeBadge { background: #f3e8ff; color: #5b21b6; }
 
 .processFlowStageDesc {
@@ -2644,11 +2645,11 @@ textarea {
 }
 
 .processFlowCalloutCheck {
-  border-left: 3px solid #10b981;
-  background: #f0fdf4;
+  border-left: 3px solid var(--gold);
+  background: var(--surface-2);
 }
 
-.processFlowCalloutCheck strong { color: #065f46; }
+.processFlowCalloutCheck strong { color: var(--gold-deep); }
 
 .processFlowCalloutRework {
   border-left: 3px solid #f59e0b;
@@ -2760,8 +2761,8 @@ textarea {
 }
 
 .receptionRequestCard {
-  border-color: #a7f3d0;
-  background: #f0fdf4;
+  border-color: var(--gold);
+  background: var(--surface-2);
 }
 
 @media (max-width: 680px) {
@@ -2925,7 +2926,7 @@ textarea {
   flex-shrink: 0;
 }
 
-.timingOnTime, .timingDone { background: #10b981; }
+.timingOnTime, .timingDone { background: var(--gold); }
 .timingWarning { background: #f59e0b; }
 .timingLate { background: #ef4444; }
 .timingPending, .timingIdle { background: var(--muted); }
@@ -4087,7 +4088,7 @@ textarea:disabled {
 }
 
 .stageDecisionApprove {
-  border-left-color: var(--success);
+  border-left-color: var(--gold);
 }
 
 .stageDecisionApprove strong {
