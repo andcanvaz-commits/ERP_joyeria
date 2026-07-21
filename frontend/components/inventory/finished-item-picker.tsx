@@ -18,14 +18,14 @@ export function FinishedItemPicker({
   title,
   subtitle,
   items,
-  excludeId,
+  excludeIds,
   onSelect,
   onClose,
 }: {
   title: string;
   subtitle?: string;
   items: InventoryItem[];
-  excludeId?: string;
+  excludeIds?: string[];
   onSelect: (item: InventoryItem) => void;
   onClose: () => void;
 }) {
@@ -33,17 +33,17 @@ export function FinishedItemPicker({
   const [drillType, setDrillType] = useState<string | null>(null);
   const [drillCat, setDrillCat] = useState<string | null>(null);
 
-  // Solo piezas del catálogo con stock (código de 7 dígitos), nunca el lote mismo.
+  // Solo piezas del catálogo con stock (código de 7 dígitos), sin las ya elegidas.
   const candidates = useMemo(
     () =>
       items.filter(
         (item) =>
           item.item_type === "FINISHED_PRODUCT" &&
-          item.id !== excludeId &&
+          !(excludeIds ?? []).includes(item.id) &&
           Number(item.current_stock) > 0 &&
           (item.product_code ?? "").length === 7,
       ),
-    [items, excludeId],
+    [items, excludeIds],
   );
 
   const typeGroups = useMemo(() => {

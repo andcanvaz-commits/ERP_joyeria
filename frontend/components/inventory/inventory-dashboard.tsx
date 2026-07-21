@@ -363,17 +363,18 @@ export function InventoryDashboard() {
   const [rejectionInfoRun, setRejectionInfoRun] = useState<ProductionRun | null>(null);
   // Ensamble de piezas de productos terminados en un producto nuevo.
   const [isCombineOpen, setIsCombineOpen] = useState(false);
+  // Piezas elegidas por ventana de catálogo; una sola cantidad aplica a todas
+  // y es también la cantidad de productos resultantes.
   const [combineForm, setCombineForm] = useState({
-    sources: [
-      { itemId: "", quantity: "" },
-      { itemId: "", quantity: "" },
-    ],
+    sources: [] as { itemId: string }[],
     material_code: "",
     material_type: "",
     product_type_id: "",
     quantity: "",
   });
   const [isCombining, setIsCombining] = useState(false);
+  // Ventana para agregar una pieza al ensamble.
+  const [isPiecePickerOpen, setIsPiecePickerOpen] = useState(false);
   // Flujo del lote de proceso terminado: la ventana principal ofrece
   // "Agregar al catálogo" (conversión) o "Combinar" con un producto terminado.
   const [lotAction, setLotAction] = useState<"convert" | "combine" | null>(null);
@@ -913,7 +914,7 @@ export function InventoryDashboard() {
   // Material del ensamble derivado de las piezas: segmento del catálogo (1er
   // carácter del código de producto de la primera pieza con código válido) y
   // texto combinado de todos los materiales ("ORO 18K + PLATA 925"), editable.
-  function deriveCombineMaterial(sources: { itemId: string; quantity: string }[]) {
+  function deriveCombineMaterial(sources: { itemId: string }[]) {
     const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
     const selected = sources
       .map((line) => items.find((item) => item.id === line.itemId))
@@ -936,9 +937,8 @@ export function InventoryDashboard() {
     setIsCombining(true);
     try {
       await combineProducts({
-        sources: combineForm.sources
-          .filter((line) => line.itemId && line.quantity)
-          .map((line) => ({ item_id: line.itemId, quantity: line.quantity })),
+        // La misma cantidad se descuenta de cada pieza y es la que se produce.
+        sources: combineForm.sources.map((line) => ({ item_id: line.itemId, quantity: combineForm.quantity })),
         material_code: combineForm.material_code,
         material_type: combineForm.material_type.trim() || null,
         product_type_id: combineForm.product_type_id,
@@ -1539,10 +1539,7 @@ export function InventoryDashboard() {
                     className="button"
                     onClick={() => {
                       setCombineForm({
-                        sources: [
-                          { itemId: "", quantity: "" },
-                          { itemId: "", quantity: "" },
-                        ],
+                        sources: [],
                         material_code: "",
                         material_type: "",
                         product_type_id: "",
@@ -2790,20 +2787,26 @@ export function InventoryDashboard() {
         const previewCode = combineForm.material_code && selectedType
           ? `${combineForm.material_code}${selectedType.category_code}${selectedType.model_code}`
           : null;
-        const validLines = combineForm.sources.filter((line) => {
-          if (!line.itemId) return false;
-          const item = combinable.find((candidate) => candidate.id === line.itemId);
-          const quantity = Number(line.quantity);
-          return Boolean(item) && Number.isFinite(quantity) && quantity > 0 && quantity <= Number(item?.current_stock ?? 0);
-        });
+        const pieces = combineForm.sources
+          .map((line) => combinable.find((candidate) => candidate.id === line.itemId))
+          .filter((item): item is InventoryItem => Boolean(item));
+        // Una sola cantidad: se descuenta de CADA pieza y es la que se produce,
+        // así que todas las piezas deben tener stock suficiente para cubrirla.
         const quantityOut = Number(combineForm.quantity);
+        const quantityValid = Number.isFinite(quantityOut) && quantityOut > 0;
+        const shortPieces = quantityValid
+          ? pieces.filter((item) => quantityOut > Number(item.current_stock))
+          : [];
+        const maxQuantity = pieces.length
+          ? Math.min(...pieces.map((item) => Number(item.current_stock)))
+          : 0;
         const canSubmit =
-          validLines.length >= 2 &&
-          validLines.length === combineForm.sources.filter((line) => line.itemId || line.quantity).length &&
+          pieces.length >= 2 &&
+          pieces.length === combineForm.sources.length &&
           Boolean(combineForm.material_code) &&
           Boolean(combineForm.product_type_id) &&
-          Number.isFinite(quantityOut) &&
-          quantityOut > 0;
+          quantityValid &&
+          shortPieces.length === 0;
         return (
           <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Ensamblar producto">
             <form className="modalWindow processFormWindow" onSubmit={handleCombineProducts}>
@@ -2817,81 +2820,44 @@ export function InventoryDashboard() {
                 </button>
               </div>
               <div className="fieldGroup">
-                <span>Piezas que se combinan</span>
+                <span>Piezas que se combinan (mínimo 2)</span>
                 {combineForm.sources.map((line, index) => {
                   const lineItem = combinable.find((candidate) => candidate.id === line.itemId);
+                  if (!lineItem) return null;
+                  const short = quantityValid && quantityOut > Number(lineItem.current_stock);
                   return (
-                    <div key={index} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <select
-                        className="field"
-                        onChange={(event) =>
+                    <div key={line.itemId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {lineItem.product_code ? (
+                        <span className={`orderCodeTag${metalTagClass(lineItem.product_code)}`}>#{lineItem.product_code}</span>
+                      ) : (
+                        <span className="orderCodeTag">{lineItem.sku}</span>
+                      )}
+                      <span style={{ fontSize: 13, flex: 1 }}>
+                        {(lineItem.description ?? "").trim() || lineItem.name}
+                      </span>
+                      <span style={{ fontSize: 13, color: short ? "var(--danger, #c0392b)" : "var(--muted)" }}>
+                        Stock: {numericText(lineItem.current_stock)} {lineItem.unit_code}
+                      </span>
+                      <button
+                        aria-label="Quitar pieza"
+                        className="iconOnlyButton dangerIconButton"
+                        onClick={() =>
                           setCombineForm((current) => {
-                            const sources = current.sources.map((item, idx) =>
-                              idx === index ? { ...item, itemId: event.target.value } : item,
-                            );
+                            const sources = current.sources.filter((_, idx) => idx !== index);
                             return { ...current, sources, ...deriveCombineMaterial(sources) };
                           })
                         }
-                        style={{ flex: 2 }}
-                        value={line.itemId}
+                        type="button"
                       >
-                        <option value="">Seleccionar pieza</option>
-                        {combinable.map((item) => (
-                          <option
-                            disabled={combineForm.sources.some((other, idx) => idx !== index && other.itemId === item.id)}
-                            key={item.id}
-                            value={item.id}
-                          >
-                            {item.name} · {item.sku} ({numericText(item.current_stock)} {item.unit_code})
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        className="field"
-                        max={lineItem ? Number(lineItem.current_stock) : undefined}
-                        min="1"
-                        onChange={(event) =>
-                          setCombineForm((current) => ({
-                            ...current,
-                            sources: current.sources.map((item, idx) =>
-                              idx === index ? { ...item, quantity: event.target.value } : item,
-                            ),
-                          }))
-                        }
-                        placeholder="Cantidad"
-                        step="1"
-                        style={{ flex: 1, minWidth: 90 }}
-                        type="number"
-                        value={line.quantity}
-                      />
-                      {combineForm.sources.length > 2 ? (
-                        <button
-                          aria-label="Quitar pieza"
-                          className="iconOnlyButton dangerIconButton"
-                          onClick={() =>
-                            setCombineForm((current) => {
-                              const sources = current.sources.filter((_, idx) => idx !== index);
-                              return { ...current, sources, ...deriveCombineMaterial(sources) };
-                            })
-                          }
-                          type="button"
-                        >
-                          <X aria-hidden="true" size={14} />
-                        </button>
-                      ) : null}
+                        <X aria-hidden="true" size={14} />
+                      </button>
                     </div>
                   );
                 })}
-                <button
-                  className="button"
-                  onClick={() =>
-                    setCombineForm((current) => ({
-                      ...current,
-                      sources: [...current.sources, { itemId: "", quantity: "" }],
-                    }))
-                  }
-                  type="button"
-                >
+                {combineForm.sources.length === 0 ? (
+                  <span style={{ fontSize: 13, color: "var(--muted)" }}>Sin piezas: agrega desde el catálogo.</span>
+                ) : null}
+                <button className="button" onClick={() => setIsPiecePickerOpen(true)} type="button">
                   <Plus aria-hidden="true" size={14} />
                   Agregar pieza
                 </button>
@@ -2913,17 +2879,18 @@ export function InventoryDashboard() {
                 </div>
               </div>
               {(() => {
-                // Materiales presentes en las piezas elegidas; el automático los
-                // combina y el lápiz permite quedarse con uno solo.
-                const pieceLabels: string[] = [];
-                for (const line of combineForm.sources) {
-                  const item = combinable.find((candidate) => candidate.id === line.itemId);
-                  if (!item) continue;
+                // Solo los materiales de las piezas elegidas; el automático los
+                // combina y el lápiz permite quedarse con uno de ellos.
+                const pieceMaterials: { label: string; code: string }[] = [];
+                for (const item of pieces) {
                   const code = item.product_code?.[0];
-                  const label = materials.find((segment) => segment.code === code)?.label ?? item.material_type?.trim();
-                  if (label && !pieceLabels.includes(label)) pieceLabels.push(label);
+                  const segment = materials.find((candidate) => candidate.code === code) ?? matchMaterialSegment(item.material_type);
+                  const label = segment?.label ?? item.material_type?.trim();
+                  if (label && !pieceMaterials.some((entry) => entry.label === label)) {
+                    pieceMaterials.push({ label, code: segment?.code ?? "" });
+                  }
                 }
-                const comboLabel = pieceLabels.join(" + ");
+                const comboLabel = pieceMaterials.map((entry) => entry.label).join(" + ");
                 return (
                   <div className="fieldGroup">
                     <span>Material de la pieza</span>
@@ -2939,24 +2906,26 @@ export function InventoryDashboard() {
                                 ...deriveCombineMaterial(current.sources),
                               }));
                             } else {
-                              const segment = materials.find((candidate) => candidate.code === event.target.value) ?? null;
-                              setCombineForm((current) => ({
-                                ...current,
-                                material_code: segment?.code ?? "",
-                                material_type: segment?.label ?? current.material_type,
-                              }));
+                              const entry = pieceMaterials.find((candidate) => candidate.label === event.target.value) ?? null;
+                              if (entry) {
+                                setCombineForm((current) => ({
+                                  ...current,
+                                  material_code: entry.code,
+                                  material_type: entry.label,
+                                }));
+                              }
                             }
                             setMaterialEditFor(null);
                           }}
                           style={{ maxWidth: 260 }}
-                          value={combineForm.material_code}
+                          value={pieceMaterials.find((entry) => entry.label === combineForm.material_type)?.label ?? ""}
                         >
                           <option value="">Seleccionar material</option>
-                          {pieceLabels.length > 1 ? (
+                          {pieceMaterials.length > 1 ? (
                             <option value="__combo__">Combinado: {comboLabel}</option>
                           ) : null}
-                          {materials.map((segment) => (
-                            <option key={segment.id} value={segment.code}>{segment.label}</option>
+                          {pieceMaterials.map((entry) => (
+                            <option key={entry.label} value={entry.label}>{entry.label}</option>
                           ))}
                         </select>
                       ) : (
@@ -2980,9 +2949,10 @@ export function InventoryDashboard() {
                 );
               })()}
               <label className="fieldGroup">
-                <span>Cantidad de productos resultantes</span>
+                <span>Cantidad a combinar{pieces.length ? ` (máx. ${numericText(String(maxQuantity))})` : ""}</span>
                 <input
                   className="field"
+                  max={pieces.length ? maxQuantity : undefined}
                   min="1"
                   onChange={(event) => setCombineForm((current) => ({ ...current, quantity: event.target.value }))}
                   step="1"
@@ -2990,6 +2960,17 @@ export function InventoryDashboard() {
                   value={combineForm.quantity}
                 />
               </label>
+              {shortPieces.length > 0 ? (
+                <p className="panelText" style={{ color: "var(--danger, #c0392b)" }}>
+                  Stock insuficiente para esa cantidad en: {shortPieces.map((item) => (item.description ?? "").trim() || item.name).join(", ")}.
+                </p>
+              ) : null}
+              {quantityValid && shortPieces.length === 0 && pieces.length >= 2 ? (
+                <p className="panelText">
+                  Se descuentan {numericText(String(quantityOut))} de cada pieza y se crean{" "}
+                  <strong>{numericText(String(quantityOut))}</strong> productos resultantes.
+                </p>
+              ) : null}
               {previewCode ? (
                 <p className="panelText">Código de producto resultante: <strong>{previewCode}</strong></p>
               ) : null}
@@ -3030,15 +3011,12 @@ export function InventoryDashboard() {
             title="¿Con qué se combina?"
             subtitle={`Lote ${convertRun.production_code ?? "sin folio"} · elige el producto terminado`}
             items={items}
-            excludeId={lotItem?.id}
+            excludeIds={lotItem ? [lotItem.id] : []}
             onSelect={(partner) => {
               if (!lotItem) return;
-              // El ensamble arranca con el lote y la pieza elegida; cantidades
+              // El ensamble arranca con el lote y la pieza elegida; cantidad
               // y producto resultante se definen en el modal de ensamblar.
-              const sources = [
-                { itemId: lotItem.id, quantity: "" },
-                { itemId: partner.id, quantity: "" },
-              ];
+              const sources = [{ itemId: lotItem.id }, { itemId: partner.id }];
               setCombineForm({
                 sources,
                 product_type_id: "",
@@ -3054,6 +3032,23 @@ export function InventoryDashboard() {
           />
         );
       })() : null}
+
+      {isPiecePickerOpen ? (
+        <FinishedItemPicker
+          title="Agregar pieza"
+          subtitle="Productos terminados con stock · elige la pieza que se suma al ensamble"
+          items={items}
+          excludeIds={combineForm.sources.map((line) => line.itemId)}
+          onSelect={(piece) => {
+            setCombineForm((current) => {
+              const sources = [...current.sources, { itemId: piece.id }];
+              return { ...current, sources, ...deriveCombineMaterial(sources) };
+            });
+            setIsPiecePickerOpen(false);
+          }}
+          onClose={() => setIsPiecePickerOpen(false)}
+        />
+      ) : null}
 
       {rejectRun ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">
