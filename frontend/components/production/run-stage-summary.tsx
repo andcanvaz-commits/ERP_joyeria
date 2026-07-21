@@ -46,11 +46,11 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
       <table className="table tableAuto" style={{ tableLayout: "fixed", width: "100%", minWidth: 560 }}>
         <thead>
           <tr>
-            <th style={{ width: "28%" }}>Etapa</th>
-            <th className="num" style={{ width: "15%" }}>Peso inicial</th>
-            <th className="num" style={{ width: "15%" }}>Peso final</th>
-            <th className="num" style={{ width: "20%" }}>Merma</th>
-            <th style={{ width: "22%" }}>Decisión</th>
+            <th style={{ width: "24%" }}>Etapa</th>
+            <th className="num" style={{ width: "13%" }}>Peso inicial</th>
+            <th className="num" style={{ width: "13%" }}>Peso final</th>
+            <th className="num" style={{ width: "18%" }}>Merma</th>
+            <th style={{ width: "32%" }}>Decisión</th>
           </tr>
         </thead>
         <tbody>
