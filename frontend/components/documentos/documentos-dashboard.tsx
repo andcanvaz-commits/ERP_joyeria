@@ -36,7 +36,8 @@ export function DocumentosDashboard() {
     queryKey: ["documentos"],
     queryFn: fetchDocumentosBundle
   });
-  const runs = data?.runs ?? [];
+  // Una orden rechazada no genera acta: no aparece en Documentos.
+  const runs = (data?.runs ?? []).filter((run) => run.status !== "CANCELADA");
   const items = data?.items ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState<DocMode | null>(null);

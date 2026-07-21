@@ -994,7 +994,23 @@ export function InventoryDashboard() {
   ];
   const wipPager = usePagination(wipRows, TAB_PAGE_SIZE, filterKey);
   // Últimos movimientos de todo el inventario, sin filtro por pestaña ni fecha.
-  const movementsPager = usePagination(sortedMovements, MOVEMENTS_PAGE_SIZE);
+  // Los rechazos de solicitudes también son movimientos de inventario.
+  const movementPanelEntries = useMemo(() => {
+    const moves = sortedMovements.map((movement) => ({
+      kind: "movement" as const,
+      movement,
+      run: null,
+      at: new Date(movement.created_at).getTime(),
+    }));
+    const rejections = rejectedRuns.map((run) => ({
+      kind: "rejection" as const,
+      movement: null,
+      run,
+      at: new Date(run.rejected_at ?? "").getTime(),
+    }));
+    return [...moves, ...rejections].sort((left, right) => right.at - left.at);
+  }, [sortedMovements, rejectedRuns]);
+  const movementsPager = usePagination(movementPanelEntries, MOVEMENTS_PAGE_SIZE);
   const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, viewingItem?.id ?? "");
   // Archivados: 5 por página dentro del modal; vuelve a la primera al abrir.
   const archivedPager = usePagination(archivedItems, 5, String(isArchivedOpen));
@@ -2098,7 +2114,28 @@ export function InventoryDashboard() {
             </button>
           </div>
           <div className="movementList">
-            {movementsPager.pageItems.map((movement, index) => (
+            {movementsPager.pageItems.map((entry) => {
+              if (entry.kind === "rejection" && entry.run) {
+                const run = entry.run;
+                return (
+                  <article className="movementRow" key={`rej-${run.id}`}>
+                    <div style={{ gridColumn: "1 / -2" }}>
+                      <strong className="dangerText">
+                        Solicitud rechazada · {run.production_code ?? run.process_name}
+                      </strong>
+                      <span>
+                        {movementDateLabel(run.rejected_at ?? "")} · {movementTimeLabel(run.rejected_at ?? "")} · {run.process_name} ·{" "}
+                        {numericText(run.total_required_material)} {run.raw_material_unit_code} ·{" "}
+                        {run.rejection_reason || "Sin motivo"}
+                        {run.rejected_by_name ? ` · ${run.rejected_by_name}` : ""}
+                      </span>
+                    </div>
+                  </article>
+                );
+              }
+              if (!entry.movement) return null;
+              const movement = entry.movement;
+              return (
               <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                 <div>
                   <strong>{movementTypeLabel(movement.movement_type)}</strong>
@@ -2126,7 +2163,7 @@ export function InventoryDashboard() {
                     <Eye aria-hidden="true" size={15} />
                     Visualizar
                   </button>
-                  {movementsPager.page === 0 && index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
+                  {movement.id === sortedMovements[0]?.id && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
                     <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
                       <RotateCcw aria-hidden="true" size={15} />
                       Revertir
@@ -2134,7 +2171,8 @@ export function InventoryDashboard() {
                   ) : null}
                 </span>
               </article>
-            ))}
+              );
+            })}
             {!isLoading && movements.length === 0 ? <div className="emptyState">No hay movimientos registrados.</div> : null}
             {isLoading ? <div className="emptyState">Cargando movimientos...</div> : null}
           </div>

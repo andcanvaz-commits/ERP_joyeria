@@ -4308,17 +4308,6 @@ textarea:disabled {
   pointer-events: none;
 }
 
-/* Detalle del rechazo bajo el cuerpo del acta: fecha, responsable y motivo. */
-.opRechazo {
-  border-top: 1px solid #111;
-  margin-top: 8px;
-  padding-top: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
 /* ── Modos de impresión (controlan tinta vía visibility) ──────── */
 .opMode-entrega .opRecepcionData {
   visibility: hidden;
