@@ -1512,10 +1512,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
 
                     {stage.started_at ? (
-                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                        Inició {hourLabel(stage.started_at)}
-                        {stage.finished_at ? ` · Finalizó ${hourLabel(stage.finished_at)}` : ""}
-                        {stage.finished_at && stage.finished_by_name ? ` · por ${stage.finished_by_name}` : ""}
+                      <div className="userPreviewGrid">
+                        <span>
+                          <strong>Inició</strong>
+                          {hourLabel(stage.started_at)}
+                        </span>
+                        {stage.finished_at ? (
+                          <span>
+                            <strong>Finalizó</strong>
+                            {hourLabel(stage.finished_at)}
+                            {stage.finished_by_name ? ` · ${stage.finished_by_name}` : ""}
+                          </span>
+                        ) : null}
                       </div>
                     ) : null}
 

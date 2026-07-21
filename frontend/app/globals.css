@@ -607,7 +607,7 @@ textarea {
 }
 
 .runStageFINALIZADA {
-  border-left-color: var(--success);
+  border-left-color: var(--gold);
 }
 
 .stageFinishBox {
@@ -2982,7 +2982,7 @@ textarea {
 }
 
 .timingOnTime.runStageTimingPill, .timingDone.runStageTimingPill {
-  background: #d1fae5; color: #065f46;
+  background: #f3e9d6; color: var(--gold-deep);
 }
 .timingWarning.runStageTimingPill { background: #fef3c7; color: #92400e; }
 .timingLate.runStageTimingPill { background: #fee2e2; color: #b91c1c; }
@@ -3059,8 +3059,8 @@ textarea {
 }
 
 .stageTimelineItemFINALIZADA {
-  border-left-color: #10b981;
-  background: #fafffe;
+  border-left-color: var(--gold);
+  background: var(--surface-2);
 }
 
 .stageTimelineItemPENDIENTE {
@@ -3120,8 +3120,8 @@ textarea {
 }
 
 .stageTimelineNumDone {
-  border-color: #10b981;
-  background: #10b981;
+  border-color: var(--gold-deep);
+  background: var(--gold-deep);
   color: #fff;
 }
 
@@ -3630,8 +3630,8 @@ textarea {
   background: #fcf9f2;
 }
 .stageCarouselCard.stageTimelineFINALIZADA {
-  border-color: #10b981;
-  background: #fafffe;
+  border-color: var(--gold);
+  background: var(--surface-2);
 }
 .stageCarouselHead {
   display: flex;
