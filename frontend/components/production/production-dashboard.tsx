@@ -223,7 +223,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const rawMaterials = bundle?.rawMaterials ?? EMPTY_RAW_MATERIALS;
   const isLoading = !currentUser || isBundleLoading;
 
-  const reload = () => queryClient.invalidateQueries({ queryKey: ["production", variant] });
+  // Invalidación cruzada: las acciones de producción cambian lo que muestran
+  // inventario (productos en proceso, solicitudes) y el badge del menú. Sin
+  // esto, navegar a esas vistas en el mismo navegador muestra datos viejos.
+  const reload = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["production", variant] }),
+      queryClient.invalidateQueries({ queryKey: ["inventory"] }),
+      queryClient.invalidateQueries({ queryKey: ["solicitudes"] }),
+    ]);
 
   const [form, setForm] = useState<ProcessForm>(emptyProcessForm);
   const [isSaving, setIsSaving] = useState(false);

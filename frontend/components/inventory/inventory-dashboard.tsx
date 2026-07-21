@@ -774,6 +774,7 @@ export function InventoryDashboard() {
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
       setPrintPreview({ run: updated, mode: "entrega" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
@@ -797,6 +798,7 @@ export function InventoryDashboard() {
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
     } finally {
@@ -817,6 +819,7 @@ export function InventoryDashboard() {
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
       setPrintPreview({ run: updated, mode: "recepcion" });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
