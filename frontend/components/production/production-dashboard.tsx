@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -1339,13 +1339,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <p className="panelText">Movimientos de los ultimos 30 dias</p>
               </div>
               <button
-                aria-label="Ver historial completo"
-                className="iconOnlyButton"
+                aria-label="Abrir historial por calendario"
+                className="iconTextButton"
                 disabled={finishedRuns.length === 0}
                 onClick={() => setIsHistoryOpen(true)}
+                title="Historial por calendario"
                 type="button"
               >
-                <Eye aria-hidden="true" size={20} />
+                <CalendarDays aria-hidden="true" size={16} />
+                Historial
               </button>
             </div>
             {recentFinishedRuns.length > 0 ? (
@@ -1749,15 +1751,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <div className="movementList movementHistoryEntries">
                   {selectedDateRuns.map((run) => (
                     <article className="movementRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
-                      <div>
-                        <strong>{run.process_name}</strong>
-                        <span>{timeLabel(run.finished_at)}</span>
-                        <span>Finalizó: {runFinisherName(run)}</span>
-                      </div>
-                      <div>
-                        <strong>{numericText(run.quantity)} unidades</strong>
-                        <span>{numericText(run.waste_percent)}% merma</span>
-                        <span>{numericText(run.waste_weight)} {run.raw_material_unit_code}</span>
+                      <div style={{ gridColumn: "1 / -2" }}>
+                        <strong>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</strong>
+                        <span>
+                          {numericText(run.quantity)} und · Merma: {numericText(run.waste_weight)} {run.raw_material_unit_code} ·{" "}
+                          {numericText(run.waste_percent)}% · {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}
+                        </span>
                       </div>
                       <button
                         className="iconTextButton"

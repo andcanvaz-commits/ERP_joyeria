@@ -1551,7 +1551,14 @@ textarea {
 }
 
 .movementRow {
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) auto;
+  align-items: center;
+}
+/* Acciones del movimiento: siempre a la derecha, centradas verticalmente. */
+.movementRow > .rowActions,
+.movementRow > .iconTextButton {
+  justify-self: end;
+  grid-column: -2;
 }
 
 .inventoryItemRow div,

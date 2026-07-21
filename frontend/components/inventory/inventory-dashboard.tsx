@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
+import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -2048,14 +2048,15 @@ export function InventoryDashboard() {
               <p className="panelText">Ultimos movimientos registrados</p>
             </div>
             <button
-              aria-label="Visualizar historial completo"
-              className="iconOnlyButton"
+              aria-label="Abrir historial por calendario"
+              className="iconTextButton"
               disabled={movements.length === 0}
               onClick={openMovementHistory}
-              title="Historial completo"
+              title="Historial por calendario"
               type="button"
             >
-              <Eye aria-hidden="true" size={17} />
+              <CalendarDays aria-hidden="true" size={16} />
+              Historial
             </button>
           </div>
           <div className="movementList">
@@ -2075,25 +2076,25 @@ export function InventoryDashboard() {
                     {movement.reason ? ` - ${movement.reason}` : ""}
                     {movement.created_by_name ? ` · ${movement.created_by_name}` : ""}
                   </span>
-                  <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
-                    {movement.source_file_name ? (
-                      <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
-                        <Download aria-hidden="true" size={15} />
-                        XML
-                      </button>
-                    ) : null}
-                    <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
-                      <Eye aria-hidden="true" size={15} />
-                      Visualizar
-                    </button>
-                    {movementsPager.page === 0 && index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
-                      <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
-                        <RotateCcw aria-hidden="true" size={15} />
-                        Revertir
-                      </button>
-                    ) : null}
-                  </span>
                 </div>
+                <span className="rowActions" onClick={stopClick}>
+                  {movement.source_file_name ? (
+                    <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
+                      <Download aria-hidden="true" size={15} />
+                      XML
+                    </button>
+                  ) : null}
+                  <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
+                    <Eye aria-hidden="true" size={15} />
+                    Visualizar
+                  </button>
+                  {movementsPager.page === 0 && index === 0 && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
+                    <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
+                      <RotateCcw aria-hidden="true" size={15} />
+                      Revertir
+                    </button>
+                  ) : null}
+                </span>
               </article>
             ))}
             {!isLoading && movements.length === 0 ? <div className="emptyState">No hay movimientos registrados.</div> : null}
@@ -2188,19 +2189,19 @@ export function InventoryDashboard() {
                           {movement.reason || "Sin motivo registrado"}
                           {movement.created_by_name ? ` · ${movement.created_by_name}` : ""}
                         </span>
-                        <span className="rowActions" onClick={stopClick} style={{ marginTop: 2 }}>
-                          {movement.source_file_name ? (
-                            <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
-                              <Download aria-hidden="true" size={15} />
-                              XML
-                            </button>
-                          ) : null}
-                          <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
-                            <Eye aria-hidden="true" size={15} />
-                            Visualizar
-                          </button>
-                        </span>
                       </div>
+                      <span className="rowActions" onClick={stopClick}>
+                        {movement.source_file_name ? (
+                          <button className="iconTextButton" onClick={() => void handleDownloadMovementSourceFile(movement)} type="button">
+                            <Download aria-hidden="true" size={15} />
+                            XML
+                          </button>
+                        ) : null}
+                        <button className="iconTextButton" onClick={() => setViewingMovement(movement)} type="button">
+                          <Eye aria-hidden="true" size={15} />
+                          Visualizar
+                        </button>
+                      </span>
                     </article>
                   ))}
                   {historySearchActive && historySearchResults.length === 0 ? (
