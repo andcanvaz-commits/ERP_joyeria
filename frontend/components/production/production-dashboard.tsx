@@ -1660,6 +1660,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <strong>Resultado</strong>
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
+            </div>
+            <RunWasteHero run={selectedStatsRun} />
+            <div className="userPreviewGrid">
               <span>
                 <button
                   className="iconTextButton"
@@ -1674,20 +1677,19 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   />
                 </button>
               </span>
+              {showResponsables ? (
+                <>
+                  <span>
+                    <strong>Inició</strong>
+                    {selectedStatsRun.started_by_name ?? "—"} · {timeLabel(selectedStatsRun.started_at)}
+                  </span>
+                  <span>
+                    <strong>Finalizó</strong>
+                    {runFinisherName(selectedStatsRun)} · {timeLabel(selectedStatsRun.finished_at)}
+                  </span>
+                </>
+              ) : null}
             </div>
-            {showResponsables ? (
-              <div className="userPreviewGrid">
-                <span>
-                  <strong>Inició</strong>
-                  {selectedStatsRun.started_by_name ?? "—"} · {timeLabel(selectedStatsRun.started_at)}
-                </span>
-                <span>
-                  <strong>Finalizó</strong>
-                  {runFinisherName(selectedStatsRun)} · {timeLabel(selectedStatsRun.finished_at)}
-                </span>
-              </div>
-            ) : null}
-            <RunWasteHero run={selectedStatsRun} />
             <RunStageSummaryTable run={selectedStatsRun} />
           </section>
         </div>
