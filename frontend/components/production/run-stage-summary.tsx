@@ -22,19 +22,19 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
     null,
   );
   return (
-    <div className="fichaHero">
-      <div className="fichaHeroItem">
-        <strong>{num(totalWaste)} {unit}</strong>
-        <span>Merma total{run.waste_percent ? ` (${num(run.waste_percent)}%)` : ""}</span>
-      </div>
-      <div className="fichaHeroItem">
-        <strong>{num(averageWaste)} {unit}</strong>
-        <span>Promedio por etapa con merma</span>
-      </div>
-      <div className="fichaHeroItem">
-        <strong>{worstStage ? worstStage.stage_name : "—"}</strong>
-        <span>Etapa con mayor merma{worstStage ? ` (${num(worstStage.waste_weight ?? "0")} ${unit})` : ""}</span>
-      </div>
+    <div className="userPreviewGrid">
+      <span>
+        <strong>Merma total</strong>
+        {num(totalWaste)} {unit}{run.waste_percent ? ` · ${num(run.waste_percent)}%` : ""}
+      </span>
+      <span>
+        <strong>Promedio por etapa</strong>
+        {num(averageWaste)} {unit}
+      </span>
+      <span>
+        <strong>Mayor merma</strong>
+        {worstStage ? `${worstStage.stage_name} (${num(worstStage.waste_weight ?? "0")} ${unit})` : "—"}
+      </span>
     </div>
   );
 }
