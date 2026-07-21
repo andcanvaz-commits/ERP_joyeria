@@ -900,15 +900,19 @@ export function InventoryDashboard() {
   }
 
   // Empata el texto de material de una pieza con el segmento del catálogo
-  // (para armar el código de producto). Comparación por etiqueta.
+  // (para armar el código de producto). Exacto primero; si no, el segmento
+  // cuya etiqueta esté contenida en el texto (ej. "ORO 18K" → ORO), tomando
+  // la etiqueta más larga que calce.
   function matchMaterialSegment(text: string | null | undefined) {
     if (!text) return null;
     const clean = text.trim().toUpperCase();
-    return (
-      catalogSegments.find(
-        (segment) => segment.kind === "MATERIAL" && segment.is_active && segment.label.trim().toUpperCase() === clean,
-      ) ?? null
-    );
+    const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+    const exact = materialSegments.find((segment) => segment.label.trim().toUpperCase() === clean);
+    if (exact) return exact;
+    const partial = materialSegments
+      .filter((segment) => clean.includes(segment.label.trim().toUpperCase()))
+      .sort((a, b) => b.label.length - a.label.length);
+    return partial[0] ?? null;
   }
 
   // Material del ensamble derivado de las piezas: segmento del catálogo (1er
@@ -2023,11 +2027,18 @@ export function InventoryDashboard() {
                             className="iconOnlyButton"
                             disabled={!lotItem || lotStock <= 0}
                             onClick={() => {
-                              // Material de la pieza: automático del lote (metal
-                              // definido en producción); lápiz para cambiarlo.
+                              // Material de la pieza: automático del lote; si el
+                              // lote no lo trae (lotes viejos), sale de la materia
+                              // prima de la orden de producción.
+                              const rawMaterial = items.find((candidate) => candidate.id === run.raw_material_item_id) ?? null;
+                              const lotMaterial =
+                                lotItem?.material_type?.trim() ||
+                                rawMaterial?.material_type?.trim() ||
+                                rawMaterial?.name ||
+                                "";
                               setConvertForm({
-                                material_code: matchMaterialSegment(lotItem?.material_type)?.code ?? "",
-                                material_type: lotItem?.material_type ?? "",
+                                material_code: matchMaterialSegment(lotMaterial)?.code ?? "",
+                                material_type: lotMaterial,
                                 product_type_id: "",
                                 quantity: "",
                               });
@@ -2713,21 +2724,38 @@ export function InventoryDashboard() {
                       autoFocus
                       className="field"
                       onChange={(event) => {
-                        const segment = materials.find((candidate) => candidate.code === event.target.value) ?? null;
-                        setConvertForm((current) => ({
-                          ...current,
-                          material_code: segment?.code ?? "",
-                          material_type: segment?.label ?? current.material_type,
-                        }));
+                        if (event.target.value === "__lot__") {
+                          setConvertForm((current) => ({
+                            ...current,
+                            material_code: matchMaterialSegment(current.material_type)?.code ?? "",
+                          }));
+                        } else {
+                          const segment = materials.find((candidate) => candidate.code === event.target.value) ?? null;
+                          setConvertForm((current) => ({
+                            ...current,
+                            material_code: segment?.code ?? "",
+                            material_type: segment?.label ?? current.material_type,
+                          }));
+                        }
                         setMaterialEditFor(null);
                       }}
                       style={{ maxWidth: 260 }}
-                      value={convertForm.material_code}
+                      value={convertForm.material_code || (convertForm.material_type ? "__lot__" : "")}
                     >
-                      <option value="">Seleccionar material</option>
-                      {materials.map((segment) => (
-                        <option key={segment.id} value={segment.code}>{segment.label}</option>
-                      ))}
+                      {/* El material es el del lote; el catálogo completo solo
+                          aparece si ese material no empata con ningún segmento. */}
+                      {convertForm.material_type ? (
+                        <option value={matchMaterialSegment(convertForm.material_type)?.code ?? "__lot__"}>
+                          {convertForm.material_type}
+                        </option>
+                      ) : (
+                        <option value="">Seleccionar material</option>
+                      )}
+                      {!matchMaterialSegment(convertForm.material_type)
+                        ? materials.map((segment) => (
+                            <option key={segment.id} value={segment.code}>{segment.label}</option>
+                          ))
+                        : null}
                     </select>
                   ) : (
                     <span style={{ fontSize: 13, color: convertForm.material_type ? undefined : "var(--muted)" }}>

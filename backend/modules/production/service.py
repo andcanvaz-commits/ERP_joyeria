@@ -776,12 +776,18 @@ class ProductionService:
         if run.status != ProductionRunStatus.PENDING_RECEPTION:
             raise ProductionDomainError("Solo se puede recibir una produccion finalizada y pendiente de recepcion.")
 
+        # El lote hereda el material (metal) de la orden para que la conversión
+        # a producto del catálogo no tenga que preguntarlo.
+        from backend.modules.inventory.models import InventoryItem
+
+        raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
         self.inventory_service.create_finished_product_lot(
             name=run.process_name,
             unit_code="und",
             production_order_id=run.id,
             production_code=run.production_code,
             quantity=run.quantity,
+            material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
             received_by_user_id=current_user.id,
         )
         run.status = ProductionRunStatus.RECEIVED

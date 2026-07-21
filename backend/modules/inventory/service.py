@@ -374,6 +374,7 @@ class InventoryService(InventoryIntegrationPort):
         production_code: str | None,
         quantity: Decimal,
         product_code: str | None = None,
+        material_type: str | None = None,
         received_by_user_id: UUID | None = None,
     ) -> InventoryItem:
         """Crea un producto terminado POR ORDEN (lote), identificado por el código OP,
@@ -387,6 +388,7 @@ class InventoryService(InventoryIntegrationPort):
             sku=sku,
             product_code=product_code,
             description="Producto terminado de produccion.",
+            material_type=material_type,
             unit_code=unit_code.strip(),
             minimum_stock=None,
         )
