@@ -13,7 +13,8 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
-import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
+import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
+import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import {
   archiveInventoryItem,
   combineProducts,
@@ -373,12 +374,16 @@ export function InventoryDashboard() {
     quantity: "",
   });
   const [isCombining, setIsCombining] = useState(false);
-  // Destino de ensamble/conversión: modal de catálogo para elegir el producto
-  // y, si no existe, mantenimiento de productos terminados para crearlo al
-  // vuelo (queda auto-seleccionado). Comparten picker; el modo dice a qué
+  // Flujo del lote de proceso terminado: la ventana principal ofrece
+  // "Agregar al catálogo" (conversión) o "Combinar" con un producto terminado.
+  const [lotAction, setLotAction] = useState<"convert" | "combine" | null>(null);
+  // Selector de producto del catálogo (drill-down); el modo dice a qué
   // formulario se escribe la selección.
   const [targetPickerFor, setTargetPickerFor] = useState<"combine" | "convert" | null>(null);
-  const [createProductFor, setCreateProductFor] = useState<"combine" | "convert" | null>(null);
+  // Selector de la pieza de producto terminado con la que se combina el lote.
+  const [isPartnerPickerOpen, setIsPartnerPickerOpen] = useState(false);
+  // Edición del material de la pieza (lápiz junto al valor automático).
+  const [materialEditFor, setMaterialEditFor] = useState<"convert" | "combine" | null>(null);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -891,6 +896,18 @@ export function InventoryDashboard() {
     } finally {
       setIsConverting(false);
     }
+  }
+
+  // Empata el texto de material de una pieza con el segmento del catálogo
+  // (para armar el código de producto). Comparación por etiqueta.
+  function matchMaterialSegment(text: string | null | undefined) {
+    if (!text) return null;
+    const clean = text.trim().toUpperCase();
+    return (
+      catalogSegments.find(
+        (segment) => segment.kind === "MATERIAL" && segment.is_active && segment.label.trim().toUpperCase() === clean,
+      ) ?? null
+    );
   }
 
   // Material del ensamble derivado de las piezas: segmento del catálogo (1er
@@ -2005,21 +2022,23 @@ export function InventoryDashboard() {
                             <Eye aria-hidden="true" size={15} />
                           </button>
                           <button
-                            aria-label="Convertir lote en productos"
+                            aria-label="Agregar al catálogo o combinar"
                             className="iconOnlyButton"
                             disabled={!lotItem || lotStock <= 0}
                             onClick={() => {
-                              // Material de la pieza: default el del lote (metal
-                              // definido en producción), editable en el modal.
+                              // Material de la pieza: automático del lote (metal
+                              // definido en producción); lápiz para cambiarlo.
                               setConvertForm({
-                                material_code: "",
+                                material_code: matchMaterialSegment(lotItem?.material_type)?.code ?? "",
                                 material_type: lotItem?.material_type ?? "",
                                 product_type_id: "",
                                 quantity: "",
                               });
+                              setLotAction(null);
+                              setMaterialEditFor(null);
                               setConvertRun(run);
                             }}
-                            title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Convertir lote en productos del catálogo"}
+                            title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Agregar al catálogo o combinar"}
                             type="button"
                           >
                             <Repeat aria-hidden="true" size={15} />
@@ -2601,34 +2620,75 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
-      {convertRun ? (() => {
+      {convertRun && lotAction === null ? (() => {
         const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
         const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
-        const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
-        // Si el proceso de la orden declara qué tipos puede producir, el combo
-        // solo ofrece esos; sin asociación ofrece todo el catálogo.
-        const allowedTypeIds = convertRun.allowed_product_type_ids ?? [];
-        const activeTypes = productTypes.filter(
-          (type) => type.is_active && (allowedTypeIds.length === 0 || allowedTypeIds.includes(type.id)),
-        );
-        const selectedType = activeTypes.find((type) => type.id === convertForm.product_type_id) ?? null;
-        const previewCode = convertForm.material_code && selectedType
-          ? `${convertForm.material_code}${selectedType.category_code}${selectedType.model_code}`
-          : null;
-        const quantityNumber = Number(convertForm.quantity);
-        const quantityValid = Number.isFinite(quantityNumber) && quantityNumber > 0 && quantityNumber <= lotStock;
         return (
-          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Convertir lote en productos">
-            <form className="modalWindow processFormWindow" onSubmit={handleConvertLot}>
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Lote de proceso terminado">
+            <section className="modalWindow processFormWindow">
               <div className="modalHeader">
                 <div>
-                  <h2>Convertir lote</h2>
+                  <h2>¿Qué hacer con el lote?</h2>
                   <p>
                     {convertRun.production_code ?? "Sin folio"} · {convertRun.process_name} · Disponible:{" "}
                     {numericText(String(lotStock))} und
                   </p>
                 </div>
                 <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setConvertRun(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="maintenanceGrid">
+                <button
+                  className="maintenanceTile"
+                  onClick={() => {
+                    // Directo al selector del catálogo; el formulario queda debajo.
+                    setLotAction("convert");
+                    setTargetPickerFor("convert");
+                  }}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" size={22} />
+                  <strong>Agregar al catálogo</strong>
+                  <span>Convertir piezas del lote en un producto del catálogo.</span>
+                </button>
+                <button
+                  className="maintenanceTile"
+                  onClick={() => setIsPartnerPickerOpen(true)}
+                  type="button"
+                >
+                  <Repeat aria-hidden="true" size={22} />
+                  <strong>Combinar</strong>
+                  <span>Unir piezas del lote con un producto terminado (ej. cadena + dije).</span>
+                </button>
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {convertRun && lotAction === "convert" ? (() => {
+        const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
+        const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
+        const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+        const selectedType = productTypes.find((type) => type.id === convertForm.product_type_id) ?? null;
+        const previewCode = convertForm.material_code && selectedType
+          ? `${convertForm.material_code}${selectedType.category_code}${selectedType.model_code}`
+          : null;
+        const quantityNumber = Number(convertForm.quantity);
+        const quantityValid = Number.isFinite(quantityNumber) && quantityNumber > 0 && quantityNumber <= lotStock;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Agregar al catálogo">
+            <form className="modalWindow processFormWindow" onSubmit={handleConvertLot}>
+              <div className="modalHeader">
+                <div>
+                  <h2>Agregar al catálogo</h2>
+                  <p>
+                    {convertRun.production_code ?? "Sin folio"} · {convertRun.process_name} · Disponible:{" "}
+                    {numericText(String(lotStock))} und
+                  </p>
+                </div>
+                <button aria-label="Volver" className="iconOnlyButton" onClick={() => setLotAction(null)} type="button">
                   <X aria-hidden="true" size={18} />
                 </button>
               </div>
@@ -2648,29 +2708,48 @@ export function InventoryDashboard() {
                   )}
                 </div>
               </div>
-              <label className="fieldGroup">
-                <span>Material</span>
-                <select
-                  className="field"
-                  onChange={(event) => setConvertForm((current) => ({ ...current, material_code: event.target.value }))}
-                  value={convertForm.material_code}
-                >
-                  <option value="">Seleccionar material</option>
-                  {materials.map((segment) => (
-                    <option key={segment.id} value={segment.code}>{segment.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Material de la pieza (auto del lote, editable)</span>
-                <input
-                  className="field"
-                  maxLength={80}
-                  onChange={(event) => setConvertForm((current) => ({ ...current, material_type: event.target.value }))}
-                  placeholder="Ej. ORO 18K"
-                  value={convertForm.material_type}
-                />
-              </label>
+              <div className="fieldGroup">
+                <span>Material de la pieza</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {materialEditFor === "convert" ? (
+                    <select
+                      autoFocus
+                      className="field"
+                      onChange={(event) => {
+                        const segment = materials.find((candidate) => candidate.code === event.target.value) ?? null;
+                        setConvertForm((current) => ({
+                          ...current,
+                          material_code: segment?.code ?? "",
+                          material_type: segment?.label ?? current.material_type,
+                        }));
+                        setMaterialEditFor(null);
+                      }}
+                      style={{ maxWidth: 260 }}
+                      value={convertForm.material_code}
+                    >
+                      <option value="">Seleccionar material</option>
+                      {materials.map((segment) => (
+                        <option key={segment.id} value={segment.code}>{segment.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span style={{ fontSize: 13, color: convertForm.material_type ? undefined : "var(--muted)" }}>
+                      {convertForm.material_type || "Sin material"}
+                    </span>
+                  )}
+                  <button
+                    aria-label="Editar material"
+                    className="iconOnlyButton"
+                    onClick={() => setMaterialEditFor((current) => (current === "convert" ? null : "convert"))}
+                    type="button"
+                  >
+                    <Pencil aria-hidden="true" size={14} />
+                  </button>
+                </div>
+                {!convertForm.material_code ? (
+                  <small style={{ color: "var(--muted)" }}>El material no está en el catálogo: elígelo con el lápiz.</small>
+                ) : null}
+              </div>
               <label className="fieldGroup">
                 <span>Cantidad a convertir (máx. {numericText(String(lotStock))})</span>
                 <input
@@ -2833,29 +2912,73 @@ export function InventoryDashboard() {
                   )}
                 </div>
               </div>
-              <label className="fieldGroup">
-                <span>Material del código resultante</span>
-                <select
-                  className="field"
-                  onChange={(event) => setCombineForm((current) => ({ ...current, material_code: event.target.value }))}
-                  value={combineForm.material_code}
-                >
-                  <option value="">Seleccionar material</option>
-                  {materials.map((segment) => (
-                    <option key={segment.id} value={segment.code}>{segment.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Material de la pieza (auto desde las piezas, editable)</span>
-                <input
-                  className="field"
-                  maxLength={80}
-                  onChange={(event) => setCombineForm((current) => ({ ...current, material_type: event.target.value }))}
-                  placeholder="Ej. ORO 18K + PLATA 925"
-                  value={combineForm.material_type}
-                />
-              </label>
+              {(() => {
+                // Materiales presentes en las piezas elegidas; el automático los
+                // combina y el lápiz permite quedarse con uno solo.
+                const pieceLabels: string[] = [];
+                for (const line of combineForm.sources) {
+                  const item = combinable.find((candidate) => candidate.id === line.itemId);
+                  if (!item) continue;
+                  const code = item.product_code?.[0];
+                  const label = materials.find((segment) => segment.code === code)?.label ?? item.material_type?.trim();
+                  if (label && !pieceLabels.includes(label)) pieceLabels.push(label);
+                }
+                const comboLabel = pieceLabels.join(" + ");
+                return (
+                  <div className="fieldGroup">
+                    <span>Material de la pieza</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {materialEditFor === "combine" ? (
+                        <select
+                          autoFocus
+                          className="field"
+                          onChange={(event) => {
+                            if (event.target.value === "__combo__") {
+                              setCombineForm((current) => ({
+                                ...current,
+                                ...deriveCombineMaterial(current.sources),
+                              }));
+                            } else {
+                              const segment = materials.find((candidate) => candidate.code === event.target.value) ?? null;
+                              setCombineForm((current) => ({
+                                ...current,
+                                material_code: segment?.code ?? "",
+                                material_type: segment?.label ?? current.material_type,
+                              }));
+                            }
+                            setMaterialEditFor(null);
+                          }}
+                          style={{ maxWidth: 260 }}
+                          value={combineForm.material_code}
+                        >
+                          <option value="">Seleccionar material</option>
+                          {pieceLabels.length > 1 ? (
+                            <option value="__combo__">Combinado: {comboLabel}</option>
+                          ) : null}
+                          {materials.map((segment) => (
+                            <option key={segment.id} value={segment.code}>{segment.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: 13, color: combineForm.material_type ? undefined : "var(--muted)" }}>
+                          {combineForm.material_type || "Se llena al elegir las piezas"}
+                        </span>
+                      )}
+                      <button
+                        aria-label="Editar material"
+                        className="iconOnlyButton"
+                        onClick={() => setMaterialEditFor((current) => (current === "combine" ? null : "combine"))}
+                        type="button"
+                      >
+                        <Pencil aria-hidden="true" size={14} />
+                      </button>
+                    </div>
+                    {combineForm.material_type && !combineForm.material_code ? (
+                      <small style={{ color: "var(--muted)" }}>El material no está en el catálogo: elígelo con el lápiz.</small>
+                    ) : null}
+                  </div>
+                );
+              })()}
               <label className="fieldGroup">
                 <span>Cantidad de productos resultantes</span>
                 <input
@@ -2881,111 +3004,51 @@ export function InventoryDashboard() {
         );
       })() : null}
 
-      {targetPickerFor ? (() => {
-        // Catálogo agrupado por categoría (orden por código), igual que el
-        // modal "qué se fabrica" de producción. En conversión, si el proceso
-        // declara qué tipos puede producir, solo se ofrecen esos.
-        const allowedTypeIds = targetPickerFor === "convert" ? (convertRun?.allowed_product_type_ids ?? []) : [];
-        const active = productTypes.filter(
-          (type) => type.is_active && (allowedTypeIds.length === 0 || allowedTypeIds.includes(type.id)),
-        );
-        const selectedId = targetPickerFor === "convert" ? convertForm.product_type_id : combineForm.product_type_id;
-        const chooseType = (id: string) => {
-          if (targetPickerFor === "convert") setConvertForm((current) => ({ ...current, product_type_id: id }));
-          else setCombineForm((current) => ({ ...current, product_type_id: id }));
-          setTargetPickerFor(null);
-        };
-        // Con lista de tipos permitidos no tiene sentido crear uno nuevo: el
-        // backend lo rechazaría al convertir.
-        const canCreate = allowedTypeIds.length === 0;
-        const groups = new Map<string, typeof active>();
-        for (const type of active) {
-          const key = `${type.category_code} · ${type.category_label}`;
-          const list = groups.get(key);
-          if (list) list.push(type);
-          else groups.set(key, [type]);
-        }
-        const sortedGroups = [...groups.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([label, types]) => [
-            label,
-            [...types].sort((a, b) => a.model_code.localeCompare(b.model_code) || (a.name ?? "").localeCompare(b.name ?? "")),
-          ] as const);
-        return (
-          <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Elegir producto resultante">
-            <section className="modalWindow processViewWindow">
-              <div className="modalHeader">
-                <div>
-                  <h2>¿Qué producto resulta?</h2>
-                  <p>Catálogo de productos terminados · elige uno</p>
-                </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setTargetPickerFor(null)} type="button">
-                  <X aria-hidden="true" size={18} />
-                </button>
-              </div>
-              <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
-                {sortedGroups.map(([groupLabel, types]) => (
-                  <div key={groupLabel}>
-                    <h3 style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                      {groupLabel}
-                    </h3>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      {types.map((type) => (
-                        <button
-                          className={`processPicker${selectedId === type.id ? " processPickerActive" : ""}`}
-                          key={type.id}
-                          onClick={() => chooseType(type.id)}
-                          type="button"
-                        >
-                          #{type.model_code} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {active.length === 0 ? (
-                  <div className="emptyState">No hay productos en el catálogo. Crea el primero.</div>
-                ) : null}
-              </div>
-              {canCreate ? (
-                <div className="modalActions">
-                  <button
-                    className="button"
-                    onClick={() => {
-                      // El mantenimiento reemplaza al picker; al cerrar o crear se vuelve.
-                      setCreateProductFor(targetPickerFor);
-                      setTargetPickerFor(null);
-                    }}
-                    type="button"
-                  >
-                    <Plus aria-hidden="true" size={14} />
-                    Crear producto nuevo
-                  </button>
-                </div>
-              ) : null}
-            </section>
-          </div>
-        );
-      })() : null}
-
-      {createProductFor ? (
-        <ProductTypesManager
-          mode="create"
-          onClose={() => {
-            setTargetPickerFor(createProductFor);
-            setCreateProductFor(null);
+      {targetPickerFor ? (
+        <CatalogProductPicker
+          title="¿Qué producto resulta?"
+          allowedTypeIds={targetPickerFor === "convert" ? convertRun?.allowed_product_type_ids ?? undefined : undefined}
+          selectedId={targetPickerFor === "convert" ? convertForm.product_type_id : combineForm.product_type_id}
+          onSelect={(type) => {
+            if (targetPickerFor === "convert") setConvertForm((current) => ({ ...current, product_type_id: type.id }));
+            else setCombineForm((current) => ({ ...current, product_type_id: type.id }));
+            setTargetPickerFor(null);
           }}
-          onProductCreated={(created) => {
-            // El recién creado queda como destino del ensamble/conversión.
-            if (createProductFor === "convert") {
-              setConvertForm((current) => ({ ...current, product_type_id: created.id }));
-            } else {
-              setCombineForm((current) => ({ ...current, product_type_id: created.id }));
-            }
-            setCreateProductFor(null);
-          }}
+          onClose={() => setTargetPickerFor(null)}
         />
       ) : null}
+
+      {isPartnerPickerOpen && convertRun ? (() => {
+        const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
+        return (
+          <FinishedItemPicker
+            title="¿Con qué se combina?"
+            subtitle={`Lote ${convertRun.production_code ?? "sin folio"} · elige el producto terminado`}
+            items={items}
+            excludeId={lotItem?.id}
+            onSelect={(partner) => {
+              if (!lotItem) return;
+              // El ensamble arranca con el lote y la pieza elegida; cantidades
+              // y producto resultante se definen en el modal de ensamblar.
+              const sources = [
+                { itemId: lotItem.id, quantity: "" },
+                { itemId: partner.id, quantity: "" },
+              ];
+              setCombineForm({
+                sources,
+                product_type_id: "",
+                quantity: "",
+                ...deriveCombineMaterial(sources),
+              });
+              setIsPartnerPickerOpen(false);
+              setConvertRun(null);
+              setLotAction(null);
+              setIsCombineOpen(true);
+            }}
+            onClose={() => setIsPartnerPickerOpen(false)}
+          />
+        );
+      })() : null}
 
       {rejectRun ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">
