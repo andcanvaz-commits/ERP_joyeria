@@ -1653,11 +1653,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </span>
               <span>
                 <strong>Merma</strong>
-                {numericText(selectedStatsRun.waste_weight)} {selectedStatsRun.raw_material_unit_code}
-              </span>
-              <span>
-                <strong>% merma</strong>
-                {numericText(selectedStatsRun.waste_percent)}%
+                {numericText(selectedStatsRun.waste_weight)} {selectedStatsRun.raw_material_unit_code} · {numericText(selectedStatsRun.waste_percent)}%
               </span>
               <span>
                 <strong>Resultado</strong>
