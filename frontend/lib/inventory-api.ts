@@ -79,6 +79,7 @@ export type ConvertLotPayload = {
   material_code: string;
   product_type_id: string;
   quantity: string;
+  material_type?: string | null;
 };
 
 // Convierte parcialmente un lote de proceso terminado en un producto del

@@ -353,7 +353,7 @@ export function InventoryDashboard() {
   const [receptionInfoRun, setReceptionInfoRun] = useState<ProductionRun | null>(null);
   // Conversión de lote de proceso terminado a producto del catálogo.
   const [convertRun, setConvertRun] = useState<ProductionRun | null>(null);
-  const [convertForm, setConvertForm] = useState({ material_code: "", product_type_id: "", quantity: "" });
+  const [convertForm, setConvertForm] = useState({ material_code: "", material_type: "", product_type_id: "", quantity: "" });
   const [isConverting, setIsConverting] = useState(false);
   // Rechazo de solicitud de materiales: modal con motivo.
   const [rejectRun, setRejectRun] = useState<ProductionRun | null>(null);
@@ -373,10 +373,12 @@ export function InventoryDashboard() {
     quantity: "",
   });
   const [isCombining, setIsCombining] = useState(false);
-  // Destino del ensamble: modal de catálogo para elegir el producto y, si no
-  // existe, mantenimiento de productos terminados para crearlo al vuelo.
-  const [isCombineTargetOpen, setIsCombineTargetOpen] = useState(false);
-  const [isCombineCreateOpen, setIsCombineCreateOpen] = useState(false);
+  // Destino de ensamble/conversión: modal de catálogo para elegir el producto
+  // y, si no existe, mantenimiento de productos terminados para crearlo al
+  // vuelo (queda auto-seleccionado). Comparten picker; el modo dice a qué
+  // formulario se escribe la selección.
+  const [targetPickerFor, setTargetPickerFor] = useState<"combine" | "convert" | null>(null);
+  const [createProductFor, setCreateProductFor] = useState<"combine" | "convert" | null>(null);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -876,12 +878,13 @@ export function InventoryDashboard() {
     try {
       await convertLotToProduct(lotItem.id, {
         material_code: convertForm.material_code,
+        material_type: convertForm.material_type.trim() || null,
         product_type_id: convertForm.product_type_id,
         quantity: convertForm.quantity,
       });
       setSuccess("Lote convertido en productos terminados.");
       setConvertRun(null);
-      setConvertForm({ material_code: "", product_type_id: "", quantity: "" });
+      setConvertForm({ material_code: "", material_type: "", product_type_id: "", quantity: "" });
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo convertir el lote.");
@@ -2006,7 +2009,14 @@ export function InventoryDashboard() {
                             className="iconOnlyButton"
                             disabled={!lotItem || lotStock <= 0}
                             onClick={() => {
-                              setConvertForm({ material_code: "", product_type_id: "", quantity: "" });
+                              // Material de la pieza: default el del lote (metal
+                              // definido en producción), editable en el modal.
+                              setConvertForm({
+                                material_code: "",
+                                material_type: lotItem?.material_type ?? "",
+                                product_type_id: "",
+                                quantity: "",
+                              });
                               setConvertRun(run);
                             }}
                             title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Convertir lote en productos del catálogo"}
@@ -2622,6 +2632,22 @@ export function InventoryDashboard() {
                   <X aria-hidden="true" size={18} />
                 </button>
               </div>
+              <div className="fieldGroup">
+                <span>Producto del catálogo</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <button className="button" onClick={() => setTargetPickerFor("convert")} type="button">
+                    <Pencil aria-hidden="true" size={14} />
+                    {convertForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
+                  </button>
+                  {selectedType ? (
+                    <span style={{ fontSize: 13 }}>
+                      {selectedType.category_label} · {selectedType.model_label}{selectedType.name ? ` · ${selectedType.name}` : ""}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 13, color: "var(--muted)" }}>Sin elegir</span>
+                  )}
+                </div>
+              </div>
               <label className="fieldGroup">
                 <span>Material</span>
                 <select
@@ -2636,19 +2662,14 @@ export function InventoryDashboard() {
                 </select>
               </label>
               <label className="fieldGroup">
-                <span>Tipo de producto</span>
-                <select
+                <span>Material de la pieza (auto del lote, editable)</span>
+                <input
                   className="field"
-                  onChange={(event) => setConvertForm((current) => ({ ...current, product_type_id: event.target.value }))}
-                  value={convertForm.product_type_id}
-                >
-                  <option value="">Seleccionar tipo</option>
-                  {activeTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
-                    </option>
-                  ))}
-                </select>
+                  maxLength={80}
+                  onChange={(event) => setConvertForm((current) => ({ ...current, material_type: event.target.value }))}
+                  placeholder="Ej. ORO 18K"
+                  value={convertForm.material_type}
+                />
               </label>
               <label className="fieldGroup">
                 <span>Cantidad a convertir (máx. {numericText(String(lotStock))})</span>
@@ -2799,7 +2820,7 @@ export function InventoryDashboard() {
               <div className="fieldGroup">
                 <span>Producto resultante</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <button className="button" onClick={() => setIsCombineTargetOpen(true)} type="button">
+                  <button className="button" onClick={() => setTargetPickerFor("combine")} type="button">
                     <Pencil aria-hidden="true" size={14} />
                     {combineForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
                   </button>
@@ -2860,10 +2881,23 @@ export function InventoryDashboard() {
         );
       })() : null}
 
-      {isCombineTargetOpen ? (() => {
+      {targetPickerFor ? (() => {
         // Catálogo agrupado por categoría (orden por código), igual que el
-        // modal "qué se fabrica" de producción.
-        const active = productTypes.filter((type) => type.is_active);
+        // modal "qué se fabrica" de producción. En conversión, si el proceso
+        // declara qué tipos puede producir, solo se ofrecen esos.
+        const allowedTypeIds = targetPickerFor === "convert" ? (convertRun?.allowed_product_type_ids ?? []) : [];
+        const active = productTypes.filter(
+          (type) => type.is_active && (allowedTypeIds.length === 0 || allowedTypeIds.includes(type.id)),
+        );
+        const selectedId = targetPickerFor === "convert" ? convertForm.product_type_id : combineForm.product_type_id;
+        const chooseType = (id: string) => {
+          if (targetPickerFor === "convert") setConvertForm((current) => ({ ...current, product_type_id: id }));
+          else setCombineForm((current) => ({ ...current, product_type_id: id }));
+          setTargetPickerFor(null);
+        };
+        // Con lista de tipos permitidos no tiene sentido crear uno nuevo: el
+        // backend lo rechazaría al convertir.
+        const canCreate = allowedTypeIds.length === 0;
         const groups = new Map<string, typeof active>();
         for (const type of active) {
           const key = `${type.category_code} · ${type.category_label}`;
@@ -2885,7 +2919,7 @@ export function InventoryDashboard() {
                   <h2>¿Qué producto resulta?</h2>
                   <p>Catálogo de productos terminados · elige uno</p>
                 </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCombineTargetOpen(false)} type="button">
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setTargetPickerFor(null)} type="button">
                   <X aria-hidden="true" size={18} />
                 </button>
               </div>
@@ -2898,12 +2932,9 @@ export function InventoryDashboard() {
                     <div style={{ display: "grid", gap: 6 }}>
                       {types.map((type) => (
                         <button
-                          className={`processPicker${combineForm.product_type_id === type.id ? " processPickerActive" : ""}`}
+                          className={`processPicker${selectedId === type.id ? " processPickerActive" : ""}`}
                           key={type.id}
-                          onClick={() => {
-                            setCombineForm((current) => ({ ...current, product_type_id: type.id }));
-                            setIsCombineTargetOpen(false);
-                          }}
+                          onClick={() => chooseType(type.id)}
                           type="button"
                         >
                           #{type.model_code} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
@@ -2916,36 +2947,42 @@ export function InventoryDashboard() {
                   <div className="emptyState">No hay productos en el catálogo. Crea el primero.</div>
                 ) : null}
               </div>
-              <div className="modalActions">
-                <button
-                  className="button"
-                  onClick={() => {
-                    // El mantenimiento reemplaza al picker; al cerrar o crear se vuelve.
-                    setIsCombineTargetOpen(false);
-                    setIsCombineCreateOpen(true);
-                  }}
-                  type="button"
-                >
-                  <Plus aria-hidden="true" size={14} />
-                  Crear producto nuevo
-                </button>
-              </div>
+              {canCreate ? (
+                <div className="modalActions">
+                  <button
+                    className="button"
+                    onClick={() => {
+                      // El mantenimiento reemplaza al picker; al cerrar o crear se vuelve.
+                      setCreateProductFor(targetPickerFor);
+                      setTargetPickerFor(null);
+                    }}
+                    type="button"
+                  >
+                    <Plus aria-hidden="true" size={14} />
+                    Crear producto nuevo
+                  </button>
+                </div>
+              ) : null}
             </section>
           </div>
         );
       })() : null}
 
-      {isCombineCreateOpen ? (
+      {createProductFor ? (
         <ProductTypesManager
           mode="create"
           onClose={() => {
-            setIsCombineCreateOpen(false);
-            setIsCombineTargetOpen(true);
+            setTargetPickerFor(createProductFor);
+            setCreateProductFor(null);
           }}
           onProductCreated={(created) => {
-            // El recién creado queda como destino del ensamble.
-            setCombineForm((current) => ({ ...current, product_type_id: created.id }));
-            setIsCombineCreateOpen(false);
+            // El recién creado queda como destino del ensamble/conversión.
+            if (createProductFor === "convert") {
+              setConvertForm((current) => ({ ...current, product_type_id: created.id }));
+            } else {
+              setCombineForm((current) => ({ ...current, product_type_id: created.id }));
+            }
+            setCreateProductFor(null);
           }}
         />
       ) : null}

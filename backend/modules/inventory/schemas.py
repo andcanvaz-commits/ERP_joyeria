@@ -75,6 +75,8 @@ class LotConversionCreate(BaseModel):
     material_code: str = Field(min_length=1, max_length=1)
     product_type_id: UUID
     quantity: Decimal = Field(gt=0)
+    # Texto libre del material de la pieza (default: el del lote), editable.
+    material_type: str | None = Field(default=None, max_length=80)
 
 
 class CombineSourceLine(BaseModel):
