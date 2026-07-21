@@ -64,7 +64,7 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
   const muted = { color: "var(--muted)" } as const;
   // Altura de fila fija + relleno hasta completar la página: el modal no debe
   // cambiar de tamaño al pasar de página (preferencia de UI del proyecto).
-  const ROW_HEIGHT = 42;
+  const ROW_HEIGHT = 36;
   const fillerCount = rows.length > 0 ? Math.max(0, pageSize - pager.pageItems.length) : 0;
   const oneLine = {
     whiteSpace: "nowrap",
@@ -72,7 +72,7 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
     textOverflow: "ellipsis",
   } as const;
   return (
-    <div className="tableWrap pagedListFloor" style={{ minHeight: 200 }}>
+    <div className="tableWrap pagedListFloor">
       {/* Layout fijo: los anchos no se recalculan por página (la ventana no
           debe cambiar de tamaño al paginar). */}
       <table className="table tableAuto" style={{ tableLayout: "fixed", width: "100%", minWidth: 560 }}>
