@@ -1403,9 +1403,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   ) : null}
                   {selectedRunForStages.process_name}
                 </h2>
-                <p style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {numericText(selectedRunForStages.quantity)} unidades
-                  <StatusPunch label={runStatusLabel(selectedRunForStages.status)} tone={runStatusTone(selectedRunForStages.status)} />
+                <p>
+                  {numericText(selectedRunForStages.quantity)} {Number(selectedRunForStages.quantity) === 1 ? "unidad" : "unidades"}
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
