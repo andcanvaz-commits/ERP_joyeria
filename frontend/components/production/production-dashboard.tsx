@@ -263,8 +263,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   } | null>(null);
   const [selectedProcessId, setSelectedProcessId] = useState("");
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
-  const [targetProductTypeId, setTargetProductTypeId] = useState("");
-  const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
   const [runQuantity, setRunQuantity] = useState("1");
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
   const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
@@ -360,14 +358,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     // respeta cualquier materia prima ya elegida (todas son utilizables).
     const materials = selectedProcess?.materials ?? [];
     setSelectedMaterialId((current) => current || (materials[0]?.inventory_item_id ?? ""));
-    // Producto objetivo: un único tipo asociado se asigna solo; con varios se
-    // conserva la elección si sigue siendo válida; sin asociaciones no aplica.
-    const allowed = selectedProcess?.product_type_ids ?? [];
-    setTargetProductTypeId((current) => {
-      if (allowed.length === 1) return allowed[0];
-      if (allowed.length === 0) return "";
-      return current && allowed.includes(current) ? current : "";
-    });
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
@@ -808,9 +798,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         process_id: selectedProcess.id,
         quantity: runQuantity,
         raw_material_item_id: selectedMaterialId,
-        target_product_type_id: targetProductTypeId || null,
       });
-      setTargetProductTypeId("");
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima.");
       await reload();
     } catch (nextError) {
@@ -1255,31 +1243,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   </select>
                 </label>
               </div>
-              {(selectedProcess?.product_type_ids ?? []).length > 1 ? (
-                // Solo los procesos multi-producto (ej. casting) gestionan qué
-                // se fabrica: botón que abre el catálogo completo en un modal.
-                <div className="fieldGroup">
-                  <span>Producto a fabricar</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <button className="button" onClick={() => setIsTargetModalOpen(true)} type="button">
-                      <Pencil aria-hidden="true" size={14} />
-                      {targetProductTypeId ? "Cambiar" : "Definir qué se fabrica"}
-                    </button>
-                    {targetProductTypeId ? (
-                      (() => {
-                        const type = productTypesList.find((candidate) => candidate.id === targetProductTypeId);
-                        return type ? (
-                          <span style={{ fontSize: 13 }}>
-                            {type.category_label} · {type.model_label}{type.name ? ` · ${type.name}` : ""}
-                          </span>
-                        ) : null;
-                      })()
-                    ) : (
-                      <span style={{ fontSize: 13, color: "var(--muted)" }}>Sin definir (se clasifica al recibir)</span>
-                    )}
-                  </div>
-                </div>
-              ) : null}
               <label className="fieldGroup">
                 <span>Cantidad a fabricar</span>
                 <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
@@ -1720,15 +1683,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <strong>Resultado</strong>
                 {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
-              {selectedStatsRun.target_product_type_id ? (
-                <span>
-                  <strong>Producto objetivo</strong>
-                  {(() => {
-                    const type = productTypesList.find((candidate) => candidate.id === selectedStatsRun.target_product_type_id);
-                    return type ? `${type.category_label} · ${type.model_label}${type.name ? ` · ${type.name}` : ""}` : "—";
-                  })()}
-                </span>
-              ) : null}
               <RunWasteHero run={selectedStatsRun} />
               <span>
                 <button
@@ -1761,72 +1715,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </section>
         </div>
       ) : null}
-
-      {isTargetModalOpen ? (() => {
-        const active = productTypesList.filter((type) => type.is_active);
-        const groups = new Map<string, typeof active>();
-        for (const type of active) {
-          const key = `${type.category_code} · ${type.category_label}`;
-          const list = groups.get(key);
-          if (list) list.push(type);
-          else groups.set(key, [type]);
-        }
-        const sortedGroups = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-        return (
-          <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir qué se fabrica">
-            <section className="modalWindow processViewWindow">
-              <div className="modalHeader">
-                <div>
-                  <h2>¿Qué se fabrica?</h2>
-                  <p>Catálogo de productos terminados · elige uno</p>
-                </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsTargetModalOpen(false)} type="button">
-                  <X aria-hidden="true" size={18} />
-                </button>
-              </div>
-              <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
-                {sortedGroups.map(([groupLabel, types]) => (
-                  <div key={groupLabel}>
-                    <h3 style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                      {groupLabel}
-                    </h3>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      {types.map((type) => (
-                        <button
-                          className={`processPicker${targetProductTypeId === type.id ? " processPickerActive" : ""}`}
-                          key={type.id}
-                          onClick={() => {
-                            setTargetProductTypeId(type.id);
-                            setIsTargetModalOpen(false);
-                          }}
-                          type="button"
-                        >
-                          {type.model_label}{type.name ? ` · ${type.name}` : ""}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {active.length === 0 ? (
-                  <div className="emptyState">No hay tipos de producto en el catálogo.</div>
-                ) : null}
-              </div>
-              <div className="modalActions">
-                <button
-                  className="button"
-                  onClick={() => {
-                    setTargetProductTypeId("");
-                    setIsTargetModalOpen(false);
-                  }}
-                  type="button"
-                >
-                  Sin definir (se clasifica al recibir)
-                </button>
-              </div>
-            </section>
-          </div>
-        );
-      })() : null}
 
       {isHistoryOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de procesos">
