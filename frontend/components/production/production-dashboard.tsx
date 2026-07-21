@@ -1644,14 +1644,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <StatusPunch label={runStatusLabel(selectedStatsRun.status)} tone={runStatusTone(selectedStatsRun.status)} />
               </span>
               <span>
-                <strong>Inicio</strong>
-                {timeLabel(selectedStatsRun.started_at)}
-              </span>
-              <span>
-                <strong>Fin</strong>
-                {timeLabel(selectedStatsRun.finished_at)}
-              </span>
-              <span>
                 <strong>Merma</strong>
                 {numericText(selectedStatsRun.waste_weight)} {selectedStatsRun.raw_material_unit_code} · {numericText(selectedStatsRun.waste_percent)}%
               </span>
@@ -1676,8 +1668,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
             {showResponsables ? (
               <div className="userPreviewGrid">
-                <span><strong>Inició</strong>{selectedStatsRun.started_by_name ?? "—"}</span>
-                <span><strong>Finalizó</strong>{runFinisherName(selectedStatsRun)}</span>
+                <span>
+                  <strong>Inició</strong>
+                  {selectedStatsRun.started_by_name ?? "—"} · {timeLabel(selectedStatsRun.started_at)}
+                </span>
+                <span>
+                  <strong>Finalizó</strong>
+                  {runFinisherName(selectedStatsRun)} · {timeLabel(selectedStatsRun.finished_at)}
+                </span>
               </div>
             ) : null}
             <RunStageSummaryTable run={selectedStatsRun} />
