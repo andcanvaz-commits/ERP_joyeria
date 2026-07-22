@@ -26,6 +26,8 @@ export type InventoryItem = {
   purity?: string | null;
   average_cost?: string;
   total_weight?: string | null;
+  // Gramos por unidad (solo piezas nacidas por conversión con el sistema).
+  weight_per_unit?: string | null;
   elaboration_date?: string | null;
   archived_at?: string | null;
 };

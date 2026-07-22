@@ -25,6 +25,9 @@ class InventoryItem(Base):
     purity: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Productos terminados: peso total y fecha de elaboracion.
     total_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    # Gramos por unidad segun la orden de produccion (solo piezas nacidas por
+    # conversion desde que el sistema calcula esto; permite stock g <-> und).
+    weight_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     elaboration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     minimum_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)

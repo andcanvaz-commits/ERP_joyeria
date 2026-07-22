@@ -428,16 +428,53 @@ class InventoryService(InventoryIntegrationPort):
         product_code = f"{material_code}{product_type.category_code}{product_type.model_code}"
         return product_code, product_type
 
+    def _match_material_code(self, text: str | None) -> str | None:
+        """Empata el texto de material de un lote con un segmento MATERIAL del
+        catálogo: exacto primero; si no, el segmento cuya etiqueta esté
+        contenida en el texto (ej. "ORO 18K" → ORO), la más larga que calce.
+        Si no empata con ninguno, CREA el segmento con el siguiente código
+        libre: el catálogo crece solo con cada material nuevo, nada quemado."""
+        if not text:
+            return None
+        from sqlalchemy import select
+        from backend.modules.catalog.models import CatalogSegment
+
+        segments = self.repository.session.execute(
+            select(CatalogSegment).where(
+                CatalogSegment.kind == "MATERIAL",
+                CatalogSegment.is_active.is_(True),
+            )
+        ).scalars().all()
+        clean = text.strip().upper()
+        exact = next((s for s in segments if s.label.strip().upper() == clean), None)
+        if exact is not None:
+            return exact.code
+        partial = sorted(
+            (s for s in segments if s.label.strip().upper() in clean),
+            key=lambda s: -len(s.label),
+        )
+        if partial:
+            return partial[0].code
+
+        from backend.modules.catalog.schemas import CatalogSegmentCreate
+        from backend.modules.catalog.service import CatalogService
+
+        created = CatalogService(self.repository.session).create_segment(
+            CatalogSegmentCreate(kind="MATERIAL", label=clean)
+        )
+        return created.code
+
     def convert_lot_to_product(
         self, lot_item_id: UUID, payload: LotConversionCreate, user_id: UUID | None
     ) -> InventoryItemRead:
         """Convierte parcialmente un lote de proceso terminado (SKU = código OP)
         en un producto del catálogo. Consumo y producción quedan como el par de
         movimientos CONVERSION_SALIDA/CONVERSION_ENTRADA; nunca se edita stock
-        directo. Repetir la conversión mismo tipo + mismo lote suma al mismo
-        item; lotes distintos nunca se consolidan."""
-        from sqlalchemy import select
-
+        directo. Destino por pieza (target_item_id): si el material de
+        fabricación del lote coincide con el de la pieza elegida, suma a esa
+        pieza; si no, crea/reusa otra fila con el mismo modelo y el material
+        del lote. Destino por tipo (product_type_id): repetir la conversión
+        mismo tipo + mismo lote suma al mismo item."""
         lot = self._get_item_or_raise(lot_item_id)
         if lot.item_type != "FINISHED_PRODUCT":
             raise InventoryDomainError("Solo se pueden convertir lotes de procesos terminados.")
@@ -450,56 +487,106 @@ class InventoryService(InventoryIntegrationPort):
         if lot.current_stock < payload.quantity:
             raise InventoryDomainError("Stock insuficiente en el lote.")
 
-        session = self.repository.session
-        product_code, product_type = self._resolve_catalog_target(
-            payload.material_code, payload.product_type_id
-        )
+        # Material: siempre el de fabricación del lote (su materia prima; sin
+        # material no arranca producción). Si no empata con un segmento del
+        # catálogo, se crea uno nuevo con el siguiente código libre.
+        lot_material = (payload.material_type or lot.material_type or "").strip()
+        material_code = payload.material_code or self._match_material_code(lot_material)
+        if not material_code:
+            raise InventoryDomainError("El lote no tiene material registrado.")
 
-        # Filtro por proceso: si el proceso de la orden de este lote declara qué
-        # tipos puede producir, la conversión solo acepta esos tipos.
-        from backend.modules.production.models import (
-            ProductionProcessProductType,
-            ProductionRun,
-        )
+        # La pieza convertida se mide en la unidad con la que calcula la
+        # producción (gramos): la orden ya sabe cuántos gramos de materia
+        # prima ocupa una unidad de producto.
+        from sqlalchemy import select
+        from backend.modules.production.models import ProductionRun
 
-        run = session.execute(
+        run = self.repository.session.execute(
             select(ProductionRun).where(ProductionRun.production_code == lot.sku)
         ).scalar_one_or_none()
-        if run is not None:
-            allowed = set(
-                session.execute(
-                    select(ProductionProcessProductType.product_type_id).where(
-                        ProductionProcessProductType.process_id == run.process_id
-                    )
-                ).scalars()
-            )
-            if allowed and payload.product_type_id not in allowed:
+        if run is not None and run.raw_material_quantity_per_unit and run.raw_material_quantity_per_unit > 0:
+            weight_per_unit = run.raw_material_quantity_per_unit
+            entry_quantity = payload.quantity * weight_per_unit
+            entry_unit = run.raw_material_unit_code
+        else:
+            weight_per_unit = None
+            entry_quantity = payload.quantity
+            entry_unit = lot.unit_code
+
+        if payload.target_item_id is not None:
+            piece = self._get_item_or_raise(payload.target_item_id)
+            if (
+                piece.item_type != "FINISHED_PRODUCT"
+                or not piece.product_code
+                or len(piece.product_code) != 7
+            ):
                 raise InventoryDomainError(
-                    "El proceso de esta orden no produce ese tipo de producto."
+                    "El destino debe ser un producto terminado del catálogo."
                 )
-        target = next(
-            (
-                item
-                for item in self.repository.list_items("FINISHED_PRODUCT")
-                if item.product_code == product_code and item.source_lot_sku == lot.sku
-            ),
-            None,
-        )
-        if target is None:
-            target = InventoryItem(
-                item_type="FINISHED_PRODUCT",
-                name=product_type.name or lot.name,
-                sku=self._generate_sku("FINISHED_PRODUCT"),
-                product_code=product_code,
-                source_lot_sku=lot.sku,
-                material_type=payload.material_type or lot.material_type,
-                unit_code=lot.unit_code,
-                minimum_stock=None,
+            # Código destino: material del lote + modelo de la pieza.
+            product_code = f"{material_code}{piece.product_code[1:]}"
+            if product_code == piece.product_code:
+                # Mismo material: se suma a la pieza elegida tal cual.
+                target = piece
+            else:
+                # La descripción es el modelo real: piezas distintas comparten
+                # código (ej. FLOR y HONGUITOS ambas x010002), así que el
+                # reúso exige también la misma descripción.
+                target = next(
+                    (
+                        item
+                        for item in self.repository.list_items("FINISHED_PRODUCT")
+                        if item.product_code == product_code
+                        and item.source_lot_sku == lot.sku
+                        and (item.description or "") == (piece.description or "")
+                    ),
+                    None,
+                )
+                if target is None:
+                    target = InventoryItem(
+                        item_type="FINISHED_PRODUCT",
+                        name=piece.name,
+                        sku=self._generate_piece_sku(product_code),
+                        product_code=product_code,
+                        source_lot_sku=lot.sku,
+                        description=piece.description,
+                        material_type=lot_material or None,
+                        unit_code=entry_unit,
+                        weight_per_unit=weight_per_unit,
+                        minimum_stock=None,
+                    )
+                    self.repository.add_item(target)
+                    self.repository.flush()
+        elif payload.product_type_id is not None:
+            product_code, product_type = self._resolve_catalog_target(
+                material_code, payload.product_type_id
             )
-            self.repository.add_item(target)
-            self.repository.flush()
-        elif payload.material_type:
-            target.material_type = payload.material_type
+            target = next(
+                (
+                    item
+                    for item in self.repository.list_items("FINISHED_PRODUCT")
+                    if item.product_code == product_code and item.source_lot_sku == lot.sku
+                ),
+                None,
+            )
+            if target is None:
+                target = InventoryItem(
+                    item_type="FINISHED_PRODUCT",
+                    name=product_type.name or lot.name,
+                    sku=self._generate_piece_sku(product_code),
+                    product_code=product_code,
+                    source_lot_sku=lot.sku,
+                    material_type=payload.material_type or lot.material_type,
+                    unit_code=entry_unit,
+                    weight_per_unit=weight_per_unit,
+                    minimum_stock=None,
+                )
+                self.repository.add_item(target)
+                self.repository.flush()
+            elif payload.material_type:
+                target.material_type = payload.material_type
+        else:
+            raise InventoryDomainError("Falta el producto destino de la conversión.")
 
         self.create_movement(
             InventoryMovementCreate(
@@ -516,7 +603,8 @@ class InventoryService(InventoryIntegrationPort):
             InventoryMovementCreate(
                 item_id=target.id,
                 movement_type="CONVERSION_ENTRADA",
-                quantity=payload.quantity,
+                # Entra en la unidad de la producción (gramos por unidad).
+                quantity=entry_quantity,
                 reason=f"Conversion desde lote {lot.sku}",
                 reference_type="lot_conversion",
                 reference_id=lot.id,
@@ -530,53 +618,121 @@ class InventoryService(InventoryIntegrationPort):
     def combine_products(
         self, payload: ProductCombineCreate, user_id: UUID | None
     ) -> InventoryItemRead:
-        """Ensambla varias piezas de productos terminados en un producto nuevo del
+        """Ensambla varias piezas de productos terminados en un producto del
         catálogo (ej. cadena + dije = collar). Cada pieza de origen registra una
         CONVERSION_SALIDA y el producto resultante una CONVERSION_ENTRADA; nada
-        de edición directa de stock. El item resultante se identifica por su
-        código de producto con la marca de ensamblado."""
+        de edición directa de stock. Destino por pieza (target_item_id): mismo
+        material → suma a esa pieza; distinto → crea/reusa fila con el mismo
+        modelo (descripción) y el material elegido. Destino por tipo: fila con
+        la marca de ensamblado."""
         ids = [line.item_id for line in payload.sources]
         if len(ids) != len(set(ids)):
             raise InventoryDomainError("No repitas la misma pieza en el ensamble.")
         sources = []
+        gram_infos = []
         for line in payload.sources:
             item = self._get_item_or_raise(line.item_id)
             if item.item_type != "FINISHED_PRODUCT":
                 raise InventoryDomainError("Solo se pueden ensamblar productos terminados.")
-            if item.current_stock < line.quantity:
-                raise InventoryDomainError(f"Stock insuficiente de '{item.name}'.")
-            sources.append((item, line.quantity))
-
-        product_code, product_type = self._resolve_catalog_target(
-            payload.material_code, payload.product_type_id
-        )
-
-        ASSEMBLED_MARK = "Producto ensamblado."
-        target = next(
-            (
-                item
-                for item in self.repository.list_items("FINISHED_PRODUCT")
-                if item.product_code == product_code
-                and item.source_lot_sku is None
-                and (item.description or "") == ASSEMBLED_MARK
-            ),
-            None,
-        )
-        if target is None:
-            target = InventoryItem(
-                item_type="FINISHED_PRODUCT",
-                name=product_type.name or product_code,
-                sku=self._generate_sku("FINISHED_PRODUCT"),
-                product_code=product_code,
-                description=ASSEMBLED_MARK,
-                material_type=payload.material_type,
-                unit_code=sources[0][0].unit_code,
-                minimum_stock=None,
+            info = self._grams_per_unit(item)
+            gram_infos.append(info)
+            # Descuento: piezas medidas en peso bajan cantidad x gramos/unidad;
+            # las medidas en unidades (o sin dato de peso) bajan la cantidad.
+            required = (
+                line.quantity * info[0]
+                if info is not None and item.unit_code == info[1]
+                else line.quantity
             )
-            self.repository.add_item(target)
-            self.repository.flush()
-        elif payload.material_type:
-            target.material_type = payload.material_type
+            if item.current_stock < required:
+                raise InventoryDomainError(f"Stock insuficiente de '{item.name}'.")
+            sources.append((item, required))
+
+        # El resultado sale en gramos SOLO si todas las piezas tienen gramos
+        # por unidad (piezas del sistema o lotes de una orden): el peso del
+        # ensamble es la suma de los pesos de sus piezas. Si alguna pieza
+        # vieja no trae el dato, queda en unidades para no descuadrar.
+        if all(info is not None for info in gram_infos):
+            weight_per_unit = sum(info[0] for info in gram_infos)
+            entry_quantity = payload.quantity * weight_per_unit
+            entry_unit = gram_infos[0][1]
+        else:
+            weight_per_unit = None
+            entry_quantity = payload.quantity
+            entry_unit = sources[0][0].unit_code
+
+        if payload.target_item_id is not None:
+            piece = self._get_item_or_raise(payload.target_item_id)
+            if (
+                piece.item_type != "FINISHED_PRODUCT"
+                or not piece.product_code
+                or len(piece.product_code) != 7
+            ):
+                raise InventoryDomainError(
+                    "El destino debe ser un producto terminado del catálogo."
+                )
+            product_code = f"{payload.material_code}{piece.product_code[1:]}"
+            if product_code == piece.product_code:
+                # Mismo material: se suma a la pieza elegida tal cual.
+                target = piece
+            else:
+                # La descripción es el modelo real: el reúso exige código y
+                # descripción iguales, no solo el código.
+                target = next(
+                    (
+                        item
+                        for item in self.repository.list_items("FINISHED_PRODUCT")
+                        if item.product_code == product_code
+                        and (item.description or "") == (piece.description or "")
+                    ),
+                    None,
+                )
+                if target is None:
+                    target = InventoryItem(
+                        item_type="FINISHED_PRODUCT",
+                        name=piece.name,
+                        sku=self._generate_piece_sku(product_code),
+                        product_code=product_code,
+                        description=piece.description,
+                        material_type=payload.material_type,
+                        unit_code=entry_unit,
+                        weight_per_unit=weight_per_unit,
+                        minimum_stock=None,
+                    )
+                    self.repository.add_item(target)
+                    self.repository.flush()
+        elif payload.product_type_id is not None:
+            product_code, product_type = self._resolve_catalog_target(
+                payload.material_code, payload.product_type_id
+            )
+            ASSEMBLED_MARK = "Producto ensamblado."
+            target = next(
+                (
+                    item
+                    for item in self.repository.list_items("FINISHED_PRODUCT")
+                    if item.product_code == product_code
+                    and item.source_lot_sku is None
+                    and (item.description or "") == ASSEMBLED_MARK
+                ),
+                None,
+            )
+            if target is None:
+                target = InventoryItem(
+                    item_type="FINISHED_PRODUCT",
+                    name=product_type.name or product_code,
+                    sku=self._generate_piece_sku(product_code),
+                    product_code=product_code,
+                    description=ASSEMBLED_MARK,
+                    material_type=payload.material_type,
+                    unit_code=entry_unit,
+                    weight_per_unit=weight_per_unit,
+                    minimum_stock=None,
+                )
+                self.repository.add_item(target)
+                self.repository.flush()
+            elif payload.material_type:
+                target.material_type = payload.material_type
+        else:
+            raise InventoryDomainError("Falta el producto destino del ensamble.")
 
         for item, quantity in sources:
             self.create_movement(
@@ -595,7 +751,8 @@ class InventoryService(InventoryIntegrationPort):
             InventoryMovementCreate(
                 item_id=target.id,
                 movement_type="CONVERSION_ENTRADA",
-                quantity=payload.quantity,
+                # Entra en la unidad de la producción (gramos por unidad).
+                quantity=entry_quantity,
                 reason=f"Ensamble de: {detail}"[:240],
                 reference_type="product_assembly",
                 reference_id=sources[0][0].id,
@@ -622,6 +779,38 @@ class InventoryService(InventoryIntegrationPort):
             reference_id=production_order_id,
         )
         self.create_movement(payload, user_id=None, lot_code=production_code)
+
+    def _grams_per_unit(self, item: InventoryItem) -> tuple[Decimal, str] | None:
+        """Gramos por unidad de una pieza y su unidad de peso: el campo propio
+        (piezas nacidas con el sistema) o, si la pieza es el lote de una orden,
+        lo que la orden declara. None para piezas viejas sin el dato."""
+        if item.weight_per_unit and item.weight_per_unit > 0:
+            return item.weight_per_unit, item.unit_code
+        from sqlalchemy import select
+        from backend.modules.production.models import ProductionRun
+
+        run = self.repository.session.execute(
+            select(ProductionRun).where(ProductionRun.production_code == item.sku)
+        ).scalar_one_or_none()
+        if run is not None and run.raw_material_quantity_per_unit and run.raw_material_quantity_per_unit > 0:
+            return run.raw_material_quantity_per_unit, run.raw_material_unit_code
+        return None
+
+    def _generate_piece_sku(self, product_code: str) -> str:
+        """SKU de una pieza del catálogo: <código de producto>-<secuencia de 4>,
+        con la misma pinta que las piezas existentes (ej. 2010002-0031). La
+        secuencia sigue al mayor sufijo numérico entre todas las piezas."""
+        max_seq = 0
+        for item in self.repository.list_items("FINISHED_PRODUCT"):
+            head, sep, tail = (item.sku or "").rpartition("-")
+            if sep and head and tail.isdigit() and (item.product_code or "") and head == item.product_code:
+                max_seq = max(max_seq, int(tail))
+        next_number = max_seq + 1
+        while True:
+            sku = f"{product_code}-{next_number:04d}"
+            if self.repository.get_item_by_sku(sku) is None:
+                return sku
+            next_number += 1
 
     def _generate_sku(self, item_type: str) -> str:
         prefix = ITEM_TYPE_PREFIXES.get(item_type, "INV")

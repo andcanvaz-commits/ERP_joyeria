@@ -13,8 +13,8 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
-import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
+import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import {
   archiveInventoryItem,
   combineProducts,
@@ -354,7 +354,9 @@ export function InventoryDashboard() {
   const [receptionInfoRun, setReceptionInfoRun] = useState<ProductionRun | null>(null);
   // Conversión de lote de proceso terminado a producto del catálogo.
   const [convertRun, setConvertRun] = useState<ProductionRun | null>(null);
-  const [convertForm, setConvertForm] = useState({ material_code: "", material_type: "", product_type_id: "", quantity: "" });
+  // Destino de la conversión: pieza existente (target_item_id) o tipo del
+  // catálogo (product_type_id, ej. producto recién creado). Uno de los dos.
+  const [convertForm, setConvertForm] = useState({ material_code: "", material_type: "", product_type_id: "", target_item_id: "", quantity: "" });
   const [isConverting, setIsConverting] = useState(false);
   // Rechazo de solicitud de materiales: modal con motivo.
   const [rejectRun, setRejectRun] = useState<ProductionRun | null>(null);
@@ -369,7 +371,10 @@ export function InventoryDashboard() {
     sources: [] as { itemId: string }[],
     material_code: "",
     material_type: "",
+    // Destino: pieza existente (target_item_id) o tipo del catálogo
+    // (product_type_id, ej. producto recién creado). Uno de los dos.
     product_type_id: "",
+    target_item_id: "",
     quantity: "",
   });
   const [isCombining, setIsCombining] = useState(false);
@@ -381,6 +386,11 @@ export function InventoryDashboard() {
   // Selector de producto del catálogo (drill-down); el modo dice a qué
   // formulario se escribe la selección.
   const [targetPickerFor, setTargetPickerFor] = useState<"combine" | "convert" | null>(null);
+  // Alta de un producto nuevo del catálogo como destino de la conversión o
+  // del ensamble (cuando la pieza aún no existe en el inventario).
+  const [creatingTargetFor, setCreatingTargetFor] = useState<"convert" | "combine" | null>(null);
+  // Ventana "ver materiales" de una categoría: materiales, piezas y stock.
+  const [materialsInfo, setMaterialsInfo] = useState<{ groupName: string; modelCode: string } | null>(null);
   // Selector de la pieza de producto terminado con la que se combina el lote.
   const [isPartnerPickerOpen, setIsPartnerPickerOpen] = useState(false);
   // Edición del material de la pieza (lápiz junto al valor automático).
@@ -883,15 +893,19 @@ export function InventoryDashboard() {
     setIsConverting(true);
     try {
       await convertLotToProduct(lotItem.id, {
-        material_code: convertForm.material_code,
+        ...(convertForm.material_code ? { material_code: convertForm.material_code } : {}),
         material_type: convertForm.material_type.trim() || null,
-        product_type_id: convertForm.product_type_id,
+        ...(convertForm.target_item_id
+          ? { target_item_id: convertForm.target_item_id }
+          : { product_type_id: convertForm.product_type_id }),
         quantity: convertForm.quantity,
       });
       setSuccess("Lote convertido en productos terminados.");
       setConvertRun(null);
-      setConvertForm({ material_code: "", material_type: "", product_type_id: "", quantity: "" });
+      setConvertForm({ material_code: "", material_type: "", product_type_id: "", target_item_id: "", quantity: "" });
+      // Un material nuevo crea su segmento en el catálogo: refrescar etiquetas.
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["catalog-segments"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo convertir el lote.");
     } finally {
@@ -945,12 +959,15 @@ export function InventoryDashboard() {
         sources: combineForm.sources.map((line) => ({ item_id: line.itemId, quantity: combineForm.quantity })),
         material_code: combineForm.material_code,
         material_type: combineForm.material_type.trim() || null,
-        product_type_id: combineForm.product_type_id,
+        ...(combineForm.target_item_id
+          ? { target_item_id: combineForm.target_item_id }
+          : { product_type_id: combineForm.product_type_id }),
         quantity: combineForm.quantity,
       });
       setSuccess("Piezas ensambladas en producto terminado.");
       setIsCombineOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["catalog-segments"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo ensamblar el producto.");
     } finally {
@@ -975,8 +992,9 @@ export function InventoryDashboard() {
   const displayItems =
     itemFilter === "FINISHED_PRODUCT" ? filteredItems.filter((item) => !receivedCodes.has(item.sku)) : filteredItems;
 
-  // Grupos por nombre (categoria) y dentro por modelo de catalogo
-  // (product_code = material+categoria+modelo); la descripcion es la variante.
+  // Grupos por nombre (categoria) y dentro por producto del catalogo SIN el
+  // material (categoria+modelo): un mismo producto puede existir en varios
+  // materiales y cada material es una seccion del producto, no otro producto.
   const finishedGroups = useMemo(() => {
     const modelLabels = new Map<string, string>();
     for (const segment of catalogSegments) {
@@ -984,6 +1002,8 @@ export function InventoryDashboard() {
         modelLabels.set(`${segment.parent_code}${segment.code}`, segment.label);
       }
     }
+    const materialLabel = (digit: string) =>
+      catalogSegments.find((segment) => segment.kind === "MATERIAL" && segment.code === digit)?.label ?? "SIN MATERIAL";
     const map = new Map<string, InventoryItem[]>();
     for (const item of displayItems) {
       const list = map.get(item.name);
@@ -992,22 +1012,44 @@ export function InventoryDashboard() {
     }
     const groups = [...map.entries()].map(([name, groupItems]) => {
       const sorted = [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku));
+      // Producto = categoria+modelo (código sin el dígito de material).
       const byModel = new Map<string, InventoryItem[]>();
       for (const item of sorted) {
         const pcode = item.product_code ?? "";
-        const list = byModel.get(pcode);
+        const modelKey = pcode.length === 7 ? pcode.slice(1) : "";
+        const list = byModel.get(modelKey);
         if (list) list.push(item);
-        else byModel.set(pcode, [item]);
+        else byModel.set(modelKey, [item]);
       }
       const models = [...byModel.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([pcode, modelItems]) => ({
-          pcode,
-          // material(1)+categoria(2)+modelo(4): el label sale de categoria+modelo.
-          label: pcode.length === 7 ? modelLabels.get(pcode.slice(1)) ?? "SIN MODELO" : "SIN MODELO",
-          items: modelItems,
-          totalStock: modelItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
-        }));
+        .map(([modelCode, modelItems]) => {
+          // Secciones por material dentro del producto.
+          const byMaterial = new Map<string, InventoryItem[]>();
+          for (const item of modelItems) {
+            const digit = (item.product_code ?? "").length === 7 ? (item.product_code as string)[0] : "";
+            const list = byMaterial.get(digit);
+            if (list) list.push(item);
+            else byMaterial.set(digit, [item]);
+          }
+          const materials = [...byMaterial.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([digit, materialItems]) => ({
+              digit,
+              fullCode: digit && modelCode ? `${digit}${modelCode}` : "",
+              // Sin dígito de material: cae al texto del material de la pieza.
+              label: digit ? materialLabel(digit) : materialItems[0]?.material_type?.trim() || "SIN MATERIAL",
+              items: materialItems,
+              stock: materialItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+            }));
+          return {
+            code: modelCode,
+            label: modelCode ? modelLabels.get(modelCode) ?? "SIN MODELO" : "SIN MODELO",
+            materials,
+            items: modelItems,
+            totalStock: modelItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+          };
+        });
       return {
         name,
         categoryCode: sorted[0]?.product_code?.slice(1, 3) ?? "—",
@@ -1022,7 +1064,7 @@ export function InventoryDashboard() {
   }, [displayItems, catalogSegments]);
   const searchActive = search.trim().length > 0;
   const drilledGroup = finishedGroups.find((g) => g.name === drillGroup) ?? null;
-  const drilledModel = drilledGroup?.models.find((m) => m.pcode === drillModel) ?? null;
+  const drilledModel = drilledGroup?.models.find((m) => m.code === drillModel) ?? null;
 
   // Paginación de listados: reemplaza el scroll interno de los paneles.
   // Pestañas del panel principal: 10 por página (llenan el recuadro fijo).
@@ -1035,8 +1077,16 @@ export function InventoryDashboard() {
   const rawItemsPager = usePagination(displayItems, TAB_PAGE_SIZE, filterKey);
   const finishedTypesPager = usePagination(finishedGroups, TAB_PAGE_SIZE, filterKey);
   const finishedCatsPager = usePagination(drilledGroup?.models ?? [], TAB_PAGE_SIZE, drillGroup ?? "");
+  // Nivel piezas: listado plano (sin headers de material; para eso están
+  // los filtros y la ventana "Ver materiales").
+  const pieceRows = useMemo(() => {
+    if (searchActive) {
+      return displayItems.map((item) => ({ kind: "item" as const, item, material: null as null }));
+    }
+    return (drilledModel?.items ?? []).map((item) => ({ kind: "item" as const, item, material: null as null }));
+  }, [searchActive, displayItems, drilledModel]);
   const piecesPager = usePagination(
-    searchActive ? displayItems : drilledModel?.items ?? [],
+    pieceRows,
     TAB_PAGE_SIZE,
     `${drillGroup ?? ""}|${drillModel ?? ""}|${search}`,
   );
@@ -1547,6 +1597,7 @@ export function InventoryDashboard() {
                         material_code: "",
                         material_type: "",
                         product_type_id: "",
+                        target_item_id: "",
                         quantity: "",
                       });
                       setIsCombineOpen(true);
@@ -1883,22 +1934,33 @@ export function InventoryDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {piecesPager.pageItems.map((item) => (
-                        <tr key={item.id}>
-                          <td>{item.sku}</td>
-                          <td>{item.description ?? "—"}</td>
-                          <td>{item.material_type ?? "—"}</td>
-                          <td>{item.purity ?? "—"}</td>
-                          <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
-                          <td>
-                            <div className="rowActions">
-                              <button aria-label="Visualizar" className="iconOnlyButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} title="Visualizar" type="button">
-                                <Eye aria-hidden="true" size={15} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {piecesPager.pageItems.map((row) => {
+                        if (!row.item) return null;
+                        const item = row.item;
+                        return (
+                          <tr key={item.id}>
+                            <td>{item.sku}</td>
+                            <td>{item.description ?? "—"}</td>
+                            <td>{item.material_type ?? "—"}</td>
+                            <td>{item.purity ?? "—"}</td>
+                            <td className="num">
+                              {numericText(item.current_stock)} {item.unit_code}
+                              {/* Piezas nacidas por conversión: la orden dejó los
+                                  gramos por unidad, así que se calculan unidades. */}
+                              {item.weight_per_unit && Number(item.weight_per_unit) > 0 && item.unit_code !== "und"
+                                ? ` · ${numericText(String(Number((Number(item.current_stock) / Number(item.weight_per_unit)).toFixed(2))))} und`
+                                : ""}
+                            </td>
+                            <td>
+                              <div className="rowActions">
+                                <button aria-label="Visualizar" className="iconOnlyButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} title="Visualizar" type="button">
+                                  <Eye aria-hidden="true" size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {searchActive && displayItems.length === 0 ? (
                         <tr><td colSpan={6}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
                       ) : null}
@@ -1914,6 +1976,7 @@ export function InventoryDashboard() {
                       <tr>
                         <th>#</th>
                         <th>Categoría</th>
+                        <th>Materiales</th>
                         <th className="num">Piezas</th>
                         <th className="num">Stock</th>
                         <th aria-label="Abrir" />
@@ -1921,16 +1984,30 @@ export function InventoryDashboard() {
                     </thead>
                     <tbody>
                       {finishedCatsPager.pageItems.map((model) => (
-                        <tr key={model.pcode} onClick={() => setDrillModel(model.pcode)} style={{ cursor: "pointer" }}>
-                          <td><span className={`orderCodeTag${metalTagClass(model.pcode)}`}>#{model.pcode || "—"}</span></td>
+                        <tr key={model.code} onClick={() => setDrillModel(model.code)} style={{ cursor: "pointer" }}>
+                          <td><span className="orderCodeTag">#{model.code || "—"}</span></td>
                           <td><strong>{model.label}</strong></td>
+                          <td>
+                            <button
+                              className="button"
+                              onClick={(event) => {
+                                // Ver materiales sin entrar a la categoría.
+                                event.stopPropagation();
+                                setMaterialsInfo({ groupName: drilledGroup.name, modelCode: model.code });
+                              }}
+                              type="button"
+                            >
+                              <Eye aria-hidden="true" size={14} />
+                              Ver materiales
+                            </button>
+                          </td>
                           <td className="num">{model.items.length}</td>
                           <td className="num">{numericText(String(model.totalStock))} {drilledGroup.unitCode}</td>
                           <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
                         </tr>
                       ))}
                       {drilledGroup.models.length === 0 ? (
-                        <tr><td colSpan={5}><div className="emptyState">Este tipo aún no tiene piezas en inventario.</div></td></tr>
+                        <tr><td colSpan={6}><div className="emptyState">Este tipo aún no tiene piezas en inventario.</div></td></tr>
                       ) : null}
                     </tbody>
                   </table>
@@ -2040,6 +2117,7 @@ export function InventoryDashboard() {
                                 material_code: matchMaterialSegment(lotMaterial)?.code ?? "",
                                 material_type: lotMaterial,
                                 product_type_id: "",
+                                target_item_id: "",
                                 quantity: "",
                               });
                               setLotAction(null);
@@ -2678,11 +2756,16 @@ export function InventoryDashboard() {
       {convertRun && lotAction === "convert" ? (() => {
         const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
         const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
-        const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+        // Destino: pieza del inventario (flujo normal) o tipo recién creado.
+        const targetPiece = items.find((item) => item.id === convertForm.target_item_id) ?? null;
         const selectedType = productTypes.find((type) => type.id === convertForm.product_type_id) ?? null;
-        const previewCode = convertForm.material_code && selectedType
-          ? `${convertForm.material_code}${selectedType.category_code}${selectedType.model_code}`
-          : null;
+        const previewCode = targetPiece?.product_code
+          ? convertForm.material_code
+            ? `${convertForm.material_code}${targetPiece.product_code.slice(1)}`
+            : targetPiece.product_code
+          : convertForm.material_code && selectedType
+            ? `${convertForm.material_code}${selectedType.category_code}${selectedType.model_code}`
+            : null;
         const quantityNumber = Number(convertForm.quantity);
         const quantityValid = Number.isFinite(quantityNumber) && quantityNumber > 0 && quantityNumber <= lotStock;
         return (
@@ -2705,9 +2788,16 @@ export function InventoryDashboard() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <button className="button" onClick={() => setTargetPickerFor("convert")} type="button">
                     <Pencil aria-hidden="true" size={14} />
-                    {convertForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
+                    {convertForm.target_item_id || convertForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
                   </button>
-                  {selectedType ? (
+                  {targetPiece ? (
+                    <span style={{ fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {targetPiece.product_code ? (
+                        <span className={`orderCodeTag${metalTagClass(targetPiece.product_code)}`}>#{targetPiece.product_code}</span>
+                      ) : null}
+                      {(targetPiece.description ?? "").trim() || targetPiece.name}
+                    </span>
+                  ) : selectedType ? (
                     <span style={{ fontSize: 13 }}>
                       {selectedType.category_label} · {selectedType.model_label}{selectedType.name ? ` · ${selectedType.name}` : ""}
                     </span>
@@ -2718,62 +2808,11 @@ export function InventoryDashboard() {
               </div>
               <div className="fieldGroup">
                 <span>Material de la pieza</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  {materialEditFor === "convert" ? (
-                    <select
-                      autoFocus
-                      className="field"
-                      onChange={(event) => {
-                        if (event.target.value === "__lot__") {
-                          setConvertForm((current) => ({
-                            ...current,
-                            material_code: matchMaterialSegment(current.material_type)?.code ?? "",
-                          }));
-                        } else {
-                          const segment = materials.find((candidate) => candidate.code === event.target.value) ?? null;
-                          setConvertForm((current) => ({
-                            ...current,
-                            material_code: segment?.code ?? "",
-                            material_type: segment?.label ?? current.material_type,
-                          }));
-                        }
-                        setMaterialEditFor(null);
-                      }}
-                      style={{ maxWidth: 260 }}
-                      value={convertForm.material_code || (convertForm.material_type ? "__lot__" : "")}
-                    >
-                      {/* El material es el del lote; el catálogo completo solo
-                          aparece si ese material no empata con ningún segmento. */}
-                      {convertForm.material_type ? (
-                        <option value={matchMaterialSegment(convertForm.material_type)?.code ?? "__lot__"}>
-                          {convertForm.material_type}
-                        </option>
-                      ) : (
-                        <option value="">Seleccionar material</option>
-                      )}
-                      {!matchMaterialSegment(convertForm.material_type)
-                        ? materials.map((segment) => (
-                            <option key={segment.id} value={segment.code}>{segment.label}</option>
-                          ))
-                        : null}
-                    </select>
-                  ) : (
-                    <span style={{ fontSize: 13, color: convertForm.material_type ? undefined : "var(--muted)" }}>
-                      {convertForm.material_type || "Sin material"}
-                    </span>
-                  )}
-                  <button
-                    aria-label="Editar material"
-                    className="iconOnlyButton"
-                    onClick={() => setMaterialEditFor((current) => (current === "convert" ? null : "convert"))}
-                    type="button"
-                  >
-                    <Pencil aria-hidden="true" size={14} />
-                  </button>
-                </div>
-                {!convertForm.material_code ? (
-                  <small style={{ color: "var(--muted)" }}>El material no está en el catálogo: elígelo con el lápiz.</small>
-                ) : null}
+                {/* Material fijo: el de fabricación del lote, sin selector.
+                    El segmento para el código lo resuelve el backend. */}
+                <span style={{ fontSize: 13, color: convertForm.material_type ? undefined : "var(--muted)" }}>
+                  {convertForm.material_type || "Sin material"}
+                </span>
               </div>
               <label className="fieldGroup">
                 <span>Cantidad a convertir (máx. {numericText(String(lotStock))})</span>
@@ -2793,7 +2832,7 @@ export function InventoryDashboard() {
               <div className="modalActions">
                 <button
                   className="button buttonPrimary"
-                  disabled={isConverting || !convertForm.material_code || !convertForm.product_type_id || !quantityValid}
+                  disabled={isConverting || !(convertForm.target_item_id || convertForm.product_type_id) || !quantityValid}
                   type="submit"
                 >
                   <Repeat aria-hidden="true" size={17} />
@@ -2812,27 +2851,39 @@ export function InventoryDashboard() {
         const materials = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
         const activeTypes = productTypes.filter((type) => type.is_active);
         const selectedType = activeTypes.find((type) => type.id === combineForm.product_type_id) ?? null;
-        const previewCode = combineForm.material_code && selectedType
-          ? `${combineForm.material_code}${selectedType.category_code}${selectedType.model_code}`
-          : null;
+        // Destino: pieza del inventario (flujo normal) o tipo recién creado.
+        const targetPiece = items.find((item) => item.id === combineForm.target_item_id) ?? null;
+        const previewCode = combineForm.material_code && targetPiece?.product_code
+          ? `${combineForm.material_code}${targetPiece.product_code.slice(1)}`
+          : combineForm.material_code && selectedType
+            ? `${combineForm.material_code}${selectedType.category_code}${selectedType.model_code}`
+            : null;
         const pieces = combineForm.sources
           .map((line) => combinable.find((candidate) => candidate.id === line.itemId))
           .filter((item): item is InventoryItem => Boolean(item));
         // Una sola cantidad: se descuenta de CADA pieza y es la que se produce,
         // así que todas las piezas deben tener stock suficiente para cubrirla.
+        // Piezas medidas en gramos con gramos/unidad: su disponible en
+        // unidades es stock ÷ gramos por unidad.
+        const availableUnits = (item: InventoryItem) => {
+          const wpu = Number(item.weight_per_unit ?? 0);
+          return item.unit_code === "g" && wpu > 0
+            ? Math.floor(Number(item.current_stock) / wpu)
+            : Number(item.current_stock);
+        };
         const quantityOut = Number(combineForm.quantity);
         const quantityValid = Number.isFinite(quantityOut) && quantityOut > 0;
         const shortPieces = quantityValid
-          ? pieces.filter((item) => quantityOut > Number(item.current_stock))
+          ? pieces.filter((item) => quantityOut > availableUnits(item))
           : [];
         const maxQuantity = pieces.length
-          ? Math.min(...pieces.map((item) => Number(item.current_stock)))
+          ? Math.min(...pieces.map((item) => availableUnits(item)))
           : 0;
         const canSubmit =
           pieces.length >= 2 &&
           pieces.length === combineForm.sources.length &&
           Boolean(combineForm.material_code) &&
-          Boolean(combineForm.product_type_id) &&
+          Boolean(combineForm.target_item_id || combineForm.product_type_id) &&
           quantityValid &&
           shortPieces.length === 0;
         return (
@@ -2895,9 +2946,16 @@ export function InventoryDashboard() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <button className="button" onClick={() => setTargetPickerFor("combine")} type="button">
                     <Pencil aria-hidden="true" size={14} />
-                    {combineForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
+                    {combineForm.target_item_id || combineForm.product_type_id ? "Cambiar" : "Elegir del catálogo"}
                   </button>
-                  {selectedType ? (
+                  {targetPiece ? (
+                    <span style={{ fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {targetPiece.product_code ? (
+                        <span className={`orderCodeTag${metalTagClass(targetPiece.product_code)}`}>#{targetPiece.product_code}</span>
+                      ) : null}
+                      {(targetPiece.description ?? "").trim() || targetPiece.name}
+                    </span>
+                  ) : selectedType ? (
                     <span style={{ fontSize: 13 }}>
                       {selectedType.category_label} · {selectedType.model_label}{selectedType.name ? ` · ${selectedType.name}` : ""}
                     </span>
@@ -2961,14 +3019,18 @@ export function InventoryDashboard() {
                           {combineForm.material_type || "Se llena al elegir las piezas"}
                         </span>
                       )}
-                      <button
-                        aria-label="Editar material"
-                        className="iconOnlyButton"
-                        onClick={() => setMaterialEditFor((current) => (current === "combine" ? null : "combine"))}
-                        type="button"
-                      >
-                        <Pencil aria-hidden="true" size={14} />
-                      </button>
+                      {/* El lápiz solo cuando hay dos materiales distintos que
+                          elegir; con uno solo no hay nada que editar. */}
+                      {pieceMaterials.length > 1 ? (
+                        <button
+                          aria-label="Editar material"
+                          className="iconOnlyButton"
+                          onClick={() => setMaterialEditFor((current) => (current === "combine" ? null : "combine"))}
+                          type="button"
+                        >
+                          <Pencil aria-hidden="true" size={14} />
+                        </button>
+                      ) : null}
                     </div>
                     {combineForm.material_type && !combineForm.material_code ? (
                       <small style={{ color: "var(--muted)" }}>El material no está en el catálogo: elígelo con el lápiz.</small>
@@ -3013,21 +3075,113 @@ export function InventoryDashboard() {
         );
       })() : null}
 
-      {targetPickerFor ? (
-        <CatalogProductPicker
+      {targetPickerFor === "convert" && convertRun ? (() => {
+        const lotItem = items.find((item) => item.sku === convertRun.production_code) ?? null;
+        return (
+          <FinishedItemPicker
+            title="¿A qué producto se agrega?"
+            subtitle="Piezas del catálogo · el material será el de fabricación del lote"
+            items={items}
+            excludeIds={lotItem ? [lotItem.id] : []}
+            requireStock={false}
+            onSelect={(piece) => {
+              setConvertForm((current) => ({ ...current, target_item_id: piece.id, product_type_id: "" }));
+              setTargetPickerFor(null);
+            }}
+            onCreate={() => {
+              setTargetPickerFor(null);
+              setCreatingTargetFor("convert");
+            }}
+            onClose={() => {
+              // Cerrar sin elegir: si el formulario de conversión aún no tiene
+              // destino, no hay nada que mostrar; vuelve a la ventana principal.
+              if (!convertForm.target_item_id && !convertForm.product_type_id) setLotAction(null);
+              setTargetPickerFor(null);
+            }}
+          />
+        );
+      })() : targetPickerFor === "combine" ? (
+        <FinishedItemPicker
           title="¿Qué producto resulta?"
-          allowedTypeIds={targetPickerFor === "convert" ? convertRun?.allowed_product_type_ids ?? undefined : undefined}
-          selectedId={targetPickerFor === "convert" ? convertForm.product_type_id : combineForm.product_type_id}
-          onSelect={(type) => {
-            if (targetPickerFor === "convert") setConvertForm((current) => ({ ...current, product_type_id: type.id }));
-            else setCombineForm((current) => ({ ...current, product_type_id: type.id }));
+          subtitle="Piezas del catálogo · elige el producto final del ensamble"
+          items={items}
+          excludeIds={combineForm.sources.map((line) => line.itemId)}
+          requireStock={false}
+          onSelect={(piece) => {
+            setCombineForm((current) => ({ ...current, target_item_id: piece.id, product_type_id: "" }));
             setTargetPickerFor(null);
           }}
-          onClose={() => {
-            // Cerrar sin elegir: si el formulario de conversión aún no tiene
-            // producto, no hay nada que mostrar; vuelve a la ventana principal.
-            if (targetPickerFor === "convert" && !convertForm.product_type_id) setLotAction(null);
+          onCreate={() => {
             setTargetPickerFor(null);
+            setCreatingTargetFor("combine");
+          }}
+          onClose={() => setTargetPickerFor(null)}
+        />
+      ) : null}
+
+      {materialsInfo ? (() => {
+        const group = finishedGroups.find((candidate) => candidate.name === materialsInfo.groupName) ?? null;
+        const model = group?.models.find((candidate) => candidate.code === materialsInfo.modelCode) ?? null;
+        if (!group || !model) return null;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Materiales de la categoría">
+            <section className="modalWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>Materiales</h2>
+                  <p>{group.name} · {model.label}</p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMaterialsInfo(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="tableWrap">
+                <table className="table tableAuto">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 110 }}>Código</th>
+                      <th>Material</th>
+                      <th className="num">Productos</th>
+                      <th className="num">Stock</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {model.materials.map((material) => {
+                      // Peso en gramos, no unidades: si la pieza se mide en
+                      // gramos su stock ya es peso; si no, usa su peso total.
+                      const grams = material.items.reduce(
+                        (acc, it) =>
+                          acc + (it.unit_code === "g" ? Number(it.current_stock) : Number(it.total_weight ?? 0)),
+                        0,
+                      );
+                      return (
+                        <tr key={material.digit || "none"}>
+                          <td><span className={`orderCodeTag${metalTagClass(material.fullCode)}`}>#{material.fullCode || "—"}</span></td>
+                          <td><strong>{material.label}</strong></td>
+                          <td className="num">{material.items.length}</td>
+                          <td className="num">{numericText(String(grams))} g</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
+
+      {creatingTargetFor ? (
+        <ProductTypesManager
+          mode="create"
+          onClose={() => setCreatingTargetFor(null)}
+          onProductCreated={(created) => {
+            if (creatingTargetFor === "convert") {
+              setConvertForm((current) => ({ ...current, product_type_id: created.id, target_item_id: "" }));
+            } else {
+              setCombineForm((current) => ({ ...current, product_type_id: created.id, target_item_id: "" }));
+            }
+            setCreatingTargetFor(null);
           }}
         />
       ) : null}
@@ -3048,6 +3202,7 @@ export function InventoryDashboard() {
               setCombineForm({
                 sources,
                 product_type_id: "",
+                target_item_id: "",
                 quantity: "",
                 ...deriveCombineMaterial(sources),
               });

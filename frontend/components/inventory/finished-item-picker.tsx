@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { Pager, usePagination } from "@/components/shared/pager";
 import type { InventoryItem } from "@/types/inventory";
@@ -19,31 +19,37 @@ export function FinishedItemPicker({
   subtitle,
   items,
   excludeIds,
+  requireStock = true,
   onSelect,
+  onCreate,
   onClose,
 }: {
   title: string;
   subtitle?: string;
   items: InventoryItem[];
   excludeIds?: string[];
+  // false: la pieza es solo destino (no se consume), sirve aunque no tenga stock.
+  requireStock?: boolean;
   onSelect: (item: InventoryItem) => void;
+  // Si viene, muestra "Crear producto nuevo" para destinos que aún no existen.
+  onCreate?: () => void;
   onClose: () => void;
 }) {
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const [drillType, setDrillType] = useState<string | null>(null);
   const [drillCat, setDrillCat] = useState<string | null>(null);
 
-  // Solo piezas del catálogo con stock (código de 7 dígitos), sin las ya elegidas.
+  // Solo piezas del catálogo (código de 7 dígitos), sin las ya elegidas.
   const candidates = useMemo(
     () =>
       items.filter(
         (item) =>
           item.item_type === "FINISHED_PRODUCT" &&
           !(excludeIds ?? []).includes(item.id) &&
-          Number(item.current_stock) > 0 &&
+          (!requireStock || Number(item.current_stock) > 0) &&
           (item.product_code ?? "").length === 7,
       ),
-    [items, excludeIds],
+    [items, excludeIds, requireStock],
   );
 
   const typeGroups = useMemo(() => {
@@ -98,7 +104,7 @@ export function FinishedItemPicker({
         <div className="modalHeader">
           <div>
             <h2>{title}</h2>
-            <p className="panelText">{subtitle ?? "Productos terminados con stock · elige uno"}</p>
+            <p className="panelText">{subtitle ?? (requireStock ? "Productos terminados con stock · elige uno" : "Productos terminados del catálogo · elige uno")}</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
@@ -152,7 +158,7 @@ export function FinishedItemPicker({
                     </tr>
                   ))}
                   {drilledCat.pieces.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">Sin piezas con stock en esta categoría.</div></td></tr>
+                    <tr><td colSpan={4}><div className="emptyState">{requireStock ? "Sin piezas con stock en esta categoría." : "Sin piezas en esta categoría."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -208,7 +214,7 @@ export function FinishedItemPicker({
                     </tr>
                   ))}
                   {typeGroups.length === 0 ? (
-                    <tr><td colSpan={5}><div className="emptyState">No hay productos terminados con stock.</div></td></tr>
+                    <tr><td colSpan={5}><div className="emptyState">{requireStock ? "No hay productos terminados con stock." : "No hay productos terminados en el catálogo."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -216,6 +222,15 @@ export function FinishedItemPicker({
             </div>
           )}
         </div>
+
+        {onCreate ? (
+          <div className="modalActions">
+            <button className="button" onClick={onCreate} type="button">
+              <Plus aria-hidden="true" size={14} />
+              Crear producto nuevo
+            </button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

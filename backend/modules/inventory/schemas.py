@@ -61,6 +61,8 @@ class InventoryItemRead(BaseModel):
     material_type: str | None = None
     purity: str | None = None
     total_weight: Decimal | None = None
+    # Gramos por unidad (solo piezas nacidas por conversión con el sistema).
+    weight_per_unit: Decimal | None = None
     elaboration_date: date | None = None
     unit_code: str
     minimum_stock: Decimal | None = None
@@ -72,10 +74,15 @@ class InventoryItemRead(BaseModel):
 class LotConversionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    material_code: str = Field(min_length=1, max_length=1)
-    product_type_id: UUID
+    # Segmento del material para el código; si falta, el servicio lo resuelve
+    # empatando el material de fabricación del lote contra el catálogo.
+    material_code: str | None = Field(default=None, min_length=1, max_length=1)
+    # Destino: una pieza existente del inventario (target_item_id) o un tipo
+    # del catálogo (product_type_id, ej. producto recién creado). Uno de los dos.
+    product_type_id: UUID | None = None
+    target_item_id: UUID | None = None
     quantity: Decimal = Field(gt=0)
-    # Texto libre del material de la pieza (default: el del lote), editable.
+    # Material de la pieza: el de fabricación del lote (no editable en UI).
     material_type: str | None = Field(default=None, max_length=80)
 
 
@@ -91,7 +98,10 @@ class ProductCombineCreate(BaseModel):
 
     sources: list[CombineSourceLine] = Field(min_length=2)
     material_code: str = Field(min_length=1, max_length=1)
-    product_type_id: UUID
+    # Destino: una pieza existente del inventario (target_item_id) o un tipo
+    # del catálogo (product_type_id, ej. producto recién creado). Uno de los dos.
+    product_type_id: UUID | None = None
+    target_item_id: UUID | None = None
     quantity: Decimal = Field(gt=0)
     # Texto libre del material del resultado (ej. "ORO 18K + PLATA 925"),
     # derivado de las piezas en el frontend pero editable por el usuario.

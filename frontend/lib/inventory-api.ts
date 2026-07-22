@@ -76,8 +76,11 @@ export function revertLastEntry(itemId: string) {
 }
 
 export type ConvertLotPayload = {
-  material_code: string;
-  product_type_id: string;
+  // Segmento del material; si falta, el backend lo resuelve del material del lote.
+  material_code?: string;
+  // Destino: pieza existente del inventario o tipo del catálogo (uno de los dos).
+  product_type_id?: string;
+  target_item_id?: string;
   quantity: string;
   material_type?: string | null;
 };
@@ -94,7 +97,9 @@ export function convertLotToProduct(lotItemId: string, payload: ConvertLotPayloa
 export type CombineProductsPayload = {
   sources: Array<{ item_id: string; quantity: string }>;
   material_code: string;
-  product_type_id: string;
+  // Destino: pieza existente del inventario o tipo del catálogo (uno de los dos).
+  product_type_id?: string;
+  target_item_id?: string;
   quantity: string;
   material_type?: string | null;
 };
