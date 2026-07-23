@@ -146,15 +146,15 @@ export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: str
 }
 
 export function upsertAssemblyRecipe(
-  productTypeId: string,
+  modelKey: string,
   items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
 ) {
-  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes/${productTypeId}`, {
+  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes/${modelKey}`, {
     method: "PUT",
     body: JSON.stringify({ items }),
   });
 }
 
-export function listAssemblyRecipeTypeIds() {
+export function listAssemblyRecipeModelKeys() {
   return apiRequest<string[]>("/api/production/assembly-recipes/types");
 }

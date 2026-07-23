@@ -35,7 +35,7 @@ import {
   deleteProcess,
   finishProductionRunStage,
   getAssemblyRecipe,
-  listAssemblyRecipeTypeIds,
+  listAssemblyRecipeModelKeys,
   listProcesses,
   listProductionRuns,
   startProductionRun,
@@ -192,7 +192,7 @@ const EMPTY_PROCESSES: ProductionProcess[] = [];
 const EMPTY_USERS: ManagedUser[] = [];
 const EMPTY_RUNS: ProductionRun[] = [];
 const EMPTY_RAW_MATERIALS: InventoryItem[] = [];
-const EMPTY_RECIPE_TYPE_IDS: string[] = [];
+const EMPTY_RECIPE_MODEL_KEYS: string[] = [];
 
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
   const queryClient = useQueryClient();
@@ -251,11 +251,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: listComplementTypes,
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
-  // Tipos de producto que ya tienen receta de ensamble: filtra los pickers en
-  // modo ASIGNAR (esos tipos solo se fabrican por ENSAMBLAR).
-  const { data: recipeTypeIds = EMPTY_RECIPE_TYPE_IDS } = useQuery({
-    queryKey: ["assembly-recipe-types"],
-    queryFn: listAssemblyRecipeTypeIds,
+  // Claves de modelo que ya tienen receta de ensamble: filtra los pickers en
+  // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR).
+  const { data: recipeModelKeys = EMPTY_RECIPE_MODEL_KEYS } = useQuery({
+    queryKey: ["assembly-recipe-model-keys"],
+    queryFn: listAssemblyRecipeModelKeys,
     enabled: Boolean(currentUser) && variant === "production",
   });
 
@@ -328,7 +328,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const recipeLookupSeq = useRef(0);
   // Tipo de producto para el que se está definiendo la receta (modal abierta
   // cuando no es null). Las filas empiezan vacías.
-  const [recipeModalTypeId, setRecipeModalTypeId] = useState<string | null>(null);
+  const [recipeModalModelKey, setRecipeModalModelKey] = useState<string | null>(null);
   const [recipeLines, setRecipeLines] = useState<Array<{ itemId: string; label: string; perUnit: string }>>([]);
   const [isRecipeComplementPickerOpen, setIsRecipeComplementPickerOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
@@ -1242,19 +1242,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     );
   }
 
-  // Resuelve el tipo de catálogo de una pieza terminada a partir de su código
-  // de 7 dígitos (categoría + modelo), para saber si ese tipo ya tiene receta.
-  // Si más de un tipo comparte categoría+modelo con distinto nombre, hay
-  // ambigüedad y no es resoluble automáticamente: se devuelve undefined y el
-  // usuario debe resolverlo por una vía segura ("Asignar" manual o respaldo
-  // posterior a la producción).
-  function pieceTypeId(item: InventoryItem): string | undefined {
+  // Clave de modelo de una pieza terminada: categoría(2)+modelo(4) de su
+  // código de 7 dígitos, sin el dígito de material (oro y plata comparten
+  // receta). undefined si la pieza no tiene código de catálogo de 7 dígitos.
+  function pieceModelKey(item: InventoryItem): string | undefined {
     const code = item.product_code;
     if (!code || code.length !== 7) return undefined;
-    const matches = productTypesList.filter(
-      (type) => type.category_code === code.slice(1, 3) && type.model_code === code.slice(3, 7)
-    );
-    return matches.length === 1 ? matches[0].id : undefined;
+    return code.slice(1);
   }
 
   // Tras elegir producto en modo ENSAMBLAR: consulta su receta. Sin receta y
@@ -1275,10 +1269,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         setOrderRecipe({ key, recipe });
         return;
       }
-      if (recipe.product_type_id) {
+      if (recipe.model_key) {
         setOrderRecipe(null);
         setRecipeLines([]);
-        setRecipeModalTypeId(recipe.product_type_id);
+        setRecipeModalModelKey(recipe.model_key);
         return;
       }
       setError("Esta pieza no tiene tipo en el catálogo: usa Asignar.");
@@ -1315,7 +1309,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setAssemblyMode(mode);
     setOrderProduct(null);
     setOrderRecipe(null);
-    setRecipeModalTypeId(null);
+    setRecipeModalModelKey(null);
     setRecipeLines([]);
   }
 
@@ -1327,7 +1321,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setAssemblyMode("ASIGNAR");
     setRunQuantity("1");
     setOrderRecipe(null);
-    setRecipeModalTypeId(null);
+    setRecipeModalModelKey(null);
     setRecipeLines([]);
     setIsRecipeComplementPickerOpen(false);
     setItemPickerFor((current) => (current === "create" ? null : current));
@@ -1337,7 +1331,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Cierra la modal de receta. clearProduct=true (X/Cancelar): sin receta no
   // hay ensamble, así que se limpia también la selección de producto.
   function closeRecipeModal(clearProduct: boolean) {
-    setRecipeModalTypeId(null);
+    setRecipeModalModelKey(null);
     setRecipeLines([]);
     setIsRecipeComplementPickerOpen(false);
     if (clearProduct) {
@@ -1362,7 +1356,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   async function handleSaveRecipe() {
-    if (!recipeModalTypeId) return;
+    if (!recipeModalModelKey) return;
     if (recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))) {
       setError("Completa la cantidad por unidad de todos los complementos (o quita los que sobren).");
       return;
@@ -1377,15 +1371,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setIsSaving(true);
     try {
       const saved = await upsertAssemblyRecipe(
-        recipeModalTypeId,
+        recipeModalModelKey,
         recipeLines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
       );
-      const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalTypeId : recipeModalTypeId;
+      const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalModelKey : recipeModalModelKey;
       setOrderRecipe({ key, recipe: saved });
-      setRecipeModalTypeId(null);
+      setRecipeModalModelKey(null);
       setRecipeLines([]);
       setSuccess("Receta guardada.");
-      await queryClient.invalidateQueries({ queryKey: ["assembly-recipe-types"] });
+      await queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo guardar la receta.");
     } finally {
@@ -2032,8 +2026,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           items={
             itemPickerFor === "create" && assemblyMode === "ASIGNAR"
               ? finishedItems.filter((item) => {
-                  const typeId = pieceTypeId(item);
-                  return !typeId || !recipeTypeIds.includes(typeId);
+                  const modelKey = pieceModelKey(item);
+                  return !modelKey || !recipeModelKeys.includes(modelKey);
                 })
               : finishedItems
           }
@@ -2055,7 +2049,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {typePickerFor ? (
         <CatalogProductPicker
           allowedTypeIds={allowedTypeIdsForPicker(typePickerFor)}
-          excludeTypeIds={assemblyMode === "ASIGNAR" && typePickerFor === "create" ? recipeTypeIds : undefined}
+          excludeTypeIds={
+            assemblyMode === "ASIGNAR" && typePickerFor === "create"
+              ? productTypesList
+                  .filter((type) => recipeModelKeys.includes(`${type.category_code}${type.model_code}`))
+                  .map((type) => type.id)
+              : undefined
+          }
           onClose={() => setTypePickerFor(null)}
           onSelect={(type) => {
             const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
@@ -2069,7 +2069,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {/* Modal de receta: se abre cuando el tipo elegido en ENSAMBLAR no tiene
           receta aún. Cerrar (X) también limpia la selección de producto: sin
           receta no hay ensamble. */}
-      {recipeModalTypeId ? (
+      {recipeModalModelKey ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir receta">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">

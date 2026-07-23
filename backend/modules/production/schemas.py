@@ -282,7 +282,7 @@ class AssemblyRecipeItemRead(BaseModel):
 class AssemblyRecipeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
-    product_type_id: UUID | None = None
+    model_key: str | None = None
     items: list[AssemblyRecipeItemRead] = Field(default_factory=list)
 
 

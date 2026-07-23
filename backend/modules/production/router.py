@@ -233,13 +233,13 @@ def receive_finished_product(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.get("/assembly-recipes/types", response_model=list[UUID])
-def list_assembly_recipe_types(
+@router.get("/assembly-recipes/types", response_model=list[str])
+def list_assembly_recipe_model_keys(
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
-) -> list[UUID]:
+) -> list[str]:
     ensure_permission(current_user, "production.runs.read")
-    return service.list_assembly_recipe_type_ids()
+    return service.list_assembly_recipe_model_keys()
 
 
 @router.get("/assembly-recipes", response_model=AssemblyRecipeRead)
@@ -256,9 +256,9 @@ def get_assembly_recipe(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.put("/assembly-recipes/{product_type_id}", response_model=AssemblyRecipeRead)
+@router.put("/assembly-recipes/{model_key}", response_model=AssemblyRecipeRead)
 def upsert_assembly_recipe(
-    product_type_id: UUID,
+    model_key: str,
     payload: AssemblyRecipeUpsert,
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
@@ -268,7 +268,7 @@ def upsert_assembly_recipe(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
     ensure_permission(current_user, "production.runs.update")
     try:
-        return service.upsert_assembly_recipe(product_type_id, payload, current_user)
+        return service.upsert_assembly_recipe(model_key, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
