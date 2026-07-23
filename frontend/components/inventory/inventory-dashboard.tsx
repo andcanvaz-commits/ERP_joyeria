@@ -24,6 +24,7 @@ import {
   deleteInventoryItem,
   downloadInventoryMovementSourceFile,
   getInventorySummary,
+  listComplementTypes,
   listInventoryItems,
   listInventoryMovements,
   revertLastEntry,
@@ -365,6 +366,10 @@ export function InventoryDashboard() {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [itemFilter]);
+  // Cambiar de pestaña vuelve al nivel tipos del drill-down de complementos.
+  useEffect(() => {
+    setComplementDrillGroup(null);
+  }, [itemFilter]);
   const [search, setSearch] = useState("");
   // Panel de filtros avanzados (se abre con el icono junto a la busqueda).
   const [showFilters, setShowFilters] = useState(false);
@@ -380,6 +385,9 @@ export function InventoryDashboard() {
   // Grupos de productos terminados expandidos (por nombre de categoria).
   // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
   const [drillGroup, setDrillGroup] = useState<string | null>(null);
+  // Drill-down de complementos: nivel actual (tipo → items). Estado propio,
+  // no comparte el de producto terminado.
+  const [complementDrillGroup, setComplementDrillGroup] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -512,6 +520,13 @@ export function InventoryDashboard() {
   const { data: catalogSegments = [] } = useQuery({
     queryKey: ["catalog-segments"],
     queryFn: listCatalogSegments,
+    enabled: Boolean(currentUser),
+  });
+
+  // Tipos de complemento del catalogo: agrupan la pestaña Complementos.
+  const { data: complementTypes = [] } = useQuery({
+    queryKey: ["complement-types"],
+    queryFn: listComplementTypes,
     enabled: Boolean(currentUser),
   });
 
@@ -672,14 +687,8 @@ export function InventoryDashboard() {
         .reduce((total, item) => total + itemTotalValue(item), 0),
     [items],
   );
-  // Mismo total para la pestaña de complementos.
-  const complementsValue = useMemo(
-    () =>
-      items
-        .filter((item) => item.item_type === "COMPLEMENT")
-        .reduce((total, item) => total + itemTotalValue(item), 0),
-    [items],
-  );
+  // El total de complementos ahora se calcula por grupo drilleado
+  // (complementItemsValue), no global: ver complementGroups más abajo.
   // Kardex del item abierto: sus movimientos con saldo corrido (mas reciente
   // primero). El saldo se calcula en orden cronologico ascendente.
   const viewingItemKardex = useMemo(() => {
@@ -1245,6 +1254,44 @@ export function InventoryDashboard() {
     return items.map((item) => ({ kind: "item" as const, item, material: null as null }));
   }, [searchActive, displayItems, drilledGroup]);
   const piecesPager = usePagination(pieceRows, TAB_PAGE_SIZE, `${drillGroup ?? ""}|${search}`);
+  // Drill-down de complementos: tipo → items. Sin tipo (o tipo eliminado) cae
+  // al grupo "Sin tipo", que siempre queda al final.
+  const complementTypeNameById = useMemo(
+    () => new Map(complementTypes.map((type) => [type.id, type.name])),
+    [complementTypes],
+  );
+  const complementGroups = useMemo(() => {
+    const byName = new Map<string, InventoryItem[]>();
+    for (const item of displayItems) {
+      const name = (item.complement_type_id && complementTypeNameById.get(item.complement_type_id)) || "Sin tipo";
+      const list = byName.get(name);
+      if (list) list.push(item);
+      else byName.set(name, [item]);
+    }
+    const groups = [...byName.entries()].map(([name, groupItems]) => ({
+      name,
+      items: groupItems,
+      itemCount: groupItems.length,
+      totalStock: groupItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+      unitCode: groupItems[0]?.unit_code ?? "und",
+    }));
+    return groups.sort((a, b) => {
+      if (a.name === "Sin tipo") return 1;
+      if (b.name === "Sin tipo") return -1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [displayItems, complementTypeNameById]);
+  const complementDrilledGroup = complementGroups.find((g) => g.name === complementDrillGroup) ?? null;
+  const complementGroupsPager = usePagination(complementGroups, TAB_PAGE_SIZE, filterKey);
+  const complementItemRows = useMemo(() => {
+    if (searchActive) return displayItems.map((item) => ({ item }));
+    return (complementDrilledGroup?.items ?? []).map((item) => ({ item }));
+  }, [searchActive, displayItems, complementDrilledGroup]);
+  const complementItemsPager = usePagination(complementItemRows, TAB_PAGE_SIZE, `${complementDrillGroup ?? ""}|${search}`);
+  const complementItemsValue = useMemo(
+    () => complementItemRows.reduce((total, row) => total + itemTotalValue(row.item), 0),
+    [complementItemRows],
+  );
   const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
   const wipRows = [
     ...inProcessRunsFiltered.map((run) => ({ kind: "run" as const, run, item: null })),
@@ -1508,7 +1555,8 @@ export function InventoryDashboard() {
 
       // Pre-clasifica cada linea: si el nombre ya existe en inventario entra a ese
       // item (tipo bloqueado); si es nueva, default segun la pestaña activa.
-      const defaultType: InventoryItemType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
+      const defaultType: InventoryItemType =
+        itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
       const lines = invoice.details.map<XmlImportLine>((detail) => {
         const matches = items.filter(
           (candidate) =>
@@ -2069,74 +2117,127 @@ export function InventoryDashboard() {
               <Pager {...rawItemsPager} />
             </div>
           ) : itemFilter === "COMPLEMENT" ? (
-            <div className="tableWrap">
-              <table className="table inventoryItemsTable">
-                <thead>
-                  <tr>
-                    <th className="num" style={{ width: 40 }}>#</th>
-                    <th>Complemento</th>
-                    <th>Descripción</th>
-                    <th className="num">Stock</th>
-                    <th>Estado</th>
-                    <th className="num">Costo promedio</th>
-                    <th className="num">Valor total</th>
-                    <th aria-label="Acciones" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rawItemsPager.pageItems.map((item, index) => {
-                    const averageCost = item.average_cost ?? "0";
-                    const totalValue = Number(item.current_stock) * Number(averageCost);
-                    const status = stockStatus(item);
-                    const suggestion = archiveSuggestion(item);
-                    return (
-                      <tr key={item.id}>
-                        <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
-                        <td>{item.name}</td>
-                        <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
-                        <td className="num">{itemStockText(item)}</td>
-                        <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
-                        <td className="num">$ {numericText(averageCost)}</td>
-                        <td className="num">$ {numericText(String(totalValue))}</td>
-                        <td>
-                          <div className="rowActions">
-                            {canArchive(item) ? (
-                              <button
-                                aria-label="Archivar item agotado"
-                                className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
-                                onClick={() => void handleArchiveItem(item)}
-                                title={suggestion ?? "Archivar item agotado"}
-                                type="button"
-                              >
-                                <Inbox aria-hidden="true" size={15} />
-                              </button>
-                            ) : null}
-                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
-                              <Eye aria-hidden="true" size={15} />
-                            </button>
-                          </div>
-                        </td>
+            <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 10, minHeight: 0 }}>
+              {complementDrilledGroup ? (
+                <div className="drillBar">
+                  <button className="button" onClick={() => setComplementDrillGroup(null)} type="button">
+                    <ChevronLeft aria-hidden="true" size={15} /> Volver
+                  </button>
+                  <span className="drillCrumbs">
+                    <button onClick={() => setComplementDrillGroup(null)} type="button">Complementos</button>
+                    <span className="drillCrumbSep">/</span>
+                    <span>{complementDrilledGroup.name}</span>
+                  </span>
+                </div>
+              ) : null}
+
+              {searchActive || complementDrilledGroup ? (
+                // Nivel items (o búsqueda global): la tabla de complementos de siempre.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable">
+                    <thead>
+                      <tr>
+                        <th className="num" style={{ width: 40 }}>#</th>
+                        <th>Complemento</th>
+                        <th>Descripción</th>
+                        <th className="num">Stock</th>
+                        <th>Estado</th>
+                        <th className="num">Costo promedio</th>
+                        <th className="num">Valor total</th>
+                        <th aria-label="Acciones" />
                       </tr>
-                    );
-                  })}
-                  {!isLoading && displayItems.length === 0 ? (
-                    <tr><td colSpan={8}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
-                  ) : null}
-                  {isLoading ? (
-                    <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
-                  ) : null}
-                </tbody>
-                {!isLoading && displayItems.length > 0 ? (
-                  <tfoot>
-                    <tr className="totalRow">
-                      <td colSpan={6}>Valor total de complementos</td>
-                      <td className="num">$ {moneyText(complementsValue)}</td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-              <Pager {...rawItemsPager} />
+                    </thead>
+                    <tbody>
+                      {complementItemsPager.pageItems.map((row, index) => {
+                        const item = row.item;
+                        const averageCost = item.average_cost ?? "0";
+                        const totalValue = Number(item.current_stock) * Number(averageCost);
+                        const status = stockStatus(item);
+                        const suggestion = archiveSuggestion(item);
+                        return (
+                          <tr key={item.id}>
+                            <td className="num">{complementItemsPager.page * complementItemsPager.pageSize + index + 1}</td>
+                            <td>{item.name}</td>
+                            <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
+                            <td className="num">{itemStockText(item)}</td>
+                            <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
+                            <td className="num">$ {numericText(averageCost)}</td>
+                            <td className="num">$ {numericText(String(totalValue))}</td>
+                            <td>
+                              <div className="rowActions">
+                                {canArchive(item) ? (
+                                  <button
+                                    aria-label="Archivar item agotado"
+                                    className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
+                                    onClick={() => void handleArchiveItem(item)}
+                                    title={suggestion ?? "Archivar item agotado"}
+                                    type="button"
+                                  >
+                                    <Inbox aria-hidden="true" size={15} />
+                                  </button>
+                                ) : null}
+                                <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
+                                  <Eye aria-hidden="true" size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {searchActive && complementItemRows.length === 0 ? (
+                        <tr><td colSpan={8}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
+                      ) : null}
+                      {!isLoading && !searchActive && complementItemRows.length === 0 ? (
+                        <tr><td colSpan={8}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
+                      ) : null}
+                      {isLoading ? (
+                        <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
+                      ) : null}
+                    </tbody>
+                    {!isLoading && complementItemRows.length > 0 ? (
+                      <tfoot>
+                        <tr className="totalRow">
+                          <td colSpan={6}>Valor total de complementos</td>
+                          <td className="num">$ {moneyText(complementItemsValue)}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    ) : null}
+                  </table>
+                  <Pager {...complementItemsPager} />
+                </div>
+              ) : (
+                // Nivel tipos: headers de tipo.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable tableAuto">
+                    <thead>
+                      <tr>
+                        <th>Tipo</th>
+                        <th className="num">Complementos</th>
+                        <th className="num">Stock</th>
+                        <th aria-label="Abrir" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {complementGroupsPager.pageItems.map((group) => (
+                        <tr key={group.name} onClick={() => setComplementDrillGroup(group.name)} style={{ cursor: "pointer" }}>
+                          <td><strong>{group.name}</strong></td>
+                          <td className="num">{group.itemCount}</td>
+                          <td className="num">{numericText(String(group.totalStock))} {group.unitCode}</td>
+                          <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
+                        </tr>
+                      ))}
+                      {!isLoading && complementGroups.length === 0 ? (
+                        <tr><td colSpan={4}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
+                      ) : null}
+                      {isLoading ? (
+                        <tr><td colSpan={4}><div className="emptyState">Cargando inventario...</div></td></tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                  <Pager {...complementGroupsPager} />
+                </div>
+              )}
             </div>
           ) : itemFilter === "FINISHED_PRODUCT" ? (
             <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 10, minHeight: 0 }}>
@@ -3538,6 +3639,7 @@ export function InventoryDashboard() {
                           >
                             <option value="RAW_MATERIAL">Materia prima</option>
                             <option value="SUPPLY">Insumo</option>
+                            <option value="COMPLEMENT">Complemento</option>
                           </select>
                         )}
                       </td>

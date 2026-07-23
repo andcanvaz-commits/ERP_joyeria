@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import type { InventoryItem } from "@/types/inventory";
-import { createInventoryItem, deleteInventoryItem, listInventoryItems, updateInventoryItem } from "@/lib/inventory-api";
+import { createInventoryItem, deleteInventoryItem, listComplementTypes, listInventoryItems, updateInventoryItem } from "@/lib/inventory-api";
 import { listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { Pager, usePagination } from "@/components/shared/pager";
@@ -17,11 +17,14 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
   });
   const itemsPager = usePagination(items, 6);
   const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits });
+  const { data: complementTypes = [] } = useQuery({ queryKey: ["complement-types"], queryFn: listComplementTypes });
+  const activeComplementTypes = useMemo(() => complementTypes.filter((type) => type.is_active), [complementTypes]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [unitCode, setUnitCode] = useState("");
+  const [complementTypeId, setComplementTypeId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -38,6 +41,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
     setName("");
     setDescription("");
     setUnitCode("");
+    setComplementTypeId("");
   }
 
   function startEdit(item: InventoryItem) {
@@ -45,6 +49,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
     setName(item.name);
     setDescription(item.description ?? "");
     setUnitCode(item.unit_code);
+    setComplementTypeId(item.complement_type_id ?? "");
     setError(null);
   }
 
@@ -88,6 +93,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
       description: description.trim() || null,
       purity: null,
       unit_code: unit,
+      complement_type_id: complementTypeId || null,
     };
     setIsSaving(true);
     try {
@@ -148,6 +154,15 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
               <span>Descripción</span>
               <input className="field" disabled={isSaving} maxLength={1000} onChange={(e) => setDescription(e.target.value)} value={description} />
             </label>
+            <label className="fieldGroup">
+              <span>Tipo (opcional)</span>
+              <select className="field" disabled={isSaving} onChange={(e) => setComplementTypeId(e.target.value)} value={complementTypeId}>
+                <option value="">Sin tipo</option>
+                {activeComplementTypes.map((type) => (
+                  <option key={type.id} value={type.id}>{type.name}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="modalActions">
             {editingId ? (
@@ -170,6 +185,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
                 <th>Nombre</th>
                 <th>Unidad</th>
                 <th>Descripción</th>
+                <th>Tipo</th>
                 <th aria-label="Acciones" />
               </tr>
             </thead>
@@ -180,6 +196,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
                   <td>{item.name}</td>
                   <td>{item.unit_code}</td>
                   <td>{item.description ?? "—"}</td>
+                  <td>{complementTypes.find((type) => type.id === item.complement_type_id)?.name ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     <span className="rowActions" style={{ justifyContent: "flex-end" }}>
                       <button
@@ -206,7 +223,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
               ))}
               {!isLoading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={5}><div className="emptyState">Sin complementos. Crea el primero.</div></td>
+                  <td colSpan={6}><div className="emptyState">Sin complementos. Crea el primero.</div></td>
                 </tr>
               ) : null}
             </tbody>
