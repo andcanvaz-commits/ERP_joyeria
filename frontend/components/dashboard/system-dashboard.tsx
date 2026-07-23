@@ -153,7 +153,7 @@ export function SystemDashboard() {
     return inventoryItems.reduce<Record<InventoryItemType, number>>((acc, item) => {
       acc[item.item_type] = (acc[item.item_type] ?? 0) + 1;
       return acc;
-    }, { RAW_MATERIAL: 0, SUPPLY: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0 });
+    }, { RAW_MATERIAL: 0, SUPPLY: 0, COMPLEMENT: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0 });
   }, [inventoryItems]);
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;
