@@ -142,6 +142,28 @@ function movementTypeLabel(type: InventoryMovementType) {
   return MOVEMENT_TYPES.find((item) => item.value === type)?.label ?? type;
 }
 
+// Conversión y ensamble son UNA operación: la flecha del detalle ya dice de
+// qué a qué; la etiqueta no distingue entrada/salida.
+function movementOperationLabel(movement: { movement_type: InventoryMovementType; reference_type?: string | null }) {
+  if (movement.movement_type === "CONVERSION_ENTRADA" || movement.movement_type === "CONVERSION_SALIDA") {
+    return movement.reference_type === "product_assembly" ? "Ensamble" : "Conversión";
+  }
+  return movementTypeLabel(movement.movement_type);
+}
+
+// Detalle del kardex por lado de la operación: si el item RECIBIÓ, dice qué
+// se sumó y de dónde vino ("Desde 1x test + 2x TEST"); si el item APORTÓ,
+// dice a dónde fue ("A producto TEST3 (4120002)"). El relato completo queda
+// en el tooltip y en el panel de movimientos.
+function kardexDetail(movement: InventoryMovement) {
+  const raw = (movement.reason ?? "").trim();
+  if (!raw) return "—";
+  const match = raw.match(/^(?:conversion|conversión|ensamble):\s*(.+?)\s*(?:->|→)\s*(.+)$/i);
+  if (!match) return raw;
+  const [, from, to] = match;
+  return movementSign(movement.movement_type) > 0 ? `Desde ${from}` : `A producto ${to}`;
+}
+
 // Signo del movimiento sobre el stock: suma entradas/ingresos/ajustes+ y resta
 // salidas/consumos/merma/ajustes-. Base del saldo corrido del kardex.
 function movementSign(type: InventoryMovementType) {
@@ -394,9 +416,8 @@ export function InventoryDashboard() {
   const [isPartnerPickerOpen, setIsPartnerPickerOpen] = useState(false);
   // Edición del material de la pieza (lápiz junto al valor automático).
   const [materialEditFor, setMaterialEditFor] = useState<"convert" | "combine" | null>(null);
-  // Lápiz de pureza del ensamble (mismo patrón que el de material).
-  const [isPurityEditOpen, setIsPurityEditOpen] = useState(false);
-  const [isKardexOpen, setIsKardexOpen] = useState(false);
+  // Kardex de cualquier item (pieza o lote); se abre desde su Visualizar.
+  const [kardexItem, setKardexItem] = useState<InventoryItem | null>(null);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
   const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
@@ -472,11 +493,6 @@ export function InventoryDashboard() {
     if (items.length === 0) return;
     setMovementForm((current) => ({ ...current, item_id: current.item_id || items[0]?.id || "" }));
   }, [items]);
-
-  // El kardex se abre desde la ficha; al cambiar o cerrar el item vuelve cerrado.
-  useEffect(() => {
-    setIsKardexOpen(false);
-  }, [viewingItem?.id]);
 
   useEffect(() => {
     if (!error && !success) return;
@@ -613,9 +629,9 @@ export function InventoryDashboard() {
   // Kardex del item abierto: sus movimientos con saldo corrido (mas reciente
   // primero). El saldo se calcula en orden cronologico ascendente.
   const viewingItemKardex = useMemo(() => {
-    if (!viewingItem) return [] as Array<{ movement: InventoryMovement; balanceAfter: number }>;
+    if (!kardexItem) return [] as Array<{ movement: InventoryMovement; balanceAfter: number }>;
     const ascending = movements
-      .filter((movement) => movement.item_id === viewingItem.id)
+      .filter((movement) => movement.item_id === kardexItem.id)
       .sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime());
     let balance = 0;
     const withBalance = ascending.map((movement) => {
@@ -623,7 +639,7 @@ export function InventoryDashboard() {
       return { movement, balanceAfter: balance };
     });
     return withBalance.reverse();
-  }, [movements, viewingItem]);
+  }, [movements, kardexItem]);
   const unitOptions = useMemo(() => {
     // Base dinamica: unidades gestionadas desde Mantenimiento > Datos. Si aun no
     // cargan, cae a las unidades por defecto para no dejar el combo vacio.
@@ -740,6 +756,7 @@ export function InventoryDashboard() {
   // Registros del día: movimientos + rechazos de solicitudes, en orden temporal.
   const selectedDateEntries = useMemo(() => {
     const moves = sortedMovements
+      .filter((movement) => movement.movement_type !== "CONVERSION_SALIDA")
       .filter((movement) => movementDateKey(movement) === selectedHistoryDate)
       .map((movement) => ({ kind: "movement" as const, movement, run: null, at: new Date(movement.created_at).getTime() }));
     const rejections = rejectedRuns
@@ -778,12 +795,13 @@ export function InventoryDashboard() {
   const historySearchResults = useMemo(() => {
     if (!historySearchActive) return [] as InventoryMovement[];
     return sortedMovements.filter((movement) =>
+      movement.movement_type !== "CONVERSION_SALIDA" &&
       matchesSearchTokens(historySearch, [
         movement.item.name,
         movement.item.sku,
         movement.item.material_type,
         itemTypeLabel(movement.item.item_type),
-        movementTypeLabel(movement.movement_type),
+        movementOperationLabel(movement),
         movement.reason,
         movement.lot_code,
         movement.created_by_name,
@@ -930,11 +948,11 @@ export function InventoryDashboard() {
     return partial[0] ?? null;
   }
 
-  // Material y pureza del ensamble heredados de la pieza que aporta MÁS
-  // GRAMOS (regla del sistema). Empate con valores distintos → se combinan
-  // los textos ("a + b") y el usuario elige con el lápiz. Si el aporte de
-  // alguna pieza se desconoce (sin peso por unidad), se combinan los de
-  // todas. El backend aplica la misma regla como respaldo.
+  // REGLA ÚNICA: el material y la pureza del ensamble son los de la pieza
+  // que aporta MÁS GRAMOS, y punto (el dígito del código ya distingue
+  // material; no hay textos combinados). Empate o aporte desconocido → la
+  // primera pieza. El lápiz permite elegir otro; el backend aplica la misma
+  // regla como respaldo.
   function deriveCombineMaterial(sources: { itemId: string; quantity?: string }[]) {
     const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
     const selected = sources
@@ -942,30 +960,33 @@ export function InventoryDashboard() {
       .filter((entry): entry is { line: { itemId: string; quantity?: string }; item: InventoryItem } =>
         Boolean(entry.item),
       );
-    // Gramos aportados por línea; null = desconocido.
-    const grams = selected.map(({ line, item }) => {
-      const wpu = Number(item.weight_per_unit ?? 0);
-      const qty = Number(line.quantity ?? "1");
-      return wpu > 0 && Number.isFinite(qty) && qty > 0 ? wpu * qty : null;
-    });
-    const allKnown = grams.length > 0 && grams.every((value) => value !== null);
-    const maxGrams = allKnown ? Math.max(...(grams as number[])) : null;
-    const top = allKnown ? selected.filter((_, index) => grams[index] === maxGrams) : selected;
-    const labels: string[] = [];
-    const purities: string[] = [];
-    for (const { item } of top) {
-      const code = item.product_code?.[0];
-      const label = materialSegments.find((segment) => segment.code === code)?.label ?? item.material_type?.trim();
-      if (label && !labels.includes(label)) labels.push(label);
-      const purity = (item.purity ?? "").trim();
-      if (purity && !purities.includes(purity)) purities.push(purity);
+    if (selected.length === 0) return { material_code: "", material_type: "", purity: "" };
+    let dominant = selected[0];
+    let best: number | null = null;
+    const allKnown = selected.every(({ item }) => Number(item.weight_per_unit ?? 0) > 0);
+    if (allKnown) {
+      for (const entry of selected) {
+        const qty = Number(entry.line.quantity ?? "1");
+        const grams = Number(entry.item.weight_per_unit) * (Number.isFinite(qty) && qty > 0 ? qty : 1);
+        if (best === null || grams > best) {
+          best = grams;
+          dominant = entry;
+        }
+      }
     }
-    // Segmento para el código: primero el de la pieza dominante; si no tiene,
-    // el de cualquier pieza con código válido.
-    const firstCode = [...top, ...selected]
+    const digit = dominant.item.product_code?.[0];
+    const segment = materialSegments.find((candidate) => candidate.code === digit);
+    const label = segment?.label ?? dominant.item.material_type?.trim() ?? "";
+    // Segmento para el código: el de la pieza dominante; si no tiene, el de
+    // cualquier pieza con código válido.
+    const fallbackCode = selected
       .map(({ item }) => item.product_code?.[0])
-      .find((code) => code && materialSegments.some((segment) => segment.code === code));
-    return { material_code: firstCode ?? "", material_type: labels.join(" + "), purity: purities.join(" + ") };
+      .find((code) => code && materialSegments.some((candidate) => candidate.code === code));
+    return {
+      material_code: segment?.code ?? fallbackCode ?? "",
+      material_type: label,
+      purity: (dominant.item.purity ?? "").trim(),
+    };
   }
 
   async function handleCombineProducts(event: FormEvent<HTMLFormElement>) {
@@ -1150,12 +1171,17 @@ export function InventoryDashboard() {
   // Últimos movimientos de todo el inventario, sin filtro por pestaña ni fecha.
   // Los rechazos de solicitudes también son movimientos de inventario.
   const movementPanelEntries = useMemo(() => {
-    const moves = sortedMovements.map((movement) => ({
-      kind: "movement" as const,
-      movement,
-      run: null,
-      at: new Date(movement.created_at).getTime(),
-    }));
+    // Conversión/ensamble = una operación: se muestra solo la ENTRADA (su
+    // detalle ya cuenta la salida); el asiento de salida vive en el kardex
+    // del item de origen.
+    const moves = sortedMovements
+      .filter((movement) => movement.movement_type !== "CONVERSION_SALIDA")
+      .map((movement) => ({
+        kind: "movement" as const,
+        movement,
+        run: null,
+        at: new Date(movement.created_at).getTime(),
+      }));
     const rejections = rejectedRuns.map((run) => ({
       kind: "rejection" as const,
       movement: null,
@@ -1165,7 +1191,7 @@ export function InventoryDashboard() {
     return [...moves, ...rejections].sort((left, right) => right.at - left.at);
   }, [sortedMovements, rejectedRuns]);
   const movementsPager = usePagination(movementPanelEntries, MOVEMENTS_PAGE_SIZE);
-  const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, viewingItem?.id ?? "");
+  const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, kardexItem?.id ?? "");
   // Archivados: 5 por página dentro del modal; vuelve a la primera al abrir.
   const archivedPager = usePagination(archivedItems, 5, String(isArchivedOpen));
   // Lineas de factura XML en revision: 5 por página dentro del modal.
@@ -2288,7 +2314,7 @@ export function InventoryDashboard() {
               return (
               <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                 <div>
-                  <strong>{movementTypeLabel(movement.movement_type)}</strong>
+                  <strong>{movementOperationLabel(movement)}</strong>
                   {movement.lot_code ? (
                     <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{movement.lot_code}</span>
                   ) : null}
@@ -2433,7 +2459,7 @@ export function InventoryDashboard() {
                     return (
                     <article className="movementRow" key={movement.id} {...openableProps(() => setViewingMovement(movement), `Ver movimiento de ${movement.item.name}`)}>
                       <div>
-                        <strong>{movementTypeLabel(movement.movement_type)}</strong>
+                        <strong>{movementOperationLabel(movement)}</strong>
                         {movement.lot_code ? (
                           <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{movement.lot_code}</span>
                         ) : null}
@@ -3000,138 +3026,23 @@ export function InventoryDashboard() {
                   )}
                 </div>
               </div>
-              {(() => {
-                // Solo los materiales de las piezas elegidas; el automático los
-                // combina y el lápiz permite quedarse con uno de ellos.
-                const pieceMaterials: { label: string; code: string }[] = [];
-                for (const item of pieces) {
-                  const code = item.product_code?.[0];
-                  const segment = materials.find((candidate) => candidate.code === code) ?? matchMaterialSegment(item.material_type);
-                  const label = segment?.label ?? item.material_type?.trim();
-                  if (label && !pieceMaterials.some((entry) => entry.label === label)) {
-                    pieceMaterials.push({ label, code: segment?.code ?? "" });
-                  }
-                }
-                const comboLabel = pieceMaterials.map((entry) => entry.label).join(" + ");
-                return (
-                  <div className="fieldGroup">
-                    <span>Material de la pieza</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      {materialEditFor === "combine" ? (
-                        <select
-                          autoFocus
-                          className="field"
-                          onChange={(event) => {
-                            if (event.target.value === "__combo__") {
-                              setCombineForm((current) => ({
-                                ...current,
-                                ...deriveCombineMaterial(current.sources),
-                              }));
-                            } else {
-                              const entry = pieceMaterials.find((candidate) => candidate.label === event.target.value) ?? null;
-                              if (entry) {
-                                setCombineForm((current) => ({
-                                  ...current,
-                                  material_code: entry.code,
-                                  material_type: entry.label,
-                                }));
-                              }
-                            }
-                            setMaterialEditFor(null);
-                          }}
-                          style={{ maxWidth: 260 }}
-                          value={pieceMaterials.find((entry) => entry.label === combineForm.material_type)?.label ?? ""}
-                        >
-                          <option value="">Seleccionar material</option>
-                          {pieceMaterials.length > 1 ? (
-                            <option value="__combo__">Combinado: {comboLabel}</option>
-                          ) : null}
-                          {pieceMaterials.map((entry) => (
-                            <option key={entry.label} value={entry.label}>{entry.label}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span style={{ fontSize: 13, color: combineForm.material_type ? undefined : "var(--muted)" }}>
-                          {combineForm.material_type || "Se llena al elegir las piezas"}
-                        </span>
-                      )}
-                      {/* El lápiz solo cuando hay dos materiales distintos que
-                          elegir; con uno solo no hay nada que editar. */}
-                      {pieceMaterials.length > 1 ? (
-                        <button
-                          aria-label="Editar material"
-                          className="iconOnlyButton"
-                          onClick={() => setMaterialEditFor((current) => (current === "combine" ? null : "combine"))}
-                          type="button"
-                        >
-                          <Pencil aria-hidden="true" size={14} />
-                        </button>
-                      ) : null}
-                    </div>
-                    {combineForm.material_type && !combineForm.material_code ? (
-                      <small style={{ color: "var(--muted)" }}>El material no está en el catálogo: elígelo con el lápiz.</small>
-                    ) : null}
-                  </div>
-                );
-              })()}
-              {(() => {
-                // Purezas de las piezas elegidas; la automática hereda la de
-                // la pieza con más gramos y el lápiz permite quedarse con una.
-                const piecePurities: string[] = [];
-                for (const item of pieces) {
-                  const clean = (item.purity ?? "").trim();
-                  if (clean && !piecePurities.includes(clean)) piecePurities.push(clean);
-                }
-                if (piecePurities.length === 0 && !combineForm.purity) return null;
-                return (
-                  <div className="fieldGroup">
-                    <span>Pureza de la pieza</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      {isPurityEditOpen ? (
-                        <select
-                          autoFocus
-                          className="field"
-                          onChange={(event) => {
-                            if (event.target.value === "__combo__") {
-                              setCombineForm((current) => ({
-                                ...current,
-                                purity: deriveCombineMaterial(current.sources).purity,
-                              }));
-                            } else if (event.target.value) {
-                              setCombineForm((current) => ({ ...current, purity: event.target.value }));
-                            }
-                            setIsPurityEditOpen(false);
-                          }}
-                          style={{ maxWidth: 260 }}
-                          value={piecePurities.find((entry) => entry === combineForm.purity) ?? ""}
-                        >
-                          <option value="">Seleccionar pureza</option>
-                          {piecePurities.length > 1 ? (
-                            <option value="__combo__">Combinada: {piecePurities.join(" + ")}</option>
-                          ) : null}
-                          {piecePurities.map((entry) => (
-                            <option key={entry} value={entry}>{entry}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span style={{ fontSize: 13, color: combineForm.purity ? undefined : "var(--muted)" }}>
-                          {combineForm.purity || "Sin pureza"}
-                        </span>
-                      )}
-                      {piecePurities.length > 1 ? (
-                        <button
-                          aria-label="Editar pureza"
-                          className="iconOnlyButton"
-                          onClick={() => setIsPurityEditOpen((current) => !current)}
-                          type="button"
-                        >
-                          <Pencil aria-hidden="true" size={14} />
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })()}
+              {/* Regla absoluta: material y pureza = los de la pieza con más
+                  gramos. Solo lectura, sin edición. */}
+              <div className="fieldGroup">
+                <span>Material de la pieza</span>
+                <span style={{ fontSize: 13, color: combineForm.material_type ? undefined : "var(--muted)" }}>
+                  {combineForm.material_type || "Se llena al elegir las piezas"}
+                </span>
+                {combineForm.material_type && !combineForm.material_code ? (
+                  <small style={{ color: "var(--muted)" }}>El material no está en el catálogo.</small>
+                ) : null}
+              </div>
+              {combineForm.purity ? (
+                <div className="fieldGroup">
+                  <span>Pureza de la pieza</span>
+                  <span style={{ fontSize: 13 }}>{combineForm.purity}</span>
+                </div>
+              ) : null}
               <label className="fieldGroup">
                 <span>Ensambles a producir</span>
                 <input
@@ -3482,24 +3393,24 @@ export function InventoryDashboard() {
             </div>
             <p className="panelText">{viewingItem.description || "Sin descripcion"}</p>
             <div className="modalActions">
-              <button className="button" onClick={() => setIsKardexOpen(true)} type="button">
+              <button className="button" onClick={() => setKardexItem(viewingItem)} type="button">
                 <History aria-hidden="true" size={15} />
-                Kardex ({viewingItemKardex.length})
+                Kardex
               </button>
             </div>
           </section>
         </div>
       ) : null}
 
-      {viewingItem && isKardexOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Kardex del item">
+      {kardexItem ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Kardex del item">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
                 <h2>Kardex</h2>
-                <p>{viewingItem.name} · {viewingItemKardex.length} movimientos</p>
+                <p>{kardexItem.name} · {viewingItemKardex.length} movimientos</p>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsKardexOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setKardexItem(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -3509,6 +3420,7 @@ export function InventoryDashboard() {
                   <tr>
                     <th>Fecha</th>
                     <th>Tipo</th>
+                    <th>Detalle</th>
                     <th className="num">Cantidad</th>
                     <th className="num">Saldo</th>
                   </tr>
@@ -3517,13 +3429,16 @@ export function InventoryDashboard() {
                   {kardexPager.pageItems.map(({ movement, balanceAfter }) => (
                     <tr key={movement.id}>
                       <td>{movementDateLabel(movement.created_at)}</td>
-                      <td>{movementTypeLabel(movement.movement_type)}</td>
+                      <td>{movementOperationLabel(movement)}</td>
+                      <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis" }} title={movement.reason ?? undefined}>
+                        {kardexDetail(movement)}
+                      </td>
                       <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{numericText(movement.quantity)} {movement.unit_code}</td>
                       <td className="num">{numericText(String(balanceAfter))} {movement.unit_code}</td>
                     </tr>
                   ))}
                   {viewingItemKardex.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">Sin movimientos para este item.</div></td></tr>
+                    <tr><td colSpan={5}><div className="emptyState">Sin movimientos para este item.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -3540,7 +3455,7 @@ export function InventoryDashboard() {
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
-                <h2>{movementTypeLabel(viewingMovement.movement_type)}</h2>
+                <h2>{movementOperationLabel(viewingMovement)}</h2>
                 <p>{viewingMovement.item.name}{viewingMovement.lot_code ? ` · ${viewingMovement.lot_code}` : ""}</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingMovement(null)} type="button">
@@ -3617,6 +3532,19 @@ export function InventoryDashboard() {
                   {viewingRun.status !== "RECIBIDA" ? (
                     <RunStageSummaryTable run={viewingRun} />
                   ) : null}
+                  {(() => {
+                    // Kardex del lote, igual que en la ficha de cualquier item.
+                    const lotItem = items.find((item) => item.sku === viewingRun.production_code) ?? null;
+                    if (!lotItem) return null;
+                    return (
+                      <div className="modalActions">
+                        <button className="button" onClick={() => setKardexItem(lotItem)} type="button">
+                          <History aria-hidden="true" size={15} />
+                          Kardex
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </>
               );
             })()}

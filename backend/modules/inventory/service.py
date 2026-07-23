@@ -476,11 +476,12 @@ class InventoryService(InventoryIntegrationPort):
         """Convierte parcialmente un lote de proceso terminado (SKU = código OP)
         en un producto del catálogo. Consumo y producción quedan como el par de
         movimientos CONVERSION_SALIDA/CONVERSION_ENTRADA; nunca se edita stock
-        directo. Destino por pieza (target_item_id): si el material de
-        fabricación del lote coincide con el de la pieza elegida, suma a esa
-        pieza; si no, crea/reusa otra fila con el mismo modelo y el material
-        del lote. Destino por tipo (product_type_id): repetir la conversión
-        mismo tipo + mismo lote suma al mismo item."""
+        directo. Mismo producto + mismo material = MISMA fila: la conversión
+        suma stock sin importar de qué lote venga (la trazabilidad por lote
+        vive en los movimientos). Destino por pieza (target_item_id): si el
+        material del lote coincide con el de la pieza elegida, suma ahí; si
+        no, crea/reusa otra fila con el mismo modelo y el material del lote.
+        Destino por tipo (product_type_id): suma a la fila del producto."""
         lot = self._get_item_or_raise(lot_item_id)
         if lot.item_type != "FINISHED_PRODUCT":
             raise InventoryDomainError("Solo se pueden convertir lotes de procesos terminados.")
@@ -532,21 +533,24 @@ class InventoryService(InventoryIntegrationPort):
                 )
             # Código destino: material del lote + modelo de la pieza.
             product_code = f"{material_code}{piece.product_code[1:]}"
-            if product_code == piece.product_code:
-                # Mismo material: se suma a la pieza elegida tal cual.
+            if product_code == piece.product_code and self._norm_text(
+                lot_material
+            ) == self._norm_text(piece.material_type):
+                # Mismo material (código y texto): suma a la pieza elegida.
                 target = piece
             else:
                 # La descripción es el modelo real y el nombre distingue tipos
                 # que comparten código (ej. TEST y TEST2 ambos x530001): el
-                # reúso exige código, nombre y descripción iguales.
+                # reúso exige código, nombre, descripción y material iguales
+                # — sin importar el lote de origen.
                 target = next(
                     (
                         item
                         for item in self.repository.list_items("FINISHED_PRODUCT")
                         if item.product_code == product_code
-                        and item.source_lot_sku == lot.sku
                         and item.name == piece.name
                         and (item.description or "") == (piece.description or "")
+                        and self._norm_text(item.material_type) == self._norm_text(lot_material)
                     ),
                     None,
                 )
@@ -569,15 +573,17 @@ class InventoryService(InventoryIntegrationPort):
             product_code, product_type = self._resolve_catalog_target(
                 material_code, payload.product_type_id
             )
-            # El nombre distingue tipos que comparten código (TEST vs TEST2):
-            # sin compararlo, la conversión sumaría a otro producto.
+            # El nombre distingue tipos que comparten código (TEST vs TEST2).
+            # Sin filtro por lote: el mismo producto acumula stock aunque
+            # venga de órdenes distintas (el kardex guarda el lote).
             target = next(
                 (
                     item
                     for item in self.repository.list_items("FINISHED_PRODUCT")
                     if item.product_code == product_code
-                    and item.source_lot_sku == lot.sku
                     and item.name == (product_type.name or lot.name)
+                    and not (item.description or "").strip()
+                    and self._norm_text(item.material_type) == self._norm_text(lot_material)
                 ),
                 None,
             )
@@ -605,12 +611,16 @@ class InventoryService(InventoryIntegrationPort):
         if lot.purity and not target.purity:
             target.purity = lot.purity
 
+        # Una sola operación contada completa en ambos asientos: el kardex de
+        # cada lado dice de dónde vino y en qué acabó.
+        target_label = (target.description or "").strip() or target.name
+        story = f"Conversion: lote {lot.sku} -> {target_label} ({product_code})"[:240]
         self.create_movement(
             InventoryMovementCreate(
                 item_id=lot.id,
                 movement_type="CONVERSION_SALIDA",
                 quantity=payload.quantity,
-                reason=f"Conversion a producto {product_code}",
+                reason=story,
                 reference_type="lot_conversion",
                 reference_id=target.id,
             ),
@@ -622,7 +632,7 @@ class InventoryService(InventoryIntegrationPort):
                 movement_type="CONVERSION_ENTRADA",
                 # Entra en la unidad de la producción (gramos por unidad).
                 quantity=entry_quantity,
-                reason=f"Conversion desde lote {lot.sku}",
+                reason=story,
                 reference_type="lot_conversion",
                 reference_id=lot.id,
             ),
@@ -664,35 +674,21 @@ class InventoryService(InventoryIntegrationPort):
                 raise InventoryDomainError(f"Stock insuficiente de '{item.name}'.")
             sources.append((item, required))
 
-        # Regla del sistema: el material y la pureza del resultado se heredan
-        # de la pieza que aporta MÁS GRAMOS al ensamble. Empate con valores
-        # distintos → se combinan los textos ("a + b") y el usuario puede
-        # elegir uno en la UI (payload.material_type / payload.purity ganan
-        # siempre). Si el aporte de alguna pieza se desconoce, se combinan
-        # los de todas.
-        def _joined(values):
-            seen: list[str] = []
-            for value in values:
-                clean = (value or "").strip()
-                if clean and clean not in seen:
-                    seen.append(clean)
-            return " + ".join(seen) or None
-
+        # REGLA ÚNICA del sistema: el material y la pureza del resultado son
+        # los de la pieza que aporta MÁS GRAMOS al ensamble, y punto (el
+        # dígito del código ya distingue material; no hay textos combinados).
+        # Empate o aportes desconocidos → la primera pieza del ensamble.
+        # payload.material_type / payload.purity ganan siempre.
+        dominant_item = sources[0][0]
         if all(info is not None for info in gram_infos):
-            contributions = [
-                line.quantity * info[0]
-                for line, info in zip(payload.sources, gram_infos)
-            ]
-            top_grams = max(contributions)
-            dominant = [
-                item
-                for (item, _), grams in zip(sources, contributions)
-                if grams == top_grams
-            ]
-        else:
-            dominant = [item for item, _ in sources]
-        auto_material = _joined(item.material_type for item in dominant)
-        auto_purity = _joined(item.purity for item in dominant)
+            best = None
+            for (item, _), line, info in zip(sources, payload.sources, gram_infos):
+                grams = line.quantity * info[0]
+                if best is None or grams > best:
+                    best = grams
+                    dominant_item = item
+        auto_material = (dominant_item.material_type or "").strip() or None
+        auto_purity = (dominant_item.purity or "").strip() or None
 
         # El resultado sale en gramos SOLO si todas las piezas tienen gramos
         # por unidad (piezas del sistema o lotes de una orden): el peso del
@@ -729,9 +725,7 @@ class InventoryService(InventoryIntegrationPort):
             # stock existente. Sin override del usuario aplica la herencia
             # por gramos dominantes.
             material_type = payload.material_type or auto_material or piece.material_type
-
-            def _norm(text: str | None) -> str:
-                return (text or "").strip().upper()
+            _norm = self._norm_text
 
             if product_code == piece.product_code and _norm(material_type) == _norm(
                 piece.material_type
@@ -809,30 +803,46 @@ class InventoryService(InventoryIntegrationPort):
         if purity_final and not target.purity:
             target.purity = purity_final
 
+        # Una sola operación contada completa en TODOS los asientos: cada
+        # kardex (piezas fuente y producto final) dice qué piezas se sumaron
+        # (con cantidades), de dónde vinieron y en qué acabaron.
+        def _qty_text(value):
+            text = format(value, "f")
+            return text.rstrip("0").rstrip(".") if "." in text else text
+
+        target_label = (target.description or "").strip() or target.name
+        detail = " + ".join(
+            f"{_qty_text(line.quantity)}x {(item.description or '').strip() or item.name}"
+            for (item, _), line in zip(sources, payload.sources)
+        )
+        story = f"Ensamble: {detail} -> {target_label} ({product_code})"[:240]
         for item, quantity in sources:
             self.create_movement(
                 InventoryMovementCreate(
                     item_id=item.id,
                     movement_type="CONVERSION_SALIDA",
                     quantity=quantity,
-                    reason=f"Ensamble en producto {product_code}",
+                    reason=story,
                     reference_type="product_assembly",
                     reference_id=target.id,
                 ),
                 user_id=user_id,
             )
-        detail = " + ".join(f"{item.name}" for item, _ in sources)
+        # Trazabilidad de lote: si el ensamble consume exactamente un lote de
+        # producción (pieza sin código de producto), la entrada lo arrastra.
+        source_lots = [item.sku for item, _ in sources if not item.product_code]
         self.create_movement(
             InventoryMovementCreate(
                 item_id=target.id,
                 movement_type="CONVERSION_ENTRADA",
                 # Entra en la unidad de la producción (gramos por unidad).
                 quantity=entry_quantity,
-                reason=f"Ensamble de: {detail}"[:240],
+                reason=story,
                 reference_type="product_assembly",
                 reference_id=sources[0][0].id,
             ),
             user_id=user_id,
+            lot_code=source_lots[0] if len(source_lots) == 1 else None,
         )
         self.repository.flush()
         return InventoryItemRead.model_validate(target)
@@ -873,6 +883,11 @@ class InventoryService(InventoryIntegrationPort):
         return None
 
     @staticmethod
+    def _norm_text(text: str | None) -> str:
+        """Normaliza textos de material/pureza para comparar identidad."""
+        return (text or "").strip().upper()
+
+    @staticmethod
     def _run_grams_per_unit(run) -> tuple[Decimal, str] | None:
         """PESO FINAL por unidad de producto de una orden de producción:
         el peso real registrado en la última etapa que pesó (merma incluida)
@@ -895,20 +910,15 @@ class InventoryService(InventoryIntegrationPort):
         return None
 
     def _generate_piece_sku(self, product_code: str) -> str:
-        """SKU de una pieza del catálogo: <código de producto>-<secuencia de 4>,
-        con la misma pinta que las piezas existentes (ej. 2010002-0031). La
-        secuencia sigue al mayor sufijo numérico entre todas las piezas."""
-        max_seq = 0
-        for item in self.repository.list_items("FINISHED_PRODUCT"):
-            head, sep, tail = (item.sku or "").rpartition("-")
-            if sep and head and tail.isdigit() and (item.product_code or "") and head == item.product_code:
-                max_seq = max(max_seq, int(tail))
-        next_number = max_seq + 1
-        while True:
-            sku = f"{product_code}-{next_number:04d}"
-            if self.repository.get_item_by_sku(sku) is None:
-                return sku
-            next_number += 1
+        """SKU de una pieza del catálogo = su código de producto: una fila
+        por código (el dígito de material ya distingue). Sufijo -N solo si
+        el código ya estuviera tomado (caso anómalo)."""
+        if self.repository.get_item_by_sku(product_code) is None:
+            return product_code
+        number = 2
+        while self.repository.get_item_by_sku(f"{product_code}-{number}") is not None:
+            number += 1
+        return f"{product_code}-{number}"
 
     def _generate_sku(self, item_type: str) -> str:
         prefix = ITEM_TYPE_PREFIXES.get(item_type, "INV")
