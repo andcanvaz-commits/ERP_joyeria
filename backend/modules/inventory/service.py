@@ -2,10 +2,14 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import func, select
+
 from backend.modules.config.settings import settings
-from backend.modules.inventory.models import InventoryItem, InventoryMovement
+from backend.modules.inventory.models import ComplementType, InventoryItem, InventoryMovement
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.schemas import (
+    ComplementTypeCreate,
+    ComplementTypeRead,
     InventoryItemCreate,
     InventoryItemRead,
     InventoryItemUpdate,
@@ -90,6 +94,7 @@ class InventoryService(InventoryIntegrationPort):
             elaboration_date=payload.elaboration_date,
             unit_code=payload.unit_code.strip(),
             minimum_stock=payload.minimum_stock,
+            complement_type_id=self._resolve_complement_type_id(payload.item_type, payload.complement_type_id),
         )
         self.repository.add_item(item)
         self.repository.flush()
@@ -116,6 +121,7 @@ class InventoryService(InventoryIntegrationPort):
         # edición existentes no envían el campo y no deben vaciarlo.
         if "weight_per_unit" in payload.model_fields_set:
             item.weight_per_unit = payload.weight_per_unit
+        item.complement_type_id = self._resolve_complement_type_id(payload.item_type, payload.complement_type_id)
         self.repository.flush()
         return InventoryItemRead.model_validate(item)
 
@@ -339,6 +345,69 @@ class InventoryService(InventoryIntegrationPort):
             low_stock_items=low_stock_items,
             total_items=len(items),
         )
+
+    def list_complement_types(self) -> list[ComplementTypeRead]:
+        rows = self.repository.session.execute(
+            select(ComplementType).order_by(ComplementType.name.asc())
+        ).scalars().all()
+        return [ComplementTypeRead.model_validate(row) for row in rows]
+
+    def create_complement_type(self, payload: ComplementTypeCreate) -> ComplementTypeRead:
+        name = payload.name.strip()
+        if self._get_complement_type_by_name(name) is not None:
+            raise InventoryDomainError("Ya existe un tipo de complemento con ese nombre.")
+        complement_type = ComplementType(name=name)
+        self.repository.session.add(complement_type)
+        self.repository.flush()
+        return ComplementTypeRead.model_validate(complement_type)
+
+    def update_complement_type(self, type_id: UUID, payload: ComplementTypeCreate) -> ComplementTypeRead:
+        complement_type = self._get_complement_type_or_raise(type_id)
+        name = payload.name.strip()
+        existing = self._get_complement_type_by_name(name)
+        if existing is not None and existing.id != complement_type.id:
+            raise InventoryDomainError("Ya existe un tipo de complemento con ese nombre.")
+        complement_type.name = name
+        self.repository.flush()
+        return ComplementTypeRead.model_validate(complement_type)
+
+    def delete_complement_type(self, type_id: UUID) -> None:
+        complement_type = self._get_complement_type_or_raise(type_id)
+        in_use = self.repository.session.execute(
+            select(func.count(InventoryItem.id)).where(
+                InventoryItem.item_type == "COMPLEMENT",
+                InventoryItem.complement_type_id == type_id,
+            )
+        ).scalar_one()
+        if in_use:
+            raise InventoryDomainError(
+                "No se puede eliminar: hay complementos que usan este tipo."
+            )
+        self.repository.session.delete(complement_type)
+        self.repository.flush()
+
+    def _get_complement_type_by_name(self, name: str) -> ComplementType | None:
+        return self.repository.session.execute(
+            select(ComplementType).where(func.lower(ComplementType.name) == name.strip().lower())
+        ).scalars().first()
+
+    def _get_complement_type_or_raise(self, type_id: UUID) -> ComplementType:
+        complement_type = self.repository.session.get(ComplementType, type_id)
+        if complement_type is None:
+            raise InventoryNotFoundError("Tipo de complemento no encontrado.")
+        return complement_type
+
+    def _resolve_complement_type_id(
+        self, item_type: str, complement_type_id: UUID | None
+    ) -> UUID | None:
+        """Solo los items COMPLEMENT pueden tener tipo de complemento; para
+        el resto del catálogo el campo se anula sin importar lo que venga."""
+        if item_type != "COMPLEMENT" or complement_type_id is None:
+            return None
+        complement_type = self.repository.session.get(ComplementType, complement_type_id)
+        if complement_type is None or not complement_type.is_active:
+            raise InventoryDomainError("Tipo de complemento no encontrado o inactivo.")
+        return complement_type_id
 
     def check_material_availability(
         self,
