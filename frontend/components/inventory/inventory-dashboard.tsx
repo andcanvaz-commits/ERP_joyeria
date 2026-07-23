@@ -727,7 +727,7 @@ export function InventoryDashboard() {
     [items, movementForm.movement_type],
   );
   // Archivados de la pestaña ACTIVA: cada menú (materia prima, insumos,
-  // productos terminados) tiene su propia vista de archivados, no compartida.
+  // complementos, productos terminados) tiene su propia vista de archivados, no compartida.
   const archivedItems = useMemo(
     () =>
       items

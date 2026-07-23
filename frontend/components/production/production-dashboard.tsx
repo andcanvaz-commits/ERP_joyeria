@@ -363,15 +363,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
-  // Cualquier materia prima del inventario es utilizable: si está configurada
-  // en el proceso se usa su cantidad por unidad; si no, la cantidad estándar
-  // del proceso (la de su primer material configurado). Igual que el backend.
-  const selectedProcessMaterial = selectedProcess?.materials.find((material) => material.inventory_item_id === selectedMaterialId) ?? null;
   const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
-  const effectiveQuantityPerUnit = selectedProcessMaterial?.quantity_per_unit ?? selectedProcess?.materials[0]?.quantity_per_unit ?? null;
-  const requiredMaterial = effectiveQuantityPerUnit && runQuantity
-    ? Number(effectiveQuantityPerUnit) * Number(runQuantity)
-    : 0;
 
   useEffect(() => {
     // Al cambiar de proceso se sugiere su primer material configurado, pero se

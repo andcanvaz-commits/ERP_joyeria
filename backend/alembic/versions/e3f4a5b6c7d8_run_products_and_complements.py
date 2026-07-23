@@ -53,12 +53,15 @@ def upgrade() -> None:
     )
     # Migrar el producto objetivo único existente como plan de una sola fila
     # (cantidad = cantidad de la orden). El campo viejo queda deprecado.
+    # Solo se migran ordenes vivas: las ya cerradas (RECIBIDA, CANCELADA)
+    # conservan su acta historica intacta, sin plan de productos generado.
     op.execute(
         """
         INSERT INTO production_run_products (id, run_id, product_type_id, quantity)
         SELECT gen_random_uuid(), id, target_product_type_id, quantity
         FROM production_runs
         WHERE target_product_type_id IS NOT NULL
+        AND status NOT IN ('RECIBIDA', 'CANCELADA')
         """
     )
 

@@ -4,7 +4,11 @@ from uuid import UUID
 
 from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.schemas import InventoryMovementCreate
-from backend.modules.inventory.service import InventoryDomainError, InventoryService
+from backend.modules.inventory.service import (
+    InventoryDomainError,
+    InventoryNotFoundError,
+    InventoryService,
+)
 from backend.modules.production.models import (
     ComplementRequestStatus,
     ProductionComplementRequest,
@@ -30,8 +34,6 @@ from backend.modules.production.schemas import (
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunStageFinish,
-    RunComplementRead,
-    RunProductRead,
     RunProductsUpdate,
     SupplyConsumptionRead,
 )
@@ -939,7 +941,7 @@ class ProductionService:
                     ),
                     user_id=current_user.id,
                 )
-            except InventoryDomainError as exc:
+            except (InventoryDomainError, InventoryNotFoundError) as exc:
                 raise ProductionDomainError(
                     f"No se pudo convertir el lote al producto planificado: {exc}"
                 ) from exc
