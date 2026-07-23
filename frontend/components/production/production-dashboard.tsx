@@ -625,6 +625,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (!assemblyRun) return;
     const lines = assemblyLines.filter((line) => Number(line.perUnit) > 0);
     if (lines.length === 0) return;
+    if (lines.some((line) => (line.perUnit.split(".")[1]?.length ?? 0) > 4)) {
+      setError("Máximo 4 decimales por unidad.");
+      return;
+    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
@@ -894,6 +898,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
     if (!runQuantity || Number(runQuantity) <= 0) {
       setError("Ingresa una cantidad valida para fabricar.");
+      return;
+    }
+    if (!Number.isInteger(Number(runQuantity))) {
+      setError("La cantidad a fabricar debe ser un número entero.");
       return;
     }
     if (!selectedMaterialId) {
@@ -1236,12 +1244,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   // Resuelve el tipo de catálogo de una pieza terminada a partir de su código
   // de 7 dígitos (categoría + modelo), para saber si ese tipo ya tiene receta.
+  // Si más de un tipo comparte categoría+modelo con distinto nombre, hay
+  // ambigüedad y no es resoluble automáticamente: se devuelve undefined y el
+  // usuario debe resolverlo por una vía segura ("Asignar" manual o respaldo
+  // posterior a la producción).
   function pieceTypeId(item: InventoryItem): string | undefined {
     const code = item.product_code;
     if (!code || code.length !== 7) return undefined;
-    return productTypesList.find(
+    const matches = productTypesList.filter(
       (type) => type.category_code === code.slice(1, 3) && type.model_code === code.slice(3, 7)
-    )?.id;
+    );
+    return matches.length === 1 ? matches[0].id : undefined;
   }
 
   // Tras elegir producto en modo ENSAMBLAR: consulta su receta. Sin receta y
@@ -1352,6 +1365,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (!recipeModalTypeId) return;
     if (recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))) {
       setError("Completa la cantidad por unidad de todos los complementos (o quita los que sobren).");
+      return;
+    }
+    if (recipeLines.some((line) => (line.perUnit.split(".")[1]?.length ?? 0) > 4)) {
+      setError("Máximo 4 decimales por unidad.");
       return;
     }
 

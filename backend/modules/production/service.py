@@ -953,22 +953,33 @@ class ProductionService:
     def _product_type_id_for_piece(self, item_id: UUID) -> UUID | None:
         """Resuelve el tipo de producto del catalogo que corresponde a una pieza
         de inventario, empatando el codigo de catalogo (categoria + modelo) de
-        la pieza. None si la pieza no tiene codigo de catalogo o no hay match."""
+        la pieza. None si la pieza no tiene codigo de catalogo, no es producto
+        terminado, o hay ambiguedad (mas de un tipo comparte categoria+modelo
+        con distinto nombre): en ese caso no es resoluble automaticamente y el
+        usuario debe resolverlo por una via segura ("Asignar" manual o
+        respaldo posterior a la produccion)."""
         from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
         from backend.modules.product_types.models import ProductType
 
         item = self.repository.session.get(InventoryItem, item_id)
-        if item is None or not item.product_code or len(item.product_code) != 7:
+        if (
+            item is None
+            or item.item_type != "FINISHED_PRODUCT"
+            or not item.product_code
+            or len(item.product_code) != 7
+        ):
             return None
         code = item.product_code
-        product_type = self.repository.session.execute(
+        product_types = self.repository.session.execute(
             select(ProductType).where(
                 ProductType.category_code == code[1:3],
                 ProductType.model_code == code[3:7],
             )
-        ).scalars().first()
-        return product_type.id if product_type is not None else None
+        ).scalars().all()
+        if len(product_types) != 1:
+            return None
+        return product_types[0].id
 
     def _resolve_plan_product_type_id(self, run: ProductionRun) -> UUID | None:
         """En modo ENSAMBLAR el plan tiene una sola fila: si ya trae el tipo de

@@ -122,7 +122,8 @@ class RunProductCreate(BaseModel):
     # pieza ya existente del inventario (destino directo).
     product_type_id: UUID | None = None
     target_item_id: UUID | None = None
-    quantity: Decimal = Field(gt=0)
+    # Piezas enteras: no se fabrican fracciones de unidad.
+    quantity: Decimal = Field(gt=0, decimal_places=0)
 
     @model_validator(mode="after")
     def _check_one_target(self) -> "RunProductCreate":
@@ -153,7 +154,8 @@ class ProductionRunCreate(BaseModel):
     process_id: UUID
     # Material con el que se fabricara: debe ser uno de los configurados en el proceso.
     raw_material_item_id: UUID
-    quantity: Decimal = Field(gt=0)
+    # Piezas enteras: no se fabrican fracciones de unidad.
+    quantity: Decimal = Field(gt=0, decimal_places=0)
     # ASIGNAR: split directo a uno o mas destinos. ENSAMBLAR: un solo producto
     # con toda la cantidad, que luego se arma con complementos.
     assembly_mode: Literal["ASIGNAR", "ENSAMBLAR"] = "ASIGNAR"
@@ -260,7 +262,7 @@ class RunAssemblyLineCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     complement_item_id: UUID
-    quantity_per_unit: Decimal = Field(gt=0)
+    quantity_per_unit: Decimal = Field(gt=0, decimal_places=4)
 
 
 class RunAssemblyDefine(BaseModel):
