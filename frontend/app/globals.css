@@ -971,6 +971,12 @@ textarea {
   min-width: 0;
 }
 
+/* El kardex trae equivalencias de peso y detalle: necesita mas ancho que la
+   ventana de proceso estandar para que nada se apile. */
+.kardexWindow {
+  width: min(880px, 100%);
+}
+
 .toolbar {
   display: flex;
   align-items: center;

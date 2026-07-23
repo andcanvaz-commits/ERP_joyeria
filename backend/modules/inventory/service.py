@@ -387,6 +387,15 @@ class InventoryService(InventoryIntegrationPort):
         sku = (production_code or "").strip() or self._generate_sku("FINISHED_PRODUCT")
         if self.repository.get_item_by_sku(sku) is not None:
             sku = self._generate_sku("FINISHED_PRODUCT")
+        # El lote guarda sus gramos por unidad (peso final de la orden entre
+        # unidades) para que los historiales muestren la equivalencia en peso.
+        from sqlalchemy import select
+        from backend.modules.production.models import ProductionRun
+
+        run = self.repository.session.execute(
+            select(ProductionRun).where(ProductionRun.production_code == sku)
+        ).scalar_one_or_none()
+        run_info = self._run_grams_per_unit(run) if run is not None else None
         item = InventoryItem(
             item_type="FINISHED_PRODUCT",
             name=name,
@@ -396,6 +405,7 @@ class InventoryService(InventoryIntegrationPort):
             material_type=material_type,
             purity=purity,
             unit_code=unit_code.strip(),
+            weight_per_unit=run_info[0] if run_info else None,
             minimum_stock=None,
         )
         self.repository.add_item(item)
@@ -805,14 +815,21 @@ class InventoryService(InventoryIntegrationPort):
 
         # Una sola operación contada completa en TODOS los asientos: cada
         # kardex (piezas fuente y producto final) dice qué piezas se sumaron
-        # (con cantidades), de dónde vinieron y en qué acabaron.
+        # (con su cantidad entre paréntesis), de dónde vinieron y en qué
+        # acabaron. Los lotes (sin código de producto) se nombran por su
+        # nombre = el proceso que los generó; su descripción es genérica.
         def _qty_text(value):
             text = format(value, "f")
             return text.rstrip("0").rstrip(".") if "." in text else text
 
-        target_label = (target.description or "").strip() or target.name
+        def _piece_label(item):
+            if item.product_code and (item.description or "").strip():
+                return item.description.strip()
+            return item.name
+
+        target_label = _piece_label(target)
         detail = " + ".join(
-            f"{_qty_text(line.quantity)}x {(item.description or '').strip() or item.name}"
+            f"{_piece_label(item)} ({_qty_text(line.quantity)})"
             for (item, _), line in zip(sources, payload.sources)
         )
         story = f"Ensamble: {detail} -> {target_label} ({product_code})"[:240]
@@ -871,7 +888,9 @@ class InventoryService(InventoryIntegrationPort):
         empresa) o, si la pieza es el lote de una orden, el peso real de esa
         orden. None para piezas viejas sin el dato."""
         if item.weight_per_unit and item.weight_per_unit > 0:
-            return item.weight_per_unit, item.unit_code
+            # El peso siempre es en gramos: en items medidos en unidades
+            # (lotes) el unit_code no es la unidad del peso.
+            return item.weight_per_unit, item.unit_code if item.unit_code == "g" else "g"
         from sqlalchemy import select
         from backend.modules.production.models import ProductionRun
 

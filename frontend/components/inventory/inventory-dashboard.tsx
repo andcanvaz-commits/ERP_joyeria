@@ -151,6 +151,23 @@ function movementOperationLabel(movement: { movement_type: InventoryMovementType
   return movementTypeLabel(movement.movement_type);
 }
 
+// Cantidad de un movimiento con su equivalencia: items en gramos con peso
+// por unidad muestran también unidades; items en unidades (lotes) muestran
+// también gramos. Sin dato de peso, solo la cantidad base.
+function movementAmountText(movement: InventoryMovement) {
+  const quantity = Number(movement.quantity);
+  const wpu = Number(movement.item.weight_per_unit ?? 0);
+  const base = `${numericText(movement.quantity)} ${movement.unit_code}`;
+  if (!(wpu > 0) || !Number.isFinite(quantity)) return base;
+  if (movement.unit_code === "g") {
+    return `${base} · ${numericText(String(Number((quantity / wpu).toFixed(2))))} und`;
+  }
+  if (movement.unit_code === "und") {
+    return `${base} · ${numericText(String(Number((quantity * wpu).toFixed(2))))} g`;
+  }
+  return base;
+}
+
 // Detalle del kardex por lado de la operación: si el item RECIBIÓ, dice qué
 // se sumó y de dónde vino ("Desde 1x test + 2x TEST"); si el item APORTÓ,
 // dice a dónde fue ("A producto TEST3 (4120002)"). El relato completo queda
@@ -711,6 +728,26 @@ export function InventoryDashboard() {
     return run.stages.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
   }
 
+  // Peso final efectivo de la orden (misma regla que el backend): el pesado
+  // real al finalizar o el de la última etapa que pesó; una orden que nunca
+  // pesó terminó con su peso inicial (materia prima total).
+  function runFinalWeight(run: ProductionRun): number | null {
+    const actual = Number(run.actual_finished_weight ?? 0);
+    if (actual > 0) return actual;
+    const weighed = [...run.stages]
+      .sort((left, right) => left.stage_order - right.stage_order)
+      .filter((stage) => Number(stage.final_weight ?? 0) > 0);
+    if (weighed.length > 0) return Number(weighed[weighed.length - 1].final_weight);
+    const initial = Number(run.total_required_material ?? 0);
+    return initial > 0 ? initial : null;
+  }
+
+  // Cantidad producida de una orden con su equivalente en gramos.
+  function runQuantityText(run: ProductionRun) {
+    const total = runFinalWeight(run);
+    return `${numericText(run.quantity)} unidades${total ? ` · ${numericText(String(total))} g` : ""}`;
+  }
+
   function runCurrentStage(run: ProductionRun) {
     return (
       run.stages.find((stage) => stage.status === "EN_PROCESO") ??
@@ -1034,8 +1071,13 @@ export function InventoryDashboard() {
   const receivedCodes = new Set(receivedRuns.map((run) => run.production_code).filter(Boolean) as string[]);
   // En "Producto terminado": las órdenes recibidas se muestran como filas (con id OP);
   // ocultamos el item de stock auto-creado con ese mismo código para no duplicar.
+  // Piezas sin stock tampoco se listan: el producto sigue existiendo (catálogo
+  // y mantenimiento) y reaparece aquí cuando una asignación o ensamble le
+  // vuelve a dar stock; los selectores de destino sí lo ofrecen siempre.
   const displayItems =
-    itemFilter === "FINISHED_PRODUCT" ? filteredItems.filter((item) => !receivedCodes.has(item.sku)) : filteredItems;
+    itemFilter === "FINISHED_PRODUCT"
+      ? filteredItems.filter((item) => !receivedCodes.has(item.sku) && Number(item.current_stock) > 0)
+      : filteredItems;
 
   // Grupos por nombre (categoria) y dentro por producto del catalogo SIN el
   // material (categoria+modelo): un mismo producto puede existir en varios
@@ -2074,8 +2116,7 @@ export function InventoryDashboard() {
                   <tr>
                     <th>#</th>
                     <th>Proceso</th>
-                    <th className="num">Cantidad</th>
-                    <th className="num">Peso final</th>
+                    <th className="num">Stock</th>
                     <th className="num">Merma final</th>
                     <th>Fecha de recepción</th>
                     <th aria-label="Acciones" />
@@ -2090,10 +2131,16 @@ export function InventoryDashboard() {
                     <tr key={run.id}>
                       <td>{run.production_code ?? "—"}</td>
                       <td>{run.process_name}</td>
-                      {/* Restante del lote en inventario, no lo producido: las
-                          conversiones a catálogo lo van descontando. */}
-                      <td className="num">{lotItem ? numericText(String(lotStock)) : numericText(run.quantity)} und</td>
-                      <td className="num">{run.actual_finished_weight ? `${numericText(run.actual_finished_weight)} g` : "—"}</td>
+                      {/* Stock ACTUAL del lote (baja con cada conversión):
+                          unidades restantes y su peso equivalente (restante ×
+                          gramos por unidad del peso final de la orden). */}
+                      <td className="num">{(() => {
+                        const units = lotItem ? lotStock : Number(run.quantity);
+                        const total = runFinalWeight(run);
+                        const perUnit = total && Number(run.quantity) > 0 ? total / Number(run.quantity) : null;
+                        const grams = perUnit !== null ? Number((units * perUnit).toFixed(2)) : null;
+                        return `${numericText(String(units))} und${grams !== null ? ` · ${numericText(String(grams))} g` : ""}`;
+                      })()}</td>
                       <td className="num">
                         <button
                           className="iconTextButton"
@@ -2156,7 +2203,7 @@ export function InventoryDashboard() {
                     );
                   })}
                   {receivedRunsFiltered.length === 0 ? (
-                    <tr><td colSpan={7}><div className="emptyState">{anyAdvancedFilter ? "Sin procesos para los filtros." : "No hay procesos terminados."}</div></td></tr>
+                    <tr><td colSpan={6}><div className="emptyState">{anyAdvancedFilter ? "Sin procesos para los filtros." : "No hay procesos terminados."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -2321,7 +2368,7 @@ export function InventoryDashboard() {
                   <span>{movementDateLabel(movement.created_at)} - {movement.item.name}</span>
                 </div>
                 <div>
-                  <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
+                  <strong className="num">{movementAmountText(movement)}</strong>
                   <span>
                     {movementTimeLabel(movement.created_at)}
                     {movement.reason ? ` - ${movement.reason}` : ""}
@@ -2469,7 +2516,7 @@ export function InventoryDashboard() {
                         </span>
                       </div>
                       <div>
-                        <strong className="num">{numericText(movement.quantity)} {movement.unit_code}</strong>
+                        <strong className="num">{movementAmountText(movement)}</strong>
                         <span>
                           {movement.reason || "Sin motivo registrado"}
                           {movement.created_by_name ? ` · ${movement.created_by_name}` : ""}
@@ -2721,7 +2768,7 @@ export function InventoryDashboard() {
               <span><strong>Recibida por</strong>{receptionInfoRun.received_by_name ?? "—"}</span>
               <span><strong>Cuándo</strong>{productionTimeLabel(receptionInfoRun.received_at)}</span>
               <span><strong>Cantidad</strong>{numericText(receptionInfoRun.quantity)} und</span>
-              <span><strong>Peso final</strong>{receptionInfoRun.actual_finished_weight ? `${numericText(receptionInfoRun.actual_finished_weight)} g` : "—"}</span>
+              <span><strong>Peso final</strong>{(() => { const weight = runFinalWeight(receptionInfoRun); return weight ? `${numericText(String(weight))} g` : "—"; })()}</span>
             </div>
           </section>
         </div>
@@ -2846,6 +2893,11 @@ export function InventoryDashboard() {
                   type="number"
                   value={convertForm.quantity}
                 />
+                {convertForm.quantity && Number.isFinite(quantityNumber) && quantityNumber > lotStock ? (
+                  <small style={{ color: "var(--danger, #c0392b)" }}>
+                    Stock insuficiente: el lote tiene {numericText(String(lotStock))} und
+                  </small>
+                ) : null}
               </label>
               {previewCode ? (
                 <p className="panelText">Código de producto resultante: <strong>{previewCode}</strong></p>
@@ -2950,48 +3002,57 @@ export function InventoryDashboard() {
                     assembliesValid &&
                     Number(line.quantity) * assembliesOut > availableUnits(lineItem);
                   return (
-                    <div key={line.itemId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      {lineItem.product_code ? (
-                        <span className={`orderCodeTag${metalTagClass(lineItem.product_code)}`}>#{lineItem.product_code}</span>
-                      ) : (
-                        <span className="orderCodeTag">{lineItem.sku}</span>
-                      )}
-                      <span style={{ fontSize: 13, flex: 1 }}>
-                        {(lineItem.description ?? "").trim() || lineItem.name}
-                      </span>
-                      <input
-                        aria-label="Cantidad de esta pieza"
-                        className="field"
-                        min="1"
-                        onChange={(event) =>
-                          setCombineForm((current) => ({
-                            ...current,
-                            sources: current.sources.map((source, idx) =>
-                              idx === index ? { ...source, quantity: event.target.value } : source,
-                            ),
-                          }))
-                        }
-                        step="1"
-                        style={{ width: 72 }}
-                        type="number"
-                        value={line.quantity}
-                      />
-                      <span style={{ fontSize: 13, color: short ? "var(--danger, #c0392b)" : "var(--muted)" }}>
-                        Stock: {stockLabel(lineItem)}
-                      </span>
-                      <button
-                        aria-label="Quitar pieza"
-                        className="iconOnlyButton dangerIconButton"
-                        onClick={() =>
-                          setCombineForm((current) => {
-                            const sources = current.sources.filter((_, idx) => idx !== index);
-                            return { ...current, sources, ...deriveCombineMaterial(sources) };
-                          })
-                        }
-                        type="button"
-                      >
-                        <X aria-hidden="true" size={14} />
-                      </button>
+                    <div key={line.itemId} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        {lineItem.product_code ? (
+                          <span className={`orderCodeTag${metalTagClass(lineItem.product_code)}`}>#{lineItem.product_code}</span>
+                        ) : (
+                          <span className="orderCodeTag">{lineItem.sku}</span>
+                        )}
+                        <span style={{ fontSize: 13, flex: 1 }}>
+                          {/* Lotes (sin código de producto) se nombran por su
+                              nombre; su descripción es texto genérico. */}
+                          {(lineItem.product_code && (lineItem.description ?? "").trim()) || lineItem.name}
+                        </span>
+                        <input
+                          aria-label="Cantidad de esta pieza"
+                          className="field"
+                          min="1"
+                          onChange={(event) =>
+                            setCombineForm((current) => ({
+                              ...current,
+                              sources: current.sources.map((source, idx) =>
+                                idx === index ? { ...source, quantity: event.target.value } : source,
+                              ),
+                            }))
+                          }
+                          step="1"
+                          style={{ width: 72 }}
+                          type="number"
+                          value={line.quantity}
+                        />
+                        <span style={{ fontSize: 13, color: short ? "var(--danger, #c0392b)" : "var(--muted)" }}>
+                          Stock: {stockLabel(lineItem)}
+                        </span>
+                        <button
+                          aria-label="Quitar pieza"
+                          className="iconOnlyButton dangerIconButton"
+                          onClick={() =>
+                            setCombineForm((current) => {
+                              const sources = current.sources.filter((_, idx) => idx !== index);
+                              return { ...current, sources, ...deriveCombineMaterial(sources) };
+                            })
+                          }
+                          type="button"
+                        >
+                          <X aria-hidden="true" size={14} />
+                        </button>
+                      </div>
+                      {short ? (
+                        <small style={{ color: "var(--danger, #c0392b)" }}>
+                          Stock insuficiente: disponible {numericText(String(availableUnits(lineItem)))} und
+                        </small>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -3056,11 +3117,6 @@ export function InventoryDashboard() {
                   value={combineForm.assemblies}
                 />
               </label>
-              {shortPieces.length > 0 ? (
-                <p className="panelText" style={{ color: "var(--danger, #c0392b)" }}>
-                  Stock insuficiente para esa cantidad en: {shortPieces.map((item) => (item.description ?? "").trim() || item.name).join(", ")}.
-                </p>
-              ) : null}
               {linesValid && assembliesValid && shortPieces.length === 0 && pieces.length >= 2 ? (
                 <p className="panelText">
                   Por ensamble se descuenta la cantidad de cada pieza; se crean{" "}
@@ -3404,7 +3460,7 @@ export function InventoryDashboard() {
 
       {kardexItem ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Kardex del item">
-          <section className="modalWindow processViewWindow">
+          <section className="modalWindow processViewWindow kardexWindow">
             <div className="modalHeader">
               <div>
                 <h2>Kardex</h2>
@@ -3433,7 +3489,7 @@ export function InventoryDashboard() {
                       <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis" }} title={movement.reason ?? undefined}>
                         {kardexDetail(movement)}
                       </td>
-                      <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{numericText(movement.quantity)} {movement.unit_code}</td>
+                      <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{movementAmountText(movement)}</td>
                       <td className="num">{numericText(String(balanceAfter))} {movement.unit_code}</td>
                     </tr>
                   ))}
@@ -3464,7 +3520,7 @@ export function InventoryDashboard() {
             </div>
             <div className="fichaHero">
               <div className="fichaHeroItem">
-                <strong>{numericText(viewingMovement.quantity)} {viewingMovement.unit_code}</strong>
+                <strong>{movementAmountText(viewingMovement)}</strong>
                 <span>Cantidad</span>
               </div>
             </div>
@@ -3499,7 +3555,7 @@ export function InventoryDashboard() {
                   {viewingRun.process_name}
                 </h2>
                 <p>
-                  {numericText(viewingRun.quantity)} unidades
+                  {runQuantityText(viewingRun)}
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingRun(null)} type="button">
@@ -3516,7 +3572,7 @@ export function InventoryDashboard() {
                     <div className="userPreviewGrid">
                       <span><strong>Lote (OP)</strong>{viewingRun.production_code ?? "—"}</span>
                       <span><strong>Proceso</strong>{viewingRun.process_name}</span>
-                      <span><strong>Cantidad</strong>{numericText(viewingRun.quantity)} unidades</span>
+                      <span><strong>Cantidad</strong>{runQuantityText(viewingRun)}</span>
                       <span><strong>Fecha</strong>{viewingRun.received_at ? productionTimeLabel(viewingRun.received_at) : "—"}</span>
                       <span><strong>Recibido por</strong>{viewingRun.received_by_name ?? "—"}</span>
                     </div>
@@ -3524,7 +3580,7 @@ export function InventoryDashboard() {
                     <div className="userPreviewGrid">
                       <span><strong>Lote (OP)</strong>{viewingRun.production_code ?? "—"}</span>
                       <span><strong>Proceso</strong>{viewingRun.process_name}</span>
-                      <span><strong>Cantidad</strong>{numericText(viewingRun.quantity)} unidades</span>
+                      <span><strong>Cantidad</strong>{runQuantityText(viewingRun)}</span>
                       <span><strong>Creado por</strong>{viewingRun.created_by_name ?? "—"}{viewingRun.requested_at ? ` · ${productionTimeLabel(viewingRun.requested_at)}` : ""}</span>
                       <span><strong>Etapas</strong>{current ? `Etapa ${current.stage_order}. ${current.stage_name}` : `${done} de ${stages.length}`}</span>
                     </div>
@@ -3660,7 +3716,7 @@ export function InventoryDashboard() {
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>
-                            <span>{numericText(run.quantity)} unidades</span>
+                            <span>{runQuantityText(run)}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Material por unidad</strong>
@@ -3735,7 +3791,7 @@ export function InventoryDashboard() {
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>
-                            <span>{numericText(run.quantity)} unidades</span>
+                            <span>{runQuantityText(run)}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Finalizado</strong>
@@ -3747,7 +3803,7 @@ export function InventoryDashboard() {
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Peso real</strong>
-                            <span>{run.actual_finished_weight ? numericText(run.actual_finished_weight) : "-"}</span>
+                            <span>{(() => { const weight = runFinalWeight(run); return weight ? numericText(String(weight)) : "-"; })()}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Merma</strong>
