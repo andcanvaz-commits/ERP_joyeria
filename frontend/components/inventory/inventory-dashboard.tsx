@@ -1560,7 +1560,7 @@ export function InventoryDashboard() {
       const lines = invoice.details.map<XmlImportLine>((detail) => {
         const matches = items.filter(
           (candidate) =>
-            (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY") &&
+            (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY" || candidate.item_type === "COMPLEMENT") &&
             candidate.name.toLowerCase() === detail.description.toLowerCase(),
         );
         const existingItem = matches.find((candidate) => candidate.item_type === defaultType) ?? matches[0] ?? null;
