@@ -2,11 +2,12 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
 import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
+import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import {
@@ -218,6 +219,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: () => listInventoryItems("SUPPLY"),
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
+  const { data: complementsList = EMPTY_RAW_MATERIALS } = useQuery({
+    queryKey: ["complements"],
+    queryFn: () => listInventoryItems("COMPLEMENT"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
+  });
 
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
   const users = bundle?.users ?? EMPTY_USERS;
@@ -243,7 +249,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
-  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "productTypes"; mode: "create" | "view" } | null>(null);
+  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "complements" | "productTypes"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -1167,6 +1173,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <FlaskConical aria-hidden="true" size={22} />
                 <strong>Insumos</strong>
                 <span>{suppliesList.length} insumos creados.</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="maintenanceSection" aria-label="Complementos">
+            <h2>Complementos</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "complements", mode: "create" })} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear complemento</strong>
+                <span>Broches, cadenas base y piezas para ensamblar.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "complements", mode: "view" })} type="button">
+                <Puzzle aria-hidden="true" size={22} />
+                <strong>Complementos</strong>
+                <span>{complementsList.length} complementos creados.</span>
               </button>
             </div>
           </section>
@@ -2148,6 +2170,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {dataModal?.type === "units" ? <UnitsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "materials" ? <RawMaterialsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "supplies" ? <SuppliesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
+      {dataModal?.type === "complements" ? <ComplementsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "productTypes" ? <ProductTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
       {isProcessesOpen ? (
