@@ -115,6 +115,26 @@ class ProductionProcessRead(BaseModel):
     product_type_ids: list[UUID] = Field(default_factory=list)
 
 
+class RunProductCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product_type_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
+class RunComplementCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
+class RunProductsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    products: list[RunProductCreate] = Field(min_length=1)
+
+
 class ProductionRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -122,9 +142,10 @@ class ProductionRunCreate(BaseModel):
     # Material con el que se fabricara: debe ser uno de los configurados en el proceso.
     raw_material_item_id: UUID
     quantity: Decimal = Field(gt=0)
-    # Producto objetivo declarado (opcional); si el proceso restringe tipos,
-    # debe ser uno de ellos.
-    target_product_type_id: UUID | None = None
+    # Plan de resultantes (split): la suma de cantidades debe igualar quantity.
+    products: list[RunProductCreate] = Field(min_length=1)
+    # Complementos de inventario solicitados para ensamblar (opcional).
+    complements: list[RunComplementCreate] = Field(default_factory=list)
 
 
 class MaterialRejectPayload(BaseModel):
@@ -190,6 +211,26 @@ class SupplyConsumptionRead(BaseModel):
     unit_code: str
 
 
+class RunProductRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    product_type_id: UUID
+    product_name: str | None = None
+    quantity: Decimal
+
+
+class RunComplementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    item_id: UUID
+    name: str | None = None
+    quantity: Decimal
+    unit_code: str
+    status: str
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -229,3 +270,6 @@ class ProductionRunRead(BaseModel):
     # Insumos realmente consumidos al aprobar materiales (desde los movimientos
     # de inventario de la orden). Alimenta el acta de entrega.
     supply_consumptions: list[SupplyConsumptionRead] = Field(default_factory=list)
+    # Plan de resultantes (split) y complementos solicitados.
+    products: list[RunProductRead] = Field(default_factory=list)
+    complements: list[RunComplementRead] = Field(default_factory=list)

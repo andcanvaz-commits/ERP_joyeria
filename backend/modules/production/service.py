@@ -6,12 +6,15 @@ from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.schemas import InventoryMovementCreate
 from backend.modules.inventory.service import InventoryDomainError, InventoryService
 from backend.modules.production.models import (
+    ComplementRequestStatus,
+    ProductionComplementRequest,
     ProductionProcess,
     ProductionProcessMaterial,
     ProductionProcessProductType,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
+    ProductionRunProduct,
     ProductionRunStage,
     ProductionRunStageDecision,
     ProductionRunStageStatus,
@@ -27,6 +30,9 @@ from backend.modules.production.schemas import (
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunStageFinish,
+    RunComplementRead,
+    RunProductRead,
+    RunProductsUpdate,
     SupplyConsumptionRead,
 )
 
@@ -158,6 +164,31 @@ class ProductionService:
         missing = [pid for pid in product_type_ids if pid not in found]
         if missing:
             raise ProductionDomainError("Un tipo de producto seleccionado no existe en el catalogo.")
+
+    def _validate_run_products(
+        self, process: ProductionProcess, quantity: Decimal, products: list
+    ) -> None:
+        """Valida el plan de resultantes: tipos activos del catalogo, permitidos
+        por el proceso (si restringe), sin repetidos y suma = cantidad."""
+        type_ids = [p.product_type_id for p in products]
+        if len(type_ids) != len(set(type_ids)):
+            raise ProductionDomainError("No repitas el mismo producto resultante.")
+        from backend.modules.product_types.models import ProductType
+
+        allowed = {link.product_type_id for link in process.product_types}
+        for type_id in type_ids:
+            product_type = self.repository.session.get(ProductType, type_id)
+            if product_type is None or not product_type.is_active:
+                raise ProductionDomainError("Un producto resultante no existe o esta inactivo.")
+            if allowed and type_id not in allowed:
+                raise ProductionDomainError(
+                    f"El proceso no puede producir '{product_type.name}'."
+                )
+        total = sum((p.quantity for p in products), Decimal("0"))
+        if total != quantity:
+            raise ProductionDomainError(
+                f"El plan de productos suma {total} y la orden fabrica {quantity}: deben coincidir."
+            )
 
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
@@ -366,14 +397,19 @@ class ProductionService:
         if not active_stages:
             raise ProductionDomainError("El proceso debe tener al menos una etapa activa.")
 
-        # Producto objetivo (opcional): es la intención declarada, cualquier
-        # tipo activo del catálogo vale.
-        if payload.target_product_type_id is not None:
-            from backend.modules.product_types.models import ProductType
+        self._validate_run_products(process, payload.quantity, payload.products)
 
-            target_type = self.repository.session.get(ProductType, payload.target_product_type_id)
-            if target_type is None or not target_type.is_active:
-                raise ProductionDomainError("El producto objetivo no existe o esta inactivo.")
+        # Complementos: items de la pestaña Complementos del inventario.
+        from backend.modules.inventory.models import InventoryItem
+
+        complement_items = []
+        for complement in payload.complements:
+            item = self.repository.session.get(InventoryItem, complement.item_id)
+            if item is None or item.item_type != "COMPLEMENT":
+                raise ProductionDomainError(
+                    "Un complemento solicitado no existe en la pestaña Complementos."
+                )
+            complement_items.append(item)
 
         total_required = quantity_per_unit * payload.quantity
         run = ProductionRun(
@@ -384,7 +420,6 @@ class ProductionService:
             raw_material_item_id=payload.raw_material_item_id,
             raw_material_quantity_per_unit=quantity_per_unit,
             raw_material_unit_code=unit_code,
-            target_product_type_id=payload.target_product_type_id,
             total_required_material=total_required,
             waste_limit_percent=process.waste_limit_percent,
             expected_finished_weight=total_required,
@@ -411,6 +446,23 @@ class ProductionService:
                 )
             )
 
+        for product in payload.products:
+            run.products.append(
+                ProductionRunProduct(
+                    product_type_id=product.product_type_id,
+                    quantity=product.quantity,
+                )
+            )
+        for complement, item in zip(payload.complements, complement_items):
+            run.complements.append(
+                ProductionComplementRequest(
+                    item_id=item.id,
+                    quantity=complement.quantity,
+                    unit_code=item.unit_code,
+                    status=ComplementRequestStatus.PENDING,
+                )
+            )
+
         self.repository.add_run(run)
         self.repository.flush()
         self.inventory_service.reserve_materials_for_production(
@@ -418,7 +470,31 @@ class ProductionService:
             requirements=(),
         )
         self.repository.flush()
-        return ProductionRunRead.model_validate(run)
+        return self._read_with_names(run)
+
+    def update_run_products(
+        self, run_id: UUID, payload: RunProductsUpdate, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status in (ProductionRunStatus.RECEIVED, ProductionRunStatus.CANCELLED):
+            raise ProductionDomainError(
+                "El plan de productos ya no se puede cambiar: la orden fue recibida o cancelada."
+            )
+        process = self.repository.get(run.process_id)
+        if process is None:
+            raise ProductionNotFoundError("Proceso de la orden no encontrado.")
+        self._validate_run_products(process, run.quantity, payload.products)
+        run.products = [
+            ProductionRunProduct(
+                product_type_id=product.product_type_id,
+                quantity=product.quantity,
+            )
+            for product in payload.products
+        ]
+        self.repository.flush()
+        return self._read_with_names(run)
 
     def approve_materials(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
@@ -557,11 +633,39 @@ class ProductionService:
                 if m.item_id != run.raw_material_item_id
             ]
 
+    def _attach_plan_names(self, reads: list, runs: list) -> None:
+        """Nombres del plan de resultantes (tipo de producto) y de los
+        complementos (item de inventario) para las vistas y el acta."""
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+        from backend.modules.product_types.models import ProductType
+
+        type_ids = {p.product_type_id for run in runs for p in run.products}
+        item_ids = {c.item_id for run in runs for c in run.complements}
+        type_names: dict = {}
+        if type_ids:
+            rows = self.repository.session.execute(
+                select(ProductType.id, ProductType.name).where(ProductType.id.in_(type_ids))
+            ).all()
+            type_names = {row[0]: row[1] for row in rows}
+        item_names: dict = {}
+        if item_ids:
+            rows = self.repository.session.execute(
+                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            item_names = {row[0]: row[1] for row in rows}
+        for read in reads:
+            for product in read.products:
+                product.product_name = type_names.get(product.product_type_id)
+            for complement in read.complements:
+                complement.name = item_names.get(complement.item_id)
+
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
         self._attach_allowed_types([read], [run])
         self._attach_supply_consumptions([read], [run])
+        self._attach_plan_names([read], [run])
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
@@ -570,6 +674,7 @@ class ProductionService:
         _populate_run_names(self.repository.session, reads, runs)
         self._attach_allowed_types(reads, runs)
         self._attach_supply_consumptions(reads, runs)
+        self._attach_plan_names(reads, runs)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:

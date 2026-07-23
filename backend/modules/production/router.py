@@ -15,6 +15,7 @@ from backend.modules.production.schemas import (
     ProductionRunRead,
     MaterialRejectPayload,
     ProductionRunStageFinish,
+    RunProductsUpdate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 from backend.modules.security.permissions import require_permission
@@ -112,6 +113,25 @@ def list_runs(
 ) -> list[ProductionRunRead]:
     ensure_permission(current_user, "production.runs.read")
     return service.list_runs()
+
+
+@router.put("/runs/{run_id}/products", response_model=ProductionRunRead)
+def update_run_products(
+    run_id: UUID,
+    payload: RunProductsUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    # Solo produccion/admin: el plan es del jefe de produccion, no de inventario.
+    if current_user.role == "Jefe de inventario":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.update_run_products(run_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/runs/{run_id}/approve-materials", response_model=ProductionRunRead)
