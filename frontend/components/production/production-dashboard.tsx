@@ -34,14 +34,17 @@ import {
   defineRunAssembly,
   deleteProcess,
   finishProductionRunStage,
+  getAssemblyRecipe,
+  listAssemblyRecipeTypeIds,
   listProcesses,
   listProductionRuns,
   startProductionRun,
   updateProcess,
   updateProductionRunProducts,
+  upsertAssemblyRecipe,
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
-import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
+import type { AssemblyRecipe, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 import { CaliperScale } from "@/components/ui/caliper-scale";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
@@ -189,6 +192,7 @@ const EMPTY_PROCESSES: ProductionProcess[] = [];
 const EMPTY_USERS: ManagedUser[] = [];
 const EMPTY_RUNS: ProductionRun[] = [];
 const EMPTY_RAW_MATERIALS: InventoryItem[] = [];
+const EMPTY_RECIPE_TYPE_IDS: string[] = [];
 
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
   const queryClient = useQueryClient();
@@ -246,6 +250,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryKey: ["complement-types"],
     queryFn: listComplementTypes,
     enabled: Boolean(currentUser) && variant === "maintenance",
+  });
+  // Tipos de producto que ya tienen receta de ensamble: filtra los pickers en
+  // modo ASIGNAR (esos tipos solo se fabrican por ENSAMBLAR).
+  const { data: recipeTypeIds = EMPTY_RECIPE_TYPE_IDS } = useQuery({
+    queryKey: ["assembly-recipe-types"],
+    queryFn: listAssemblyRecipeTypeIds,
+    enabled: Boolean(currentUser) && variant === "production",
   });
 
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
@@ -307,6 +318,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [assemblyMode, setAssemblyMode] = useState<"ASIGNAR" | "ENSAMBLAR">("ASIGNAR");
   // Producto único elegido con los pickers (pieza o tipo de catálogo).
   const [orderProduct, setOrderProduct] = useState<ProductChoice | null>(null);
+  // Receta de ensamble del producto elegido en ENSAMBLAR (complementos +
+  // cantidad por unidad); se usa para calcular la solicitud automática.
+  const [orderRecipe, setOrderRecipe] = useState<AssemblyRecipe | null>(null);
+  // Tipo de producto para el que se está definiendo la receta (modal abierta
+  // cuando no es null). Las filas empiezan vacías.
+  const [recipeModalTypeId, setRecipeModalTypeId] = useState<string | null>(null);
+  const [recipeLines, setRecipeLines] = useState<Array<{ itemId: string; label: string; perUnit: string }>>([]);
+  const [isRecipeComplementPickerOpen, setIsRecipeComplementPickerOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
   const [editPlanProduct, setEditPlanProduct] = useState<ProductChoice | null>(null);
   // Orden a la que se le esta definiendo el ensamble (complementos APROBADOS
@@ -887,10 +906,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
 
     const productsPayload = [productRowToPayload(orderProduct, runQuantity)];
-    // ENSAMBLAR manda complementos vacíos temporalmente: la receta que los
-    // calcula llega en la task siguiente. El backend rechazará con 409
-    // ("necesita al menos un complemento") hasta entonces.
-    const complementsPayload: Array<{ item_id: string; quantity: string }> = [];
+
+    // ASIGNAR no solicita complementos. ENSAMBLAR calcula la solicitud
+    // automáticamente a partir de la receta del producto elegido (Task 4).
+    let complementsPayload: Array<{ item_id: string; quantity: string }> = [];
+    if (assemblyMode === "ENSAMBLAR") {
+      if (!orderRecipe || orderRecipe.items.length === 0) {
+        setError("Este producto necesita receta para ensamblar.");
+        return;
+      }
+      complementsPayload = orderRecipe.items.map((item) => ({
+        item_id: item.complement_item_id,
+        quantity: String(Number(item.quantity_per_unit) * Number(runQuantity)),
+      }));
+    }
 
     setError(null);
     setSuccess(null);
@@ -906,8 +935,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       });
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima y complementos.");
       setIsCreateOrderOpen(false);
-      setAssemblyMode("ASIGNAR");
-      setOrderProduct(null);
+      resetCreateOrderState();
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo crear la orden de produccion.");
@@ -1197,20 +1225,157 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     );
   }
 
+  // Resuelve el tipo de catálogo de una pieza terminada a partir de su código
+  // de 7 dígitos (categoría + modelo), para saber si ese tipo ya tiene receta.
+  function pieceTypeId(item: InventoryItem): string | undefined {
+    const code = item.product_code;
+    if (!code || code.length !== 7) return undefined;
+    return productTypesList.find(
+      (type) => type.category_code === code.slice(1, 3) && type.model_code === code.slice(3, 7)
+    )?.id;
+  }
+
+  // Tras elegir producto en modo ENSAMBLAR: consulta su receta. Sin receta y
+  // con tipo resoluble, abre la modal para crearla; sin tipo resoluble, no se
+  // puede ensamblar y se limpia la selección.
+  async function loadOrderRecipeForChoice(choice: ProductChoice) {
+    setError(null);
+    try {
+      const recipe = choice.targetItemId
+        ? await getAssemblyRecipe({ itemId: choice.targetItemId })
+        : await getAssemblyRecipe({ productTypeId: choice.productTypeId });
+
+      if (recipe.items.length > 0) {
+        setOrderRecipe(recipe);
+        return;
+      }
+      if (recipe.product_type_id) {
+        setOrderRecipe(null);
+        setRecipeLines([]);
+        setRecipeModalTypeId(recipe.product_type_id);
+        return;
+      }
+      setError("Esta pieza no tiene tipo en el catálogo: usa Asignar.");
+      setOrderProduct(null);
+      setOrderRecipe(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo cargar la receta.");
+      setOrderProduct(null);
+      setOrderRecipe(null);
+    }
+  }
+
   // Aplica la selección de un picker (pieza o tipo) al producto único de la
   // modal correspondiente ("create" = Crear orden, "edit" = Editar producto).
   function applyProductChoice(kind: "create" | "edit", patch: ProductChoice) {
-    if (kind === "create") setOrderProduct(patch);
-    else setEditPlanProduct(patch);
+    if (kind === "create") {
+      setOrderProduct(patch);
+      setOrderRecipe(null);
+      if (assemblyMode === "ENSAMBLAR") {
+        void loadOrderRecipeForChoice(patch);
+      }
+    } else {
+      setEditPlanProduct(patch);
+    }
   }
 
-  // Cambiar de modo limpia el producto elegido: en ASIGNAR se destina a una
-  // pieza/tipo existente, en ENSAMBLAR es el producto final (Task 4 agrega la
-  // receta de complementos que va con este producto).
+  // Cambiar de modo limpia el producto elegido y su receta: en ASIGNAR se
+  // destina a una pieza/tipo existente, en ENSAMBLAR es el producto final que
+  // arrastra la receta de complementos que lo ensambla.
   function handleAssemblyModeChange(mode: "ASIGNAR" | "ENSAMBLAR") {
     if (mode === assemblyMode) return;
     setAssemblyMode(mode);
     setOrderProduct(null);
+    setOrderRecipe(null);
+    setRecipeModalTypeId(null);
+    setRecipeLines([]);
+  }
+
+  // Cierra la modal de crear orden: limpia producto, modo, cantidad, receta y
+  // pickers abiertos para esa modal. Se usa en éxito y en el botón X.
+  function resetCreateOrderState() {
+    setOrderProduct(null);
+    setAssemblyMode("ASIGNAR");
+    setRunQuantity("1");
+    setOrderRecipe(null);
+    setRecipeModalTypeId(null);
+    setRecipeLines([]);
+    setIsRecipeComplementPickerOpen(false);
+    setItemPickerFor((current) => (current === "create" ? null : current));
+    setTypePickerFor((current) => (current === "create" ? null : current));
+  }
+
+  // Cierra la modal de receta. clearProduct=true (X/Cancelar): sin receta no
+  // hay ensamble, así que se limpia también la selección de producto.
+  function closeRecipeModal(clearProduct: boolean) {
+    setRecipeModalTypeId(null);
+    setRecipeLines([]);
+    setIsRecipeComplementPickerOpen(false);
+    if (clearProduct) {
+      setOrderProduct(null);
+      setOrderRecipe(null);
+    }
+  }
+
+  function addRecipeLine(item: InventoryItem) {
+    setRecipeLines((current) => [...current, { itemId: item.id, label: item.name, perUnit: "" }]);
+    setIsRecipeComplementPickerOpen(false);
+  }
+
+  function removeRecipeLine(itemId: string) {
+    setRecipeLines((current) => current.filter((line) => line.itemId !== itemId));
+  }
+
+  function updateRecipeLinePerUnit(itemId: string, value: string) {
+    setRecipeLines((current) =>
+      current.map((line) => (line.itemId === itemId ? { ...line, perUnit: value } : line))
+    );
+  }
+
+  async function handleSaveRecipe() {
+    if (!recipeModalTypeId) return;
+    const validLines = recipeLines.filter((line) => Number(line.perUnit) > 0);
+    if (validLines.length === 0) return;
+
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const saved = await upsertAssemblyRecipe(
+        recipeModalTypeId,
+        validLines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
+      );
+      setOrderRecipe(saved);
+      setRecipeModalTypeId(null);
+      setRecipeLines([]);
+      setSuccess("Receta guardada.");
+      await queryClient.invalidateQueries({ queryKey: ["assembly-recipe-types"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo guardar la receta.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // Ids de tipos permitidos para el CatalogProductPicker según modal y modo.
+  // En ASIGNAR ("create") se excluyen los tipos que ya tienen receta: esos
+  // solo se fabrican por ENSAMBLAR.
+  function allowedTypeIdsForPicker(kind: "create" | "edit"): string[] {
+    const baseAllowed = kind === "create"
+      ? selectedProcess?.product_type_ids ?? []
+      : editPlanRun?.allowed_product_type_ids ?? [];
+
+    if (kind !== "create" || assemblyMode !== "ASIGNAR") {
+      return baseAllowed;
+    }
+
+    const activeWithoutRecipe = productTypesList
+      .filter((type) => type.is_active && !recipeTypeIds.includes(type.id))
+      .map((type) => type.id);
+
+    return baseAllowed.length === 0
+      ? activeWithoutRecipe
+      : baseAllowed.filter((id) => activeWithoutRecipe.includes(id));
   }
 
   return (
@@ -1603,7 +1768,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>Crear orden</h2>
                 <p>Proceso, material, producto y cantidad a fabricar</p>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCreateOrderOpen(false)} type="button">
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => {
+                  setIsCreateOrderOpen(false);
+                  resetCreateOrderState();
+                }}
+                type="button"
+              >
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
@@ -1831,7 +2004,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           tipo del catálogo, para productos que aún no tienen piezas. */}
       {itemPickerFor ? (
         <FinishedItemPicker
-          items={finishedItems}
+          items={
+            itemPickerFor === "create" && assemblyMode === "ASIGNAR"
+              ? finishedItems.filter((item) => {
+                  const typeId = pieceTypeId(item);
+                  return !typeId || !recipeTypeIds.includes(typeId);
+                })
+              : finishedItems
+          }
           onClose={() => setItemPickerFor(null)}
           onCreate={() => {
             setTypePickerFor(itemPickerFor);
@@ -1849,11 +2029,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
       {typePickerFor ? (
         <CatalogProductPicker
-          allowedTypeIds={
-            typePickerFor === "create"
-              ? selectedProcess?.product_type_ids ?? []
-              : editPlanRun?.allowed_product_type_ids ?? []
-          }
+          allowedTypeIds={allowedTypeIdsForPicker(typePickerFor)}
           onClose={() => setTypePickerFor(null)}
           onSelect={(type) => {
             const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
@@ -1864,8 +2040,95 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         />
       ) : null}
 
-      {/* ComplementPicker se reutiliza en la ventana de receta (task siguiente);
-          la modal Crear orden ya no solicita complementos directamente. */}
+      {/* Modal de receta: se abre cuando el tipo elegido en ENSAMBLAR no tiene
+          receta aún. Cerrar (X) también limpia la selección de producto: sin
+          receta no hay ensamble. */}
+      {recipeModalTypeId ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir receta">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Definir receta</h2>
+                <p>Complementos y cantidad por unidad para ensamblar este producto</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => closeRecipeModal(true)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+
+            {recipeLines.length > 0 ? (
+              <div className="tableWrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Complemento</th>
+                      <th className="num">Por unidad</th>
+                      <th aria-label="Quitar" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recipeLines.map((line) => (
+                      <tr key={line.itemId}>
+                        <td>{line.label}</td>
+                        <td className="num">
+                          <input
+                            aria-label={`Cantidad por unidad de ${line.label}`}
+                            className="field"
+                            min="0"
+                            onChange={(event) => updateRecipeLinePerUnit(line.itemId, event.target.value)}
+                            step="0.0001"
+                            style={{ width: 90 }}
+                            type="number"
+                            value={line.perUnit}
+                          />
+                        </td>
+                        <td>
+                          <button
+                            aria-label={`Quitar ${line.label}`}
+                            className="iconOnlyButton"
+                            onClick={() => removeRecipeLine(line.itemId)}
+                            type="button"
+                          >
+                            <Trash2 aria-hidden="true" size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="emptyState">Sin complementos agregados.</div>
+            )}
+
+            <div className="modalActions">
+              <button className="button" onClick={() => setIsRecipeComplementPickerOpen(true)} type="button">
+                <Plus aria-hidden="true" size={14} />
+                Elegir complementos
+              </button>
+              <button
+                className="button buttonPrimary"
+                disabled={isSaving || !recipeLines.some((line) => Number(line.perUnit) > 0)}
+                onClick={() => void handleSaveRecipe()}
+                type="button"
+              >
+                <Save aria-hidden="true" size={15} />
+                {isSaving ? "Guardando" : "Guardar"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isRecipeComplementPickerOpen ? (
+        <ComplementPicker
+          excludeIds={recipeLines.map((line) => line.itemId)}
+          items={complementItems}
+          onClose={() => setIsRecipeComplementPickerOpen(false)}
+          onSelect={(item) => addRecipeLine(item)}
+          title="Elegir complementos"
+        />
+      ) : null}
 
       {isRunStagesOpen && selectedRunForStages ? (
         <div className="modalBackdrop modalBackdropAnchor" role="dialog" aria-modal="true">
