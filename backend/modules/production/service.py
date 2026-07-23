@@ -538,6 +538,30 @@ class ProductionService:
                         )
                     except InventoryDomainError as exc:
                         raise ProductionDomainError(f"Insumo '{supply_name}': {exc}") from exc
+        # Complementos solicitados en la orden: se aprueban y descuentan junto
+        # con la materia prima. Si falta stock, toda la aprobacion se revierte.
+        from backend.modules.inventory.models import InventoryItem as _InventoryItem
+
+        now = datetime.utcnow()
+        for complement in run.complements:
+            if complement.status != ComplementRequestStatus.PENDING:
+                continue
+            item = self.repository.session.get(_InventoryItem, complement.item_id)
+            item_name = item.name if item is not None else "complemento"
+            try:
+                self.inventory_service.consume_material_for_production(
+                    item_id=complement.item_id,
+                    quantity=complement.quantity,
+                    production_run_id=run.id,
+                    user_id=current_user.id,
+                    production_code=run.production_code,
+                    reason=f"Complemento para ensamble: {item_name}.",
+                )
+            except InventoryDomainError as exc:
+                raise ProductionDomainError(f"Complemento '{item_name}': {exc}") from exc
+            complement.status = ComplementRequestStatus.APPROVED
+            complement.approved_by_user_id = current_user.id
+            complement.approved_at = now
         run.status = ProductionRunStatus.MATERIALS_APPROVED
         run.materials_approved_at = datetime.utcnow()
         run.materials_approved_by_user_id = current_user.id
@@ -554,6 +578,9 @@ class ProductionService:
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = (reason or "").strip() or None
         run.rejected_at = datetime.utcnow()
+        for complement in run.complements:
+            if complement.status == ComplementRequestStatus.PENDING:
+                complement.status = ComplementRequestStatus.REJECTED
         self.repository.flush()
         return self._read_with_names(run)
 
