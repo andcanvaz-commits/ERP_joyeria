@@ -8,6 +8,8 @@ from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.service import InventoryService
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    AssemblyRecipeRead,
+    AssemblyRecipeUpsert,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
@@ -225,6 +227,39 @@ def receive_finished_product(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.receive_finished_product(run_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/assembly-recipes", response_model=AssemblyRecipeRead)
+def get_assembly_recipe(
+    product_type_id: UUID | None = None,
+    item_id: UUID | None = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> AssemblyRecipeRead:
+    ensure_permission(current_user, "production.runs.read")
+    try:
+        return service.get_assembly_recipe(product_type_id, item_id)
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.put("/assembly-recipes/{product_type_id}", response_model=AssemblyRecipeRead)
+def upsert_assembly_recipe(
+    product_type_id: UUID,
+    payload: AssemblyRecipeUpsert,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> AssemblyRecipeRead:
+    # Solo produccion/admin: la receta es del jefe de produccion, no de inventario.
+    if current_user.role == "Jefe de inventario":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.upsert_assembly_recipe(product_type_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

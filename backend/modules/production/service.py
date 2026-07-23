@@ -32,6 +32,9 @@ from backend.modules.production.models import (
 DECISION_STAGE_TYPES = {"DECISION", "CONTROL"}
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    AssemblyRecipeItemRead,
+    AssemblyRecipeRead,
+    AssemblyRecipeUpsert,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
@@ -39,6 +42,7 @@ from backend.modules.production.schemas import (
     ProductionRunRead,
     ProductionRunStageFinish,
     RunAssemblyDefine,
+    RunAssemblyLineCreate,
     RunProductsUpdate,
     SupplyConsumptionRead,
 )
@@ -946,6 +950,26 @@ class ProductionService:
             )
         )
 
+    def _product_type_id_for_piece(self, item_id: UUID) -> UUID | None:
+        """Resuelve el tipo de producto del catalogo que corresponde a una pieza
+        de inventario, empatando el codigo de catalogo (categoria + modelo) de
+        la pieza. None si la pieza no tiene codigo de catalogo o no hay match."""
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+        from backend.modules.product_types.models import ProductType
+
+        item = self.repository.session.get(InventoryItem, item_id)
+        if item is None or not item.product_code or len(item.product_code) != 7:
+            return None
+        code = item.product_code
+        product_type = self.repository.session.execute(
+            select(ProductType).where(
+                ProductType.category_code == code[1:3],
+                ProductType.model_code == code[3:7],
+            )
+        ).scalars().first()
+        return product_type.id if product_type is not None else None
+
     def _resolve_plan_product_type_id(self, run: ProductionRun) -> UUID | None:
         """En modo ENSAMBLAR el plan tiene una sola fila: si ya trae el tipo de
         producto se usa directo; si trae una pieza destino, se busca su tipo
@@ -957,22 +981,7 @@ class ProductionService:
             return product.product_type_id
         if product.target_item_id is None:
             return None
-
-        from sqlalchemy import select
-        from backend.modules.inventory.models import InventoryItem
-        from backend.modules.product_types.models import ProductType
-
-        item = self.repository.session.get(InventoryItem, product.target_item_id)
-        if item is None or not item.product_code or len(item.product_code) != 7:
-            return None
-        code = item.product_code
-        product_type = self.repository.session.execute(
-            select(ProductType).where(
-                ProductType.category_code == code[1:3],
-                ProductType.model_code == code[3:7],
-            )
-        ).scalars().first()
-        return product_type.id if product_type is not None else None
+        return self._product_type_id_for_piece(product.target_item_id)
 
     def _approved_complement_totals(self, run: ProductionRun) -> dict:
         """Suma por item de los complementos APROBADOS de la orden (lo que
@@ -1051,7 +1060,6 @@ class ProductionService:
         if len(item_ids) != len(set(item_ids)):
             raise ProductionDomainError("No repitas el mismo complemento en el ensamble.")
 
-        from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
 
         approved = self._approved_complement_totals(run)
@@ -1083,25 +1091,108 @@ class ProductionService:
         # ensambles del mismo tipo se apliquen solos.
         type_id = self._resolve_plan_product_type_id(run)
         if type_id is not None:
-            recipe = self.repository.session.execute(
-                select(AssemblyRecipe).where(AssemblyRecipe.product_type_id == type_id)
-            ).scalars().first()
-            new_items = [
-                AssemblyRecipeItem(
-                    complement_item_id=line.complement_item_id,
-                    quantity_per_unit=line.quantity_per_unit,
-                )
-                for line in payload.items
-            ]
-            if recipe is not None:
-                recipe.items = new_items
-                recipe.updated_at = datetime.utcnow()
-            else:
-                recipe = AssemblyRecipe(product_type_id=type_id, items=new_items)
-                self.repository.session.add(recipe)
+            self._upsert_recipe_items(type_id, payload.items)
 
         self.repository.flush()
         return self._read_with_names(run)
+
+    def _upsert_recipe_items(
+        self, product_type_id: UUID, lines: list[RunAssemblyLineCreate]
+    ) -> None:
+        """Reemplaza los items de la receta de ensamble del tipo de producto
+        (o la crea si aun no existe)."""
+        from sqlalchemy import select
+
+        recipe = self.repository.session.execute(
+            select(AssemblyRecipe).where(AssemblyRecipe.product_type_id == product_type_id)
+        ).scalars().first()
+        new_items = [
+            AssemblyRecipeItem(
+                complement_item_id=line.complement_item_id,
+                quantity_per_unit=line.quantity_per_unit,
+            )
+            for line in lines
+        ]
+        if recipe is not None:
+            recipe.items = new_items
+            recipe.updated_at = datetime.utcnow()
+        else:
+            recipe = AssemblyRecipe(product_type_id=product_type_id, items=new_items)
+            self.repository.session.add(recipe)
+
+    def get_assembly_recipe(
+        self, product_type_id: UUID | None, item_id: UUID | None
+    ) -> AssemblyRecipeRead:
+        """Consulta la receta de ensamble aprendida para un tipo de producto,
+        o para la pieza indicada (se resuelve su tipo primero)."""
+        if (product_type_id is None) == (item_id is None):
+            raise ProductionDomainError(
+                "Indica el tipo de producto o la pieza (uno de los dos)."
+            )
+        if product_type_id is None:
+            product_type_id = self._product_type_id_for_piece(item_id)
+        if product_type_id is None:
+            return AssemblyRecipeRead(product_type_id=None, items=[])
+
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+
+        recipe = self.repository.session.execute(
+            select(AssemblyRecipe).where(AssemblyRecipe.product_type_id == product_type_id)
+        ).scalars().first()
+        if recipe is None:
+            return AssemblyRecipeRead(product_type_id=product_type_id, items=[])
+
+        complement_ids = list({item.complement_item_id for item in recipe.items})
+        names: dict = {}
+        if complement_ids:
+            rows = self.repository.session.execute(
+                select(InventoryItem.id, InventoryItem.name).where(
+                    InventoryItem.id.in_(complement_ids)
+                )
+            ).all()
+            names = {row[0]: row[1] for row in rows}
+        items = [
+            AssemblyRecipeItemRead(
+                complement_item_id=item.complement_item_id,
+                name=names.get(item.complement_item_id),
+                quantity_per_unit=item.quantity_per_unit,
+            )
+            for item in recipe.items
+        ]
+        return AssemblyRecipeRead(product_type_id=product_type_id, items=items)
+
+    def upsert_assembly_recipe(
+        self, product_type_id: UUID, payload: AssemblyRecipeUpsert, current_user: CurrentUser
+    ) -> AssemblyRecipeRead:
+        """Crea o reemplaza manualmente la receta de ensamble de un tipo de
+        producto (misma regla que la receta aprendida automaticamente)."""
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+        from backend.modules.product_types.models import ProductType
+
+        product_type = self.repository.session.get(ProductType, product_type_id)
+        if product_type is None or not product_type.is_active:
+            raise ProductionDomainError("El tipo de producto no existe o esta inactivo.")
+
+        item_ids = [line.complement_item_id for line in payload.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ProductionDomainError("No repitas el mismo complemento en la receta.")
+
+        items = self.repository.session.execute(
+            select(InventoryItem).where(InventoryItem.id.in_(item_ids))
+        ).scalars().all()
+        items_by_id = {item.id: item for item in items}
+        for line in payload.items:
+            item = items_by_id.get(line.complement_item_id)
+            if item is None:
+                raise ProductionDomainError("El complemento indicado no existe.")
+            if item.item_type != "COMPLEMENT":
+                raise ProductionDomainError(f"'{item.name}' no es un complemento.")
+
+        self._upsert_recipe_items(product_type_id, payload.items)
+        self.repository.flush()
+        return self.get_assembly_recipe(product_type_id, None)
 
     def receive_finished_product(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:

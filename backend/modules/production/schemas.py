@@ -269,6 +269,27 @@ class RunAssemblyDefine(BaseModel):
     items: list[RunAssemblyLineCreate] = Field(min_length=1)
 
 
+class AssemblyRecipeItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    complement_item_id: UUID
+    name: str | None = None
+    quantity_per_unit: Decimal
+
+
+class AssemblyRecipeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    product_type_id: UUID | None = None
+    items: list[AssemblyRecipeItemRead] = Field(default_factory=list)
+
+
+class AssemblyRecipeUpsert(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[RunAssemblyLineCreate] = Field(min_length=1)
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
