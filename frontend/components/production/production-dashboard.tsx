@@ -9,6 +9,9 @@ import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-ma
 import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
 import { ComplementTypesManager } from "@/components/mantenimiento/complement-types-manager";
+import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
+import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
+import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import {
@@ -74,6 +77,17 @@ type ProcessForm = {
 
 type FormMode = "create" | "edit";
 type UserFormMode = "create" | "edit";
+
+// Fila de producto resultante: pieza existente (targetItemId) o tipo del
+// catálogo aún sin piezas (productTypeId); label es lo que se muestra elegido.
+type ProductPickerRow = {
+  targetItemId?: string;
+  productTypeId?: string;
+  label: string;
+  quantity: string;
+};
+
+const emptyProductRow = (): ProductPickerRow => ({ label: "", quantity: "" });
 
 const SYSTEM_ROLES = ["Jefe de producción", "Admin", "Jefe de inventario"];
 
@@ -153,13 +167,14 @@ function processToForm(process: ProductionProcess): ProcessForm {
 }
 
 async function fetchProductionBundle(variant: "production" | "maintenance") {
-  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies, nextComplements] = await Promise.all([
+  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies, nextComplements, nextFinishedItems] = await Promise.all([
     listProcesses(),
     variant === "maintenance" ? listUsers() : Promise.resolve([]),
     variant === "production" ? listProductionRuns() : Promise.resolve([]),
     listInventoryItems("RAW_MATERIAL"),
     listInventoryItems("SUPPLY"),
     variant === "production" ? listInventoryItems("COMPLEMENT") : Promise.resolve([]),
+    variant === "production" ? listInventoryItems("FINISHED_PRODUCT") : Promise.resolve([]),
   ]);
   return {
     processes: nextProcesses,
@@ -168,6 +183,7 @@ async function fetchProductionBundle(variant: "production" | "maintenance") {
     // Materiales elegibles para procesos: materia prima + insumos.
     rawMaterials: [...nextRawMaterials, ...nextSupplies],
     complements: nextComplements,
+    finishedItems: nextFinishedItems,
   };
 }
 
@@ -239,6 +255,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const runs = bundle?.runs ?? EMPTY_RUNS;
   const rawMaterials = bundle?.rawMaterials ?? EMPTY_RAW_MATERIALS;
   const complementItems = bundle?.complements ?? EMPTY_RAW_MATERIALS;
+  const finishedItems = bundle?.finishedItems ?? EMPTY_RAW_MATERIALS;
   const isLoading = !currentUser || isBundleLoading;
 
   // Invalidación cruzada: las acciones de producción cambian lo que muestran
@@ -287,15 +304,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [showResponsables, setShowResponsables] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
-  // Filas del split: tipo de producto del catálogo + cantidad.
-  const [orderProducts, setOrderProducts] = useState<Array<{ productTypeId: string; quantity: string }>>([
-    { productTypeId: "", quantity: "" },
-  ]);
-  // Complementos solicitados: item + cantidad.
-  const [orderComplements, setOrderComplements] = useState<Array<{ itemId: string; quantity: string }>>([]);
-  const [isComplementsOpen, setIsComplementsOpen] = useState(false);
+  // Modo de destino del resultante: asignar a piezas/tipos existentes o
+  // ensamblar un único producto final (usa la cantidad de la orden).
+  const [assemblyMode, setAssemblyMode] = useState<"ASIGNAR" | "ENSAMBLAR">("ASIGNAR");
+  // Filas del split: pieza o tipo de producto elegidos con los pickers + cantidad.
+  const [orderProducts, setOrderProducts] = useState<ProductPickerRow[]>([emptyProductRow()]);
+  // Complementos solicitados: item + cantidad (el label viene del picker).
+  const [orderComplements, setOrderComplements] = useState<Array<{ itemId: string; label: string; quantity: string }>>([]);
+  const [isComplementPickerOpen, setIsComplementPickerOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
-  const [editPlanRows, setEditPlanRows] = useState<Array<{ productTypeId: string; quantity: string }>>([]);
+  const [editPlanRows, setEditPlanRows] = useState<ProductPickerRow[]>([]);
+  // Picker de pieza/tipo abierto para una fila: "create" = modal Crear orden,
+  // "edit" = modal Editar productos resultantes.
+  const [itemPickerFor, setItemPickerFor] = useState<{ kind: "create" | "edit"; index: number } | null>(null);
+  const [typePickerFor, setTypePickerFor] = useState<{ kind: "create" | "edit"; index: number } | null>(null);
   // Tick por minuto para el tiempo transcurrido de las ordenes en proceso.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -797,6 +819,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     );
   }
 
+  // Convierte una fila del picker al shape que espera el backend: solo se
+  // manda la clave del identificador realmente elegido (nunca ambas, nunca
+  // undefined) para no pisar la regla del backend de una sola referencia por fila.
+  function productRowToPayload(row: ProductPickerRow, quantity: string) {
+    const payload: { product_type_id?: string; target_item_id?: string; quantity: string } = { quantity };
+    if (row.targetItemId) payload.target_item_id = row.targetItemId;
+    else if (row.productTypeId) payload.product_type_id = row.productTypeId;
+    return payload;
+  }
+
   async function handleCreateProductionOrder() {
     if (!selectedProcess) {
       setError("Selecciona un proceso para producir.");
@@ -810,16 +842,30 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Selecciona la materia prima con la que se fabricará esta orden.");
       return;
     }
-    const products = orderProducts.filter((row) => row.productTypeId && Number(row.quantity) > 0);
-    if (products.length === 0) {
-      setError("Agrega al menos un producto resultante.");
-      return;
+
+    let productsPayload: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>;
+
+    if (assemblyMode === "ENSAMBLAR") {
+      const row = orderProducts[0];
+      if (!row || (!row.targetItemId && !row.productTypeId)) {
+        setError("Elige el producto final a ensamblar.");
+        return;
+      }
+      productsPayload = [productRowToPayload(row, runQuantity)];
+    } else {
+      const rows = orderProducts.filter((row) => (row.targetItemId || row.productTypeId) && Number(row.quantity) > 0);
+      if (rows.length === 0) {
+        setError("Agrega al menos un producto resultante.");
+        return;
+      }
+      const splitTotal = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+      if (splitTotal !== Number(runQuantity)) {
+        setError(`El plan de productos suma ${splitTotal} y la orden fabrica ${runQuantity}: deben coincidir.`);
+        return;
+      }
+      productsPayload = rows.map((row) => productRowToPayload(row, row.quantity));
     }
-    const splitTotal = products.reduce((sum, row) => sum + Number(row.quantity), 0);
-    if (splitTotal !== Number(runQuantity)) {
-      setError(`El plan de productos suma ${splitTotal} y la orden fabrica ${runQuantity}: deben coincidir.`);
-      return;
-    }
+
     const complements = orderComplements.filter((row) => row.itemId && Number(row.quantity) > 0);
 
     setError(null);
@@ -830,12 +876,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         process_id: selectedProcess.id,
         quantity: runQuantity,
         raw_material_item_id: selectedMaterialId,
-        products: products.map((row) => ({ product_type_id: row.productTypeId, quantity: row.quantity })),
+        assembly_mode: assemblyMode,
+        products: productsPayload,
         complements: complements.map((row) => ({ item_id: row.itemId, quantity: row.quantity })),
       });
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima y complementos.");
       setIsCreateOrderOpen(false);
-      setOrderProducts([{ productTypeId: "", quantity: "" }]);
+      setAssemblyMode("ASIGNAR");
+      setOrderProducts([emptyProductRow()]);
       setOrderComplements([]);
       await reload();
     } catch (nextError) {
@@ -1105,28 +1153,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   // Filas del split de productos resultantes: se usa tanto al crear la orden
   // (allowedTypeIds viene del proceso) como al editar el plan (viene del run).
+  // Filas del split de productos resultantes: se usa tanto al crear la orden
+  // (modo ASIGNAR) como al editar el plan de un run ya creado. El producto de
+  // cada fila se elige con los pickers visuales, no con un combo.
   function renderProductRows(
-    rows: Array<{ productTypeId: string; quantity: string }>,
-    setRows: Dispatch<SetStateAction<Array<{ productTypeId: string; quantity: string }>>>,
-    allowedTypeIds: string[] = [],
+    rows: ProductPickerRow[],
+    setRows: Dispatch<SetStateAction<ProductPickerRow[]>>,
+    onOpenPicker: (index: number) => void,
   ) {
     return (
       <div className="fieldGroup">
         <span>Productos resultantes</span>
         {rows.map((row, index) => (
           <div className="materialRow" key={index}>
-            <select
-              className="field"
-              onChange={(e) => setRows((current) => current.map((r, i) => (i === index ? { ...r, productTypeId: e.target.value } : r)))}
-              value={row.productTypeId}
+            <button
+              className="button"
+              onClick={() => onOpenPicker(index)}
+              style={{ flex: 1, justifyContent: "flex-start" }}
+              type="button"
             >
-              <option value="">Seleccionar producto</option>
-              {productTypesList
-                .filter((type) => allowedTypeIds.length === 0 || allowedTypeIds.includes(type.id))
-                .map((type) => (
-                  <option key={type.id} value={type.id}>{type.name}</option>
-                ))}
-            </select>
+              {row.label || "Elegir producto"}
+            </button>
             <input
               className="field"
               min="1"
@@ -1143,11 +1190,37 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             ) : null}
           </div>
         ))}
-        <button className="button" onClick={() => setRows((current) => [...current, { productTypeId: "", quantity: "" }])} type="button">
+        <button className="button" onClick={() => setRows((current) => [...current, emptyProductRow()])} type="button">
           <Plus aria-hidden="true" size={14} /> Agregar producto
         </button>
       </div>
     );
+  }
+
+  // Aplica la selección de un picker (pieza o tipo) a la fila indicada del
+  // modal correspondiente ("create" = Crear orden, "edit" = Editar productos).
+  function applyProductRow(
+    kind: "create" | "edit",
+    index: number,
+    patch: { targetItemId?: string; productTypeId?: string; label: string },
+  ) {
+    const updater = (rows: ProductPickerRow[]) =>
+      rows.map((row, i) =>
+        i === index
+          ? { ...row, targetItemId: patch.targetItemId, productTypeId: patch.productTypeId, label: patch.label }
+          : row
+      );
+    if (kind === "create") setOrderProducts(updater);
+    else setEditPlanRows(updater);
+  }
+
+  // Cambiar de modo limpia el plan de productos: los campos de cada fila
+  // significan cosas distintas en ASIGNAR (split con cantidades) que en
+  // ENSAMBLAR (un solo producto final, cantidad = la de la orden).
+  function handleAssemblyModeChange(mode: "ASIGNAR" | "ENSAMBLAR") {
+    if (mode === assemblyMode) return;
+    setAssemblyMode(mode);
+    setOrderProducts([emptyProductRow()]);
   }
 
   return (
@@ -1560,49 +1633,67 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <input className="field" min="1" onChange={(e) => setRunQuantity(e.target.value)} step="1" type="number" value={runQuantity} />
             </label>
 
-            {renderProductRows(orderProducts, setOrderProducts, selectedProcess?.product_type_ids ?? [])}
+            {/* Modo de destino del resultante: asignar a piezas/tipos existentes
+                (split con cantidades) o ensamblar un único producto final. */}
+            <div className="fieldGroup">
+              <span>Destino del producto</span>
+              <div className="materialRow" style={{ gap: 8 }}>
+                <button
+                  className={`button${assemblyMode === "ASIGNAR" ? " buttonPrimary" : ""}`}
+                  onClick={() => handleAssemblyModeChange("ASIGNAR")}
+                  type="button"
+                >
+                  Asignar
+                </button>
+                <button
+                  className={`button${assemblyMode === "ENSAMBLAR" ? " buttonPrimary" : ""}`}
+                  onClick={() => handleAssemblyModeChange("ENSAMBLAR")}
+                  type="button"
+                >
+                  Ensamblar
+                </button>
+              </div>
+            </div>
+
+            {assemblyMode === "ASIGNAR" ? (
+              renderProductRows(orderProducts, setOrderProducts, (index) => setItemPickerFor({ kind: "create", index }))
+            ) : (
+              <label className="fieldGroup">
+                <span>Producto final</span>
+                <button
+                  className="button"
+                  onClick={() => setItemPickerFor({ kind: "create", index: 0 })}
+                  style={{ justifyContent: "flex-start" }}
+                  type="button"
+                >
+                  {orderProducts[0]?.label || "Elegir producto final"}
+                </button>
+              </label>
+            )}
 
             {/* Complementos del inventario para ensamblar con lo producido. */}
             <div className="fieldGroup">
-              <button className="button" onClick={() => setIsComplementsOpen((open) => !open)} type="button">
+              <button className="button" onClick={() => setIsComplementPickerOpen(true)} type="button">
                 <Boxes aria-hidden="true" size={14} />
                 Solicitar complementos{orderComplements.length > 0 ? ` (${orderComplements.length})` : ""}
               </button>
-              {isComplementsOpen ? (
-                <>
-                  {orderComplements.map((row, index) => (
-                    <div className="materialRow" key={index}>
-                      <select
-                        className="field"
-                        onChange={(e) => setOrderComplements((rows) => rows.map((r, i) => (i === index ? { ...r, itemId: e.target.value } : r)))}
-                        value={row.itemId}
-                      >
-                        <option value="">Seleccionar complemento</option>
-                        {complementItems.filter((item) => !item.archived_at).map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} · {numericText(item.current_stock)} {item.unit_code}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        className="field"
-                        min="0.0001"
-                        onChange={(e) => setOrderComplements((rows) => rows.map((r, i) => (i === index ? { ...r, quantity: e.target.value } : r)))}
-                        placeholder="Cantidad"
-                        step="0.0001"
-                        type="number"
-                        value={row.quantity}
-                      />
-                      <button aria-label="Quitar complemento" className="iconOnlyButton" onClick={() => setOrderComplements((rows) => rows.filter((_, i) => i !== index))} type="button">
-                        <Trash2 aria-hidden="true" size={15} />
-                      </button>
-                    </div>
-                  ))}
-                  <button className="button" onClick={() => setOrderComplements((rows) => [...rows, { itemId: "", quantity: "" }])} type="button">
-                    <Plus aria-hidden="true" size={14} /> Agregar complemento
+              {orderComplements.map((row, index) => (
+                <div className="materialRow" key={index}>
+                  <span className="field" style={{ display: "flex", alignItems: "center" }}>{row.label}</span>
+                  <input
+                    className="field"
+                    min="0.0001"
+                    onChange={(e) => setOrderComplements((rows) => rows.map((r, i) => (i === index ? { ...r, quantity: e.target.value } : r)))}
+                    placeholder="Cantidad"
+                    step="0.0001"
+                    type="number"
+                    value={row.quantity}
+                  />
+                  <button aria-label="Quitar complemento" className="iconOnlyButton" onClick={() => setOrderComplements((rows) => rows.filter((_, i) => i !== index))} type="button">
+                    <Trash2 aria-hidden="true" size={15} />
                   </button>
-                </>
-              ) : null}
+                </div>
+              ))}
             </div>
 
             <button
@@ -1630,12 +1721,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            {renderProductRows(editPlanRows, setEditPlanRows, editPlanRun.allowed_product_type_ids ?? [])}
+            {renderProductRows(editPlanRows, setEditPlanRows, (index) => setItemPickerFor({ kind: "edit", index }))}
             <button
               className="button buttonPrimary"
               disabled={isSaving}
               onClick={() => void (async () => {
-                const rows = editPlanRows.filter((row) => row.productTypeId && Number(row.quantity) > 0);
+                const rows = editPlanRows.filter((row) => (row.targetItemId || row.productTypeId) && Number(row.quantity) > 0);
                 const total = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
                 if (total !== Number(editPlanRun.quantity)) {
                   setError(`El plan suma ${total} y la orden fabrica ${numericText(editPlanRun.quantity)}: deben coincidir.`);
@@ -1645,7 +1736,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 setSuccess(null);
                 setIsSaving(true);
                 try {
-                  await updateProductionRunProducts(editPlanRun.id, rows.map((row) => ({ product_type_id: row.productTypeId, quantity: row.quantity })));
+                  await updateProductionRunProducts(editPlanRun.id, rows.map((row) => productRowToPayload(row, row.quantity)));
                   setSuccess("Plan de productos actualizado.");
                   setEditPlanRun(null);
                   await reload();
@@ -1662,6 +1753,57 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </button>
           </section>
         </div>
+      ) : null}
+
+      {/* Picker de pieza terminada para una fila del plan de productos (Crear
+          orden o Editar productos). "Crear producto nuevo" pasa al picker de
+          tipo del catálogo, para productos que aún no tienen piezas. */}
+      {itemPickerFor ? (
+        <FinishedItemPicker
+          items={finishedItems}
+          onClose={() => setItemPickerFor(null)}
+          onCreate={() => {
+            setTypePickerFor(itemPickerFor);
+            setItemPickerFor(null);
+          }}
+          onSelect={(item) => {
+            const label = (item.description ?? "").trim() || item.name;
+            applyProductRow(itemPickerFor.kind, itemPickerFor.index, { targetItemId: item.id, label });
+            setItemPickerFor(null);
+          }}
+          requireStock={false}
+          title="Elegir producto"
+        />
+      ) : null}
+
+      {typePickerFor ? (
+        <CatalogProductPicker
+          allowedTypeIds={
+            typePickerFor.kind === "create"
+              ? selectedProcess?.product_type_ids ?? []
+              : editPlanRun?.allowed_product_type_ids ?? []
+          }
+          onClose={() => setTypePickerFor(null)}
+          onSelect={(type) => {
+            const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
+            applyProductRow(typePickerFor.kind, typePickerFor.index, { productTypeId: type.id, label });
+            setTypePickerFor(null);
+          }}
+          title="Elegir tipo de producto"
+        />
+      ) : null}
+
+      {isComplementPickerOpen ? (
+        <ComplementPicker
+          excludeIds={orderComplements.map((row) => row.itemId)}
+          items={complementItems}
+          onClose={() => setIsComplementPickerOpen(false)}
+          onSelect={(item) => {
+            setOrderComplements((rows) => [...rows, { itemId: item.id, label: item.name, quantity: "" }]);
+            setIsComplementPickerOpen(false);
+          }}
+          title="Solicitar complemento"
+        />
       ) : null}
 
       {isRunStagesOpen && selectedRunForStages ? (
@@ -1681,7 +1823,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </div>
               {selectedRunForStages.status !== "RECIBIDA" && selectedRunForStages.status !== "CANCELADA" ? (
                 <button className="iconTextButton" onClick={() => {
-                  setEditPlanRows((selectedRunForStages.products ?? []).map((p) => ({ productTypeId: p.product_type_id, quantity: p.quantity })));
+                  setEditPlanRows((selectedRunForStages.products ?? []).map((p) => ({
+                    targetItemId: p.target_item_id ?? undefined,
+                    productTypeId: p.product_type_id ?? undefined,
+                    label: p.product_name ?? "",
+                    quantity: p.quantity,
+                  })));
                   setEditPlanRun(selectedRunForStages);
                 }} type="button">
                   <Pencil aria-hidden="true" size={14} />
@@ -1952,7 +2099,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </div>
               {selectedStatsRun.status !== "RECIBIDA" && selectedStatsRun.status !== "CANCELADA" ? (
                 <button className="iconTextButton" onClick={() => {
-                  setEditPlanRows((selectedStatsRun.products ?? []).map((p) => ({ productTypeId: p.product_type_id, quantity: p.quantity })));
+                  setEditPlanRows((selectedStatsRun.products ?? []).map((p) => ({
+                    targetItemId: p.target_item_id ?? undefined,
+                    productTypeId: p.product_type_id ?? undefined,
+                    label: p.product_name ?? "",
+                    quantity: p.quantity,
+                  })));
                   setEditPlanRun(selectedStatsRun);
                 }} type="button">
                   <Pencil aria-hidden="true" size={14} />

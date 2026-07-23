@@ -122,7 +122,7 @@ export type ProductionRun = {
   // Plan de resultantes (split) declarado al crear la orden.
   products?: Array<{
     id: string;
-    product_type_id: string;
+    product_type_id?: string | null;
     product_name?: string | null;
     quantity: string;
     target_item_id?: string | null;
