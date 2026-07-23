@@ -41,6 +41,12 @@ export type ProductionProcess = {
   product_type_ids?: string[];
 };
 
+// Receta de ensamble de un tipo de producto (cantidades por unidad).
+export type AssemblyRecipe = {
+  product_type_id: string | null;
+  items: Array<{ complement_item_id: string; name?: string | null; quantity_per_unit: string }>;
+};
+
 export type ProductionRunStage = {
   id: string;
   source_stage_id: string;

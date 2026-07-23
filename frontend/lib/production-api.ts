@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/api";
-import type { ProductionProcess, ProductionRun } from "@/types/production";
+import type { AssemblyRecipe, ProductionProcess, ProductionRun } from "@/types/production";
 
 export type CreateProductionProcessPayload = {
   name: string;
@@ -136,4 +136,25 @@ export function receiveProductionRunFinishedProduct(runId: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/receive-finished`, {
     method: "POST",
   });
+}
+
+export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: string }) {
+  const query = params.productTypeId
+    ? `product_type_id=${params.productTypeId}`
+    : `item_id=${params.itemId}`;
+  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes?${query}`);
+}
+
+export function upsertAssemblyRecipe(
+  productTypeId: string,
+  items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
+) {
+  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes/${productTypeId}`, {
+    method: "PUT",
+    body: JSON.stringify({ items }),
+  });
+}
+
+export function listAssemblyRecipeTypeIds() {
+  return apiRequest<string[]>("/api/production/assembly-recipes/types");
 }

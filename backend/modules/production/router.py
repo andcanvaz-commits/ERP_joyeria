@@ -233,6 +233,15 @@ def receive_finished_product(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.get("/assembly-recipes/types", response_model=list[UUID])
+def list_assembly_recipe_types(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> list[UUID]:
+    ensure_permission(current_user, "production.runs.read")
+    return service.list_assembly_recipe_type_ids()
+
+
 @router.get("/assembly-recipes", response_model=AssemblyRecipeRead)
 def get_assembly_recipe(
     product_type_id: UUID | None = None,

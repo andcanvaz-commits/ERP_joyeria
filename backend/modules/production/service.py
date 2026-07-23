@@ -1120,6 +1120,17 @@ class ProductionService:
             recipe = AssemblyRecipe(product_type_id=product_type_id, items=new_items)
             self.repository.session.add(recipe)
 
+    def list_assembly_recipe_type_ids(self) -> list[UUID]:
+        """Tipos de producto que ya tienen receta de ensamble (para filtrar
+        los pickers de asignacion)."""
+        from sqlalchemy import select
+
+        return list(
+            self.repository.session.execute(
+                select(AssemblyRecipe.product_type_id)
+            ).scalars()
+        )
+
     def get_assembly_recipe(
         self, product_type_id: UUID | None, item_id: UUID | None
     ) -> AssemblyRecipeRead:
