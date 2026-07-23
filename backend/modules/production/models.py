@@ -326,9 +326,10 @@ class AssemblyRecipe(Base):
     __tablename__ = "assembly_recipes"
 
     id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    # Clave de modelo: categoria(2)+modelo(4) del codigo de pieza, sin el
-    # digito de material — oro y plata comparten receta.
-    model_key: Mapped[str] = mapped_column(String(6), nullable=False, unique=True)
+    # Clave de modelo: material(1)+categoria(2)+modelo(4), el codigo de
+    # catalogo completo de 7 digitos — la receta NO se comparte entre
+    # materiales (oro y plata tienen recetas distintas).
+    model_key: Mapped[str] = mapped_column(String(7), nullable=False, unique=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     items: Mapped[list["AssemblyRecipeItem"]] = relationship(

@@ -246,12 +246,13 @@ def list_assembly_recipe_model_keys(
 def get_assembly_recipe(
     product_type_id: UUID | None = None,
     item_id: UUID | None = None,
+    material_item_id: UUID | None = None,
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
 ) -> AssemblyRecipeRead:
     ensure_permission(current_user, "production.runs.read")
     try:
-        return service.get_assembly_recipe(product_type_id, item_id)
+        return service.get_assembly_recipe(product_type_id, item_id, material_item_id)
     except ProductionDomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

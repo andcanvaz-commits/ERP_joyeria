@@ -26,6 +26,8 @@ import {
   updateUser,
 } from "@/lib/auth-api";
 import { listComplementTypes, listInventoryItems } from "@/lib/inventory-api";
+import { listCatalogSegments, type CatalogSegment } from "@/lib/catalog-api";
+import { materialCodeForItem } from "@/lib/material-match";
 import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
@@ -193,6 +195,7 @@ const EMPTY_USERS: ManagedUser[] = [];
 const EMPTY_RUNS: ProductionRun[] = [];
 const EMPTY_RAW_MATERIALS: InventoryItem[] = [];
 const EMPTY_RECIPE_MODEL_KEYS: string[] = [];
+const EMPTY_CATALOG_SEGMENTS: CatalogSegment[] = [];
 
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
   const queryClient = useQueryClient();
@@ -256,6 +259,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const { data: recipeModelKeys = EMPTY_RECIPE_MODEL_KEYS } = useQuery({
     queryKey: ["assembly-recipe-model-keys"],
     queryFn: listAssemblyRecipeModelKeys,
+    enabled: Boolean(currentUser) && variant === "production",
+  });
+  // Segmentos del catálogo (para resolver el código de material de la
+  // materia prima elegida): la clave de receta ahora incluye el material.
+  const { data: catalogSegments = EMPTY_CATALOG_SEGMENTS } = useQuery({
+    queryKey: ["catalog-segments"],
+    queryFn: listCatalogSegments,
     enabled: Boolean(currentUser) && variant === "production",
   });
 
@@ -395,6 +405,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedProcessId((current) => current || processes.find((process) => process.is_active)?.id || "");
   }, [processes]);
 
+  // Cambiar el material con un producto ya elegido en ENSAMBLAR: la clave de
+  // receta depende del material, así que hay que volver a resolverla.
+  useEffect(() => {
+    if (assemblyMode === "ENSAMBLAR" && orderProduct) {
+      void loadOrderRecipeForChoice(orderProduct);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMaterialId]);
+
   useEffect(() => {
     if (!error && !success) return;
     const timeout = window.setTimeout(() => {
@@ -415,6 +434,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
   const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
+  // Código de material (1 dígito) de la materia prima elegida: la clave de
+  // receta ahora es material+categoria+modelo. Sin material elegido no se
+  // puede saber qué piezas/tipos ya tienen receta, así que no se excluye
+  // nada (mejor mostrar de más que ocultar sin poder saberlo).
+  const orderMaterialCode = materialCodeForItem(selectedMaterial, catalogSegments);
 
   useEffect(() => {
     // Al cambiar de proceso se sugiere su primer material configurado, pero se
@@ -1242,26 +1266,36 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     );
   }
 
-  // Clave de modelo de una pieza terminada: categoría(2)+modelo(4) de su
-  // código de 7 dígitos, sin el dígito de material (oro y plata comparten
-  // receta). undefined si la pieza no tiene código de catálogo de 7 dígitos.
+  // Parte de modelo de una pieza terminada: categoría(2)+modelo(4) de su
+  // código de 7 dígitos, SIN el dígito de material. Esto es solo la mitad de
+  // la clave de receta: hay que anteponerle el código de material de la
+  // orden (orderMaterialCode) para tener la clave completa de 7 dígitos.
+  // undefined si la pieza no tiene código de catálogo de 7 dígitos.
   function pieceModelKey(item: InventoryItem): string | undefined {
     const code = item.product_code;
     if (!code || code.length !== 7) return undefined;
     return code.slice(1);
   }
 
-  // Tras elegir producto en modo ENSAMBLAR: consulta su receta. Sin receta y
-  // con tipo resoluble, abre la modal para crearla; sin tipo resoluble, no se
-  // puede ensamblar y se limpia la selección.
+  // Tras elegir producto en modo ENSAMBLAR: consulta su receta. La clave de
+  // receta ahora incluye el material de la orden, así que sin material
+  // elegido no se puede resolver: se avisa y se limpia la selección. Sin
+  // receta y con tipo resoluble, abre la modal para crearla; sin tipo
+  // resoluble, no se puede ensamblar y se limpia la selección.
   async function loadOrderRecipeForChoice(choice: ProductChoice) {
     setError(null);
+    if (!selectedMaterialId) {
+      setError("Elige primero el material.");
+      setOrderProduct(null);
+      setOrderRecipe(null);
+      return;
+    }
     const key = choice.targetItemId ?? choice.productTypeId ?? "";
     const seq = ++recipeLookupSeq.current;
     try {
       const recipe = choice.targetItemId
-        ? await getAssemblyRecipe({ itemId: choice.targetItemId })
-        : await getAssemblyRecipe({ productTypeId: choice.productTypeId });
+        ? await getAssemblyRecipe({ itemId: choice.targetItemId, materialItemId: selectedMaterialId })
+        : await getAssemblyRecipe({ productTypeId: choice.productTypeId, materialItemId: selectedMaterialId });
 
       if (seq !== recipeLookupSeq.current) return;
 
@@ -2026,8 +2060,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           items={
             itemPickerFor === "create" && assemblyMode === "ASIGNAR"
               ? finishedItems.filter((item) => {
-                  const modelKey = pieceModelKey(item);
-                  return !modelKey || !recipeModelKeys.includes(modelKey);
+                  if (!orderMaterialCode) return true;
+                  const modelPart = pieceModelKey(item);
+                  return !modelPart || !recipeModelKeys.includes(`${orderMaterialCode}${modelPart}`);
                 })
               : finishedItems
           }
@@ -2050,9 +2085,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         <CatalogProductPicker
           allowedTypeIds={allowedTypeIdsForPicker(typePickerFor)}
           excludeTypeIds={
-            assemblyMode === "ASIGNAR" && typePickerFor === "create"
+            assemblyMode === "ASIGNAR" && typePickerFor === "create" && orderMaterialCode
               ? productTypesList
-                  .filter((type) => recipeModelKeys.includes(`${type.category_code}${type.model_code}`))
+                  .filter((type) => recipeModelKeys.includes(`${orderMaterialCode}${type.category_code}${type.model_code}`))
                   .map((type) => type.id)
               : undefined
           }

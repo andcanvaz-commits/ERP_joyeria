@@ -11,6 +11,7 @@ import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
+import { matchMaterialSegment as matchMaterialSegmentShared } from "@/lib/material-match";
 import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
@@ -1021,19 +1022,12 @@ export function InventoryDashboard() {
   }
 
   // Empata el texto de material de una pieza con el segmento del catálogo
-  // (para armar el código de producto). Exacto primero; si no, el segmento
-  // cuya etiqueta esté contenida en el texto (ej. "ORO 18K" → ORO), tomando
-  // la etiqueta más larga que calce.
+  // (para armar el código de producto). Lógica compartida con producción
+  // (lib/material-match.ts): exacto primero; si no, el segmento cuya
+  // etiqueta esté contenida en el texto (ej. "ORO 18K" → ORO), tomando la
+  // etiqueta más larga que calce.
   function matchMaterialSegment(text: string | null | undefined) {
-    if (!text) return null;
-    const clean = text.trim().toUpperCase();
-    const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
-    const exact = materialSegments.find((segment) => segment.label.trim().toUpperCase() === clean);
-    if (exact) return exact;
-    const partial = materialSegments
-      .filter((segment) => clean.includes(segment.label.trim().toUpperCase()))
-      .sort((a, b) => b.label.length - a.label.length);
-    return partial[0] ?? null;
+    return matchMaterialSegmentShared(text, catalogSegments);
   }
 
   // REGLA ÚNICA: el material y la pureza del ensamble son los de la pieza

@@ -138,11 +138,12 @@ export function receiveProductionRunFinishedProduct(runId: string) {
   });
 }
 
-export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: string }) {
+export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: string; materialItemId?: string }) {
   const query = params.productTypeId
     ? `product_type_id=${params.productTypeId}`
     : `item_id=${params.itemId}`;
-  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes?${query}`);
+  const materialParam = params.materialItemId ? `&material_item_id=${params.materialItemId}` : "";
+  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes?${query}${materialParam}`);
 }
 
 export function upsertAssemblyRecipe(

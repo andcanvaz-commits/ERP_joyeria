@@ -950,11 +950,11 @@ class ProductionService:
             )
         )
 
-    def _model_key_for_piece(self, item_id: UUID) -> str | None:
-        """Clave de modelo (categoria+modelo, 6 digitos) de una pieza de
-        inventario: los primeros 6 digitos del codigo de catalogo tras el
-        digito de material. None si la pieza no tiene codigo de catalogo o no
-        es producto terminado."""
+    def _model_part_for_piece(self, item_id: UUID) -> str | None:
+        """Parte de modelo (categoria+modelo, 6 digitos, SIN el material) de
+        una pieza de inventario: los ultimos 6 digitos de su codigo de
+        catalogo. None si la pieza no tiene codigo de catalogo o no es
+        producto terminado."""
         from backend.modules.inventory.models import InventoryItem
 
         item = self.repository.session.get(InventoryItem, item_id)
@@ -967,25 +967,65 @@ class ProductionService:
             return None
         return item.product_code[1:]
 
+    def _material_code_for_item(self, item_id: UUID | None) -> str | None:
+        """Codigo de material (1 digito) de la materia prima de la orden,
+        empatando su texto de material contra el catalogo. NO crea el
+        segmento si no existe: esto es una consulta (GET), y un GET no debe
+        escribir en el catalogo (a diferencia de la conversion de recepcion,
+        que sí puede crear un material nuevo)."""
+        if item_id is None:
+            return None
+        from sqlalchemy import select
+        from backend.modules.catalog.models import CatalogSegment
+        from backend.modules.inventory.models import InventoryItem
+
+        item = self.repository.session.get(InventoryItem, item_id)
+        if item is None:
+            return None
+        text = (item.material_type or item.name or "").strip()
+        if not text:
+            return None
+        clean = text.upper()
+
+        segments = self.repository.session.execute(
+            select(CatalogSegment).where(
+                CatalogSegment.kind == "MATERIAL",
+                CatalogSegment.is_active.is_(True),
+            )
+        ).scalars().all()
+        exact = next((s for s in segments if s.label.strip().upper() == clean), None)
+        if exact is not None:
+            return exact.code
+        partial = sorted(
+            (s for s in segments if s.label.strip().upper() in clean),
+            key=lambda s: -len(s.label),
+        )
+        return partial[0].code if partial else None
+
     def _model_key_for_run(self, run: ProductionRun) -> str | None:
-        """En modo ENSAMBLAR el plan tiene una sola fila: si trae una pieza
-        destino, se usa su clave de modelo; si trae un tipo de producto del
-        catálogo, se arma la clave con categoria+modelo del tipo (si son 6
-        digitos en total)."""
+        """En modo ENSAMBLAR el plan tiene una sola fila: la clave completa es
+        el material de la orden (raw_material_item_id) + la parte de modelo
+        de la pieza destino, o de categoria+modelo si trae un tipo del
+        catálogo. Requiere ambas partes; si alguna falta, no hay clave."""
+        material_code = self._material_code_for_item(run.raw_material_item_id)
+        if material_code is None:
+            return None
         product = next(iter(run.products), None)
         if product is None:
             return None
         if product.target_item_id is not None:
-            return self._model_key_for_piece(product.target_item_id)
-        if product.product_type_id is None:
-            return None
-        from backend.modules.product_types.models import ProductType
+            part = self._model_part_for_piece(product.target_item_id)
+        elif product.product_type_id is not None:
+            from backend.modules.product_types.models import ProductType
 
-        product_type = self.repository.session.get(ProductType, product.product_type_id)
-        if product_type is None:
-            return None
-        key = f"{product_type.category_code}{product_type.model_code}"
-        return key if len(key) == 6 else None
+            product_type = self.repository.session.get(ProductType, product.product_type_id)
+            part = None
+            if product_type is not None:
+                candidate = f"{product_type.category_code}{product_type.model_code}"
+                part = candidate if len(candidate) == 6 else None
+        else:
+            part = None
+        return f"{material_code}{part}" if part else None
 
     def _approved_complement_totals(self, run: ProductionRun) -> dict:
         """Suma por item de los complementos APROBADOS de la orden (lo que
@@ -1136,28 +1176,35 @@ class ProductionService:
         )
 
     def get_assembly_recipe(
-        self, product_type_id: UUID | None, item_id: UUID | None
+        self,
+        product_type_id: UUID | None,
+        item_id: UUID | None,
+        material_item_id: UUID | None = None,
     ) -> AssemblyRecipeRead:
         """Consulta la receta de ensamble aprendida para la clave de modelo de
-        un tipo de producto, o para la pieza indicada (se resuelve su clave
-        primero)."""
+        un tipo de producto, o para la pieza indicada (se resuelve su parte
+        de modelo primero). La clave completa exige ademas la materia prima
+        de la orden (material_item_id): sin ella no se puede saber a que
+        material corresponde la receta, asi que se devuelve vacia (el flujo
+        de creacion de orden siempre la envia)."""
         if (product_type_id is None) == (item_id is None):
             raise ProductionDomainError(
                 "Indica el tipo de producto o la pieza (uno de los dos)."
             )
         if item_id is not None:
-            model_key = self._model_key_for_piece(item_id)
+            part = self._model_part_for_piece(item_id)
         else:
             from backend.modules.product_types.models import ProductType
 
             product_type = self.repository.session.get(ProductType, product_type_id)
-            model_key = None
+            part = None
             if product_type is not None:
                 key = f"{product_type.category_code}{product_type.model_code}"
-                model_key = key if len(key) == 6 else None
-        if model_key is None:
+                part = key if len(key) == 6 else None
+        material_code = self._material_code_for_item(material_item_id)
+        if part is None or material_code is None:
             return AssemblyRecipeRead(model_key=None, items=[])
-        return self._recipe_read_for_key(model_key)
+        return self._recipe_read_for_key(f"{material_code}{part}")
 
     def upsert_assembly_recipe(
         self, model_key: str, payload: AssemblyRecipeUpsert, current_user: CurrentUser
@@ -1167,7 +1214,7 @@ class ProductionService:
         from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
 
-        if len(model_key) != 6 or not model_key.isdigit():
+        if len(model_key) != 7 or not model_key.isdigit():
             raise ProductionDomainError("Clave de modelo inválida.")
 
         item_ids = [line.complement_item_id for line in payload.items]
