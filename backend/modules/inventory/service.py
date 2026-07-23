@@ -121,7 +121,15 @@ class InventoryService(InventoryIntegrationPort):
         # edición existentes no envían el campo y no deben vaciarlo.
         if "weight_per_unit" in payload.model_fields_set:
             item.weight_per_unit = payload.weight_per_unit
-        item.complement_type_id = self._resolve_complement_type_id(payload.item_type, payload.complement_type_id)
+        # Igual que weight_per_unit: solo tocar complement_type_id si el
+        # cliente lo mandó explícitamente, salvo que el item deje de ser
+        # COMPLEMENT (en cuyo caso siempre se limpia).
+        if payload.item_type != "COMPLEMENT":
+            item.complement_type_id = None
+        elif "complement_type_id" in payload.model_fields_set:
+            item.complement_type_id = self._resolve_complement_type_id(
+                payload.item_type, payload.complement_type_id
+            )
         self.repository.flush()
         return InventoryItemRead.model_validate(item)
 

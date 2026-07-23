@@ -434,6 +434,15 @@ class ProductionService:
             process, payload.quantity, payload.products, payload.assembly_mode
         )
 
+        if payload.assembly_mode == AssemblyMode.ASSEMBLE and not payload.complements:
+            raise ProductionDomainError(
+                "Una orden de ensamble necesita al menos un complemento solicitado."
+            )
+
+        complement_item_ids = [complement.item_id for complement in payload.complements]
+        if len(complement_item_ids) != len(set(complement_item_ids)):
+            raise ProductionDomainError("No repitas el mismo complemento en la solicitud.")
+
         # Complementos: items de la pestaña Complementos del inventario.
         from backend.modules.inventory.models import InventoryItem
 

@@ -892,6 +892,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         return;
       }
       productsPayload = [productRowToPayload(row, runQuantity)];
+      const assembleComplements = orderComplements.filter((row) => row.itemId && Number(row.quantity) > 0);
+      if (assembleComplements.length === 0) {
+        setError("Solicita al menos un complemento para ensamblar.");
+        return;
+      }
     } else {
       const rows = orderProducts.filter((row) => (row.targetItemId || row.productTypeId) && Number(row.quantity) > 0);
       if (rows.length === 0) {
@@ -1822,7 +1827,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         });
         const canSubmitAssembly = hasValidLine && !hasExcess;
         return (
-          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Definir ensamble">
+          <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir ensamble">
             <section className="modalWindow processViewWindow">
               <div className="modalHeader">
                 <div>
