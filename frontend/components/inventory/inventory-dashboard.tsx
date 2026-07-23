@@ -46,6 +46,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
   { value: "SUPPLY", label: "Insumos" },
+  { value: "COMPLEMENT", label: "Complementos" },
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
   { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Productos terminados" },
@@ -660,6 +661,14 @@ export function InventoryDashboard() {
         .reduce((total, item) => total + itemTotalValue(item), 0),
     [items],
   );
+  // Mismo total para la pestaña de complementos.
+  const complementsValue = useMemo(
+    () =>
+      items
+        .filter((item) => item.item_type === "COMPLEMENT")
+        .reduce((total, item) => total + itemTotalValue(item), 0),
+    [items],
+  );
   // Kardex del item abierto: sus movimientos con saldo corrido (mas reciente
   // primero). El saldo se calcula en orden cronologico ascendente.
   const viewingItemKardex = useMemo(() => {
@@ -695,9 +704,12 @@ export function InventoryDashboard() {
   const canSeeMovementAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const editingItem = editingItemId ? items.find((item) => item.id === editingItemId) ?? null : null;
   const isEditingXmlItem = editingItem ? isXmlInvoiceItem(editingItem) : false;
-  // Salidas: productos terminados. Entradas: materia prima e insumos.
+  // Insumos y complementos comparten el mismo formulario simple: nombre y
+  // unidad, sin material ni pureza.
+  const isSimpleItem = itemForm.item_type === "SUPPLY" || itemForm.item_type === "COMPLEMENT";
+  // Salidas: productos terminados. Entradas: materia prima, insumos y complementos.
   const movementItemTypes: InventoryItemType[] =
-    movementForm.movement_type === "SALIDA" ? ["FINISHED_PRODUCT"] : ["RAW_MATERIAL", "SUPPLY"];
+    movementForm.movement_type === "SALIDA" ? ["FINISHED_PRODUCT"] : ["RAW_MATERIAL", "SUPPLY", "COMPLEMENT"];
   const movementItems = useMemo(
     () => items.filter((item) => !item.archived_at && movementItemTypes.includes(item.item_type)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1302,8 +1314,8 @@ export function InventoryDashboard() {
   }
 
   function openManualEntry() {
-    // Preselecciona un item del tipo de la pestaña activa (materia prima o insumo).
-    const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
+    // Preselecciona un item del tipo de la pestaña activa (materia prima, insumo o complemento).
+    const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
     const firstItem = items.find((item) => item.item_type === entryType);
     setMovementForm({ ...emptyMovementForm(), item_id: firstItem?.id || "", movement_type: "ENTRADA" });
     setIsMovementFormOpen(true);
@@ -1401,22 +1413,27 @@ export function InventoryDashboard() {
     setIsSaving(true);
     setError(null);
     try {
-      const isSupply = itemForm.item_type === "SUPPLY";
       const materialType = itemForm.material_type?.trim() || "";
       if (!isEditingXmlItem && !materialType) {
-        setError(isSupply ? "Escribe el nombre del insumo." : "Escribe el tipo de materia prima.");
+        setError(
+          itemForm.item_type === "SUPPLY"
+            ? "Escribe el nombre del insumo."
+            : itemForm.item_type === "COMPLEMENT"
+              ? "Escribe el nombre del complemento."
+              : "Escribe el tipo de materia prima.",
+        );
         setIsSaving(false);
         return;
       }
       const payload = {
         ...itemForm,
         // Para materia prima el nombre ES el tipo (ya no hay campo Nombre aparte);
-        // para insumos el campo es directamente el nombre.
+        // para insumos y complementos el campo es directamente el nombre.
         name: isEditingXmlItem ? itemForm.name : materialType,
         description: isEditingXmlItem ? editingItem?.description ?? null : itemForm.description?.trim() || null,
         unit_code: isEditingXmlItem ? editingItem?.unit_code ?? itemForm.unit_code : itemForm.unit_code,
-        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : isSupply ? null : materialType,
-        purity: isEditingXmlItem ? editingItem?.purity ?? null : isSupply ? null : itemForm.purity?.trim() || null,
+        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : isSimpleItem ? null : materialType,
+        purity: isEditingXmlItem ? editingItem?.purity ?? null : isSimpleItem ? null : itemForm.purity?.trim() || null,
       };
       if (editingItemId) {
         await updateInventoryItem(editingItemId, payload);
@@ -1650,11 +1667,13 @@ export function InventoryDashboard() {
                   ? "Ingresos manuales y facturas XML de materia prima"
                   : itemFilter === "SUPPLY"
                     ? "Quimicos y materiales auxiliares de fabricacion"
-                    : itemFilter === "FINISHED_PRODUCT"
-                      ? "Salidas comerciales de productos terminados"
-                      : itemFilter === "ORDENES_TERMINADAS"
-                        ? "Ordenes de produccion recibidas en inventario"
-                        : "Seguimiento de productos en proceso"}
+                    : itemFilter === "COMPLEMENT"
+                      ? "Empaques y accesorios para ensamble de produccion"
+                      : itemFilter === "FINISHED_PRODUCT"
+                        ? "Salidas comerciales de productos terminados"
+                        : itemFilter === "ORDENES_TERMINADAS"
+                          ? "Ordenes de produccion recibidas en inventario"
+                          : "Seguimiento de productos en proceso"}
               </p>
             </div>
             <div className="rowActions">
@@ -1714,7 +1733,14 @@ export function InventoryDashboard() {
                   ) : null}
                 </div>
               ) : null}
-              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY" || itemFilter === "FINISHED_PRODUCT") &&
+              {itemFilter === "COMPLEMENT" ? (
+                // Complementos entra solo por registro manual: sin factura XML.
+                <button className="button" onClick={openManualEntry} type="button">
+                  <Plus aria-hidden="true" size={17} />
+                  Entrada
+                </button>
+              ) : null}
+              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY" || itemFilter === "COMPLEMENT" || itemFilter === "FINISHED_PRODUCT") &&
               archivedItems.length > 0 ? (
                 <button className="button" onClick={() => setIsArchivedOpen(true)} type="button">
                   <Inbox aria-hidden="true" size={17} />
@@ -2024,6 +2050,76 @@ export function InventoryDashboard() {
                     <tr className="totalRow">
                       <td colSpan={6}>Valor total de insumos</td>
                       <td className="num">$ {moneyText(suppliesValue)}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
+              </table>
+              <Pager {...rawItemsPager} />
+            </div>
+          ) : itemFilter === "COMPLEMENT" ? (
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th className="num" style={{ width: 40 }}>#</th>
+                    <th>Complemento</th>
+                    <th>Descripción</th>
+                    <th className="num">Stock</th>
+                    <th>Estado</th>
+                    <th className="num">Costo promedio</th>
+                    <th className="num">Valor total</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawItemsPager.pageItems.map((item, index) => {
+                    const averageCost = item.average_cost ?? "0";
+                    const totalValue = Number(item.current_stock) * Number(averageCost);
+                    const status = stockStatus(item);
+                    const suggestion = archiveSuggestion(item);
+                    return (
+                      <tr key={item.id}>
+                        <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
+                        <td>{item.name}</td>
+                        <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
+                        <td className="num">{itemStockText(item)}</td>
+                        <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
+                        <td className="num">$ {numericText(averageCost)}</td>
+                        <td className="num">$ {numericText(String(totalValue))}</td>
+                        <td>
+                          <div className="rowActions">
+                            {canArchive(item) ? (
+                              <button
+                                aria-label="Archivar item agotado"
+                                className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
+                                onClick={() => void handleArchiveItem(item)}
+                                title={suggestion ?? "Archivar item agotado"}
+                                type="button"
+                              >
+                                <Inbox aria-hidden="true" size={15} />
+                              </button>
+                            ) : null}
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
+                              <Eye aria-hidden="true" size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!isLoading && displayItems.length === 0 ? (
+                    <tr><td colSpan={8}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  ) : null}
+                </tbody>
+                {!isLoading && displayItems.length > 0 ? (
+                  <tfoot>
+                    <tr className="totalRow">
+                      <td colSpan={6}>Valor total de complementos</td>
+                      <td className="num">$ {moneyText(complementsValue)}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -2583,7 +2679,15 @@ export function InventoryDashboard() {
           <form className="modalWindow processFormWindow" onSubmit={handleSaveItem}>
             <div className="modalHeader">
               <div>
-                <h2>{editingItemId ? "Editar item" : itemForm.item_type === "SUPPLY" ? "Crear insumo" : "Crear item"}</h2>
+                <h2>
+                  {editingItemId
+                    ? "Editar item"
+                    : itemForm.item_type === "SUPPLY"
+                      ? "Crear insumo"
+                      : itemForm.item_type === "COMPLEMENT"
+                        ? "Crear complemento"
+                        : "Crear item"}
+                </h2>
                 <p>Mantenimiento de inventario</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsItemFormOpen(false)} type="button">
@@ -2597,11 +2701,11 @@ export function InventoryDashboard() {
               </label>
             ) : (
               <label className="fieldGroup">
-                <span>{itemForm.item_type === "SUPPLY" ? "Nombre" : "Tipo"}</span>
+                <span>{isSimpleItem ? "Nombre" : "Tipo"}</span>
                 <input
                   className="field"
                   onChange={(event) => setItemForm((current) => ({ ...current, material_type: event.target.value }))}
-                  placeholder={itemForm.item_type === "SUPPLY" ? "Ej. Bórax, Ácido para baño" : "Ej. Oro, Plata"}
+                  placeholder={isSimpleItem ? "Ej. Bórax, Ácido para baño" : "Ej. Oro, Plata"}
                   value={itemForm.material_type ?? ""}
                 />
               </label>
@@ -2616,7 +2720,7 @@ export function InventoryDashboard() {
                 </select>
               </label>
             ) : null}
-            {!isEditingXmlItem && itemForm.item_type !== "SUPPLY" ? (
+            {!isEditingXmlItem && !isSimpleItem ? (
               <label className="fieldGroup">
                 <span>Ley / pureza</span>
                 <input
