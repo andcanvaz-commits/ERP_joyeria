@@ -323,7 +323,6 @@ export function InventoryDashboard() {
   // Grupos de productos terminados expandidos (por nombre de categoria).
   // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
   const [drillGroup, setDrillGroup] = useState<string | null>(null);
-  const [drillModel, setDrillModel] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -365,17 +364,18 @@ export function InventoryDashboard() {
   const [rejectionInfoRun, setRejectionInfoRun] = useState<ProductionRun | null>(null);
   // Ensamble de piezas de productos terminados en un producto nuevo.
   const [isCombineOpen, setIsCombineOpen] = useState(false);
-  // Piezas elegidas por ventana de catálogo; una sola cantidad aplica a todas
-  // y es también la cantidad de productos resultantes.
+  // Piezas elegidas por ventana de catálogo; cantidad individual por pieza
+  // POR ENSAMBLE (default 1) y número de ensambles iguales a producir.
   const [combineForm, setCombineForm] = useState({
-    sources: [] as { itemId: string }[],
+    sources: [] as { itemId: string; quantity: string }[],
     material_code: "",
     material_type: "",
+    purity: "",
     // Destino: pieza existente (target_item_id) o tipo del catálogo
     // (product_type_id, ej. producto recién creado). Uno de los dos.
     product_type_id: "",
     target_item_id: "",
-    quantity: "",
+    assemblies: "1",
   });
   const [isCombining, setIsCombining] = useState(false);
   // Ventana para agregar una pieza al ensamble.
@@ -390,11 +390,12 @@ export function InventoryDashboard() {
   // del ensamble (cuando la pieza aún no existe en el inventario).
   const [creatingTargetFor, setCreatingTargetFor] = useState<"convert" | "combine" | null>(null);
   // Ventana "ver materiales" de una categoría: materiales, piezas y stock.
-  const [materialsInfo, setMaterialsInfo] = useState<{ groupName: string; modelCode: string } | null>(null);
   // Selector de la pieza de producto terminado con la que se combina el lote.
   const [isPartnerPickerOpen, setIsPartnerPickerOpen] = useState(false);
   // Edición del material de la pieza (lápiz junto al valor automático).
   const [materialEditFor, setMaterialEditFor] = useState<"convert" | "combine" | null>(null);
+  // Lápiz de pureza del ensamble (mismo patrón que el de material).
+  const [isPurityEditOpen, setIsPurityEditOpen] = useState(false);
   const [isKardexOpen, setIsKardexOpen] = useState(false);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
   const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
@@ -929,24 +930,42 @@ export function InventoryDashboard() {
     return partial[0] ?? null;
   }
 
-  // Material del ensamble derivado de las piezas: segmento del catálogo (1er
-  // carácter del código de producto de la primera pieza con código válido) y
-  // texto combinado de todos los materiales ("ORO 18K + PLATA 925"), editable.
-  function deriveCombineMaterial(sources: { itemId: string }[]) {
+  // Material y pureza del ensamble heredados de la pieza que aporta MÁS
+  // GRAMOS (regla del sistema). Empate con valores distintos → se combinan
+  // los textos ("a + b") y el usuario elige con el lápiz. Si el aporte de
+  // alguna pieza se desconoce (sin peso por unidad), se combinan los de
+  // todas. El backend aplica la misma regla como respaldo.
+  function deriveCombineMaterial(sources: { itemId: string; quantity?: string }[]) {
     const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
     const selected = sources
-      .map((line) => items.find((item) => item.id === line.itemId))
-      .filter((item): item is InventoryItem => Boolean(item));
+      .map((line) => ({ line, item: items.find((item) => item.id === line.itemId) }))
+      .filter((entry): entry is { line: { itemId: string; quantity?: string }; item: InventoryItem } =>
+        Boolean(entry.item),
+      );
+    // Gramos aportados por línea; null = desconocido.
+    const grams = selected.map(({ line, item }) => {
+      const wpu = Number(item.weight_per_unit ?? 0);
+      const qty = Number(line.quantity ?? "1");
+      return wpu > 0 && Number.isFinite(qty) && qty > 0 ? wpu * qty : null;
+    });
+    const allKnown = grams.length > 0 && grams.every((value) => value !== null);
+    const maxGrams = allKnown ? Math.max(...(grams as number[])) : null;
+    const top = allKnown ? selected.filter((_, index) => grams[index] === maxGrams) : selected;
     const labels: string[] = [];
-    for (const item of selected) {
+    const purities: string[] = [];
+    for (const { item } of top) {
       const code = item.product_code?.[0];
       const label = materialSegments.find((segment) => segment.code === code)?.label ?? item.material_type?.trim();
       if (label && !labels.includes(label)) labels.push(label);
+      const purity = (item.purity ?? "").trim();
+      if (purity && !purities.includes(purity)) purities.push(purity);
     }
-    const firstCode = selected
-      .map((item) => item.product_code?.[0])
+    // Segmento para el código: primero el de la pieza dominante; si no tiene,
+    // el de cualquier pieza con código válido.
+    const firstCode = [...top, ...selected]
+      .map(({ item }) => item.product_code?.[0])
       .find((code) => code && materialSegments.some((segment) => segment.code === code));
-    return { material_code: firstCode ?? "", material_type: labels.join(" + ") };
+    return { material_code: firstCode ?? "", material_type: labels.join(" + "), purity: purities.join(" + ") };
   }
 
   async function handleCombineProducts(event: FormEvent<HTMLFormElement>) {
@@ -955,14 +974,19 @@ export function InventoryDashboard() {
     setIsCombining(true);
     try {
       await combineProducts({
-        // La misma cantidad se descuenta de cada pieza y es la que se produce.
-        sources: combineForm.sources.map((line) => ({ item_id: line.itemId, quantity: combineForm.quantity })),
+        // Cantidad por pieza POR ENSAMBLE × número de ensambles = total que
+        // se descuenta de cada pieza; se producen `assemblies` resultantes.
+        sources: combineForm.sources.map((line) => ({
+          item_id: line.itemId,
+          quantity: String(Number(line.quantity) * Number(combineForm.assemblies)),
+        })),
         material_code: combineForm.material_code,
         material_type: combineForm.material_type.trim() || null,
         ...(combineForm.target_item_id
           ? { target_item_id: combineForm.target_item_id }
           : { product_type_id: combineForm.product_type_id }),
-        quantity: combineForm.quantity,
+        quantity: combineForm.assemblies,
+        purity: combineForm.purity.trim() || null,
       });
       setSuccess("Piezas ensambladas en producto terminado.");
       setIsCombineOpen(false);
@@ -1002,16 +1026,27 @@ export function InventoryDashboard() {
         modelLabels.set(`${segment.parent_code}${segment.code}`, segment.label);
       }
     }
+    const categoryLabel = (code: string) =>
+      catalogSegments.find((segment) => segment.kind === "CATEGORY" && segment.code === code)?.label ?? null;
     const materialLabel = (digit: string) =>
       catalogSegments.find((segment) => segment.kind === "MATERIAL" && segment.code === digit)?.label ?? "SIN MATERIAL";
+    // Nivel 1 por CATEGORÍA del código, no por nombre: productos distintos de
+    // la misma categoría (ej. TEST y TEST3) viven bajo el mismo tipo. Piezas
+    // sin código de producto agrupan por nombre.
     const map = new Map<string, InventoryItem[]>();
     for (const item of displayItems) {
-      const list = map.get(item.name);
+      const pcode = item.product_code ?? "";
+      const key = pcode.length === 7 ? `cat:${pcode.slice(1, 3)}` : `name:${item.name}`;
+      const list = map.get(key);
       if (list) list.push(item);
-      else map.set(item.name, [item]);
+      else map.set(key, [item]);
     }
-    const groups = [...map.entries()].map(([name, groupItems]) => {
+    const groups = [...map.entries()].map(([key, groupItems]) => {
       const sorted = [...groupItems].sort((a, b) => a.sku.localeCompare(b.sku));
+      const categoryCode = key.startsWith("cat:") ? key.slice(4) : "—";
+      const name = key.startsWith("cat:")
+        ? categoryLabel(categoryCode) ?? sorted[0]?.name ?? categoryCode
+        : sorted[0]?.name ?? "—";
       // Producto = categoria+modelo (código sin el dígito de material).
       const byModel = new Map<string, InventoryItem[]>();
       for (const item of sorted) {
@@ -1021,38 +1056,59 @@ export function InventoryDashboard() {
         if (list) list.push(item);
         else byModel.set(modelKey, [item]);
       }
+      const buildMaterials = (modelCode: string, modelItems: InventoryItem[]) => {
+        // Secciones por material dentro del producto.
+        const byMaterial = new Map<string, InventoryItem[]>();
+        for (const item of modelItems) {
+          const digit = (item.product_code ?? "").length === 7 ? (item.product_code as string)[0] : "";
+          const list = byMaterial.get(digit);
+          if (list) list.push(item);
+          else byMaterial.set(digit, [item]);
+        }
+        return [...byMaterial.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([digit, materialItems]) => ({
+            digit,
+            fullCode: digit && modelCode ? `${digit}${modelCode}` : "",
+            // Sin dígito de material: cae al texto del material de la pieza.
+            label: digit ? materialLabel(digit) : materialItems[0]?.material_type?.trim() || "SIN MATERIAL",
+            items: materialItems,
+            stock: materialItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+          }));
+      };
       const models = [...byModel.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([modelCode, modelItems]) => {
-          // Secciones por material dentro del producto.
-          const byMaterial = new Map<string, InventoryItem[]>();
-          for (const item of modelItems) {
-            const digit = (item.product_code ?? "").length === 7 ? (item.product_code as string)[0] : "";
-            const list = byMaterial.get(digit);
-            if (list) list.push(item);
-            else byMaterial.set(digit, [item]);
-          }
-          const materials = [...byMaterial.entries()]
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([digit, materialItems]) => ({
-              digit,
-              fullCode: digit && modelCode ? `${digit}${modelCode}` : "",
-              // Sin dígito de material: cae al texto del material de la pieza.
-              label: digit ? materialLabel(digit) : materialItems[0]?.material_type?.trim() || "SIN MATERIAL",
-              items: materialItems,
-              stock: materialItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
-            }));
-          return {
+        .flatMap(([modelCode, modelItems]) => {
+          // Tipos distintos pueden compartir código (TEST y TEST3, ambos
+          // x530001): si hay varios nombres en el mismo modelo, cada nombre
+          // es su propio producto en la lista.
+          const names = [...new Set(modelItems.map((item) => item.name))].sort((a, b) => a.localeCompare(b));
+          const buckets =
+            names.length > 1
+              ? names.map((pieceName) => ({
+                  key: `${modelCode}|${pieceName}`,
+                  label: pieceName,
+                  items: modelItems.filter((item) => item.name === pieceName),
+                }))
+              : [
+                  {
+                    key: modelCode,
+                    label: modelCode ? modelLabels.get(modelCode) ?? "SIN MODELO" : "SIN MODELO",
+                    items: modelItems,
+                  },
+                ];
+          return buckets.map((bucket) => ({
+            key: bucket.key,
             code: modelCode,
-            label: modelCode ? modelLabels.get(modelCode) ?? "SIN MODELO" : "SIN MODELO",
-            materials,
-            items: modelItems,
-            totalStock: modelItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
-          };
+            label: bucket.label,
+            materials: buildMaterials(modelCode, bucket.items),
+            items: bucket.items,
+            totalStock: bucket.items.reduce((acc, it) => acc + Number(it.current_stock), 0),
+          }));
         });
       return {
         name,
-        categoryCode: sorted[0]?.product_code?.slice(1, 3) ?? "—",
+        categoryCode,
         models,
         pieceCount: sorted.length,
         totalStock: sorted.reduce((acc, it) => acc + Number(it.current_stock), 0),
@@ -1064,7 +1120,6 @@ export function InventoryDashboard() {
   }, [displayItems, catalogSegments]);
   const searchActive = search.trim().length > 0;
   const drilledGroup = finishedGroups.find((g) => g.name === drillGroup) ?? null;
-  const drilledModel = drilledGroup?.models.find((m) => m.code === drillModel) ?? null;
 
   // Paginación de listados: reemplaza el scroll interno de los paneles.
   // Pestañas del panel principal: 10 por página (llenan el recuadro fijo).
@@ -1076,20 +1131,16 @@ export function InventoryDashboard() {
   const filterKey = `${itemFilter}|${search}|${stockFilter}|${typeText}|${descText}|${purityText}|${orderStatusFilter}|${dateFrom}|${dateTo}`;
   const rawItemsPager = usePagination(displayItems, TAB_PAGE_SIZE, filterKey);
   const finishedTypesPager = usePagination(finishedGroups, TAB_PAGE_SIZE, filterKey);
-  const finishedCatsPager = usePagination(drilledGroup?.models ?? [], TAB_PAGE_SIZE, drillGroup ?? "");
-  // Nivel piezas: listado plano (sin headers de material; para eso están
-  // los filtros y la ventana "Ver materiales").
+  // Nivel piezas (tipo → productos directo): listado plano de las piezas del
+  // tipo elegido, ordenado por código.
   const pieceRows = useMemo(() => {
     if (searchActive) {
       return displayItems.map((item) => ({ kind: "item" as const, item, material: null as null }));
     }
-    return (drilledModel?.items ?? []).map((item) => ({ kind: "item" as const, item, material: null as null }));
-  }, [searchActive, displayItems, drilledModel]);
-  const piecesPager = usePagination(
-    pieceRows,
-    TAB_PAGE_SIZE,
-    `${drillGroup ?? ""}|${drillModel ?? ""}|${search}`,
-  );
+    const items = (drilledGroup?.models ?? []).flatMap((model) => model.items);
+    return items.map((item) => ({ kind: "item" as const, item, material: null as null }));
+  }, [searchActive, displayItems, drilledGroup]);
+  const piecesPager = usePagination(pieceRows, TAB_PAGE_SIZE, `${drillGroup ?? ""}|${search}`);
   const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
   const wipRows = [
     ...inProcessRunsFiltered.map((run) => ({ kind: "run" as const, run, item: null })),
@@ -1596,9 +1647,10 @@ export function InventoryDashboard() {
                         sources: [],
                         material_code: "",
                         material_type: "",
+                        purity: "",
                         product_type_id: "",
                         target_item_id: "",
-                        quantity: "",
+                        assemblies: "1",
                       });
                       setIsCombineOpen(true);
                     }}
@@ -1896,37 +1948,25 @@ export function InventoryDashboard() {
             <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 10, minHeight: 0 }}>
               {drilledGroup ? (
                 <div className="drillBar">
-                  <button
-                    className="button"
-                    onClick={() => (drilledModel ? setDrillModel(null) : setDrillGroup(null))}
-                    type="button"
-                  >
+                  <button className="button" onClick={() => setDrillGroup(null)} type="button">
                     <ChevronLeft aria-hidden="true" size={15} /> Volver
                   </button>
                   <span className="drillCrumbs">
-                    <button onClick={() => { setDrillGroup(null); setDrillModel(null); }} type="button">Productos</button>
+                    <button onClick={() => setDrillGroup(null)} type="button">Productos</button>
                     <span className="drillCrumbSep">/</span>
-                    {drilledModel ? (
-                      <>
-                        <button onClick={() => setDrillModel(null)} type="button">{drilledGroup.name}</button>
-                        <span className="drillCrumbSep">/</span>
-                        <span>{drilledModel.label}</span>
-                      </>
-                    ) : (
-                      <span>{drilledGroup.name}</span>
-                    )}
+                    <span>{drilledGroup.name}</span>
                   </span>
                 </div>
               ) : null}
 
-              {searchActive || drilledModel ? (
+              {searchActive || drilledGroup ? (
                 // Nivel piezas (o búsqueda global): headers de pieza.
                 <div className="tableWrap">
                   <table className="table inventoryItemsTable tableAuto">
                     <thead>
                       <tr>
                         <th>Lote</th>
-                        <th>Descripción</th>
+                        <th>Producto</th>
                         <th>Metal principal</th>
                         <th>Ley/pureza</th>
                         <th className="num">Stock</th>
@@ -1940,7 +1980,7 @@ export function InventoryDashboard() {
                         return (
                           <tr key={item.id}>
                             <td>{item.sku}</td>
-                            <td>{item.description ?? "—"}</td>
+                            <td>{(item.description ?? "").trim() || item.name}</td>
                             <td>{item.material_type ?? "—"}</td>
                             <td>{item.purity ?? "—"}</td>
                             <td className="num">
@@ -1968,60 +2008,14 @@ export function InventoryDashboard() {
                   </table>
                   <Pager {...piecesPager} />
                 </div>
-              ) : drilledGroup ? (
-                // Nivel categorías del tipo elegido: headers de categoría.
-                <div className="tableWrap">
-                  <table className="table inventoryItemsTable tableAuto">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Categoría</th>
-                        <th>Materiales</th>
-                        <th className="num">Piezas</th>
-                        <th className="num">Stock</th>
-                        <th aria-label="Abrir" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {finishedCatsPager.pageItems.map((model) => (
-                        <tr key={model.code} onClick={() => setDrillModel(model.code)} style={{ cursor: "pointer" }}>
-                          <td><span className="orderCodeTag">#{model.code || "—"}</span></td>
-                          <td><strong>{model.label}</strong></td>
-                          <td>
-                            <button
-                              className="button"
-                              onClick={(event) => {
-                                // Ver materiales sin entrar a la categoría.
-                                event.stopPropagation();
-                                setMaterialsInfo({ groupName: drilledGroup.name, modelCode: model.code });
-                              }}
-                              type="button"
-                            >
-                              <Eye aria-hidden="true" size={14} />
-                              Ver materiales
-                            </button>
-                          </td>
-                          <td className="num">{model.items.length}</td>
-                          <td className="num">{numericText(String(model.totalStock))} {drilledGroup.unitCode}</td>
-                          <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
-                        </tr>
-                      ))}
-                      {drilledGroup.models.length === 0 ? (
-                        <tr><td colSpan={6}><div className="emptyState">Este tipo aún no tiene piezas en inventario.</div></td></tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                  <Pager {...finishedCatsPager} />
-                </div>
               ) : (
                 // Nivel tipos: headers de tipo.
                 <div className="tableWrap">
                   <table className="table inventoryItemsTable tableAuto">
                     <thead>
                       <tr>
-                        <th>#</th>
                         <th>Tipo</th>
-                        <th className="num">Categorías</th>
+                        <th className="num">Productos</th>
                         <th className="num">Stock</th>
                         <th aria-label="Abrir" />
                       </tr>
@@ -2029,7 +2023,6 @@ export function InventoryDashboard() {
                     <tbody>
                       {finishedTypesPager.pageItems.map((group) => (
                         <tr key={group.name} onClick={() => setDrillGroup(group.name)} style={{ cursor: "pointer" }}>
-                          <td><span className="orderCodeTag">#{group.categoryCode}</span></td>
                           <td><strong>{group.name}</strong></td>
                           <td className="num">{group.models.length}</td>
                           <td className="num">{numericText(String(group.totalStock))} {group.unitCode}</td>
@@ -2037,10 +2030,10 @@ export function InventoryDashboard() {
                         </tr>
                       ))}
                       {!isLoading && finishedGroups.length === 0 ? (
-                        <tr><td colSpan={5}><div className="emptyState">No hay productos terminados.</div></td></tr>
+                        <tr><td colSpan={4}><div className="emptyState">No hay productos terminados.</div></td></tr>
                       ) : null}
                       {isLoading ? (
-                        <tr><td colSpan={5}><div className="emptyState">Cargando inventario...</div></td></tr>
+                        <tr><td colSpan={4}><div className="emptyState">Cargando inventario...</div></td></tr>
                       ) : null}
                     </tbody>
                   </table>
@@ -2071,7 +2064,9 @@ export function InventoryDashboard() {
                     <tr key={run.id}>
                       <td>{run.production_code ?? "—"}</td>
                       <td>{run.process_name}</td>
-                      <td className="num">{numericText(run.quantity)} und</td>
+                      {/* Restante del lote en inventario, no lo producido: las
+                          conversiones a catálogo lo van descontando. */}
+                      <td className="num">{lotItem ? numericText(String(lotStock)) : numericText(run.quantity)} und</td>
                       <td className="num">{run.actual_finished_weight ? `${numericText(run.actual_finished_weight)} g` : "—"}</td>
                       <td className="num">
                         <button
@@ -2861,30 +2856,51 @@ export function InventoryDashboard() {
         const pieces = combineForm.sources
           .map((line) => combinable.find((candidate) => candidate.id === line.itemId))
           .filter((item): item is InventoryItem => Boolean(item));
-        // Una sola cantidad: se descuenta de CADA pieza y es la que se produce,
-        // así que todas las piezas deben tener stock suficiente para cubrirla.
-        // Piezas medidas en gramos con gramos/unidad: su disponible en
-        // unidades es stock ÷ gramos por unidad.
+        // Cantidad individual por pieza (default 1); cada pieza debe tener
+        // stock para cubrir la suya. Piezas medidas en gramos con gramos por
+        // unidad: su disponible en unidades es stock ÷ gramos por unidad.
         const availableUnits = (item: InventoryItem) => {
           const wpu = Number(item.weight_per_unit ?? 0);
           return item.unit_code === "g" && wpu > 0
             ? Math.floor(Number(item.current_stock) / wpu)
             : Number(item.current_stock);
         };
-        const quantityOut = Number(combineForm.quantity);
-        const quantityValid = Number.isFinite(quantityOut) && quantityOut > 0;
-        const shortPieces = quantityValid
-          ? pieces.filter((item) => quantityOut > availableUnits(item))
-          : [];
-        const maxQuantity = pieces.length
-          ? Math.min(...pieces.map((item) => availableUnits(item)))
-          : 0;
+        // El ensamble opera en unidades: piezas en gramos con peso por pieza
+        // se muestran como unidades y los gramos se calculan por detrás.
+        const stockLabel = (item: InventoryItem) => {
+          const wpu = Number(item.weight_per_unit ?? 0);
+          return item.unit_code === "g" && wpu > 0
+            ? `${numericText(String(availableUnits(item)))} und`
+            : `${numericText(item.current_stock)} ${item.unit_code}`;
+        };
+        const lineEntries = combineForm.sources.map((line) => ({
+          line,
+          item: combinable.find((candidate) => candidate.id === line.itemId) ?? null,
+        }));
+        const lineQuantityValid = (line: { quantity: string }) => {
+          const value = Number(line.quantity);
+          return Number.isFinite(value) && value > 0;
+        };
+        const linesValid = combineForm.sources.every(lineQuantityValid);
+        const assembliesOut = Number(combineForm.assemblies);
+        const assembliesValid = Number.isFinite(assembliesOut) && assembliesOut > 0;
+        // Consumo total por pieza = cantidad por ensamble × ensambles.
+        const shortPieces = lineEntries
+          .filter(
+            (entry) =>
+              entry.item &&
+              lineQuantityValid(entry.line) &&
+              assembliesValid &&
+              Number(entry.line.quantity) * assembliesOut > availableUnits(entry.item),
+          )
+          .map((entry) => entry.item as InventoryItem);
         const canSubmit =
           pieces.length >= 2 &&
           pieces.length === combineForm.sources.length &&
           Boolean(combineForm.material_code) &&
           Boolean(combineForm.target_item_id || combineForm.product_type_id) &&
-          quantityValid &&
+          linesValid &&
+          assembliesValid &&
           shortPieces.length === 0;
         return (
           <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Ensamblar producto">
@@ -2903,7 +2919,10 @@ export function InventoryDashboard() {
                 {combineForm.sources.map((line, index) => {
                   const lineItem = combinable.find((candidate) => candidate.id === line.itemId);
                   if (!lineItem) return null;
-                  const short = quantityValid && quantityOut > Number(lineItem.current_stock);
+                  const short =
+                    lineQuantityValid(line) &&
+                    assembliesValid &&
+                    Number(line.quantity) * assembliesOut > availableUnits(lineItem);
                   return (
                     <div key={line.itemId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       {lineItem.product_code ? (
@@ -2914,8 +2933,25 @@ export function InventoryDashboard() {
                       <span style={{ fontSize: 13, flex: 1 }}>
                         {(lineItem.description ?? "").trim() || lineItem.name}
                       </span>
+                      <input
+                        aria-label="Cantidad de esta pieza"
+                        className="field"
+                        min="1"
+                        onChange={(event) =>
+                          setCombineForm((current) => ({
+                            ...current,
+                            sources: current.sources.map((source, idx) =>
+                              idx === index ? { ...source, quantity: event.target.value } : source,
+                            ),
+                          }))
+                        }
+                        step="1"
+                        style={{ width: 72 }}
+                        type="number"
+                        value={line.quantity}
+                      />
                       <span style={{ fontSize: 13, color: short ? "var(--danger, #c0392b)" : "var(--muted)" }}>
-                        Stock: {numericText(lineItem.current_stock)} {lineItem.unit_code}
+                        Stock: {stockLabel(lineItem)}
                       </span>
                       <button
                         aria-label="Quitar pieza"
@@ -3038,16 +3074,75 @@ export function InventoryDashboard() {
                   </div>
                 );
               })()}
+              {(() => {
+                // Purezas de las piezas elegidas; la automática hereda la de
+                // la pieza con más gramos y el lápiz permite quedarse con una.
+                const piecePurities: string[] = [];
+                for (const item of pieces) {
+                  const clean = (item.purity ?? "").trim();
+                  if (clean && !piecePurities.includes(clean)) piecePurities.push(clean);
+                }
+                if (piecePurities.length === 0 && !combineForm.purity) return null;
+                return (
+                  <div className="fieldGroup">
+                    <span>Pureza de la pieza</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {isPurityEditOpen ? (
+                        <select
+                          autoFocus
+                          className="field"
+                          onChange={(event) => {
+                            if (event.target.value === "__combo__") {
+                              setCombineForm((current) => ({
+                                ...current,
+                                purity: deriveCombineMaterial(current.sources).purity,
+                              }));
+                            } else if (event.target.value) {
+                              setCombineForm((current) => ({ ...current, purity: event.target.value }));
+                            }
+                            setIsPurityEditOpen(false);
+                          }}
+                          style={{ maxWidth: 260 }}
+                          value={piecePurities.find((entry) => entry === combineForm.purity) ?? ""}
+                        >
+                          <option value="">Seleccionar pureza</option>
+                          {piecePurities.length > 1 ? (
+                            <option value="__combo__">Combinada: {piecePurities.join(" + ")}</option>
+                          ) : null}
+                          {piecePurities.map((entry) => (
+                            <option key={entry} value={entry}>{entry}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: 13, color: combineForm.purity ? undefined : "var(--muted)" }}>
+                          {combineForm.purity || "Sin pureza"}
+                        </span>
+                      )}
+                      {piecePurities.length > 1 ? (
+                        <button
+                          aria-label="Editar pureza"
+                          className="iconOnlyButton"
+                          onClick={() => setIsPurityEditOpen((current) => !current)}
+                          type="button"
+                        >
+                          <Pencil aria-hidden="true" size={14} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })()}
               <label className="fieldGroup">
-                <span>Cantidad a combinar{pieces.length ? ` (máx. ${numericText(String(maxQuantity))})` : ""}</span>
+                <span>Ensambles a producir</span>
                 <input
                   className="field"
-                  max={pieces.length ? maxQuantity : undefined}
                   min="1"
-                  onChange={(event) => setCombineForm((current) => ({ ...current, quantity: event.target.value }))}
+                  onChange={(event) =>
+                    setCombineForm((current) => ({ ...current, assemblies: event.target.value }))
+                  }
                   step="1"
                   type="number"
-                  value={combineForm.quantity}
+                  value={combineForm.assemblies}
                 />
               </label>
               {shortPieces.length > 0 ? (
@@ -3055,10 +3150,10 @@ export function InventoryDashboard() {
                   Stock insuficiente para esa cantidad en: {shortPieces.map((item) => (item.description ?? "").trim() || item.name).join(", ")}.
                 </p>
               ) : null}
-              {quantityValid && shortPieces.length === 0 && pieces.length >= 2 ? (
+              {linesValid && assembliesValid && shortPieces.length === 0 && pieces.length >= 2 ? (
                 <p className="panelText">
-                  Se descuentan {numericText(String(quantityOut))} de cada pieza y se crean{" "}
-                  <strong>{numericText(String(quantityOut))}</strong> productos resultantes.
+                  Por ensamble se descuenta la cantidad de cada pieza; se crean{" "}
+                  <strong>{numericText(String(assembliesOut))}</strong> producto(s) resultante(s).
                 </p>
               ) : null}
               {previewCode ? (
@@ -3105,7 +3200,6 @@ export function InventoryDashboard() {
           title="¿Qué producto resulta?"
           subtitle="Piezas del catálogo · elige el producto final del ensamble"
           items={items}
-          excludeIds={combineForm.sources.map((line) => line.itemId)}
           requireStock={false}
           onSelect={(piece) => {
             setCombineForm((current) => ({ ...current, target_item_id: piece.id, product_type_id: "" }));
@@ -3118,58 +3212,6 @@ export function InventoryDashboard() {
           onClose={() => setTargetPickerFor(null)}
         />
       ) : null}
-
-      {materialsInfo ? (() => {
-        const group = finishedGroups.find((candidate) => candidate.name === materialsInfo.groupName) ?? null;
-        const model = group?.models.find((candidate) => candidate.code === materialsInfo.modelCode) ?? null;
-        if (!group || !model) return null;
-        return (
-          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Materiales de la categoría">
-            <section className="modalWindow">
-              <div className="modalHeader">
-                <div>
-                  <h2>Materiales</h2>
-                  <p>{group.name} · {model.label}</p>
-                </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMaterialsInfo(null)} type="button">
-                  <X aria-hidden="true" size={18} />
-                </button>
-              </div>
-              <div className="tableWrap">
-                <table className="table tableAuto">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 110 }}>Código</th>
-                      <th>Material</th>
-                      <th className="num">Productos</th>
-                      <th className="num">Stock</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {model.materials.map((material) => {
-                      // Peso en gramos, no unidades: si la pieza se mide en
-                      // gramos su stock ya es peso; si no, usa su peso total.
-                      const grams = material.items.reduce(
-                        (acc, it) =>
-                          acc + (it.unit_code === "g" ? Number(it.current_stock) : Number(it.total_weight ?? 0)),
-                        0,
-                      );
-                      return (
-                        <tr key={material.digit || "none"}>
-                          <td><span className={`orderCodeTag${metalTagClass(material.fullCode)}`}>#{material.fullCode || "—"}</span></td>
-                          <td><strong>{material.label}</strong></td>
-                          <td className="num">{material.items.length}</td>
-                          <td className="num">{numericText(String(grams))} g</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </div>
-        );
-      })() : null}
 
       {creatingTargetFor ? (
         <ProductTypesManager
@@ -3196,14 +3238,17 @@ export function InventoryDashboard() {
             excludeIds={lotItem ? [lotItem.id] : []}
             onSelect={(partner) => {
               if (!lotItem) return;
-              // El ensamble arranca con el lote y la pieza elegida; cantidad
-              // y producto resultante se definen en el modal de ensamblar.
-              const sources = [{ itemId: lotItem.id }, { itemId: partner.id }];
+              // El ensamble arranca con el lote y la pieza elegida; cantidades
+              // por pieza y producto resultante se definen en el modal.
+              const sources = [
+                { itemId: lotItem.id, quantity: "1" },
+                { itemId: partner.id, quantity: "1" },
+              ];
               setCombineForm({
                 sources,
                 product_type_id: "",
                 target_item_id: "",
-                quantity: "",
+                assemblies: "1",
                 ...deriveCombineMaterial(sources),
               });
               setIsPartnerPickerOpen(false);
@@ -3224,7 +3269,7 @@ export function InventoryDashboard() {
           excludeIds={combineForm.sources.map((line) => line.itemId)}
           onSelect={(piece) => {
             setCombineForm((current) => {
-              const sources = [...current.sources, { itemId: piece.id }];
+              const sources = [...current.sources, { itemId: piece.id, quantity: "1" }];
               return { ...current, sources, ...deriveCombineMaterial(sources) };
             });
             setIsPiecePickerOpen(false);

@@ -46,6 +46,11 @@ class InventoryItemUpdate(BaseModel):
     elaboration_date: date | None = None
     unit_code: str = Field(min_length=1, max_length=20)
     minimum_stock: Decimal | None = Field(default=None, ge=0)
+    # PESO FINAL por pieza en gramos (real, con merma; nunca el planificado
+    # de materia prima). Para las piezas pre-sistema se cargará desde el
+    # Excel de la empresa. Solo se toca si viene en el payload: los
+    # formularios que no lo envían no lo borran.
+    weight_per_unit: Decimal | None = Field(default=None, gt=0)
 
 
 class InventoryItemRead(BaseModel):
@@ -61,7 +66,8 @@ class InventoryItemRead(BaseModel):
     material_type: str | None = None
     purity: str | None = None
     total_weight: Decimal | None = None
-    # Gramos por unidad (solo piezas nacidas por conversión con el sistema).
+    # PESO FINAL por pieza en gramos: real de producción (merma incluida) en
+    # piezas nacidas por conversión, o el cargado del histórico de la empresa.
     weight_per_unit: Decimal | None = None
     elaboration_date: date | None = None
     unit_code: str
@@ -106,6 +112,8 @@ class ProductCombineCreate(BaseModel):
     # Texto libre del material del resultado (ej. "ORO 18K + PLATA 925"),
     # derivado de las piezas en el frontend pero editable por el usuario.
     material_type: str | None = Field(default=None, max_length=80)
+    # Pureza del resultado: derivada de la pieza con más gramos (editable).
+    purity: str | None = Field(default=None, max_length=40)
 
 
 class InventoryMovementCreate(BaseModel):

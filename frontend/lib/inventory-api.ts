@@ -102,6 +102,8 @@ export type CombineProductsPayload = {
   target_item_id?: string;
   quantity: string;
   material_type?: string | null;
+  // Pureza del resultado: derivada de la pieza con más gramos (editable).
+  purity?: string | null;
 };
 
 // Ensambla varias piezas de productos terminados en un producto nuevo del

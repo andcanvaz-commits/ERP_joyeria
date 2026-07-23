@@ -8,7 +8,9 @@ class ProductTypeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     category_code: str = Field(min_length=1, max_length=10)
-    model_code: str = Field(min_length=1, max_length=10)
+    # Opcional: sin él, el sistema asigna el siguiente código de modelo libre
+    # dentro del tipo y crea el segmento MODEL con el nombre del producto.
+    model_code: str | None = Field(default=None, min_length=1, max_length=10)
     name: str = Field(min_length=1, max_length=180)
     price: Decimal | None = Field(default=None, ge=0)
 

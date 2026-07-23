@@ -37,7 +37,6 @@ export function FinishedItemPicker({
 }) {
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const [drillType, setDrillType] = useState<string | null>(null);
-  const [drillCat, setDrillCat] = useState<string | null>(null);
 
   // Solo piezas del catálogo (código de 7 dígitos), sin las ya elegidas.
   const candidates = useMemo(
@@ -52,51 +51,33 @@ export function FinishedItemPicker({
     [items, excludeIds, requireStock],
   );
 
+  // Jerarquía plana tipo → piezas: el modelo (producto) es parte de la pieza.
   const typeGroups = useMemo(() => {
     const catLabel = (code: string) => segments.find((s) => s.kind === "CATEGORY" && s.code === code)?.label ?? code;
-    const modelLabel = (code: string, parent: string) =>
-      segments.find((s) => s.kind === "MODEL" && s.code === code && s.parent_code === parent)?.label ?? code;
-    const byType = new Map<string, Map<string, InventoryItem[]>>();
+    const byType = new Map<string, InventoryItem[]>();
     for (const item of candidates) {
       const code = item.product_code as string;
       const typeCode = code.slice(1, 3);
-      const modelCode = code.slice(3);
-      let cats = byType.get(typeCode);
-      if (!cats) {
-        cats = new Map();
-        byType.set(typeCode, cats);
-      }
-      const list = cats.get(modelCode);
+      const list = byType.get(typeCode);
       if (list) list.push(item);
-      else cats.set(modelCode, [item]);
+      else byType.set(typeCode, [item]);
     }
     return [...byType.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([code, cats]) => {
-        const catList = [...cats.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([modelCode, pieces]) => ({
-            code: modelCode,
-            label: modelLabel(modelCode, code),
-            pieces: [...pieces].sort(
-              (x, y) => (x.product_code ?? "").localeCompare(y.product_code ?? "") || x.name.localeCompare(y.name),
-            ),
-          }));
-        return {
-          code,
-          label: catLabel(code),
-          cats: catList,
-          pieceCount: catList.reduce((acc, c) => acc + c.pieces.length, 0),
-        };
-      });
+      .map(([code, pieces]) => ({
+        code,
+        label: catLabel(code),
+        pieces: [...pieces].sort(
+          (x, y) => (x.product_code ?? "").localeCompare(y.product_code ?? "") || x.sku.localeCompare(y.sku),
+        ),
+        pieceCount: pieces.length,
+      }));
   }, [candidates, segments]);
 
   const drilledType = typeGroups.find((g) => g.code === drillType) ?? null;
-  const drilledCat = drilledType?.cats.find((c) => c.code === drillCat) ?? null;
 
   const typesPager = usePagination(typeGroups, DRILL_PAGE_SIZE);
-  const catsPager = usePagination(drilledType?.cats ?? [], DRILL_PAGE_SIZE, drillType ?? "");
-  const piecesPager = usePagination(drilledCat?.pieces ?? [], DRILL_PAGE_SIZE, `${drillType ?? ""}/${drillCat ?? ""}`);
+  const piecesPager = usePagination(drilledType?.pieces ?? [], DRILL_PAGE_SIZE, drillType ?? "");
 
   return (
     <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label={title}>
@@ -114,36 +95,24 @@ export function FinishedItemPicker({
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: typeGroups.length >= DRILL_PAGE_SIZE ? 460 : undefined }}>
           {drilledType ? (
             <div className="drillBar">
-              <button
-                className="button"
-                onClick={() => (drilledCat ? setDrillCat(null) : setDrillType(null))}
-                type="button"
-              >
+              <button className="button" onClick={() => setDrillType(null)} type="button">
                 <ChevronLeft aria-hidden="true" size={15} /> Volver
               </button>
               <span className="drillCrumbs">
-                <button onClick={() => { setDrillType(null); setDrillCat(null); }} type="button">Tipos</button>
+                <button onClick={() => setDrillType(null)} type="button">Tipos</button>
                 <span className="drillCrumbSep">/</span>
-                {drilledCat ? (
-                  <>
-                    <button onClick={() => setDrillCat(null)} type="button">{drilledType.label}</button>
-                    <span className="drillCrumbSep">/</span>
-                    <span>{drilledCat.label}</span>
-                  </>
-                ) : (
-                  <span>{drilledType.label}</span>
-                )}
+                <span>{drilledType.label}</span>
               </span>
             </div>
           ) : null}
 
-          {drilledCat && drilledType ? (
+          {drilledType ? (
             <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
                     <th style={{ width: 110 }}>Código</th>
-                    <th>Nombre</th>
+                    <th>Producto</th>
                     <th>Material</th>
                     <th className="num">Stock</th>
                   </tr>
@@ -154,51 +123,28 @@ export function FinishedItemPicker({
                       <td><span className={`orderCodeTag${metalTagClass(item.product_code)}`}>#{item.product_code}</span></td>
                       <td>{(item.description ?? "").trim() || item.name}</td>
                       <td>{item.material_type ?? "—"}</td>
-                      <td className="num">{Number(item.current_stock).toLocaleString("es-EC")} {item.unit_code}</td>
+                      {/* Piezas en gramos con peso por pieza: stock en unidades,
+                          los gramos quedan por detrás. */}
+                      <td className="num">
+                        {item.unit_code === "g" && Number(item.weight_per_unit ?? 0) > 0
+                          ? `${Math.floor(Number(item.current_stock) / Number(item.weight_per_unit)).toLocaleString("es-EC")} und`
+                          : `${Number(item.current_stock).toLocaleString("es-EC")} ${item.unit_code}`}
+                      </td>
                     </tr>
                   ))}
-                  {drilledCat.pieces.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">{requireStock ? "Sin piezas con stock en esta categoría." : "Sin piezas en esta categoría."}</div></td></tr>
+                  {drilledType.pieces.length === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">{requireStock ? "Sin piezas con stock en este tipo." : "Sin piezas en este tipo."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
               <Pager {...piecesPager} />
-            </div>
-          ) : drilledType ? (
-            <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
-              <table className="table tableAuto">
-                <thead>
-                  <tr>
-                    <th style={{ width: 90 }}>#</th>
-                    <th>Categoría</th>
-                    <th className="num">Piezas</th>
-                    <th aria-label="Abrir" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {catsPager.pageItems.map((cat) => (
-                    <tr key={cat.code} onClick={() => setDrillCat(cat.code)} style={{ cursor: "pointer" }}>
-                      <td><span className="orderCodeTag">#{cat.code}</span></td>
-                      <td><strong>{cat.label}</strong></td>
-                      <td className="num">{cat.pieces.length}</td>
-                      <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
-                    </tr>
-                  ))}
-                  {drilledType.cats.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">Sin categorías en este tipo.</div></td></tr>
-                  ) : null}
-                </tbody>
-              </table>
-              <Pager {...catsPager} />
             </div>
           ) : (
             <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
-                    <th style={{ width: 90 }}>#</th>
                     <th>Tipo</th>
-                    <th className="num">Categorías</th>
                     <th className="num">Piezas</th>
                     <th aria-label="Abrir" />
                   </tr>
@@ -206,15 +152,13 @@ export function FinishedItemPicker({
                 <tbody>
                   {typesPager.pageItems.map((group) => (
                     <tr key={group.code} onClick={() => setDrillType(group.code)} style={{ cursor: "pointer" }}>
-                      <td><span className="orderCodeTag">#{group.code}</span></td>
                       <td><strong>{group.label}</strong></td>
-                      <td className="num">{group.cats.length}</td>
                       <td className="num">{group.pieceCount}</td>
                       <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
                     </tr>
                   ))}
                   {typeGroups.length === 0 ? (
-                    <tr><td colSpan={5}><div className="emptyState">{requireStock ? "No hay productos terminados con stock." : "No hay productos terminados en el catálogo."}</div></td></tr>
+                    <tr><td colSpan={3}><div className="emptyState">{requireStock ? "No hay productos terminados con stock." : "No hay productos terminados en el catálogo."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>

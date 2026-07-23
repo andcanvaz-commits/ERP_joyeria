@@ -111,6 +111,10 @@ class InventoryService(InventoryIntegrationPort):
         item.elaboration_date = payload.elaboration_date
         item.unit_code = payload.unit_code.strip()
         item.minimum_stock = payload.minimum_stock
+        # Solo si el cliente lo mandó explícitamente: los formularios de
+        # edición existentes no envían el campo y no deben vaciarlo.
+        if "weight_per_unit" in payload.model_fields_set:
+            item.weight_per_unit = payload.weight_per_unit
         self.repository.flush()
         return InventoryItemRead.model_validate(item)
 
@@ -375,6 +379,7 @@ class InventoryService(InventoryIntegrationPort):
         quantity: Decimal,
         product_code: str | None = None,
         material_type: str | None = None,
+        purity: str | None = None,
         received_by_user_id: UUID | None = None,
     ) -> InventoryItem:
         """Crea un producto terminado POR ORDEN (lote), identificado por el código OP,
@@ -389,6 +394,7 @@ class InventoryService(InventoryIntegrationPort):
             product_code=product_code,
             description="Producto terminado de produccion.",
             material_type=material_type,
+            purity=purity,
             unit_code=unit_code.strip(),
             minimum_stock=None,
         )
@@ -495,19 +501,20 @@ class InventoryService(InventoryIntegrationPort):
         if not material_code:
             raise InventoryDomainError("El lote no tiene material registrado.")
 
-        # La pieza convertida se mide en la unidad con la que calcula la
-        # producción (gramos): la orden ya sabe cuántos gramos de materia
-        # prima ocupa una unidad de producto.
+        # La pieza convertida se mide en la unidad con la que pesa la
+        # producción (gramos), con el PESO FINAL de la orden (merma
+        # incluida); orden sin pesajes → peso final = peso inicial (gramos
+        # de materia prima por unidad).
         from sqlalchemy import select
         from backend.modules.production.models import ProductionRun
 
         run = self.repository.session.execute(
             select(ProductionRun).where(ProductionRun.production_code == lot.sku)
         ).scalar_one_or_none()
-        if run is not None and run.raw_material_quantity_per_unit and run.raw_material_quantity_per_unit > 0:
-            weight_per_unit = run.raw_material_quantity_per_unit
+        run_info = self._run_grams_per_unit(run) if run is not None else None
+        if run_info is not None:
+            weight_per_unit, entry_unit = run_info
             entry_quantity = payload.quantity * weight_per_unit
-            entry_unit = run.raw_material_unit_code
         else:
             weight_per_unit = None
             entry_quantity = payload.quantity
@@ -529,15 +536,16 @@ class InventoryService(InventoryIntegrationPort):
                 # Mismo material: se suma a la pieza elegida tal cual.
                 target = piece
             else:
-                # La descripción es el modelo real: piezas distintas comparten
-                # código (ej. FLOR y HONGUITOS ambas x010002), así que el
-                # reúso exige también la misma descripción.
+                # La descripción es el modelo real y el nombre distingue tipos
+                # que comparten código (ej. TEST y TEST2 ambos x530001): el
+                # reúso exige código, nombre y descripción iguales.
                 target = next(
                     (
                         item
                         for item in self.repository.list_items("FINISHED_PRODUCT")
                         if item.product_code == product_code
                         and item.source_lot_sku == lot.sku
+                        and item.name == piece.name
                         and (item.description or "") == (piece.description or "")
                     ),
                     None,
@@ -561,11 +569,15 @@ class InventoryService(InventoryIntegrationPort):
             product_code, product_type = self._resolve_catalog_target(
                 material_code, payload.product_type_id
             )
+            # El nombre distingue tipos que comparten código (TEST vs TEST2):
+            # sin compararlo, la conversión sumaría a otro producto.
             target = next(
                 (
                     item
                     for item in self.repository.list_items("FINISHED_PRODUCT")
-                    if item.product_code == product_code and item.source_lot_sku == lot.sku
+                    if item.product_code == product_code
+                    and item.source_lot_sku == lot.sku
+                    and item.name == (product_type.name or lot.name)
                 ),
                 None,
             )
@@ -587,6 +599,11 @@ class InventoryService(InventoryIntegrationPort):
                 target.material_type = payload.material_type
         else:
             raise InventoryDomainError("Falta el producto destino de la conversión.")
+
+        # Trazabilidad: la pieza hereda la pureza del lote (que a su vez viene
+        # de la materia prima de la orden). Nunca pisa una pureza ya asignada.
+        if lot.purity and not target.purity:
+            target.purity = lot.purity
 
         self.create_movement(
             InventoryMovementCreate(
@@ -622,9 +639,9 @@ class InventoryService(InventoryIntegrationPort):
         catálogo (ej. cadena + dije = collar). Cada pieza de origen registra una
         CONVERSION_SALIDA y el producto resultante una CONVERSION_ENTRADA; nada
         de edición directa de stock. Destino por pieza (target_item_id): mismo
-        material → suma a esa pieza; distinto → crea/reusa fila con el mismo
-        modelo (descripción) y el material elegido. Destino por tipo: fila con
-        la marca de ensamblado."""
+        material (código Y texto) → suma a esa pieza; distinto → crea/reusa
+        fila con el mismo modelo (descripción) y el material elegido. Destino
+        por tipo: fila con la marca de ensamblado."""
         ids = [line.item_id for line in payload.sources]
         if len(ids) != len(set(ids)):
             raise InventoryDomainError("No repitas la misma pieza en el ensamble.")
@@ -647,13 +664,48 @@ class InventoryService(InventoryIntegrationPort):
                 raise InventoryDomainError(f"Stock insuficiente de '{item.name}'.")
             sources.append((item, required))
 
+        # Regla del sistema: el material y la pureza del resultado se heredan
+        # de la pieza que aporta MÁS GRAMOS al ensamble. Empate con valores
+        # distintos → se combinan los textos ("a + b") y el usuario puede
+        # elegir uno en la UI (payload.material_type / payload.purity ganan
+        # siempre). Si el aporte de alguna pieza se desconoce, se combinan
+        # los de todas.
+        def _joined(values):
+            seen: list[str] = []
+            for value in values:
+                clean = (value or "").strip()
+                if clean and clean not in seen:
+                    seen.append(clean)
+            return " + ".join(seen) or None
+
+        if all(info is not None for info in gram_infos):
+            contributions = [
+                line.quantity * info[0]
+                for line, info in zip(payload.sources, gram_infos)
+            ]
+            top_grams = max(contributions)
+            dominant = [
+                item
+                for (item, _), grams in zip(sources, contributions)
+                if grams == top_grams
+            ]
+        else:
+            dominant = [item for item, _ in sources]
+        auto_material = _joined(item.material_type for item in dominant)
+        auto_purity = _joined(item.purity for item in dominant)
+
         # El resultado sale en gramos SOLO si todas las piezas tienen gramos
         # por unidad (piezas del sistema o lotes de una orden): el peso del
-        # ensamble es la suma de los pesos de sus piezas. Si alguna pieza
-        # vieja no trae el dato, queda en unidades para no descuadrar.
+        # ensamble es la suma de los pesos de sus piezas, contando las que
+        # entran repetidas (línea con cantidad = ensambles × N por ensamble).
+        # Si alguna pieza vieja no trae el dato, queda en unidades para no
+        # descuadrar.
         if all(info is not None for info in gram_infos):
-            weight_per_unit = sum(info[0] for info in gram_infos)
-            entry_quantity = payload.quantity * weight_per_unit
+            entry_quantity = sum(
+                line.quantity * info[0]
+                for line, info in zip(payload.sources, gram_infos)
+            )
+            weight_per_unit = entry_quantity / payload.quantity
             entry_unit = gram_infos[0][1]
         else:
             weight_per_unit = None
@@ -671,18 +723,33 @@ class InventoryService(InventoryIntegrationPort):
                     "El destino debe ser un producto terminado del catálogo."
                 )
             product_code = f"{payload.material_code}{piece.product_code[1:]}"
-            if product_code == piece.product_code:
+            # El material se compara por texto, no solo por segmento: un
+            # ensamble "test + PLATA" comparte código con la pieza PLATA pero
+            # no es el mismo material, y sumarlo a la pieza re-etiquetaría
+            # stock existente. Sin override del usuario aplica la herencia
+            # por gramos dominantes.
+            material_type = payload.material_type or auto_material or piece.material_type
+
+            def _norm(text: str | None) -> str:
+                return (text or "").strip().upper()
+
+            if product_code == piece.product_code and _norm(material_type) == _norm(
+                piece.material_type
+            ):
                 # Mismo material: se suma a la pieza elegida tal cual.
                 target = piece
             else:
-                # La descripción es el modelo real: el reúso exige código y
-                # descripción iguales, no solo el código.
+                # La descripción es el modelo real y el nombre distingue tipos
+                # que comparten código: el reúso exige código, nombre,
+                # descripción y material iguales.
                 target = next(
                     (
                         item
                         for item in self.repository.list_items("FINISHED_PRODUCT")
                         if item.product_code == product_code
+                        and item.name == piece.name
                         and (item.description or "") == (piece.description or "")
+                        and _norm(item.material_type) == _norm(material_type)
                     ),
                     None,
                 )
@@ -693,7 +760,7 @@ class InventoryService(InventoryIntegrationPort):
                         sku=self._generate_piece_sku(product_code),
                         product_code=product_code,
                         description=piece.description,
-                        material_type=payload.material_type,
+                        material_type=material_type,
                         unit_code=entry_unit,
                         weight_per_unit=weight_per_unit,
                         minimum_stock=None,
@@ -705,12 +772,14 @@ class InventoryService(InventoryIntegrationPort):
                 payload.material_code, payload.product_type_id
             )
             ASSEMBLED_MARK = "Producto ensamblado."
+            # El nombre distingue tipos que comparten código (TEST vs TEST2).
             target = next(
                 (
                     item
                     for item in self.repository.list_items("FINISHED_PRODUCT")
                     if item.product_code == product_code
                     and item.source_lot_sku is None
+                    and item.name == (product_type.name or product_code)
                     and (item.description or "") == ASSEMBLED_MARK
                 ),
                 None,
@@ -722,7 +791,7 @@ class InventoryService(InventoryIntegrationPort):
                     sku=self._generate_piece_sku(product_code),
                     product_code=product_code,
                     description=ASSEMBLED_MARK,
-                    material_type=payload.material_type,
+                    material_type=payload.material_type or auto_material,
                     unit_code=entry_unit,
                     weight_per_unit=weight_per_unit,
                     minimum_stock=None,
@@ -733,6 +802,12 @@ class InventoryService(InventoryIntegrationPort):
                 target.material_type = payload.material_type
         else:
             raise InventoryDomainError("Falta el producto destino del ensamble.")
+
+        # Pureza heredada por gramos dominantes (o la elegida por el usuario);
+        # nunca pisa una pureza ya asignada a una pieza existente.
+        purity_final = (payload.purity or "").strip() or auto_purity
+        if purity_final and not target.purity:
+            target.purity = purity_final
 
         for item, quantity in sources:
             self.create_movement(
@@ -782,8 +857,9 @@ class InventoryService(InventoryIntegrationPort):
 
     def _grams_per_unit(self, item: InventoryItem) -> tuple[Decimal, str] | None:
         """Gramos por unidad de una pieza y su unidad de peso: el campo propio
-        (piezas nacidas con el sistema) o, si la pieza es el lote de una orden,
-        lo que la orden declara. None para piezas viejas sin el dato."""
+        (piezas nacidas con el sistema o cargado desde el histórico de la
+        empresa) o, si la pieza es el lote de una orden, el peso real de esa
+        orden. None para piezas viejas sin el dato."""
         if item.weight_per_unit and item.weight_per_unit > 0:
             return item.weight_per_unit, item.unit_code
         from sqlalchemy import select
@@ -792,7 +868,29 @@ class InventoryService(InventoryIntegrationPort):
         run = self.repository.session.execute(
             select(ProductionRun).where(ProductionRun.production_code == item.sku)
         ).scalar_one_or_none()
-        if run is not None and run.raw_material_quantity_per_unit and run.raw_material_quantity_per_unit > 0:
+        if run is not None:
+            return self._run_grams_per_unit(run)
+        return None
+
+    @staticmethod
+    def _run_grams_per_unit(run) -> tuple[Decimal, str] | None:
+        """PESO FINAL por unidad de producto de una orden de producción:
+        el peso real registrado en la última etapa que pesó (merma incluida)
+        repartido entre las unidades fabricadas. Caso específico de una orden
+        que terminó sin pesar en ninguna etapa: el peso final ES el peso
+        inicial, es decir los gramos de materia prima por unidad con los que
+        arrancó. Ese planificado nunca pisa un peso real registrado."""
+        final_weight = run.actual_finished_weight
+        if not final_weight or final_weight <= 0:
+            weighed = [
+                stage.final_weight
+                for stage in sorted(run.stages, key=lambda stage: stage.stage_order)
+                if stage.final_weight is not None and stage.final_weight > 0
+            ]
+            final_weight = weighed[-1] if weighed else None
+        if final_weight and final_weight > 0 and run.quantity and run.quantity > 0:
+            return final_weight / run.quantity, run.raw_material_unit_code
+        if run.raw_material_quantity_per_unit and run.raw_material_quantity_per_unit > 0:
             return run.raw_material_quantity_per_unit, run.raw_material_unit_code
         return None
 

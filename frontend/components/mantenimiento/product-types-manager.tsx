@@ -31,16 +31,11 @@ export function ProductTypesManager({
     enabled: mode === "view",
   });
 
-  // Solo segmentos activos: los MODEL heredados del Excel que eran nombres de
-  // producto quedaron inactivos (migracion b4c5d6e7f8a9) y no deben ofrecerse.
   const categories = segments.filter((s) => s.kind === "CATEGORY" && s.is_active);
-  // Opcion 1: nuevo tipo. Opcion 2: nueva categoria dentro de un tipo.
-  // Opcion 3: producto (nombre) con tipo+categoria existentes.
+  // Opcion 1: nuevo tipo. Opcion 2: producto (nombre) dentro de un tipo; el
+  // código de modelo lo asigna el sistema (jerarquía = tipo → producto).
   const [newTypeLabel, setNewTypeLabel] = useState("");
-  const [catParentCode, setCatParentCode] = useState("");
-  const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [prodTypeCode, setProdTypeCode] = useState("");
-  const [prodCatCode, setProdCatCode] = useState("");
   const [prodName, setProdName] = useState("");
   const [prodPrice, setProdPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -48,15 +43,15 @@ export function ProductTypesManager({
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
 
-  const prodModels = segments.filter((s) => s.kind === "MODEL" && s.is_active && s.parent_code === prodTypeCode);
-
   // Productos ya presentes en inventario, agrupados por codigo + nombre (description
   // de la pieza). Se omiten los que ya estan definidos aqui con ese tipo+categoria+nombre.
   const inventoryProducts = useMemo(() => {
     const grouped = new Map<string, { code: string; name: string }>();
     for (const item of finishedItems) {
       if (!item.product_code || item.product_code.length !== 7) continue;
-      const name = (item.description ?? "").trim().toUpperCase() || "SIN NOMBRE";
+      // Piezas nacidas por conversión/ensamble no traen descripción: su
+      // nombre de producto vive en `name` (el del tipo del catálogo).
+      const name = (item.description ?? "").trim().toUpperCase() || item.name.trim().toUpperCase() || "SIN NOMBRE";
       grouped.set(`${item.product_code}|${name}`, { code: item.product_code, name });
     }
     const defined = new Set(types.map((t) => `${t.category_code}${t.model_code}|${t.name ?? ""}`));
@@ -66,66 +61,52 @@ export function ProductTypesManager({
       .sort((a, b) => a.code.localeCompare(b.code) || a.name.localeCompare(b.name));
   }, [finishedItems, types]);
 
-  // Drill-down de la vista: tipos → categorías → productos, cada nivel con su tabla.
+  // Drill-down de la vista: tipos → productos (el código de modelo vive en el
+  // producto; ya no hay nivel intermedio de categorías).
   const [drillType, setDrillType] = useState<string | null>(null);
-  const [drillCat, setDrillCat] = useState<string | null>(null);
   const typeGroups = useMemo(() => {
     const catLabel = (code: string) => segments.find((s) => s.kind === "CATEGORY" && s.code === code)?.label ?? code;
-    const modelLabel = (code: string, parent: string) =>
-      segments.find((s) => s.kind === "MODEL" && s.code === code && s.parent_code === parent)?.label ?? code;
-    const byType = new Map<string, Map<string, { defined: typeof types; inventory: { code: string; name: string }[] }>>();
-    const ensure = (cat: string, model: string) => {
-      let cats = byType.get(cat);
-      if (!cats) {
-        cats = new Map();
-        byType.set(cat, cats);
-      }
-      let entry = cats.get(model);
+    const byType = new Map<string, { defined: typeof types; inventory: { code: string; name: string }[] }>();
+    const ensure = (cat: string) => {
+      let entry = byType.get(cat);
       if (!entry) {
         entry = { defined: [], inventory: [] };
-        cats.set(model, entry);
+        byType.set(cat, entry);
       }
       return entry;
     };
-    for (const t of types) ensure(t.category_code, t.model_code).defined.push(t);
-    for (const p of inventoryProducts) ensure(p.categoryCode, p.modelCode).inventory.push({ code: p.code, name: p.name });
+    for (const t of types) {
+      if (t.is_active) ensure(t.category_code).defined.push(t);
+    }
+    for (const p of inventoryProducts) ensure(p.categoryCode).inventory.push({ code: p.code, name: p.name });
     return [...byType.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([code, cats]) => {
-        const catList = [...cats.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([modelCode, entry]) => ({
-            code: modelCode,
-            label: modelLabel(modelCode, code),
-            defined: [...entry.defined].sort((x, y) => (x.name ?? "").localeCompare(y.name ?? "")),
-            inventory: [...entry.inventory].sort((x, y) => x.name.localeCompare(y.name)),
-          }));
-        return {
-          code,
-          label: catLabel(code),
-          cats: catList,
-          productCount: catList.reduce((acc, c) => acc + c.defined.length + c.inventory.length, 0),
-        };
-      });
+      .map(([code, entry]) => ({
+        code,
+        label: catLabel(code),
+        defined: [...entry.defined].sort(
+          (x, y) => x.model_code.localeCompare(y.model_code) || (x.name ?? "").localeCompare(y.name ?? ""),
+        ),
+        inventory: [...entry.inventory].sort((x, y) => x.code.localeCompare(y.code) || x.name.localeCompare(y.name)),
+        productCount: entry.defined.length + entry.inventory.length,
+      }));
   }, [types, inventoryProducts, segments]);
 
   const drilledType = typeGroups.find((g) => g.code === drillType) ?? null;
-  const drilledCat = drilledType?.cats.find((c) => c.code === drillCat) ?? null;
 
   // Paginación por nivel del drill-down; cada nivel vuelve a la página 1 al entrar.
   const typesPager = usePagination(typeGroups, DRILL_PAGE_SIZE);
-  const catsPager = usePagination(drilledType?.cats ?? [], DRILL_PAGE_SIZE, drillType ?? "");
   const productRows = useMemo(
     () =>
-      drilledCat
+      drilledType
         ? [
-            ...drilledCat.defined.map((t) => ({ kind: "defined" as const, defined: t, inventory: null })),
-            ...drilledCat.inventory.map((p) => ({ kind: "inventory" as const, defined: null, inventory: p })),
+            ...drilledType.defined.map((t) => ({ kind: "defined" as const, defined: t, inventory: null })),
+            ...drilledType.inventory.map((p) => ({ kind: "inventory" as const, defined: null, inventory: p })),
           ]
         : [],
-    [drilledCat],
+    [drilledType],
   );
-  const productsPager = usePagination(productRows, DRILL_PAGE_SIZE, `${drillType ?? ""}/${drillCat ?? ""}`);
+  const productsPager = usePagination(productRows, DRILL_PAGE_SIZE, drillType ?? "");
 
   useEffect(() => {
     if (!success) return;
@@ -144,43 +125,11 @@ export function ProductTypesManager({
     try {
       const created = await createCatalogSegment({ kind: "CATEGORY", label: newTypeLabel.trim().toUpperCase() });
       setNewTypeLabel("");
-      setCatParentCode(created.code);
       setProdTypeCode(created.code);
-      setProdCatCode("");
       setSuccess(`Tipo #${created.code} ${created.label} creado.`);
       await queryClient.invalidateQueries({ queryKey: ["catalog-segments"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el tipo.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleCreateCategory(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    if (!catParentCode) {
-      setError("Selecciona el tipo donde irá la categoría.");
-      return;
-    }
-    if (!newCategoryLabel.trim()) {
-      setError("Escribe el nombre de la nueva categoría.");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const created = await createCatalogSegment({
-        kind: "MODEL",
-        label: newCategoryLabel.trim().toUpperCase(),
-        parent_code: catParentCode,
-      });
-      setNewCategoryLabel("");
-      setProdTypeCode(catParentCode);
-      setProdCatCode(created.code);
-      setSuccess(`Categoría #${created.code} ${created.label} creada.`);
-      await queryClient.invalidateQueries({ queryKey: ["catalog-segments"] });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo crear la categoría.");
     } finally {
       setIsSaving(false);
     }
@@ -193,19 +142,15 @@ export function ProductTypesManager({
       setError("Selecciona el tipo.");
       return;
     }
-    if (!prodCatCode) {
-      setError("Selecciona la categoría.");
-      return;
-    }
     if (!prodName.trim()) {
       setError("Escribe el nombre del producto.");
       return;
     }
     setIsSaving(true);
     try {
+      // Sin código de modelo: el backend asigna el siguiente libre del tipo.
       const created = await createProductType({
         category_code: prodTypeCode,
-        model_code: prodCatCode,
         name: prodName.trim().toUpperCase(),
         price: prodPrice.trim() || null,
       });
@@ -240,7 +185,7 @@ export function ProductTypesManager({
         <div className="modalHeader">
           <div>
             <h2>{mode === "create" ? "Crear tipo de producto" : "Tipos de producto"}</h2>
-            <p className="panelText">Tipo, categoría y nombre del catálogo; el material se define en producción.</p>
+            <p className="panelText">Tipo y producto del catálogo; el código y el material los pone el sistema.</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
@@ -271,70 +216,34 @@ export function ProductTypesManager({
 
           <div aria-hidden="true" className="formStepDivider">o</div>
 
-          <form onSubmit={handleCreateCategory} className="formStep">
-            <p className="formStepTitle"><strong>2. Crear una categoría</strong> dentro de un tipo existente</p>
-            <div className="formStepGrid colsPairAction">
-              <label className="fieldGroup">
-                <span>Tipo</span>
-                <select className="field" disabled={isSaving} onChange={(e) => setCatParentCode(e.target.value)} value={catParentCode}>
-                  <option value="">Seleccionar tipo</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.code}>#{c.code} {c.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Nombre de la nueva categoría</span>
-                <input className="field" disabled={isSaving} maxLength={120} onChange={(e) => setNewCategoryLabel(e.target.value)} placeholder="Ej. FILIGRANA" value={newCategoryLabel} />
-              </label>
-              <button className="button buttonPrimary" disabled={isSaving || !catParentCode || !newCategoryLabel.trim()} type="submit">
-                <Plus aria-hidden="true" size={14} /> Crear categoría
-              </button>
-            </div>
-          </form>
-
-          <div aria-hidden="true" className="formStepDivider">o</div>
-
           <form onSubmit={handleCreateProduct} className="formStep">
-            <p className="formStepTitle"><strong>3. Crear un producto</strong> con tipo y categoría existentes</p>
+            <p className="formStepTitle"><strong>2. Crear un producto</strong> dentro de un tipo existente (el código lo asigna el sistema)</p>
             <div className="formStepGrid colsPairAction">
               <label className="fieldGroup">
                 <span>Tipo</span>
                 <select
                   className="field"
                   disabled={isSaving}
-                  onChange={(e) => {
-                    setProdTypeCode(e.target.value);
-                    setProdCatCode("");
-                  }}
+                  onChange={(e) => setProdTypeCode(e.target.value)}
                   value={prodTypeCode}
                 >
                   <option value="">Seleccionar tipo</option>
                   {categories.map((c) => (
-                    <option key={c.id} value={c.code}>#{c.code} {c.label}</option>
+                    <option key={c.id} value={c.code}>{c.label}</option>
                   ))}
                 </select>
               </label>
-              <label className="fieldGroup">
-                <span>Categoría</span>
-                <select className="field" disabled={isSaving || !prodTypeCode} onChange={(e) => setProdCatCode(e.target.value)} value={prodCatCode}>
-                  <option value="">{prodTypeCode ? (prodModels.length ? "Seleccionar categoría" : "Sin categorías; crea una en la opción 2") : "Elige primero el tipo"}</option>
-                  {prodModels.map((m) => (
-                    <option key={m.id} value={m.code}>#{m.code} {m.label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="formStepGrid colsPairAction">
               <label className="fieldGroup">
                 <span>Nombre del producto</span>
                 <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setProdName(e.target.value)} placeholder="Ej. ORQUIDEA FILIGRANA" value={prodName} />
               </label>
+            </div>
+            <div className="formStepGrid colsPairAction">
               <label className="fieldGroup">
                 <span>Precio referencial (opcional)</span>
                 <input className="field" disabled={isSaving} min="0" onChange={(e) => setProdPrice(e.target.value)} placeholder="Ej. 120.00" step="0.01" type="number" value={prodPrice} />
               </label>
-              <button className="button buttonPrimary" disabled={isSaving || !prodTypeCode || !prodCatCode || !prodName.trim()} type="submit">
+              <button className="button buttonPrimary" disabled={isSaving || !prodTypeCode || !prodName.trim()} type="submit">
                 <Plus aria-hidden="true" size={14} /> Crear producto
               </button>
             </div>
@@ -346,36 +255,24 @@ export function ProductTypesManager({
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: typeGroups.length >= DRILL_PAGE_SIZE ? 460 : undefined }}>
           {drilledType ? (
             <div className="drillBar">
-              <button
-                className="button"
-                onClick={() => (drilledCat ? setDrillCat(null) : setDrillType(null))}
-                type="button"
-              >
+              <button className="button" onClick={() => setDrillType(null)} type="button">
                 <ChevronLeft aria-hidden="true" size={15} /> Volver
               </button>
               <span className="drillCrumbs">
-                <button onClick={() => { setDrillType(null); setDrillCat(null); }} type="button">Tipos</button>
+                <button onClick={() => setDrillType(null)} type="button">Tipos</button>
                 <span className="drillCrumbSep">/</span>
-                {drilledCat ? (
-                  <>
-                    <button onClick={() => setDrillCat(null)} type="button">{drilledType.label}</button>
-                    <span className="drillCrumbSep">/</span>
-                    <span>{drilledCat.label}</span>
-                  </>
-                ) : (
-                  <span>{drilledType.label}</span>
-                )}
+                <span>{drilledType.label}</span>
               </span>
             </div>
           ) : null}
 
-          {drilledCat && drilledType ? (
+          {drilledType ? (
             <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
                     <th style={{ width: 110 }}>Código</th>
-                    <th>Nombre</th>
+                    <th>Producto</th>
                     <th className="num">Precio</th>
                     <th aria-label="Acciones" />
                   </tr>
@@ -413,48 +310,19 @@ export function ProductTypesManager({
                       </tr>
                     );
                   })}
-                  {drilledCat.defined.length === 0 && drilledCat.inventory.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">Sin productos en esta categoría.</div></td></tr>
+                  {drilledType.productCount === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">Sin productos en este tipo.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
               <Pager {...productsPager} />
-            </div>
-          ) : drilledType ? (
-            <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
-              <table className="table tableAuto">
-                <thead>
-                  <tr>
-                    <th style={{ width: 90 }}>#</th>
-                    <th>Categoría</th>
-                    <th className="num">Productos</th>
-                    <th aria-label="Abrir" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {catsPager.pageItems.map((cat) => (
-                    <tr key={cat.code} onClick={() => setDrillCat(cat.code)} style={{ cursor: "pointer" }}>
-                      <td><span className="orderCodeTag">#{cat.code}</span></td>
-                      <td><strong>{cat.label}</strong></td>
-                      <td className="num">{cat.defined.length + cat.inventory.length}</td>
-                      <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
-                    </tr>
-                  ))}
-                  {drilledType.cats.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">Sin categorías en este tipo.</div></td></tr>
-                  ) : null}
-                </tbody>
-              </table>
-              <Pager {...catsPager} />
             </div>
           ) : (
             <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
                 <thead>
                   <tr>
-                    <th style={{ width: 90 }}>#</th>
                     <th>Tipo</th>
-                    <th className="num">Categorías</th>
                     <th className="num">Productos</th>
                     <th aria-label="Abrir" />
                   </tr>
@@ -462,15 +330,13 @@ export function ProductTypesManager({
                 <tbody>
                   {typesPager.pageItems.map((group) => (
                     <tr key={group.code} onClick={() => setDrillType(group.code)} style={{ cursor: "pointer" }}>
-                      <td><span className="orderCodeTag">#{group.code}</span></td>
                       <td><strong>{group.label}</strong></td>
-                      <td className="num">{group.cats.length}</td>
                       <td className="num">{group.productCount}</td>
                       <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
                     </tr>
                   ))}
                   {!isLoading && typeGroups.length === 0 ? (
-                    <tr><td colSpan={5}><div className="emptyState">Sin tipos de producto. Crea el primero.</div></td></tr>
+                    <tr><td colSpan={3}><div className="emptyState">Sin tipos de producto. Crea el primero.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>

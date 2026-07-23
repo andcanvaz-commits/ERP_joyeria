@@ -788,6 +788,8 @@ class ProductionService:
             production_code=run.production_code,
             quantity=run.quantity,
             material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
+            # La pureza de la materia prima viaja con el lote (trazabilidad).
+            purity=raw_material.purity if raw_material else None,
             received_by_user_id=current_user.id,
         )
         run.status = ProductionRunStatus.RECEIVED

@@ -17,7 +17,8 @@ export function listProductTypes() {
 
 export function createProductType(payload: {
   category_code: string;
-  model_code: string;
+  // Opcional: sin él, el backend asigna el siguiente código libre del tipo.
+  model_code?: string;
   name: string;
   price?: string | null;
 }) {

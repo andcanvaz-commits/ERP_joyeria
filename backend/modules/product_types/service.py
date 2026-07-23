@@ -43,15 +43,45 @@ class ProductTypeService:
     def create_type(self, payload: ProductTypeCreate) -> ProductTypeRead:
         if self._segment("CATEGORY", payload.category_code) is None:
             raise ProductTypeError("El tipo (categoria de catalogo) no existe.")
-        if self._segment("MODEL", payload.model_code, parent=payload.category_code) is None:
-            raise ProductTypeError("La categoria (modelo) no existe dentro de ese tipo.")
         name = payload.name.strip().upper()
         if not name:
             raise ProductTypeError("El nombre del producto es obligatorio.")
+        model_code = payload.model_code
+        if model_code is None:
+            # El código de modelo lo administra el sistema: si ya existe un
+            # modelo con ese nombre en el tipo se reutiliza; si no, siguiente
+            # código libre y segmento MODEL nuevo con el nombre del producto.
+            models = self.session.execute(
+                select(CatalogSegment).where(
+                    CatalogSegment.kind == "MODEL",
+                    CatalogSegment.parent_code == payload.category_code,
+                )
+            ).scalars().all()
+            same = next(
+                (s for s in models if s.is_active and s.label.strip().upper() == name),
+                None,
+            )
+            if same is not None:
+                model_code = same.code
+            else:
+                next_number = max(
+                    (int(s.code) for s in models if s.code.isdigit()), default=0
+                ) + 1
+                model_code = f"{next_number:04d}"
+                self.session.add(
+                    CatalogSegment(
+                        kind="MODEL",
+                        code=model_code,
+                        parent_code=payload.category_code,
+                        label=name,
+                    )
+                )
+        elif self._segment("MODEL", model_code, parent=payload.category_code) is None:
+            raise ProductTypeError("El modelo no existe dentro de ese tipo.")
         existing = self.session.execute(
             select(ProductType).where(
                 ProductType.category_code == payload.category_code,
-                ProductType.model_code == payload.model_code,
+                ProductType.model_code == model_code,
                 ProductType.name == name,
             )
         ).scalars().first()
@@ -59,7 +89,7 @@ class ProductTypeService:
             raise ProductTypeError("Ese producto ya esta definido con ese nombre.")
         row = ProductType(
             category_code=payload.category_code,
-            model_code=payload.model_code,
+            model_code=model_code,
             name=name,
             price=payload.price,
         )
