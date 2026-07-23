@@ -1127,14 +1127,14 @@ class ProductionService:
         # herencia de material, codigo de catalogo y par de movimientos).
         # Sin plan (ordenes viejas): el lote queda para conversion manual.
         for product in run.products:
+            conversion = (
+                LotConversionCreate(target_item_id=product.target_item_id, quantity=product.quantity)
+                if product.target_item_id is not None
+                else LotConversionCreate(product_type_id=product.product_type_id, quantity=product.quantity)
+            )
             try:
                 self.inventory_service.convert_lot_to_product(
-                    lot.id,
-                    LotConversionCreate(
-                        product_type_id=product.product_type_id,
-                        quantity=product.quantity,
-                    ),
-                    user_id=current_user.id,
+                    lot.id, conversion, user_id=current_user.id
                 )
             except (InventoryDomainError, InventoryNotFoundError) as exc:
                 raise ProductionDomainError(
