@@ -88,6 +88,34 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
           ) : null}
         </div>
 
+        {(run.products ?? []).length > 0 ? (
+          <div className="card panelBody">
+            <div className="panelHeader"><div><h2 className="panelTitle">Productos resultantes</h2></div></div>
+            <div className="dashboardList">
+              {(run.products ?? []).map((product) => (
+                <div className="dashboardRow" key={product.id}>
+                  <div><strong>{product.product_name ?? "—"}</strong></div>
+                  <small>{num(product.quantity)} und</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {(run.complements ?? []).length > 0 ? (
+          <div className="card panelBody">
+            <div className="panelHeader"><div><h2 className="panelTitle">Complementos solicitados</h2></div></div>
+            <div className="dashboardList">
+              {(run.complements ?? []).map((complement) => (
+                <div className="dashboardRow" key={complement.id}>
+                  <div><strong>{complement.name ?? "—"}</strong></div>
+                  <small>{num(complement.quantity)} {complement.unit_code} · {complement.status}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="card panelBody">
           <div className="panelHeader"><div><h2 className="panelTitle">Linea de tiempo</h2></div></div>
           <div className="dashboardList">
