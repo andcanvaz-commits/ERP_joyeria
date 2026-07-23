@@ -2,13 +2,12 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, Tags, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
 import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
-import { ComplementTypesManager } from "@/components/mantenimiento/complement-types-manager";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
@@ -25,7 +24,7 @@ import {
   resetUserPassword,
   updateUser,
 } from "@/lib/auth-api";
-import { listComplementTypes, listInventoryItems } from "@/lib/inventory-api";
+import { listInventoryItems } from "@/lib/inventory-api";
 import { listCatalogSegments, type CatalogSegment } from "@/lib/catalog-api";
 import { materialCodeForItem } from "@/lib/material-match";
 import { listProductTypes } from "@/lib/product-types-api";
@@ -249,11 +248,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: () => listInventoryItems("COMPLEMENT"),
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
-  const { data: complementTypesList = [] } = useQuery({
-    queryKey: ["complement-types"],
-    queryFn: listComplementTypes,
-    enabled: Boolean(currentUser) && variant === "maintenance",
-  });
   // Claves de modelo que ya tienen receta de ensamble: filtra los pickers en
   // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR).
   const { data: recipeModelKeys = EMPTY_RECIPE_MODEL_KEYS } = useQuery({
@@ -295,7 +289,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
-  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "complements" | "complementTypes" | "productTypes"; mode: "create" | "view" } | null>(null);
+  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "complements" | "productTypes"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -1548,16 +1542,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <Puzzle aria-hidden="true" size={22} />
                 <strong>Complementos</strong>
                 <span>{complementsList.length} complementos creados.</span>
-              </button>
-              <button className="maintenanceTile" onClick={() => setDataModal({ type: "complementTypes", mode: "create" })} type="button">
-                <Plus aria-hidden="true" size={22} />
-                <strong>Crear tipo de complemento</strong>
-                <span>Nuevo tipo para agrupar complementos.</span>
-              </button>
-              <button className="maintenanceTile" onClick={() => setDataModal({ type: "complementTypes", mode: "view" })} type="button">
-                <Tags aria-hidden="true" size={22} />
-                <strong>Tipos de complemento</strong>
-                <span>{complementTypesList.length} tipos creados.</span>
               </button>
             </div>
           </section>
@@ -2993,7 +2977,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {dataModal?.type === "materials" ? <RawMaterialsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "supplies" ? <SuppliesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "complements" ? <ComplementsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
-      {dataModal?.type === "complementTypes" ? <ComplementTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "productTypes" ? <ProductTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
       {isProcessesOpen ? (
