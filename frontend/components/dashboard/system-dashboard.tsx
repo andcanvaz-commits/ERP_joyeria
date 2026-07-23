@@ -15,6 +15,7 @@ import type { ProductionRun } from "@/types/production";
 const INVENTORY_TYPE_LABELS: Record<InventoryItemType, string> = {
   RAW_MATERIAL: "Materia prima",
   SUPPLY: "Insumos",
+  COMPLEMENT: "Complementos",
   WORK_IN_PROGRESS: "En proceso",
   FINISHED_PRODUCT: "Terminados",
 };

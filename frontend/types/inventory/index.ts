@@ -1,4 +1,4 @@
-export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
+export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "COMPLEMENT" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
 
 export type InventoryMovementType =
   | "ENTRADA"

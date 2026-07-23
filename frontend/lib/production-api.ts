@@ -64,11 +64,24 @@ export function createProductionRun(payload: {
   process_id: string;
   quantity: string;
   raw_material_item_id: string;
-  target_product_type_id?: string | null;
+  // Plan de resultantes: la suma de cantidades debe igualar quantity.
+  products: Array<{ product_type_id: string; quantity: string }>;
+  // Complementos solicitados al inventario (opcional).
+  complements?: Array<{ item_id: string; quantity: string }>;
 }) {
   return apiRequest<ProductionRun>("/api/production/runs", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function updateProductionRunProducts(
+  runId: string,
+  products: Array<{ product_type_id: string; quantity: string }>,
+) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/products`, {
+    method: "PUT",
+    body: JSON.stringify({ products }),
   });
 }
 

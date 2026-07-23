@@ -119,4 +119,8 @@ export type ProductionRun = {
   allowed_product_type_ids?: string[];
   // Insumos consumidos al aprobar materiales (para el acta de entrega).
   supply_consumptions?: Array<{ name: string; quantity: string; unit_code: string }>;
+  // Plan de resultantes (split) declarado al crear la orden.
+  products?: Array<{ id: string; product_type_id: string; product_name?: string | null; quantity: string }>;
+  // Complementos de inventario solicitados para ensamblar.
+  complements?: Array<{ id: string; item_id: string; name?: string | null; quantity: string; unit_code: string; status: string }>;
 };
