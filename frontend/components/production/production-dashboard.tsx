@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { Dispatch, FormEvent, SetStateAction, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
@@ -33,6 +33,7 @@ import {
   listProductionRuns,
   startProductionRun,
   updateProcess,
+  updateProductionRunProducts,
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
@@ -151,12 +152,13 @@ function processToForm(process: ProductionProcess): ProcessForm {
 }
 
 async function fetchProductionBundle(variant: "production" | "maintenance") {
-  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies] = await Promise.all([
+  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies, nextComplements] = await Promise.all([
     listProcesses(),
     variant === "maintenance" ? listUsers() : Promise.resolve([]),
     variant === "production" ? listProductionRuns() : Promise.resolve([]),
     listInventoryItems("RAW_MATERIAL"),
     listInventoryItems("SUPPLY"),
+    variant === "production" ? listInventoryItems("COMPLEMENT") : Promise.resolve([]),
   ]);
   return {
     processes: nextProcesses,
@@ -164,6 +166,7 @@ async function fetchProductionBundle(variant: "production" | "maintenance") {
     runs: nextRuns,
     // Materiales elegibles para procesos: materia prima + insumos.
     rawMaterials: [...nextRawMaterials, ...nextSupplies],
+    complements: nextComplements,
   };
 }
 
@@ -229,6 +232,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const users = bundle?.users ?? EMPTY_USERS;
   const runs = bundle?.runs ?? EMPTY_RUNS;
   const rawMaterials = bundle?.rawMaterials ?? EMPTY_RAW_MATERIALS;
+  const complementItems = bundle?.complements ?? EMPTY_RAW_MATERIALS;
   const isLoading = !currentUser || isBundleLoading;
 
   // Invalidación cruzada: las acciones de producción cambian lo que muestran
@@ -276,6 +280,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [showResponsables, setShowResponsables] = useState(false);
+  const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
+  // Filas del split: tipo de producto del catálogo + cantidad.
+  const [orderProducts, setOrderProducts] = useState<Array<{ productTypeId: string; quantity: string }>>([
+    { productTypeId: "", quantity: "" },
+  ]);
+  // Complementos solicitados: item + cantidad.
+  const [orderComplements, setOrderComplements] = useState<Array<{ itemId: string; quantity: string }>>([]);
+  const [isComplementsOpen, setIsComplementsOpen] = useState(false);
+  const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
+  const [editPlanRows, setEditPlanRows] = useState<Array<{ productTypeId: string; quantity: string }>>([]);
   // Tick por minuto para el tiempo transcurrido de las ordenes en proceso.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -795,6 +809,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Selecciona la materia prima con la que se fabricará esta orden.");
       return;
     }
+    const products = orderProducts.filter((row) => row.productTypeId && Number(row.quantity) > 0);
+    if (products.length === 0) {
+      setError("Agrega al menos un producto resultante.");
+      return;
+    }
+    const splitTotal = products.reduce((sum, row) => sum + Number(row.quantity), 0);
+    if (splitTotal !== Number(runQuantity)) {
+      setError(`El plan de productos suma ${splitTotal} y la orden fabrica ${runQuantity}: deben coincidir.`);
+      return;
+    }
+    const complements = orderComplements.filter((row) => row.itemId && Number(row.quantity) > 0);
 
     setError(null);
     setSuccess(null);
@@ -804,8 +829,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         process_id: selectedProcess.id,
         quantity: runQuantity,
         raw_material_item_id: selectedMaterialId,
+        products: products.map((row) => ({ product_type_id: row.productTypeId, quantity: row.quantity })),
+        complements: complements.map((row) => ({ item_id: row.itemId, quantity: row.quantity })),
       });
-      setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima.");
+      setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima y complementos.");
+      setIsCreateOrderOpen(false);
+      setOrderProducts([{ productTypeId: "", quantity: "" }]);
+      setOrderComplements([]);
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo crear la orden de produccion.");
@@ -1072,6 +1102,53 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
+  // Filas del split de productos resultantes: se usa tanto al crear la orden
+  // (allowedTypeIds viene del proceso) como al editar el plan (viene del run).
+  function renderProductRows(
+    rows: Array<{ productTypeId: string; quantity: string }>,
+    setRows: Dispatch<SetStateAction<Array<{ productTypeId: string; quantity: string }>>>,
+    allowedTypeIds: string[] = [],
+  ) {
+    return (
+      <div className="fieldGroup">
+        <span>Productos resultantes</span>
+        {rows.map((row, index) => (
+          <div className="materialRow" key={index}>
+            <select
+              className="field"
+              onChange={(e) => setRows((current) => current.map((r, i) => (i === index ? { ...r, productTypeId: e.target.value } : r)))}
+              value={row.productTypeId}
+            >
+              <option value="">Seleccionar producto</option>
+              {productTypesList
+                .filter((type) => allowedTypeIds.length === 0 || allowedTypeIds.includes(type.id))
+                .map((type) => (
+                  <option key={type.id} value={type.id}>{type.name}</option>
+                ))}
+            </select>
+            <input
+              className="field"
+              min="1"
+              onChange={(e) => setRows((current) => current.map((r, i) => (i === index ? { ...r, quantity: e.target.value } : r)))}
+              placeholder="Cantidad"
+              step="1"
+              type="number"
+              value={row.quantity}
+            />
+            {rows.length > 1 ? (
+              <button aria-label="Quitar producto" className="iconOnlyButton" onClick={() => setRows((current) => current.filter((_, i) => i !== index))} type="button">
+                <Trash2 aria-hidden="true" size={15} />
+              </button>
+            ) : null}
+          </div>
+        ))}
+        <button className="button" onClick={() => setRows((current) => [...current, { productTypeId: "", quantity: "" }])} type="button">
+          <Plus aria-hidden="true" size={14} /> Agregar producto
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="content">
       {error || success ? (
@@ -1243,39 +1320,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </div>
                 <Play aria-hidden="true" size={20} />
               </div>
-              <div className="materialRow">
-                <label className="fieldGroup">
-                  <span>Proceso</span>
-                  <select className="field" onChange={(e) => setSelectedProcessId(e.target.value)} value={selectedProcess?.id ?? ""}>
-                    <option value="">Seleccionar proceso</option>
-                    {activeProcesses.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="fieldGroup">
-                  <span>Material</span>
-                  <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
-                    <option value="">Seleccionar material</option>
-                    {rawMaterials.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} · {numericText(item.current_stock)} {item.unit_code}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label className="fieldGroup">
-                <span>Cantidad a fabricar</span>
-                <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
-              </label>
-              <button
-                className="button buttonPrimary"
-                disabled={isSaving || !selectedProcess || !selectedMaterialId}
-                onClick={() => void handleCreateProductionOrder()}
-                type="button"
-              >
-                <Play aria-hidden="true" size={16} />
+              <button className="button buttonPrimary" onClick={() => setIsCreateOrderOpen(true)} type="button">
+                <Plus aria-hidden="true" size={16} />
                 Crear orden
               </button>
             </article>
@@ -1415,6 +1461,150 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </>
       )}
 
+      {isCreateOrderOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Crear orden</h2>
+                <p>Proceso, material, cantidad y productos resultantes</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCreateOrderOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+
+            <div className="materialRow">
+              <label className="fieldGroup">
+                <span>Proceso</span>
+                <select className="field" onChange={(e) => setSelectedProcessId(e.target.value)} value={selectedProcess?.id ?? ""}>
+                  <option value="">Seleccionar proceso</option>
+                  {activeProcesses.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="fieldGroup">
+                <span>Material</span>
+                <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
+                  <option value="">Seleccionar material</option>
+                  {rawMaterials.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {numericText(item.current_stock)} {item.unit_code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="fieldGroup">
+              <span>Cantidad a fabricar</span>
+              <input className="field" min="1" onChange={(e) => setRunQuantity(e.target.value)} step="1" type="number" value={runQuantity} />
+            </label>
+
+            {renderProductRows(orderProducts, setOrderProducts, selectedProcess?.product_type_ids ?? [])}
+
+            {/* Complementos del inventario para ensamblar con lo producido. */}
+            <div className="fieldGroup">
+              <button className="button" onClick={() => setIsComplementsOpen((open) => !open)} type="button">
+                <Boxes aria-hidden="true" size={14} />
+                Solicitar complementos{orderComplements.length > 0 ? ` (${orderComplements.length})` : ""}
+              </button>
+              {isComplementsOpen ? (
+                <>
+                  {orderComplements.map((row, index) => (
+                    <div className="materialRow" key={index}>
+                      <select
+                        className="field"
+                        onChange={(e) => setOrderComplements((rows) => rows.map((r, i) => (i === index ? { ...r, itemId: e.target.value } : r)))}
+                        value={row.itemId}
+                      >
+                        <option value="">Seleccionar complemento</option>
+                        {complementItems.filter((item) => !item.archived_at).map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} · {numericText(item.current_stock)} {item.unit_code}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="field"
+                        min="0.0001"
+                        onChange={(e) => setOrderComplements((rows) => rows.map((r, i) => (i === index ? { ...r, quantity: e.target.value } : r)))}
+                        placeholder="Cantidad"
+                        step="0.0001"
+                        type="number"
+                        value={row.quantity}
+                      />
+                      <button aria-label="Quitar complemento" className="iconOnlyButton" onClick={() => setOrderComplements((rows) => rows.filter((_, i) => i !== index))} type="button">
+                        <Trash2 aria-hidden="true" size={15} />
+                      </button>
+                    </div>
+                  ))}
+                  <button className="button" onClick={() => setOrderComplements((rows) => [...rows, { itemId: "", quantity: "" }])} type="button">
+                    <Plus aria-hidden="true" size={14} /> Agregar complemento
+                  </button>
+                </>
+              ) : null}
+            </div>
+
+            <button
+              className="button buttonPrimary"
+              disabled={isSaving || !selectedProcess || !selectedMaterialId}
+              onClick={() => void handleCreateProductionOrder()}
+              type="button"
+            >
+              <Play aria-hidden="true" size={16} />
+              Crear orden
+            </button>
+          </section>
+        </div>
+      ) : null}
+
+      {editPlanRun ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Editar productos resultantes</h2>
+                <p>{editPlanRun.production_code ?? ""} · fabrica {numericText(editPlanRun.quantity)} und</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setEditPlanRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            {renderProductRows(editPlanRows, setEditPlanRows, editPlanRun.allowed_product_type_ids ?? [])}
+            <button
+              className="button buttonPrimary"
+              disabled={isSaving}
+              onClick={() => void (async () => {
+                const rows = editPlanRows.filter((row) => row.productTypeId && Number(row.quantity) > 0);
+                const total = rows.reduce((sum, row) => sum + Number(row.quantity), 0);
+                if (total !== Number(editPlanRun.quantity)) {
+                  setError(`El plan suma ${total} y la orden fabrica ${numericText(editPlanRun.quantity)}: deben coincidir.`);
+                  return;
+                }
+                setError(null);
+                setSuccess(null);
+                setIsSaving(true);
+                try {
+                  await updateProductionRunProducts(editPlanRun.id, rows.map((row) => ({ product_type_id: row.productTypeId, quantity: row.quantity })));
+                  setSuccess("Plan de productos actualizado.");
+                  setEditPlanRun(null);
+                  await reload();
+                } catch (nextError) {
+                  setError(nextError instanceof Error ? nextError.message : "No se pudo actualizar el plan.");
+                } finally {
+                  setIsSaving(false);
+                }
+              })()}
+              type="button"
+            >
+              <Save aria-hidden="true" size={15} />
+              Guardar plan
+            </button>
+          </section>
+        </div>
+      ) : null}
+
       {isRunStagesOpen && selectedRunForStages ? (
         <div className="modalBackdrop modalBackdropAnchor" role="dialog" aria-modal="true">
           <section className="modalWindow processViewWindow">
@@ -1430,6 +1620,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {numericText(selectedRunForStages.quantity)} {Number(selectedRunForStages.quantity) === 1 ? "unidad" : "unidades"}
                 </p>
               </div>
+              {selectedRunForStages.status !== "RECIBIDA" && selectedRunForStages.status !== "CANCELADA" ? (
+                <button className="iconTextButton" onClick={() => {
+                  setEditPlanRows((selectedRunForStages.products ?? []).map((p) => ({ productTypeId: p.product_type_id, quantity: p.quantity })));
+                  setEditPlanRun(selectedRunForStages);
+                }} type="button">
+                  <Pencil aria-hidden="true" size={14} />
+                  Editar productos
+                </button>
+              ) : null}
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
@@ -1692,6 +1891,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{selectedStatsRun.process_name}</h2>
                 <p>{numericText(selectedStatsRun.quantity)} unidades</p>
               </div>
+              {selectedStatsRun.status !== "RECIBIDA" && selectedStatsRun.status !== "CANCELADA" ? (
+                <button className="iconTextButton" onClick={() => {
+                  setEditPlanRows((selectedStatsRun.products ?? []).map((p) => ({ productTypeId: p.product_type_id, quantity: p.quantity })));
+                  setEditPlanRun(selectedStatsRun);
+                }} type="button">
+                  <Pencil aria-hidden="true" size={14} />
+                  Editar productos
+                </button>
+              ) : null}
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
