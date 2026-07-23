@@ -62,6 +62,11 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
           <article className="card metric">
             <span className="metricLabel">Estado</span>
             <strong className="metricValue" style={{ fontSize: 16 }}>{STATUS_LABELS[run.status]}</strong>
+            {run.assembly_pending ? (
+              <span className="statusBadge" style={{ background: "#fff4df", color: "var(--warning)", marginTop: 6 }}>
+                Ensamble pendiente
+              </span>
+            ) : null}
           </article>
           <article className="card metric">
             <span className="metricLabel">Cantidad</span>
@@ -110,6 +115,20 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
                 <div className="dashboardRow" key={complement.id}>
                   <div><strong>{complement.name ?? "—"}</strong></div>
                   <small>{num(complement.quantity)} {complement.unit_code} · {complement.status}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {(run.assembly_items ?? []).length > 0 ? (
+          <div className="card panelBody">
+            <div className="panelHeader"><div><h2 className="panelTitle">Ensamble aplicado</h2></div></div>
+            <div className="dashboardList">
+              {(run.assembly_items ?? []).map((item) => (
+                <div className="dashboardRow" key={item.id}>
+                  <div><strong>{item.name ?? "—"}</strong></div>
+                  <small>{num(item.quantity)}</small>
                 </div>
               ))}
             </div>

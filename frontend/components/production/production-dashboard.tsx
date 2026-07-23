@@ -31,6 +31,7 @@ import { listUnits } from "@/lib/units-api";
 import {
   createProcess,
   createProductionRun,
+  defineRunAssembly,
   deleteProcess,
   finishProductionRunStage,
   listProcesses,
@@ -314,6 +315,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isComplementPickerOpen, setIsComplementPickerOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
   const [editPlanRows, setEditPlanRows] = useState<ProductPickerRow[]>([]);
+  // Orden a la que se le esta definiendo el ensamble (complementos APROBADOS
+  // + cantidad por unidad); se cierra a null tras guardar o cancelar.
+  const [assemblyRun, setAssemblyRun] = useState<ProductionRun | null>(null);
+  const [assemblyLines, setAssemblyLines] = useState<Array<{ itemId: string; perUnit: string }>>([]);
   // Picker de pieza/tipo abierto para una fila: "create" = modal Crear orden,
   // "edit" = modal Editar productos resultantes.
   const [itemPickerFor, setItemPickerFor] = useState<{ kind: "create" | "edit"; index: number } | null>(null);
@@ -583,6 +588,41 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedStatsRun(run);
     setShowResponsables(false);
     setIsStatsModalOpen(true);
+  }
+
+  // Abre "Definir ensamble": semilla de filas desde los complementos APROBADA
+  // de la orden, con "por unidad" vacio para que el jefe de produccion lo llene.
+  function openAssemblyModal(run: ProductionRun) {
+    const approved = (run.complements ?? []).filter((complement) => complement.status === "APROBADA");
+    setAssemblyLines(approved.map((complement) => ({ itemId: complement.item_id, perUnit: "" })));
+    setAssemblyRun(run);
+  }
+
+  function closeAssemblyModal() {
+    setAssemblyRun(null);
+    setAssemblyLines([]);
+  }
+
+  async function handleDefineAssembly() {
+    if (!assemblyRun) return;
+    const lines = assemblyLines.filter((line) => Number(line.perUnit) > 0);
+    if (lines.length === 0) return;
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      await defineRunAssembly(
+        assemblyRun.id,
+        lines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
+      );
+      setSuccess("Ensamble definido. La receta quedó guardada para el futuro.");
+      closeAssemblyModal();
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo definir el ensamble.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function closeStatsModal() {
@@ -1531,10 +1571,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </strong>
                       <span>{numericText(run.quantity)} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
                     </div>
-                    <button className="iconTextButton" onClick={(event) => { event.stopPropagation(); openStatsModal(run); }} type="button">
-                      <Eye aria-hidden="true" size={14} />
-                      Visualizar
-                    </button>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
+                      {run.assembly_pending ? (
+                        <button
+                          className="button buttonPrimary"
+                          onClick={() => openAssemblyModal(run)}
+                          type="button"
+                        >
+                          <Puzzle aria-hidden="true" size={14} />
+                          Definir ensamble
+                        </button>
+                      ) : null}
+                      <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+                        <Eye aria-hidden="true" size={14} />
+                        Visualizar
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1754,6 +1806,109 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </section>
         </div>
       ) : null}
+
+      {/* Definir ensamble: combinacion de complementos APROBADOS de la orden,
+          por unidad × cantidad fabricada. Se guarda como receta a futuro. */}
+      {assemblyRun ? (() => {
+        const approvedComplements = (assemblyRun.complements ?? []).filter((complement) => complement.status === "APROBADA");
+        const runQuantity = Number(assemblyRun.quantity) || 0;
+        const hasValidLine = assemblyLines.some((line) => Number(line.perUnit) > 0);
+        const hasExcess = assemblyLines.some((line) => {
+          const perUnit = Number(line.perUnit);
+          if (!(perUnit > 0)) return false;
+          const complement = approvedComplements.find((candidate) => candidate.item_id === line.itemId);
+          const approvedQty = complement ? Number(complement.quantity) : 0;
+          return perUnit * runQuantity > approvedQty;
+        });
+        const canSubmitAssembly = hasValidLine && !hasExcess;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Definir ensamble">
+            <section className="modalWindow processViewWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>Definir ensamble</h2>
+                  <p>{assemblyRun.production_code ?? ""} · fabrica {numericText(assemblyRun.quantity)} und</p>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeAssemblyModal} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              {approvedComplements.length > 0 ? (
+                <div className="tableWrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Complemento</th>
+                        <th className="num">Aprobado</th>
+                        <th className="num">Por unidad</th>
+                        <th className="num">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {approvedComplements.map((complement) => {
+                        const line = assemblyLines.find((candidate) => candidate.itemId === complement.item_id);
+                        const perUnit = line?.perUnit ?? "";
+                        const perUnitNumber = Number(perUnit);
+                        const total = perUnitNumber > 0 ? perUnitNumber * runQuantity : 0;
+                        const approvedQty = Number(complement.quantity);
+                        const exceeds = perUnitNumber > 0 && total > approvedQty;
+                        return (
+                          <tr key={complement.id}>
+                            <td>{complement.name ?? "—"}</td>
+                            <td className="num">{numericText(complement.quantity)} {complement.unit_code}</td>
+                            <td className="num">
+                              <input
+                                aria-label={`Cantidad por unidad de ${complement.name ?? "complemento"}`}
+                                className="field"
+                                min="0"
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  setAssemblyLines((current) =>
+                                    current.map((candidate) =>
+                                      candidate.itemId === complement.item_id ? { ...candidate, perUnit: value } : candidate,
+                                    ),
+                                  );
+                                }}
+                                step="0.0001"
+                                style={{ width: 90 }}
+                                type="number"
+                                value={perUnit}
+                              />
+                            </td>
+                            <td className="num">
+                              <span style={{ color: exceeds ? "var(--danger, #c0392b)" : undefined }}>
+                                {numericText(total)} {complement.unit_code}
+                              </span>
+                              {exceeds ? (
+                                <small style={{ display: "block", color: "var(--danger, #c0392b)" }}>
+                                  Supera lo aprobado
+                                </small>
+                              ) : null}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="emptyState">Esta orden no tiene complementos aprobados.</div>
+              )}
+              <div className="modalActions">
+                <button
+                  className="button buttonPrimary"
+                  disabled={isSaving || !canSubmitAssembly}
+                  onClick={() => void handleDefineAssembly()}
+                  type="button"
+                >
+                  <Puzzle aria-hidden="true" size={15} />
+                  {isSaving ? "Guardando" : "Definir ensamble"}
+                </button>
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
 
       {/* Picker de pieza terminada para una fila del plan de productos (Crear
           orden o Editar productos). "Crear producto nuevo" pasa al picker de
@@ -2109,6 +2264,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 }} type="button">
                   <Pencil aria-hidden="true" size={14} />
                   Editar productos
+                </button>
+              ) : null}
+              {selectedStatsRun.assembly_pending ? (
+                <button
+                  className="button buttonPrimary"
+                  onClick={() => openAssemblyModal(selectedStatsRun)}
+                  type="button"
+                >
+                  <Puzzle aria-hidden="true" size={14} />
+                  Definir ensamble
                 </button>
               ) : null}
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
