@@ -477,6 +477,17 @@ export function InventoryDashboard() {
   });
   const canSeeAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
 
+  useEffect(() => {
+    if (!canSeeAudit && itemFilter === "ORDENES_TERMINADAS") {
+      setItemFilter("RAW_MATERIAL");
+    }
+  }, [canSeeAudit, itemFilter]);
+
+  // "Procesos terminados" es legado: solo admin lo ve para convertir lotes viejos.
+  const visibleItemTypes = ITEM_TYPES.filter(
+    (tab) => tab.value !== "ORDENES_TERMINADAS" || canSeeAudit,
+  );
+
   const {
     data,
     isLoading: isBundleLoading,
@@ -1793,7 +1804,7 @@ export function InventoryDashboard() {
                   }}
                 />
               ) : null}
-              {ITEM_TYPES.map((type) => (
+              {visibleItemTypes.map((type) => (
                 <button
                   className={itemFilter === type.value ? "segmentActive" : ""}
                   key={type.value}

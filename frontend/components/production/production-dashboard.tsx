@@ -383,6 +383,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
   const finishedRuns = runs.filter((run) => run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA");
   const recentFinishedRuns = finishedRuns.slice(0, 3);
+  const receivedRuns = runs
+    .filter((run) => run.status === "RECIBIDA")
+    .sort((a, b) => (b.received_at ?? "").localeCompare(a.received_at ?? ""));
 
   useEffect(() => {
     if (finishedRuns.length === 0 || hasInitializedHistory) {
@@ -1456,6 +1459,54 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </div>
             ) : (
               <div className="emptyState">No hay historial disponible.</div>
+            )}
+          </section>
+
+          {/* Procesos terminados: solo lectura — mermas y datos de recepción. */}
+          <section className="card panelBody" aria-label="Procesos terminados">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Procesos terminados</h2>
+                <p className="panelText">Mermas e información de las órdenes recibidas</p>
+              </div>
+            </div>
+            {receivedRuns.length > 0 ? (
+              <div className="tableWrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Proceso</th>
+                      <th className="num">Cantidad</th>
+                      <th className="num">Merma final</th>
+                      <th>Recibida</th>
+                      <th aria-label="Acciones" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receivedRuns.map((run) => (
+                      <tr key={run.id}>
+                        <td>{run.production_code ?? "—"}</td>
+                        <td>{run.process_name}</td>
+                        <td className="num">{numericText(run.quantity)} und</td>
+                        <td className="num">
+                          {run.waste_weight ? `${numericText(run.waste_weight)} g` : "0 g"}
+                          {run.waste_percent ? ` · ${numericText(run.waste_percent)}%` : ""}
+                        </td>
+                        <td>{timeLabel(run.received_at)}</td>
+                        <td>
+                          <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+                            <Eye aria-hidden="true" size={14} />
+                            Visualizar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="emptyState">No hay procesos terminados.</div>
             )}
           </section>
         </>
