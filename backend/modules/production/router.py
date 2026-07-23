@@ -15,6 +15,7 @@ from backend.modules.production.schemas import (
     ProductionRunRead,
     MaterialRejectPayload,
     ProductionRunStageFinish,
+    RunAssemblyDefine,
     RunProductsUpdate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
@@ -128,6 +129,25 @@ def update_run_products(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.update_run_products(run_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/assembly", response_model=ProductionRunRead)
+def define_run_assembly(
+    run_id: UUID,
+    payload: RunAssemblyDefine,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    # Solo produccion/admin: el ensamble es del jefe de produccion, no de inventario.
+    if current_user.role == "Jefe de inventario":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.define_run_assembly(run_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

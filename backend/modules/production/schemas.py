@@ -256,6 +256,19 @@ class RunAssemblyItemRead(BaseModel):
     quantity: Decimal
 
 
+class RunAssemblyLineCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    complement_item_id: UUID
+    quantity_per_unit: Decimal = Field(gt=0)
+
+
+class RunAssemblyDefine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[RunAssemblyLineCreate] = Field(min_length=1)
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
