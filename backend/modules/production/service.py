@@ -911,9 +911,10 @@ class ProductionService:
         # El lote hereda el material (metal) de la orden para que la conversión
         # a producto del catálogo no tenga que preguntarlo.
         from backend.modules.inventory.models import InventoryItem
+        from backend.modules.inventory.schemas import LotConversionCreate
 
         raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
-        self.inventory_service.create_finished_product_lot(
+        lot = self.inventory_service.create_finished_product_lot(
             name=run.process_name,
             unit_code="und",
             production_order_id=run.id,
@@ -924,6 +925,24 @@ class ProductionService:
             purity=raw_material.purity if raw_material else None,
             received_by_user_id=current_user.id,
         )
+        # Con plan de resultantes: el lote se convierte aqui mismo en los
+        # productos finales declarados (misma logica de conversion de siempre:
+        # herencia de material, codigo de catalogo y par de movimientos).
+        # Sin plan (ordenes viejas): el lote queda para conversion manual.
+        for product in run.products:
+            try:
+                self.inventory_service.convert_lot_to_product(
+                    lot.id,
+                    LotConversionCreate(
+                        product_type_id=product.product_type_id,
+                        quantity=product.quantity,
+                    ),
+                    user_id=current_user.id,
+                )
+            except InventoryDomainError as exc:
+                raise ProductionDomainError(
+                    f"No se pudo convertir el lote al producto planificado: {exc}"
+                ) from exc
         run.status = ProductionRunStatus.RECEIVED
         run.received_at = datetime.utcnow()
         run.received_by_user_id = current_user.id
