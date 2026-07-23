@@ -60,13 +60,14 @@ NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA"
 ITEM_TYPE_PREFIXES = {
     "RAW_MATERIAL": "MP",
     "SUPPLY": "IN",
+    "COMPLEMENT": "CO",
     "WORK_IN_PROGRESS": "PP",
     "FINISHED_PRODUCT": "PT",
 }
 
 # Tipos que el usuario gestiona directamente (crear/editar/eliminar);
 # los demás los administra el flujo de producción.
-MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "FINISHED_PRODUCT")
+MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "FINISHED_PRODUCT")
 
 
 class InventoryService(InventoryIntegrationPort):
@@ -332,6 +333,7 @@ class InventoryService(InventoryIntegrationPort):
         return InventorySummary(
             raw_materials=sum(1 for item in items if item.item_type == "RAW_MATERIAL"),
             supplies=sum(1 for item in items if item.item_type == "SUPPLY"),
+            complements=sum(1 for item in items if item.item_type == "COMPLEMENT"),
             work_in_progress=sum(1 for item in items if item.item_type == "WORK_IN_PROGRESS"),
             finished_products=sum(1 for item in items if item.item_type == "FINISHED_PRODUCT"),
             low_stock_items=low_stock_items,
