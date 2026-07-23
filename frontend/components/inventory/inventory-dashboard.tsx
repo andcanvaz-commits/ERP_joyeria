@@ -151,6 +151,23 @@ function movementOperationLabel(movement: { movement_type: InventoryMovementType
   return movementTypeLabel(movement.movement_type);
 }
 
+// Stock de un item con su equivalencia: gramos ↔ unidades cuando el item
+// tiene peso por unidad; su unidad base cuando no. Formato único para todo
+// el sistema ("40 g · 4 und").
+function itemStockText(item: InventoryItem) {
+  const stock = Number(item.current_stock);
+  const wpu = Number(item.weight_per_unit ?? 0);
+  const base = `${numericText(item.current_stock)} ${item.unit_code}`;
+  if (!(wpu > 0) || !Number.isFinite(stock)) return base;
+  if (item.unit_code === "g") {
+    return `${base} · ${numericText(String(Number((stock / wpu).toFixed(2))))} und`;
+  }
+  if (item.unit_code === "und") {
+    return `${base} · ${numericText(String(Number((stock * wpu).toFixed(2))))} g`;
+  }
+  return base;
+}
+
 // Cantidad de un movimiento con su equivalencia: items en gramos con peso
 // por unidad muestran también unidades; items en unidades (lotes) muestran
 // también gramos. Sin dato de peso, solo la cantidad base.
@@ -686,12 +703,14 @@ export function InventoryDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, movementForm.movement_type],
   );
+  // Archivados de la pestaña ACTIVA: cada menú (materia prima, insumos,
+  // productos terminados) tiene su propia vista de archivados, no compartida.
   const archivedItems = useMemo(
     () =>
       items
-        .filter((item) => item.archived_at)
+        .filter((item) => item.archived_at && item.item_type === itemFilter)
         .sort((left, right) => (right.archived_at ?? "").localeCompare(left.archived_at ?? "")),
-    [items],
+    [items, itemFilter],
   );
   // Fecha del ultimo movimiento por item: base para sugerir archivado de
   // items agotados sin actividad reciente.
@@ -1071,13 +1090,12 @@ export function InventoryDashboard() {
   const receivedCodes = new Set(receivedRuns.map((run) => run.production_code).filter(Boolean) as string[]);
   // En "Producto terminado": las órdenes recibidas se muestran como filas (con id OP);
   // ocultamos el item de stock auto-creado con ese mismo código para no duplicar.
-  // Piezas sin stock tampoco se listan: el producto sigue existiendo (catálogo
-  // y mantenimiento) y reaparece aquí cuando una asignación o ensamble le
-  // vuelve a dar stock; los selectores de destino sí lo ofrecen siempre.
+  // Piezas agotadas se quedan con su semáforo hasta que se archiven (misma
+  // lógica que materia prima/insumos); archivadas salen de la vista pero
+  // siguen existiendo y los selectores de destino las ofrecen: una nueva
+  // asignación o ensamble las reactiva solas.
   const displayItems =
-    itemFilter === "FINISHED_PRODUCT"
-      ? filteredItems.filter((item) => !receivedCodes.has(item.sku) && Number(item.current_stock) > 0)
-      : filteredItems;
+    itemFilter === "FINISHED_PRODUCT" ? filteredItems.filter((item) => !receivedCodes.has(item.sku)) : filteredItems;
 
   // Grupos por nombre (categoria) y dentro por producto del catalogo SIN el
   // material (categoria+modelo): un mismo producto puede existir en varios
@@ -1696,7 +1714,8 @@ export function InventoryDashboard() {
                   ) : null}
                 </div>
               ) : null}
-              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY") && archivedItems.length > 0 ? (
+              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY" || itemFilter === "FINISHED_PRODUCT") &&
+              archivedItems.length > 0 ? (
                 <button className="button" onClick={() => setIsArchivedOpen(true)} type="button">
                   <Inbox aria-hidden="true" size={17} />
                   Archivados ({archivedItems.length})
@@ -1890,7 +1909,7 @@ export function InventoryDashboard() {
                         <td>{item.material_type ?? item.name}</td>
                         <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
-                        <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                        <td className="num">{itemStockText(item)}</td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
                         <td className="num">$ {numericText(String(totalValue))}</td>
@@ -1968,7 +1987,7 @@ export function InventoryDashboard() {
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
                         <td>{item.name}</td>
                         <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
-                        <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                        <td className="num">{itemStockText(item)}</td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
                         <td className="num">$ {numericText(String(totalValue))}</td>
@@ -2038,6 +2057,7 @@ export function InventoryDashboard() {
                         <th>Metal principal</th>
                         <th>Ley/pureza</th>
                         <th className="num">Stock</th>
+                        <th>Estado</th>
                         <th aria-label="Acciones" />
                       </tr>
                     </thead>
@@ -2045,22 +2065,29 @@ export function InventoryDashboard() {
                       {piecesPager.pageItems.map((row) => {
                         if (!row.item) return null;
                         const item = row.item;
+                        const status = stockStatus(item);
+                        const suggestion = archiveSuggestion(item);
                         return (
                           <tr key={item.id}>
                             <td>{item.sku}</td>
                             <td>{(item.description ?? "").trim() || item.name}</td>
                             <td>{item.material_type ?? "—"}</td>
                             <td>{item.purity ?? "—"}</td>
-                            <td className="num">
-                              {numericText(item.current_stock)} {item.unit_code}
-                              {/* Piezas nacidas por conversión: la orden dejó los
-                                  gramos por unidad, así que se calculan unidades. */}
-                              {item.weight_per_unit && Number(item.weight_per_unit) > 0 && item.unit_code !== "und"
-                                ? ` · ${numericText(String(Number((Number(item.current_stock) / Number(item.weight_per_unit)).toFixed(2))))} und`
-                                : ""}
-                            </td>
+                            <td className="num">{itemStockText(item)}</td>
+                            <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                             <td>
                               <div className="rowActions">
+                                {canArchive(item) ? (
+                                  <button
+                                    aria-label="Archivar pieza agotada"
+                                    className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
+                                    onClick={() => void handleArchiveItem(item)}
+                                    title={suggestion ?? "Archivar pieza agotada"}
+                                    type="button"
+                                  >
+                                    <Inbox aria-hidden="true" size={15} />
+                                  </button>
+                                ) : null}
                                 <button aria-label="Visualizar" className="iconOnlyButton" onClick={(event) => { event.stopPropagation(); setViewingItem(item); }} title="Visualizar" type="button">
                                   <Eye aria-hidden="true" size={15} />
                                 </button>
@@ -2070,7 +2097,7 @@ export function InventoryDashboard() {
                         );
                       })}
                       {searchActive && displayItems.length === 0 ? (
-                        <tr><td colSpan={6}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
+                        <tr><td colSpan={7}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
                       ) : null}
                     </tbody>
                   </table>
@@ -2280,7 +2307,7 @@ export function InventoryDashboard() {
                     <tr key={item.id}>
                       <td>{item.sku}</td>
                       <td>{item.name}</td>
-                      <td className="num">{numericText(item.current_stock)} {item.unit_code}</td>
+                      <td className="num">{itemStockText(item)}</td>
                       <td className="num">—</td>
                       <td className="num">—</td>
                       <td>—</td>
@@ -2943,13 +2970,18 @@ export function InventoryDashboard() {
             ? Math.floor(Number(item.current_stock) / wpu)
             : Number(item.current_stock);
         };
-        // El ensamble opera en unidades: piezas en gramos con peso por pieza
-        // se muestran como unidades y los gramos se calculan por detrás.
+        // El ensamble opera en unidades: piezas con peso por unidad muestran
+        // unidades disponibles y su equivalente en gramos.
         const stockLabel = (item: InventoryItem) => {
           const wpu = Number(item.weight_per_unit ?? 0);
-          return item.unit_code === "g" && wpu > 0
-            ? `${numericText(String(availableUnits(item)))} und`
-            : `${numericText(item.current_stock)} ${item.unit_code}`;
+          if (item.unit_code === "g" && wpu > 0) {
+            return `${numericText(String(availableUnits(item)))} und · ${numericText(item.current_stock)} g`;
+          }
+          if (item.unit_code === "und" && wpu > 0) {
+            const grams = Number((Number(item.current_stock) * wpu).toFixed(2));
+            return `${numericText(item.current_stock)} und · ${numericText(String(grams))} g`;
+          }
+          return `${numericText(item.current_stock)} ${item.unit_code}`;
         };
         const lineEntries = combineForm.sources.map((line) => ({
           line,
@@ -3295,7 +3327,8 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>Archivados</h2>
-                <p>{archivedItems.length} items fuera del inventario activo</p>
+                {/* Vista propia de la pestaña activa, no compartida. */}
+                <p>{itemTypeLabel(itemFilter as InventoryItemType)} · {archivedItems.length} items fuera del inventario activo</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsArchivedOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -3427,7 +3460,7 @@ export function InventoryDashboard() {
             </div>
             <div className="fichaHero">
               <div className="fichaHeroItem">
-                <strong>{numericText(viewingItem.current_stock)} {viewingItem.unit_code}</strong>
+                <strong>{itemStockText(viewingItem)}</strong>
                 <span>Stock actual</span>
               </div>
               {viewingItem.purity ? (
@@ -3490,7 +3523,18 @@ export function InventoryDashboard() {
                         {kardexDetail(movement)}
                       </td>
                       <td className="num">{movementSign(movement.movement_type) > 0 ? "+" : "−"}{movementAmountText(movement)}</td>
-                      <td className="num">{numericText(String(balanceAfter))} {movement.unit_code}</td>
+                      <td className="num">{(() => {
+                        const wpu = Number(kardexItem.weight_per_unit ?? 0);
+                        const base = `${numericText(String(balanceAfter))} ${movement.unit_code}`;
+                        if (!(wpu > 0)) return base;
+                        if (movement.unit_code === "g") {
+                          return `${base} · ${numericText(String(Number((balanceAfter / wpu).toFixed(2))))} und`;
+                        }
+                        if (movement.unit_code === "und") {
+                          return `${base} · ${numericText(String(Number((balanceAfter * wpu).toFixed(2))))} g`;
+                        }
+                        return base;
+                      })()}</td>
                     </tr>
                   ))}
                   {viewingItemKardex.length === 0 ? (

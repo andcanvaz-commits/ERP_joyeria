@@ -971,9 +971,17 @@ textarea {
   min-width: 0;
 }
 
+/* Nada se parte en dos lineas: el detalle largo se corta con elipsis (el
+   texto completo vive en el tooltip). */
+.kardexTable th,
+.kardexTable td {
+  white-space: nowrap;
+}
+
 /* El kardex trae equivalencias de peso y detalle: necesita mas ancho que la
-   ventana de proceso estandar para que nada se apile. */
-.kardexWindow {
+   ventana de proceso estandar. Doble clase para ganarle en especificidad a
+   .processViewWindow, que se declara despues. */
+.modalWindow.kardexWindow {
   width: min(880px, 100%);
 }
 

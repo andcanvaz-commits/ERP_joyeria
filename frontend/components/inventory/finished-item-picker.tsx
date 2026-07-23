@@ -123,12 +123,22 @@ export function FinishedItemPicker({
                       <td><span className={`orderCodeTag${metalTagClass(item.product_code)}`}>#{item.product_code}</span></td>
                       <td>{(item.description ?? "").trim() || item.name}</td>
                       <td>{item.material_type ?? "—"}</td>
-                      {/* Piezas en gramos con peso por pieza: stock en unidades,
-                          los gramos quedan por detrás. */}
+                      {/* Stock con equivalencia gramos ↔ unidades cuando hay
+                          peso por unidad. */}
                       <td className="num">
-                        {item.unit_code === "g" && Number(item.weight_per_unit ?? 0) > 0
-                          ? `${Math.floor(Number(item.current_stock) / Number(item.weight_per_unit)).toLocaleString("es-EC")} und`
-                          : `${Number(item.current_stock).toLocaleString("es-EC")} ${item.unit_code}`}
+                        {(() => {
+                          const stock = Number(item.current_stock);
+                          const wpu = Number(item.weight_per_unit ?? 0);
+                          const base = `${stock.toLocaleString("es-EC")} ${item.unit_code}`;
+                          if (!(wpu > 0)) return base;
+                          if (item.unit_code === "g") {
+                            return `${base} · ${Number((stock / wpu).toFixed(2)).toLocaleString("es-EC")} und`;
+                          }
+                          if (item.unit_code === "und") {
+                            return `${base} · ${Number((stock * wpu).toFixed(2)).toLocaleString("es-EC")} g`;
+                          }
+                          return base;
+                        })()}
                       </td>
                     </tr>
                   ))}
