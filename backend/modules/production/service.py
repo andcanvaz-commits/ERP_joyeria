@@ -10,6 +10,7 @@ from backend.modules.inventory.service import (
     InventoryService,
 )
 from backend.modules.production.models import (
+    AssemblyMode,
     ComplementRequestStatus,
     ProductionComplementRequest,
     ProductionProcess,
@@ -168,24 +169,50 @@ class ProductionService:
             raise ProductionDomainError("Un tipo de producto seleccionado no existe en el catalogo.")
 
     def _validate_run_products(
-        self, process: ProductionProcess, quantity: Decimal, products: list
+        self,
+        process: ProductionProcess,
+        quantity: Decimal,
+        products: list,
+        assembly_mode: str = AssemblyMode.ASSIGN,
     ) -> None:
-        """Valida el plan de resultantes: tipos activos del catalogo, permitidos
-        por el proceso (si restringe), sin repetidos y suma = cantidad."""
-        type_ids = [p.product_type_id for p in products]
-        if len(type_ids) != len(set(type_ids)):
+        """Valida el plan de resultantes: tipos activos del catalogo o piezas
+        existentes del inventario, permitidos por el proceso (si restringe, solo
+        aplica a tipos), sin repetidos y reglas de cantidad segun el modo."""
+        keys = [p.product_type_id or p.target_item_id for p in products]
+        if len(keys) != len(set(keys)):
             raise ProductionDomainError("No repitas el mismo producto resultante.")
+
         from backend.modules.product_types.models import ProductType
+        from backend.modules.inventory.models import InventoryItem
 
         allowed = {link.product_type_id for link in process.product_types}
-        for type_id in type_ids:
-            product_type = self.repository.session.get(ProductType, type_id)
-            if product_type is None or not product_type.is_active:
-                raise ProductionDomainError("Un producto resultante no existe o esta inactivo.")
-            if allowed and type_id not in allowed:
+        for product in products:
+            if product.product_type_id is not None:
+                product_type = self.repository.session.get(ProductType, product.product_type_id)
+                if product_type is None or not product_type.is_active:
+                    raise ProductionDomainError("Un producto resultante no existe o esta inactivo.")
+                if allowed and product.product_type_id not in allowed:
+                    raise ProductionDomainError(
+                        f"El proceso no puede producir '{product_type.name}'."
+                    )
+            else:
+                item = self.repository.session.get(InventoryItem, product.target_item_id)
+                if item is None or item.item_type != "FINISHED_PRODUCT":
+                    raise ProductionDomainError(
+                        "El destino seleccionado no existe como pieza en el inventario."
+                    )
+                if not item.product_code or len(item.product_code) != 7:
+                    raise ProductionDomainError(
+                        "La pieza destino debe tener un codigo de catalogo de 7 digitos."
+                    )
+
+        if assembly_mode == AssemblyMode.ASSEMBLE:
+            if len(products) != 1 or products[0].quantity != quantity:
                 raise ProductionDomainError(
-                    f"El proceso no puede producir '{product_type.name}'."
+                    "En modo ensamblar el plan es un solo producto con la cantidad de la orden."
                 )
+            return
+
         total = sum((p.quantity for p in products), Decimal("0"))
         if total != quantity:
             raise ProductionDomainError(
@@ -399,7 +426,9 @@ class ProductionService:
         if not active_stages:
             raise ProductionDomainError("El proceso debe tener al menos una etapa activa.")
 
-        self._validate_run_products(process, payload.quantity, payload.products)
+        self._validate_run_products(
+            process, payload.quantity, payload.products, payload.assembly_mode
+        )
 
         # Complementos: items de la pestaña Complementos del inventario.
         from backend.modules.inventory.models import InventoryItem
@@ -419,6 +448,7 @@ class ProductionService:
             process_name=process.name,
             quantity=payload.quantity,
             status=ProductionRunStatus.PENDING_INVENTORY,
+            assembly_mode=payload.assembly_mode,
             raw_material_item_id=payload.raw_material_item_id,
             raw_material_quantity_per_unit=quantity_per_unit,
             raw_material_unit_code=unit_code,
@@ -452,6 +482,7 @@ class ProductionService:
             run.products.append(
                 ProductionRunProduct(
                     product_type_id=product.product_type_id,
+                    target_item_id=product.target_item_id,
                     quantity=product.quantity,
                 )
             )
@@ -487,10 +518,13 @@ class ProductionService:
         process = self.repository.get(run.process_id)
         if process is None:
             raise ProductionNotFoundError("Proceso de la orden no encontrado.")
-        self._validate_run_products(process, run.quantity, payload.products)
+        self._validate_run_products(
+            process, run.quantity, payload.products, run.assembly_mode
+        )
         run.products = [
             ProductionRunProduct(
                 product_type_id=product.product_type_id,
+                target_item_id=product.target_item_id,
                 quantity=product.quantity,
             )
             for product in payload.products
@@ -663,14 +697,19 @@ class ProductionService:
             ]
 
     def _attach_plan_names(self, reads: list, runs: list) -> None:
-        """Nombres del plan de resultantes (tipo de producto) y de los
-        complementos (item de inventario) para las vistas y el acta."""
+        """Nombres del plan de resultantes (tipo de producto o pieza destino),
+        de los complementos y de la combinacion de ensamble aplicada, para las
+        vistas y el acta."""
         from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
         from backend.modules.product_types.models import ProductType
 
-        type_ids = {p.product_type_id for run in runs for p in run.products}
+        type_ids = {p.product_type_id for run in runs for p in run.products if p.product_type_id}
+        target_item_ids = {p.target_item_id for run in runs for p in run.products if p.target_item_id}
         item_ids = {c.item_id for run in runs for c in run.complements}
+        assembly_item_ids = {a.complement_item_id for run in runs for a in run.assembly_items}
+        item_ids |= assembly_item_ids
+        item_ids |= target_item_ids
         type_names: dict = {}
         if type_ids:
             rows = self.repository.session.execute(
@@ -678,16 +717,26 @@ class ProductionService:
             ).all()
             type_names = {row[0]: row[1] for row in rows}
         item_names: dict = {}
+        target_names: dict = {}
         if item_ids:
             rows = self.repository.session.execute(
-                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(item_ids))
+                select(
+                    InventoryItem.id, InventoryItem.name, InventoryItem.description
+                ).where(InventoryItem.id.in_(item_ids))
             ).all()
-            item_names = {row[0]: row[1] for row in rows}
+            for item_id, name, description in rows:
+                item_names[item_id] = name
+                target_names[item_id] = (description or "").strip() or name
         for read in reads:
             for product in read.products:
-                product.product_name = type_names.get(product.product_type_id)
+                if product.product_type_id is not None:
+                    product.product_name = type_names.get(product.product_type_id)
+                else:
+                    product.product_name = target_names.get(product.target_item_id)
             for complement in read.complements:
                 complement.name = item_names.get(complement.item_id)
+            for assembly_item in read.assembly_items:
+                assembly_item.name = item_names.get(assembly_item.complement_item_id)
 
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)

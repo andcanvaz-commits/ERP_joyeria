@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StageIngredientCreate(BaseModel):
@@ -118,8 +118,20 @@ class ProductionProcessRead(BaseModel):
 class RunProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    product_type_id: UUID
+    # Exactamente uno de los dos: tipo del catalogo (sin destino fisico aun) o
+    # pieza ya existente del inventario (destino directo).
+    product_type_id: UUID | None = None
+    target_item_id: UUID | None = None
     quantity: Decimal = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _check_one_target(self) -> "RunProductCreate":
+        if (self.product_type_id is None) == (self.target_item_id is None):
+            raise ValueError(
+                "Cada producto del plan debe ser una pieza del inventario o un "
+                "tipo del catalogo (uno de los dos)."
+            )
+        return self
 
 
 class RunComplementCreate(BaseModel):
@@ -142,6 +154,9 @@ class ProductionRunCreate(BaseModel):
     # Material con el que se fabricara: debe ser uno de los configurados en el proceso.
     raw_material_item_id: UUID
     quantity: Decimal = Field(gt=0)
+    # ASIGNAR: split directo a uno o mas destinos. ENSAMBLAR: un solo producto
+    # con toda la cantidad, que luego se arma con complementos.
+    assembly_mode: Literal["ASIGNAR", "ENSAMBLAR"] = "ASIGNAR"
     # Plan de resultantes (split): la suma de cantidades debe igualar quantity.
     products: list[RunProductCreate] = Field(min_length=1)
     # Complementos de inventario solicitados para ensamblar (opcional).
@@ -215,7 +230,8 @@ class RunProductRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     id: UUID
-    product_type_id: UUID
+    product_type_id: UUID | None = None
+    target_item_id: UUID | None = None
     product_name: str | None = None
     quantity: Decimal
 
@@ -231,6 +247,15 @@ class RunComplementRead(BaseModel):
     status: str
 
 
+class RunAssemblyItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    complement_item_id: UUID
+    name: str | None = None
+    quantity: Decimal
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -240,6 +265,11 @@ class ProductionRunRead(BaseModel):
     production_code: str | None = None
     quantity: Decimal
     status: str
+    # Modo del plan: ASIGNAR (split directo) o ENSAMBLAR (un producto + complementos).
+    assembly_mode: str
+    # ENSAMBLAR sin receta aplicable: produccion debe definir la combinacion
+    # antes de que inventario pueda recibir.
+    assembly_pending: bool
     raw_material_item_id: UUID
     raw_material_quantity_per_unit: Decimal
     raw_material_unit_code: str
@@ -273,3 +303,5 @@ class ProductionRunRead(BaseModel):
     # Plan de resultantes (split) y complementos solicitados.
     products: list[RunProductRead] = Field(default_factory=list)
     complements: list[RunComplementRead] = Field(default_factory=list)
+    # Combinacion de complementos aplicada al ensamble (cantidades totales).
+    assembly_items: list[RunAssemblyItemRead] = Field(default_factory=list)
