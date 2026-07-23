@@ -21,6 +21,7 @@ export function CatalogProductPicker({
   subtitle,
   selectedId,
   allowedTypeIds,
+  excludeTypeIds,
   onSelect,
   onClose,
 }: {
@@ -30,6 +31,10 @@ export function CatalogProductPicker({
   // Si viene con elementos, solo se ofrecen esos tipos y no se puede crear
   // (el proceso de la orden declara qué produce; el backend rechazaría otro).
   allowedTypeIds?: string[];
+  // Tipos a ocultar de la lista sin afectar la semántica de allowed/canCreate
+  // (ej.: tipos que ya tienen receta de ensamble y por eso no se ofrecen en
+  // ASIGNAR, pero el picker sigue "sin restricción" para efectos de crear).
+  excludeTypeIds?: string[];
   onSelect: (type: ProductType) => void;
   onClose: () => void;
 }) {
@@ -40,9 +45,16 @@ export function CatalogProductPicker({
 
   const allowed = allowedTypeIds ?? [];
   const canCreate = allowed.length === 0;
+  const excluded = excludeTypeIds ?? [];
   const active = useMemo(
-    () => types.filter((type) => type.is_active && (allowed.length === 0 || allowed.includes(type.id))),
-    [types, allowed],
+    () =>
+      types.filter(
+        (type) =>
+          type.is_active &&
+          (allowed.length === 0 || allowed.includes(type.id)) &&
+          (excluded.length === 0 || !excluded.includes(type.id)),
+      ),
+    [types, allowed, excluded],
   );
 
   // Drill-down tipos → productos, igual que el mantenimiento.

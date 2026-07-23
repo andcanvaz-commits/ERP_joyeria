@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, Tags, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
@@ -319,8 +319,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Producto único elegido con los pickers (pieza o tipo de catálogo).
   const [orderProduct, setOrderProduct] = useState<ProductChoice | null>(null);
   // Receta de ensamble del producto elegido en ENSAMBLAR (complementos +
-  // cantidad por unidad); se usa para calcular la solicitud automática.
-  const [orderRecipe, setOrderRecipe] = useState<AssemblyRecipe | null>(null);
+  // cantidad por unidad); se usa para calcular la solicitud automática. `key`
+  // identifica el producto que la originó (targetItemId o productTypeId) para
+  // no enviar al submit una receta de una selección anterior/obsoleta.
+  const [orderRecipe, setOrderRecipe] = useState<{ key: string; recipe: AssemblyRecipe } | null>(null);
+  // Evita condiciones de carrera: cada búsqueda de receta incrementa este
+  // contador y solo aplica su resultado si sigue siendo la más reciente.
+  const recipeLookupSeq = useRef(0);
   // Tipo de producto para el que se está definiendo la receta (modal abierta
   // cuando no es null). Las filas empiezan vacías.
   const [recipeModalTypeId, setRecipeModalTypeId] = useState<string | null>(null);
@@ -911,14 +916,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     // automáticamente a partir de la receta del producto elegido (Task 4).
     let complementsPayload: Array<{ item_id: string; quantity: string }> = [];
     if (assemblyMode === "ENSAMBLAR") {
-      if (!orderRecipe || orderRecipe.items.length === 0) {
+      const productKey = orderProduct.targetItemId ?? orderProduct.productTypeId;
+      if (!orderRecipe || orderRecipe.key !== productKey || orderRecipe.recipe.items.length === 0) {
         setError("Este producto necesita receta para ensamblar.");
         return;
       }
-      complementsPayload = orderRecipe.items.map((item) => ({
-        item_id: item.complement_item_id,
-        quantity: String(Number(item.quantity_per_unit) * Number(runQuantity)),
-      }));
+      complementsPayload = orderRecipe.recipe.items.map((item) => {
+        const qty = Number(item.quantity_per_unit) * Number(runQuantity);
+        return {
+          item_id: item.complement_item_id,
+          quantity: String(Number(qty.toFixed(4))),
+        };
+      });
     }
 
     setError(null);
@@ -1240,13 +1249,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // puede ensamblar y se limpia la selección.
   async function loadOrderRecipeForChoice(choice: ProductChoice) {
     setError(null);
+    const key = choice.targetItemId ?? choice.productTypeId ?? "";
+    const seq = ++recipeLookupSeq.current;
     try {
       const recipe = choice.targetItemId
         ? await getAssemblyRecipe({ itemId: choice.targetItemId })
         : await getAssemblyRecipe({ productTypeId: choice.productTypeId });
 
+      if (seq !== recipeLookupSeq.current) return;
+
       if (recipe.items.length > 0) {
-        setOrderRecipe(recipe);
+        setOrderRecipe({ key, recipe });
         return;
       }
       if (recipe.product_type_id) {
@@ -1259,6 +1272,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setOrderProduct(null);
       setOrderRecipe(null);
     } catch (nextError) {
+      if (seq !== recipeLookupSeq.current) return;
       setError(nextError instanceof Error ? nextError.message : "No se pudo cargar la receta.");
       setOrderProduct(null);
       setOrderRecipe(null);
@@ -1284,6 +1298,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // arrastra la receta de complementos que lo ensambla.
   function handleAssemblyModeChange(mode: "ASIGNAR" | "ENSAMBLAR") {
     if (mode === assemblyMode) return;
+    recipeLookupSeq.current += 1;
     setAssemblyMode(mode);
     setOrderProduct(null);
     setOrderRecipe(null);
@@ -1294,6 +1309,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Cierra la modal de crear orden: limpia producto, modo, cantidad, receta y
   // pickers abiertos para esa modal. Se usa en éxito y en el botón X.
   function resetCreateOrderState() {
+    recipeLookupSeq.current += 1;
     setOrderProduct(null);
     setAssemblyMode("ASIGNAR");
     setRunQuantity("1");
@@ -1334,8 +1350,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   async function handleSaveRecipe() {
     if (!recipeModalTypeId) return;
-    const validLines = recipeLines.filter((line) => Number(line.perUnit) > 0);
-    if (validLines.length === 0) return;
+    if (recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))) {
+      setError("Completa la cantidad por unidad de todos los complementos (o quita los que sobren).");
+      return;
+    }
 
     setError(null);
     setSuccess(null);
@@ -1343,9 +1361,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     try {
       const saved = await upsertAssemblyRecipe(
         recipeModalTypeId,
-        validLines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
+        recipeLines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
       );
-      setOrderRecipe(saved);
+      const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalTypeId : recipeModalTypeId;
+      setOrderRecipe({ key, recipe: saved });
       setRecipeModalTypeId(null);
       setRecipeLines([]);
       setSuccess("Receta guardada.");
@@ -1357,25 +1376,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  // Ids de tipos permitidos para el CatalogProductPicker según modal y modo.
-  // En ASIGNAR ("create") se excluyen los tipos que ya tienen receta: esos
-  // solo se fabrican por ENSAMBLAR.
+  // Ids de tipos permitidos para el CatalogProductPicker según modal (el
+  // proceso/orden declara qué produce; [] = sin restricción, permite crear).
+  // La exclusión de tipos con receta (solo se fabrican por ENSAMBLAR) se
+  // aplica aparte con excludeTypeIds, sin tocar esta semántica.
   function allowedTypeIdsForPicker(kind: "create" | "edit"): string[] {
-    const baseAllowed = kind === "create"
+    return kind === "create"
       ? selectedProcess?.product_type_ids ?? []
       : editPlanRun?.allowed_product_type_ids ?? [];
-
-    if (kind !== "create" || assemblyMode !== "ASIGNAR") {
-      return baseAllowed;
-    }
-
-    const activeWithoutRecipe = productTypesList
-      .filter((type) => type.is_active && !recipeTypeIds.includes(type.id))
-      .map((type) => type.id);
-
-    return baseAllowed.length === 0
-      ? activeWithoutRecipe
-      : baseAllowed.filter((id) => activeWithoutRecipe.includes(id));
   }
 
   return (
@@ -2030,6 +2038,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {typePickerFor ? (
         <CatalogProductPicker
           allowedTypeIds={allowedTypeIdsForPicker(typePickerFor)}
+          excludeTypeIds={assemblyMode === "ASIGNAR" && typePickerFor === "create" ? recipeTypeIds : undefined}
           onClose={() => setTypePickerFor(null)}
           onSelect={(type) => {
             const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
@@ -2108,7 +2117,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
               <button
                 className="button buttonPrimary"
-                disabled={isSaving || !recipeLines.some((line) => Number(line.perUnit) > 0)}
+                disabled={isSaving || recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))}
                 onClick={() => void handleSaveRecipe()}
                 type="button"
               >
