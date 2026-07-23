@@ -138,6 +138,12 @@ class ProductionRunStatus:
     CANCELLED = "CANCELADA"
 
 
+class ComplementRequestStatus:
+    PENDING = "PENDIENTE"
+    APPROVED = "APROBADA"
+    REJECTED = "RECHAZADA"
+
+
 class ProductionRunStageStatus:
     PENDING = "PENDIENTE"
     IN_PROGRESS = "EN_PROCESO"
@@ -184,6 +190,17 @@ class ProductionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
         order_by="ProductionRunStage.stage_order",
+    )
+    # Plan de productos resultantes declarado al crear la orden (split):
+    # a qué tipos del catálogo se convierte el lote al recibirlo.
+    products: Mapped[list["ProductionRunProduct"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+    # Complementos de inventario solicitados para ensamblar con la producción.
+    complements: Mapped[list["ProductionComplementRequest"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
     )
 
 
@@ -242,3 +259,43 @@ class ProductionRunStageDecision(Base):
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     stage: Mapped["ProductionRunStage"] = relationship(back_populates="decisions")
+
+
+class ProductionRunProduct(Base):
+    __tablename__ = "production_run_products"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_type_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("product_types.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="products")
+
+
+class ProductionComplementRequest(Base):
+    __tablename__ = "production_complement_requests"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ComplementRequestStatus.PENDING
+    )
+    approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="complements")
