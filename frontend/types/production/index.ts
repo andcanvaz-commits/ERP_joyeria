@@ -120,7 +120,19 @@ export type ProductionRun = {
   // Insumos consumidos al aprobar materiales (para el acta de entrega).
   supply_consumptions?: Array<{ name: string; quantity: string; unit_code: string }>;
   // Plan de resultantes (split) declarado al crear la orden.
-  products?: Array<{ id: string; product_type_id: string; product_name?: string | null; quantity: string }>;
+  products?: Array<{
+    id: string;
+    product_type_id: string;
+    product_name?: string | null;
+    quantity: string;
+    target_item_id?: string | null;
+  }>;
   // Complementos de inventario solicitados para ensamblar.
   complements?: Array<{ id: string; item_id: string; name?: string | null; quantity: string; unit_code: string; status: string }>;
+  // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
+  assembly_mode: "ASIGNAR" | "ENSAMBLAR";
+  // Indica si falta definir la combinacion de complementos del ensamble.
+  assembly_pending: boolean;
+  // Combinacion de complementos aplicada al ensamble (totales).
+  assembly_items?: Array<{ id: string; complement_item_id: string; name?: string | null; quantity: string }>;
 };

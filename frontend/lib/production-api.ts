@@ -64,8 +64,10 @@ export function createProductionRun(payload: {
   process_id: string;
   quantity: string;
   raw_material_item_id: string;
+  // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
+  assembly_mode: "ASIGNAR" | "ENSAMBLAR";
   // Plan de resultantes: la suma de cantidades debe igualar quantity.
-  products: Array<{ product_type_id: string; quantity: string }>;
+  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>;
   // Complementos solicitados al inventario (opcional).
   complements?: Array<{ item_id: string; quantity: string }>;
 }) {
@@ -77,11 +79,22 @@ export function createProductionRun(payload: {
 
 export function updateProductionRunProducts(
   runId: string,
-  products: Array<{ product_type_id: string; quantity: string }>,
+  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>,
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/products`, {
     method: "PUT",
     body: JSON.stringify({ products }),
+  });
+}
+
+// Define la combinacion de complementos aplicada al ensamble del resultante.
+export function defineRunAssembly(
+  runId: string,
+  items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
+) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/assembly`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
   });
 }
 

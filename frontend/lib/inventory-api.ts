@@ -1,5 +1,6 @@
 import { API_URL, apiRequest } from "@/lib/api";
 import type {
+  ComplementType,
   InventoryItem,
   InventoryItemType,
   InventoryMovement,
@@ -17,6 +18,8 @@ export type SaveInventoryItemPayload = {
   purity?: string | null;
   total_weight?: string | null;
   elaboration_date?: string | null;
+  // Tipo de complemento del catalogo (solo aplica a item_type COMPLEMENT).
+  complement_type_id?: string | null;
 };
 
 export type CreateInventoryMovementPayload = {
@@ -125,6 +128,29 @@ export function createInventoryMovement(payload: CreateInventoryMovementPayload)
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+// Tipos de complemento del catalogo (ej. broche, cierre, cadena base).
+export function listComplementTypes() {
+  return apiRequest<ComplementType[]>("/api/inventory/complement-types");
+}
+
+export function createComplementType(name: string) {
+  return apiRequest<ComplementType>("/api/inventory/complement-types", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function updateComplementType(typeId: string, name: string) {
+  return apiRequest<ComplementType>(`/api/inventory/complement-types/${typeId}`, {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteComplementType(typeId: string) {
+  return apiRequest<void>(`/api/inventory/complement-types/${typeId}`, { method: "DELETE" });
 }
 
 export async function downloadInventoryMovementSourceFile(movementId: string) {
