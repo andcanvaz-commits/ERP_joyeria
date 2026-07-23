@@ -67,6 +67,24 @@ una fila con `quantity = cantidad`).
   `POST /runs/{id}/assembly` y el auto-ensamble de `_finish_run` quedan como
   respaldo sin cambios.
 
+## 3.1 Ajustes (mismo día, aprobados)
+
+- **Crear orden ya no pide complementos en ningún modo.** La sección
+  "Solicitar complementos" desaparece de la modal:
+  - Asignar: la orden no lleva complementos (payload `complements: []`).
+  - Ensamblar: los complementos se piden dentro de la ventana de receta
+    (ComplementPicker ahí), y la solicitud de la orden se calcula sola =
+    receta × cantidad al crear. Sin UI de edición de solicitud.
+- **Pickers filtrados por receta**: en Asignar, los productos cuyo tipo ya
+  tiene receta guardada dejan de aparecer (siempre se ensamblan); los sin
+  receta siguen. Ensamblar muestra todos. Nuevo endpoint
+  `GET /api/production/assembly-recipes/types` → lista de `product_type_id`
+  con receta, para filtrar piezas (mapeando `product_code` → tipo por
+  category/model) y tipos en los pickers.
+- **Ensamblar con pieza sin tipo resoluble**: al no poder tener receta ni
+  complementos, no se puede crear la orden en ese modo — la selección se
+  rechaza con mensaje; usar Asignar para esos casos.
+
 ## 4. Lo que no cambia
 
 - Flujo Asignar (salvo producto único), aprobación de materiales/complementos,

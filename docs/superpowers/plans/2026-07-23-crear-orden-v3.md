@@ -41,19 +41,24 @@
 
 ---
 
-### Task 2: APIs y tipos frontend
+### Task 2: Endpoint de tipos con receta (backend) + APIs y tipos frontend
 
 **Files:**
+- Modify: `backend/modules/production/service.py`, `backend/modules/production/router.py`
 - Modify: `frontend/types/production/index.ts`, `frontend/lib/production-api.ts`
 
 **Interfaces:**
-- Produces:
+- Produces (backend):
+  - Service `list_assembly_recipe_type_ids(self) -> list[UUID]` (select de `AssemblyRecipe.product_type_id`).
+  - Router `GET /assembly-recipes/types` → `ensure_permission("production.runs.read")`, response `list[UUID]`. Declararlo ANTES de cualquier ruta con path param bajo el mismo prefijo si la hubiera (hoy solo existe PUT `/assembly-recipes/{product_type_id}`, método distinto — sin conflicto, pero mantener orden por claridad).
+- Produces (frontend):
   - Tipo `AssemblyRecipe = { product_type_id: string | null; items: Array<{ complement_item_id: string; name?: string | null; quantity_per_unit: string }> }` (exportado de types/production).
   - `getAssemblyRecipe(params: { productTypeId?: string; itemId?: string })` → GET `/api/production/assembly-recipes?product_type_id=…|item_id=…` (construir query con el param presente).
   - `upsertAssemblyRecipe(productTypeId: string, items: Array<{ complement_item_id: string; quantity_per_unit: string }>)` → PUT `/api/production/assembly-recipes/${productTypeId}` body `{ items }`.
-- tsc: cero errores (solo se agregan tipos/funciones).
+  - `listAssemblyRecipeTypeIds()` → GET `/api/production/assembly-recipes/types` → `string[]`.
+- Verificación: py_compile backend ×2 + tsc = 0.
 
-- [ ] **Step 1: Implementar.** — [ ] **Step 2: tsc = 0.** — [ ] **Step 3: Commit** — `feat(front): api de recetas de ensamble`
+- [ ] **Step 1: Backend endpoint.** — [ ] **Step 2: Frontend tipos+APIs.** — [ ] **Step 3: py_compile + tsc = 0.** — [ ] **Step 4: Commit** — `feat(produccion): api de recetas y tipos con receta`
 
 ---
 
@@ -63,16 +68,17 @@
 - Modify: `frontend/components/production/production-dashboard.tsx`
 
 **Interfaces:**
-- Consumes: pickers v2 (FinishedItemPicker/CatalogProductPicker/ComplementPicker), estado v2 (`orderProducts`, `orderComplements`, `assemblyMode`, `productPickerFor`…), `createProductionRun`, `updateProductionRunProducts`.
+- Consumes: pickers v2 (FinishedItemPicker/CatalogProductPicker), estado v2 (`orderProducts`, `orderComplements`, `assemblyMode`, `productPickerFor`…), `createProductionRun`, `updateProductionRunProducts`.
 - Produces:
   1. Estado de producto pasa de lista a UNO: `orderProduct: { targetItemId?: string; productTypeId?: string; label: string } | null` (eliminar `orderProducts` y el render de filas con cantidades; `renderProductRows` desaparece o queda para el modal de editar si se reusa — ver punto 4).
-  2. Layout dentro de la modal, en este orden exacto: Proceso · Material · toggle Asignar|Ensamblar · sección "Solicitar complementos" (igual v2: botón + filas con cantidad) · "Elegir producto" (botón que abre FinishedItemPicker requireStock=false; onCreate → CatalogProductPicker; muestra label elegido con opción Cambiar) · campo "Cantidad a fabricar" AL FINAL · botón Crear orden.
-  3. `handleCreateProductionOrder`: ambos modos mandan `products: [fila única {product_type_id|target_item_id, quantity: runQuantity}]`; validaciones: producto elegido (mensajes por modo), cantidad > 0, ENSAMBLAR ≥1 complemento (ya existe). Eliminar la validación de suma de split.
-  4. Modal "Editar productos": pasa a producto único (mismo botón picker, sin cantidades); PUT manda una fila con `quantity = run.quantity`. (El backend v2 valida modo y suma: una fila con la cantidad de la orden pasa ambas.)
-  5. NO tocar todavía el flujo de receta (Task 4) — en ENSAMBLAR elegir producto solo lo fija.
+  2. **La sección "Solicitar complementos" se ELIMINA de la modal** (junto con `orderComplements` como estado editable por el usuario y el uso de ComplementPicker desde la modal de crear; ComplementPicker se seguirá usando desde la ventana de receta en Task 4 — no borrar el componente).
+  3. Layout dentro de la modal, en este orden exacto: Proceso · Material · toggle Asignar|Ensamblar · "Elegir producto" (botón que abre FinishedItemPicker requireStock=false; onCreate → CatalogProductPicker; muestra label elegido con opción Cambiar) · campo "Cantidad a fabricar" AL FINAL · botón Crear orden.
+  4. `handleCreateProductionOrder`: ambos modos mandan `products: [fila única {product_type_id|target_item_id, quantity: runQuantity}]`; ASIGNAR manda `complements: []`; ENSAMBLAR manda los complementos calculados de la receta (Task 4 — en esta task, ENSAMBLAR puede quedar temporalmente con `complements: []`, lo que el backend rechaza con 409: aceptable hasta Task 4, anotarlo en el reporte). Validaciones: producto elegido (mensajes por modo), cantidad > 0. Eliminar la validación de suma de split.
+  5. Modal "Editar productos": pasa a producto único (mismo botón picker, sin cantidades); PUT manda una fila con `quantity = run.quantity`. (El backend v2 valida modo y suma: una fila con la cantidad de la orden pasa ambas.)
+  6. NO tocar todavía el flujo de receta ni el filtrado de pickers (Task 4) — en ENSAMBLAR elegir producto solo lo fija.
 - tsc = 0 al cerrar.
 
-- [ ] **Step 1: Estado + layout.** — [ ] **Step 2: Handler + editar plan.** — [ ] **Step 3: tsc = 0.** — [ ] **Step 4: Commit** — `feat(produccion): crear orden con producto unico y layout reordenado`
+- [ ] **Step 1: Estado + layout (sin complementos).** — [ ] **Step 2: Handler + editar plan.** — [ ] **Step 3: tsc = 0.** — [ ] **Step 4: Commit** — `feat(produccion): crear orden con producto unico y layout reordenado`
 
 ---
 
@@ -82,23 +88,20 @@
 - Modify: `frontend/components/production/production-dashboard.tsx`
 
 **Interfaces:**
-- Consumes: `getAssemblyRecipe`/`upsertAssemblyRecipe` (Task 2), modal de ensamble v2 (`assemblyRun`/`assemblyLines` — se generaliza), `ComplementPicker`.
+- Consumes: `getAssemblyRecipe`/`upsertAssemblyRecipe`/`listAssemblyRecipeTypeIds` (Tasks 1-2), `ComplementPicker`, `productTypesList` (tiene `category_code`/`model_code` por tipo), `complementItems` del bundle.
 - Produces:
-  1. Al elegir producto en modo ENSAMBLAR (tras el picker): `getAssemblyRecipe({productTypeId|itemId según lo elegido})`.
-     - `items.length > 0` → guardar `orderRecipe = recipe` y autollenar `orderComplements` (ver punto 3).
+  1. **Estado de receta**: `orderRecipe: AssemblyRecipe | null`. Al elegir producto en modo ENSAMBLAR (tras el picker): `getAssemblyRecipe({productTypeId|itemId según lo elegido})`.
+     - `items.length > 0` → `orderRecipe = recipe` (la solicitud se calcula al crear, punto 3).
      - `items.length === 0 && product_type_id !== null` → abrir **modal de receta** (punto 2) con ese product_type_id.
-     - `product_type_id === null` (pieza sin tipo resoluble) → aviso terse ("Esta pieza no tiene tipo en el catálogo: el ensamble se definirá al finalizar producción.") y seguir sin receta.
-  2. **Modal de receta**: generalizar el modal "Definir ensamble" de v2 a dos usos (extraer a función/JSX parametrizado o duplicar mínimamente respetando el idiom — preferir parametrizar):
-     - Fuente de filas: los complementos del borrador (`orderComplements` con label) con input "por unidad"; botón "+ Elegir más" que abre `ComplementPicker` y agrega filas (también al borrador de solicitados).
-     - Sin límite de "aprobado" aquí (no hay orden aún); validación: ≥1 fila con por-unidad > 0.
-     - Guardar → `upsertAssemblyRecipe(productTypeId, items)` → set `orderRecipe` → cerrar y autollenar (punto 3). Mensaje éxito: "Receta guardada.".
-     - Cancelar → el producto queda elegido pero sin receta (el respaldo post-producción de v2 aplica).
-  3. **Autollenado editable con dirty-flag**: al fijar `orderRecipe` o al cambiar `runQuantity`, si el usuario NO ha editado manualmente las filas de complementos autollenadas (flag `complementsDirty`, se activa con cualquier edición manual de filas; se resetea al autollenar de nuevo tras cambiar de producto/receta), recalcular `orderComplements = items.map({itemId, quantity: String(per_unit × Number(runQuantity || 0))})` (labels desde `complementItems`). Cantidad vacía → filas con cantidad vacía (se llenan al poner cantidad).
-  4. Reset de todo el estado nuevo al crear con éxito y al cerrar la modal con X (aprovechar para cerrar el follow-up v2: resetear TODO el estado de la modal — producto, complementos, modo, receta, dirty — en un `resetCreateOrderState()` usado por éxito y por cierre).
-  5. El modal "Definir ensamble" post-producción (assemblyRun) sigue funcionando igual.
+     - `product_type_id === null` (pieza sin tipo resoluble) → NO se puede ensamblar: error terse ("Esta pieza no tiene tipo en el catálogo: usa Asignar.") y limpiar la selección de producto.
+  2. **Modal de receta** (abre sobre la de crear, `modalBackdropTop`): filas de receta empiezan VACÍAS; botón "Elegir complementos" abre `ComplementPicker` (items COMPLEMENT del bundle, excludeIds los ya elegidos) y cada selección agrega fila {label, input "por unidad"}. Quitar fila con basurero. Validación: ≥1 fila con por-unidad > 0. Guardar → `upsertAssemblyRecipe(productTypeId, items)` → `orderRecipe = receta guardada` → cerrar, success "Receta guardada.". Cancelar → limpiar la selección de producto (sin receta no hay ensamble).
+  3. **Solicitud automática (sin UI)**: `handleCreateProductionOrder` en ENSAMBLAR calcula `complements = orderRecipe.items.map({item_id: complement_item_id, quantity: String(per_unit × Number(runQuantity))})`; si `orderRecipe` es null o sin items → error "Este producto necesita receta para ensamblar." (no debería pasar por el punto 1/2). ASIGNAR → `complements: []`. No hay sección de complementos en la modal (Task 3 ya la quitó).
+  4. **Filtrado de pickers en ASIGNAR**: cargar `recipeTypeIds` (query `["assembly-recipe-types"]`, `listAssemblyRecipeTypeIds`, enabled variante production). En modo ASIGNAR: `FinishedItemPicker` recibe items filtrados excluyendo piezas cuyo tipo tiene receta (resolver tipo de pieza en frontend: `productTypesList.find(t => t.category_code === code.slice(1,3) && t.model_code === code.slice(3,7))`; si el tipo resuelto está en `recipeTypeIds` → excluir); `CatalogProductPicker` en ASIGNAR excluye tipos con receta (según sus props: pasar lista filtrada o allowed — leer el componente y aplicar el mecanismo que ofrezca; si solo acepta `allowed`, construir la lista de ids permitidos = todos los tipos activos sin receta). ENSAMBLAR muestra todo.
+  5. **Reset total**: `resetCreateOrderState()` (producto, modo, receta, cantidad, pickers) usado en éxito Y en el botón X (cierra follow-up v2). Invalidar query `["assembly-recipe-types"]` tras guardar receta.
+  6. El modal "Definir ensamble" post-producción (assemblyRun) sigue igual.
 - tsc = 0 al cerrar.
 
-- [ ] **Step 1: Query receta al elegir producto.** — [ ] **Step 2: Modal receta (parametrizado).** — [ ] **Step 3: Autollenado + dirty-flag + recálculo por cantidad.** — [ ] **Step 4: resetCreateOrderState en éxito y X.** — [ ] **Step 5: tsc = 0.** — [ ] **Step 6: Commit** — `feat(produccion): receta en creacion con autollenado de complementos`
+- [ ] **Step 1: Query receta al elegir producto + bloqueo pieza sin tipo.** — [ ] **Step 2: Modal receta.** — [ ] **Step 3: Solicitud automática en handler.** — [ ] **Step 4: Filtrado de pickers ASIGNAR.** — [ ] **Step 5: resetCreateOrderState + invalidación.** — [ ] **Step 6: tsc = 0.** — [ ] **Step 7: Commit** — `feat(produccion): receta en creacion, solicitud automatica y pickers filtrados`
 
 ---
 
