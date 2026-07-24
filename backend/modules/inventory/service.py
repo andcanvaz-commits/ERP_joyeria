@@ -565,6 +565,7 @@ class InventoryService(InventoryIntegrationPort):
         payload: LotConversionCreate,
         user_id: UUID | None,
         assembly_note: str | None = None,
+        extra_grams_per_unit: Decimal | None = None,
     ) -> InventoryItemRead:
         """Convierte parcialmente un lote de proceso terminado (SKU = código OP)
         en un producto del catálogo. Consumo y producción quedan como el par de
@@ -608,8 +609,15 @@ class InventoryService(InventoryIntegrationPort):
         run_info = self._run_grams_per_unit(run) if run is not None else None
         if run_info is not None:
             weight_per_unit, entry_unit = run_info
+            if extra_grams_per_unit:
+                # Ensamble: el peso final suma el peso real del lote mas los
+                # gramos de los complementos combinados (sin dato -> no se
+                # inventa peso, solo se suma lo que aporta la combinacion).
+                weight_per_unit = weight_per_unit + extra_grams_per_unit
             entry_quantity = payload.quantity * weight_per_unit
         else:
+            # Fallback en unidades (sin peso de la orden): los extra_grams no
+            # tienen base para prorratearse, se ignoran.
             weight_per_unit = None
             entry_quantity = payload.quantity
             entry_unit = lot.unit_code

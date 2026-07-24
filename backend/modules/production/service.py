@@ -1309,17 +1309,34 @@ class ProductionService:
         # Orden de ensamble: el kardex del producto final debe contar los
         # complementos combinados, no una conversión genérica.
         assembly_note = None
+        extra_grams_per_unit = None
         if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_items:
             from sqlalchemy import select
 
             item_ids = [entry.complement_item_id for entry in run.assembly_items]
             rows = self.repository.session.execute(
-                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(item_ids))
+                select(InventoryItem).where(InventoryItem.id.in_(item_ids))
             ).all()
-            names = {row[0]: row[1] for row in rows}
+            complements = {row[0].id: row[0] for row in rows}
+            names = {item_id: item.name for item_id, item in complements.items()}
             assembly_note = " + ".join(
                 names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
             )
+            # El ensamblado pesa lote + complementos: si el complemento se
+            # mide en gramos, suma su cantidad total; si es por unidad con
+            # peso_por_unidad conocido, suma cantidad x peso; sin dato de
+            # peso no se inventa, no aporta.
+            extra_grams = Decimal("0")
+            for entry in run.assembly_items:
+                item = complements.get(entry.complement_item_id)
+                if item is None:
+                    continue
+                if item.unit_code == "g":
+                    extra_grams += entry.quantity
+                elif item.weight_per_unit:
+                    extra_grams += entry.quantity * item.weight_per_unit
+            if run.quantity and extra_grams > 0:
+                extra_grams_per_unit = extra_grams / run.quantity
         for product in run.products:
             try:
                 if product.target_item_id is not None:
@@ -1337,7 +1354,11 @@ class ProductionService:
                         product_type_id=product.product_type_id, quantity=product.quantity
                     )
                 self.inventory_service.convert_lot_to_product(
-                    lot.id, conversion, user_id=current_user.id, assembly_note=assembly_note
+                    lot.id,
+                    conversion,
+                    user_id=current_user.id,
+                    assembly_note=assembly_note,
+                    extra_grams_per_unit=extra_grams_per_unit,
                 )
             except (InventoryDomainError, InventoryNotFoundError) as exc:
                 raise ProductionDomainError(
