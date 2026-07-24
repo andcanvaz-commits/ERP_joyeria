@@ -15,6 +15,7 @@ import { matchMaterialSegment as matchMaterialSegmentShared } from "@/lib/materi
 import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
+import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import {
   archiveInventoryItem,
@@ -122,9 +123,11 @@ type XmlInvoiceDetail = {
 };
 
 // Linea de factura en revision: tipo elegible solo si el item no existe aun.
+// complementTypeId solo aplica a lineas nuevas de tipo COMPLEMENT.
 type XmlImportLine = XmlInvoiceDetail & {
   itemType: InventoryItemType;
   existingItem: InventoryItem | null;
+  complementTypeId: string | null;
 };
 
 type XmlImportDraft = {
@@ -406,6 +409,10 @@ export function InventoryDashboard() {
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
+  // Tipo de item que originó el modal de movimiento (fijado al abrirlo): decide
+  // si el selector de item es el flat select o el picker de complementos.
+  const [movementEntryType, setMovementEntryType] = useState<InventoryItemType | null>(null);
+  const [isComplementPickerOpen, setIsComplementPickerOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
   // Borrador de factura XML: se revisa y clasifica cada linea antes de importar.
@@ -736,6 +743,9 @@ export function InventoryDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, movementForm.movement_type],
   );
+  const movementSelectedItem = movementForm.item_id
+    ? items.find((item) => item.id === movementForm.item_id) ?? null
+    : null;
   // Archivados de la pestaña ACTIVA: cada menú (materia prima, insumos,
   // complementos, productos terminados) tiene su propia vista de archivados, no compartida.
   const archivedItems = useMemo(
@@ -1370,6 +1380,7 @@ export function InventoryDashboard() {
     const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
     const firstItem = items.find((item) => item.item_type === entryType);
     setMovementForm({ ...emptyMovementForm(), item_id: firstItem?.id || "", movement_type: "ENTRADA" });
+    setMovementEntryType(entryType);
     setIsMovementFormOpen(true);
     setIsEntryMenuOpen(false);
   }
@@ -1377,6 +1388,7 @@ export function InventoryDashboard() {
   function openFinishedProductExit() {
     const firstFinishedProduct = items.find((item) => item.item_type === "FINISHED_PRODUCT");
     setMovementForm({ ...emptyMovementForm(), item_id: firstFinishedProduct?.id || "", movement_type: "SALIDA" });
+    setMovementEntryType("FINISHED_PRODUCT");
     setIsMovementFormOpen(true);
   }
 
@@ -1558,7 +1570,7 @@ export function InventoryDashboard() {
             candidate.name.toLowerCase() === detail.description.toLowerCase(),
         );
         const existingItem = matches.find((candidate) => candidate.item_type === defaultType) ?? matches[0] ?? null;
-        return { ...detail, itemType: existingItem?.item_type ?? defaultType, existingItem };
+        return { ...detail, itemType: existingItem?.item_type ?? defaultType, existingItem, complementTypeId: null };
       });
 
       setIsEntryMenuOpen(false);
@@ -1578,6 +1590,13 @@ export function InventoryDashboard() {
 
   async function handleConfirmXmlImport() {
     if (!xmlImportDraft) return;
+    const missingComplementType = xmlImportDraft.lines.some(
+      (line) => !line.existingItem && line.itemType === "COMPLEMENT" && !line.complementTypeId,
+    );
+    if (missingComplementType) {
+      setError("Elige el tipo de complemento en las líneas marcadas como complemento.");
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
@@ -1602,6 +1621,7 @@ export function InventoryDashboard() {
             name: line.description,
             description: metadata,
             unit_code: line.unitCode || "und",
+            complement_type_id: line.itemType === "COMPLEMENT" ? line.complementTypeId : undefined,
           });
           nextItems = [...nextItems, item];
         }
@@ -2867,12 +2887,18 @@ export function InventoryDashboard() {
             </div>
             <label className="fieldGroup">
               <span>Item</span>
-              <select className="field" onChange={(event) => setMovementForm((current) => ({ ...current, item_id: event.target.value }))} value={movementForm.item_id}>
-                <option value="">Seleccionar item</option>
-                {movementItems.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name} - {item.sku}</option>
-                ))}
-              </select>
+              {movementEntryType === "COMPLEMENT" && movementForm.movement_type !== "SALIDA" ? (
+                <button className="button" onClick={() => setIsComplementPickerOpen(true)} type="button">
+                  {movementSelectedItem ? `${movementSelectedItem.name} · ${movementSelectedItem.sku}` : "Elegir complemento"}
+                </button>
+              ) : (
+                <select className="field" onChange={(event) => setMovementForm((current) => ({ ...current, item_id: event.target.value }))} value={movementForm.item_id}>
+                  <option value="">Seleccionar item</option>
+                  {movementItems.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} - {item.sku}</option>
+                  ))}
+                </select>
+              )}
             </label>
             <label className="fieldGroup">
               <span>Cantidad</span>
@@ -2901,6 +2927,18 @@ export function InventoryDashboard() {
             </div>
           </form>
         </div>
+      ) : null}
+
+      {isComplementPickerOpen ? (
+        <ComplementPicker
+          title="Elegir complemento"
+          items={items}
+          onSelect={(item) => {
+            setMovementForm((current) => ({ ...current, item_id: item.id }));
+            setIsComplementPickerOpen(false);
+          }}
+          onClose={() => setIsComplementPickerOpen(false)}
+        />
       ) : null}
 
       {stageInfoRun ? (() => {
@@ -3618,23 +3656,48 @@ export function InventoryDashboard() {
                         {line.existingItem ? (
                           <span>{itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}</span>
                         ) : (
-                          <select
-                            className="field"
-                            onChange={(event) =>
-                              setXmlImportDraft((current) => {
-                                if (!current) return current;
-                                const nextLines = current.lines.map((candidate, candidateIndex) =>
-                                  candidateIndex === lineIndex ? { ...candidate, itemType: event.target.value as InventoryItemType } : candidate,
-                                );
-                                return { ...current, lines: nextLines };
-                              })
-                            }
-                            value={line.itemType}
-                          >
-                            <option value="RAW_MATERIAL">Materia prima</option>
-                            <option value="SUPPLY">Insumo</option>
-                            <option value="COMPLEMENT">Complemento</option>
-                          </select>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <select
+                              className="field"
+                              onChange={(event) =>
+                                setXmlImportDraft((current) => {
+                                  if (!current) return current;
+                                  const nextType = event.target.value as InventoryItemType;
+                                  const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                    candidateIndex === lineIndex
+                                      ? { ...candidate, itemType: nextType, complementTypeId: nextType === "COMPLEMENT" ? candidate.complementTypeId : null }
+                                      : candidate,
+                                  );
+                                  return { ...current, lines: nextLines };
+                                })
+                              }
+                              value={line.itemType}
+                            >
+                              <option value="RAW_MATERIAL">Materia prima</option>
+                              <option value="SUPPLY">Insumo</option>
+                              <option value="COMPLEMENT">Complemento</option>
+                            </select>
+                            {line.itemType === "COMPLEMENT" ? (
+                              <select
+                                className="field"
+                                onChange={(event) =>
+                                  setXmlImportDraft((current) => {
+                                    if (!current) return current;
+                                    const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                      candidateIndex === lineIndex ? { ...candidate, complementTypeId: event.target.value || null } : candidate,
+                                    );
+                                    return { ...current, lines: nextLines };
+                                  })
+                                }
+                                value={line.complementTypeId ?? ""}
+                              >
+                                <option value="">Tipo de complemento…</option>
+                                {complementTypes.map((type) => (
+                                  <option key={type.id} value={type.id}>{type.name}</option>
+                                ))}
+                              </select>
+                            ) : null}
+                          </div>
                         )}
                       </td>
                     </tr>
