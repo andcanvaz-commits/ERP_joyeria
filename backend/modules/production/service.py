@@ -205,20 +205,30 @@ class ProductionService:
                     )
             else:
                 item = self.repository.session.get(InventoryItem, product.target_item_id)
-                if item is None or item.item_type != "FINISHED_PRODUCT":
+                if item is None or item.item_type not in ("FINISHED_PRODUCT", "COMPLEMENT"):
                     raise ProductionDomainError(
                         "El destino seleccionado no existe como pieza en el inventario."
                     )
-                if not item.product_code or len(item.product_code) != 7:
-                    raise ProductionDomainError(
-                        "La pieza destino debe tener un codigo de catalogo de 7 digitos."
-                    )
+                if item.item_type == "FINISHED_PRODUCT":
+                    if not item.product_code or len(item.product_code) != 7:
+                        raise ProductionDomainError(
+                            "La pieza destino debe tener un codigo de catalogo de 7 digitos."
+                        )
+                # COMPLEMENT: la joyeria fabrica su propio complemento; no
+                # lleva codigo de catalogo (recetas/claves de modelo no aplican).
 
         if assembly_mode == AssemblyMode.ASSEMBLE:
             if len(products) != 1 or products[0].quantity != quantity:
                 raise ProductionDomainError(
                     "En modo ensamblar el plan es un solo producto con la cantidad de la orden."
                 )
+            single = products[0]
+            if single.target_item_id is not None:
+                item = self.repository.session.get(InventoryItem, single.target_item_id)
+                if item is not None and item.item_type != "FINISHED_PRODUCT":
+                    raise ProductionDomainError(
+                        "En ensamblar el producto final debe ser un producto terminado del catalogo."
+                    )
             return
 
         total = sum((p.quantity for p in products), Decimal("0"))
@@ -1311,12 +1321,21 @@ class ProductionService:
                 names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
             )
         for product in run.products:
-            conversion = (
-                LotConversionCreate(target_item_id=product.target_item_id, quantity=product.quantity)
-                if product.target_item_id is not None
-                else LotConversionCreate(product_type_id=product.product_type_id, quantity=product.quantity)
-            )
             try:
+                if product.target_item_id is not None:
+                    target = self.repository.session.get(InventoryItem, product.target_item_id)
+                    if target is not None and target.item_type == "COMPLEMENT":
+                        self.inventory_service.convert_lot_to_complement(
+                            lot.id, product.target_item_id, product.quantity, user_id=current_user.id
+                        )
+                        continue
+                    conversion = LotConversionCreate(
+                        target_item_id=product.target_item_id, quantity=product.quantity
+                    )
+                else:
+                    conversion = LotConversionCreate(
+                        product_type_id=product.product_type_id, quantity=product.quantity
+                    )
                 self.inventory_service.convert_lot_to_product(
                     lot.id, conversion, user_id=current_user.id, assembly_note=assembly_note
                 )

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { listComplementTypes } from "@/lib/inventory-api";
@@ -21,12 +21,15 @@ export function ComplementPicker({
   excludeIds,
   onSelect,
   onClose,
+  tabs,
 }: {
   title: string;
   items: InventoryItem[];
   excludeIds?: string[];
   onSelect: (item: InventoryItem) => void;
   onClose: () => void;
+  // Slot opcional debajo del header (ej. pestañas Productos | Complementos).
+  tabs?: ReactNode;
 }) {
   const { data: complementTypes = [] } = useQuery({ queryKey: ["complement-types"], queryFn: listComplementTypes });
   const [drillType, setDrillType] = useState<string | null>(null);
@@ -82,6 +85,8 @@ export function ComplementPicker({
             <X aria-hidden="true" size={18} />
           </button>
         </div>
+
+        {tabs}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: typeGroups.length >= DRILL_PAGE_SIZE ? 460 : undefined }}>
           {drilledType ? (

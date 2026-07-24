@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
@@ -23,6 +23,7 @@ export function FinishedItemPicker({
   onSelect,
   onCreate,
   onClose,
+  tabs,
 }: {
   title: string;
   subtitle?: string;
@@ -34,6 +35,8 @@ export function FinishedItemPicker({
   // Si viene, muestra "Crear producto nuevo" para destinos que aún no existen.
   onCreate?: () => void;
   onClose: () => void;
+  // Slot opcional debajo del header (ej. pestañas Productos | Complementos).
+  tabs?: ReactNode;
 }) {
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const [drillType, setDrillType] = useState<string | null>(null);
@@ -91,6 +94,8 @@ export function FinishedItemPicker({
             <X aria-hidden="true" size={18} />
           </button>
         </div>
+
+        {tabs}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: typeGroups.length >= DRILL_PAGE_SIZE ? 460 : undefined }}>
           {drilledType ? (

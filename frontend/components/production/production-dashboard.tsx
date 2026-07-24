@@ -345,6 +345,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Editar producto resultante.
   const [itemPickerFor, setItemPickerFor] = useState<"create" | "edit" | null>(null);
   const [typePickerFor, setTypePickerFor] = useState<"create" | "edit" | null>(null);
+  // Pestaña activa del picker de producto en modo ASIGNAR: productos
+  // terminados o complementos (la joyeria fabrica sus propios complementos).
+  const [assignPickerTab, setAssignPickerTab] = useState<"PRODUCTOS" | "COMPLEMENTOS">("PRODUCTOS");
   // Tick por minuto para el tiempo transcurrido de las ordenes en proceso.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -1888,7 +1891,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
             <label className="fieldGroup">
               <span>{assemblyMode === "ENSAMBLAR" ? "Producto final" : "Producto"}</span>
-              {renderProductChooser(orderProduct, () => setItemPickerFor("create"))}
+              {renderProductChooser(orderProduct, () => {
+                setAssignPickerTab("PRODUCTOS");
+                setItemPickerFor("create");
+              })}
             </label>
 
             <label className="fieldGroup">
@@ -1923,7 +1929,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
             <label className="fieldGroup">
               <span>Producto</span>
-              {renderProductChooser(editPlanProduct, () => setItemPickerFor("edit"))}
+              {renderProductChooser(editPlanProduct, () => {
+                setAssignPickerTab("PRODUCTOS");
+                setItemPickerFor("edit");
+              })}
             </label>
             <button
               className="button buttonPrimary"
@@ -2059,34 +2068,79 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         );
       })() : null}
 
-      {/* Picker de pieza terminada para el producto único de la orden (Crear
-          orden o Editar producto). "Crear producto nuevo" pasa al picker de
-          tipo del catálogo, para productos que aún no tienen piezas. */}
-      {itemPickerFor ? (
-        <FinishedItemPicker
-          items={
-            itemPickerFor === "create" && assemblyMode === "ASIGNAR"
-              ? finishedItems.filter((item) => {
-                  if (!orderMaterialCode) return true;
-                  const modelPart = pieceModelKey(item);
-                  return !modelPart || !recipeModelKeys.includes(`${orderMaterialCode}${modelPart}`);
-                })
-              : finishedItems
-          }
-          onClose={() => setItemPickerFor(null)}
-          onCreate={() => {
-            setTypePickerFor(itemPickerFor);
-            setItemPickerFor(null);
-          }}
-          onSelect={(item) => {
-            const label = (item.description ?? "").trim() || item.name;
-            applyProductChoice(itemPickerFor, { targetItemId: item.id, label });
-            setItemPickerFor(null);
-          }}
-          requireStock={false}
-          title="Elegir producto"
-        />
-      ) : null}
+      {/* Picker de pieza terminada (o complemento) para el producto único de
+          la orden (Crear orden o Editar producto). "Crear producto nuevo"
+          pasa al picker de tipo del catálogo, para productos que aún no
+          tienen piezas. En modo ASIGNAR se muestran dos pestañas: productos
+          terminados y complementos (la joyeria fabrica sus propios
+          complementos). En ENSAMBLAR solo productos terminados: las recetas
+          de ensamble no aplican a complementos. */}
+      {itemPickerFor ? (() => {
+        const isAssignContext =
+          itemPickerFor === "create"
+            ? assemblyMode === "ASIGNAR"
+            : editPlanRun?.assembly_mode === "ASIGNAR";
+        const tabsBar = isAssignContext ? (
+          <div className="materialRow" style={{ gap: 8 }}>
+            <button
+              className={`button${assignPickerTab === "PRODUCTOS" ? " buttonPrimary" : ""}`}
+              onClick={() => setAssignPickerTab("PRODUCTOS")}
+              type="button"
+            >
+              Productos terminados
+            </button>
+            <button
+              className={`button${assignPickerTab === "COMPLEMENTOS" ? " buttonPrimary" : ""}`}
+              onClick={() => setAssignPickerTab("COMPLEMENTOS")}
+              type="button"
+            >
+              Complementos
+            </button>
+          </div>
+        ) : null;
+
+        if (isAssignContext && assignPickerTab === "COMPLEMENTOS") {
+          return (
+            <ComplementPicker
+              items={complementItems}
+              onClose={() => setItemPickerFor(null)}
+              onSelect={(item) => {
+                applyProductChoice(itemPickerFor, { targetItemId: item.id, label: item.name });
+                setItemPickerFor(null);
+              }}
+              tabs={tabsBar}
+              title="Elegir producto"
+            />
+          );
+        }
+
+        return (
+          <FinishedItemPicker
+            items={
+              itemPickerFor === "create" && assemblyMode === "ASIGNAR"
+                ? finishedItems.filter((item) => {
+                    if (!orderMaterialCode) return true;
+                    const modelPart = pieceModelKey(item);
+                    return !modelPart || !recipeModelKeys.includes(`${orderMaterialCode}${modelPart}`);
+                  })
+                : finishedItems
+            }
+            onClose={() => setItemPickerFor(null)}
+            onCreate={() => {
+              setTypePickerFor(itemPickerFor);
+              setItemPickerFor(null);
+            }}
+            onSelect={(item) => {
+              const label = (item.description ?? "").trim() || item.name;
+              applyProductChoice(itemPickerFor, { targetItemId: item.id, label });
+              setItemPickerFor(null);
+            }}
+            requireStock={false}
+            tabs={tabsBar}
+            title="Elegir producto"
+          />
+        );
+      })() : null}
 
       {typePickerFor ? (
         <CatalogProductPicker

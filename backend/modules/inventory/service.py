@@ -741,6 +741,55 @@ class InventoryService(InventoryIntegrationPort):
         self.repository.flush()
         return InventoryItemRead.model_validate(target)
 
+    def convert_lot_to_complement(
+        self, lot_item_id: UUID, complement_item_id: UUID, quantity: Decimal, user_id: UUID | None
+    ) -> InventoryItemRead:
+        """Convierte unidades de un lote de producción en stock de un
+        complemento fabricado en casa: par CONVERSION_SALIDA/ENTRADA, sin
+        catálogo de producto (los complementos no llevan código de modelo)."""
+        lot = self._get_item_or_raise(lot_item_id)
+        if lot.item_type != "FINISHED_PRODUCT":
+            raise InventoryDomainError("Solo se pueden convertir lotes de procesos terminados.")
+        is_production_lot = any(
+            movement.reference_type == "production_order"
+            for movement in self.repository.list_movements(lot.id)
+        )
+        if not is_production_lot:
+            raise InventoryDomainError("El item no es un lote de una orden de produccion.")
+        if lot.current_stock < quantity:
+            raise InventoryDomainError("Stock insuficiente en el lote.")
+
+        complement = self._get_item_or_raise(complement_item_id)
+        if complement.item_type != "COMPLEMENT":
+            raise InventoryDomainError("El destino debe ser un complemento del inventario.")
+
+        story = f"Conversion: lote {lot.sku} -> {complement.name} (complemento)"[:240]
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=lot.id,
+                movement_type="CONVERSION_SALIDA",
+                quantity=quantity,
+                reason=story,
+                reference_type="lot_conversion",
+                reference_id=complement.id,
+            ),
+            user_id=user_id,
+        )
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=complement.id,
+                movement_type="CONVERSION_ENTRADA",
+                quantity=quantity,
+                reason=story,
+                reference_type="lot_conversion",
+                reference_id=lot.id,
+            ),
+            user_id=user_id,
+            lot_code=lot.sku,
+        )
+        self.repository.flush()
+        return InventoryItemRead.model_validate(complement)
+
     def combine_products(
         self, payload: ProductCombineCreate, user_id: UUID | None
     ) -> InventoryItemRead:
