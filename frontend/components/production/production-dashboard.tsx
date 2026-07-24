@@ -1688,60 +1688,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </article>
           </section>
 
-          {/* History */}
-          <section className="card panelBody productionMovementsPanel" aria-label="Movimientos de produccion">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Movimientos</h2>
-                <p className="panelText">Movimientos de los ultimos 30 dias</p>
-              </div>
-              <button
-                aria-label="Abrir historial por calendario"
-                className="iconTextButton"
-                disabled={finishedRuns.length === 0}
-                onClick={() => setIsHistoryOpen(true)}
-                title="Historial por calendario"
-                type="button"
-              >
-                <CalendarDays aria-hidden="true" size={16} />
-                Historial
-              </button>
-            </div>
-            {recentFinishedRuns.length > 0 ? (
-              <div className="readyToStartList">
-                {recentFinishedRuns.map((run) => (
-                  <div className="readyToStartRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
-                    <div className="readyToStartInfo">
-                      <strong>
-                        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                        {run.process_name}
-                      </strong>
-                      <span>{numericText(run.quantity)} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
-                      {run.assembly_pending ? (
-                        <button
-                          className="button buttonPrimary"
-                          onClick={() => openAssemblyModal(run)}
-                          type="button"
-                        >
-                          <Puzzle aria-hidden="true" size={14} />
-                          Definir ensamble
-                        </button>
-                      ) : null}
-                      <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
-                        <Eye aria-hidden="true" size={14} />
-                        Visualizar
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="emptyState">No hay historial disponible.</div>
-            )}
-          </section>
-
           {/* Procesos: listos para iniciar, en curso y terminados, en un solo lugar. */}
           <section className="card panelBody" aria-label="Procesos">
             <div className="panelHeader">
@@ -1816,6 +1762,61 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div className="emptyState">No hay procesos.</div>
             )}
           </section>
+
+          {/* History */}
+          <section className="card panelBody productionMovementsPanel" aria-label="Movimientos de produccion">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Movimientos</h2>
+                <p className="panelText">Movimientos de los ultimos 30 dias</p>
+              </div>
+              <button
+                aria-label="Abrir historial por calendario"
+                className="iconTextButton"
+                disabled={finishedRuns.length === 0}
+                onClick={() => setIsHistoryOpen(true)}
+                title="Historial por calendario"
+                type="button"
+              >
+                <CalendarDays aria-hidden="true" size={16} />
+                Historial
+              </button>
+            </div>
+            {recentFinishedRuns.length > 0 ? (
+              <div className="readyToStartList">
+                {recentFinishedRuns.map((run) => (
+                  <div className="readyToStartRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
+                    <div className="readyToStartInfo">
+                      <strong>
+                        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                        {run.process_name}
+                      </strong>
+                      <span>{numericText(run.quantity)} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
+                      {run.assembly_pending ? (
+                        <button
+                          className="button buttonPrimary"
+                          onClick={() => openAssemblyModal(run)}
+                          type="button"
+                        >
+                          <Puzzle aria-hidden="true" size={14} />
+                          Definir ensamble
+                        </button>
+                      ) : null}
+                      <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+                        <Eye aria-hidden="true" size={14} />
+                        Visualizar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="emptyState">No hay historial disponible.</div>
+            )}
+          </section>
+
         </>
       )}
 
