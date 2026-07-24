@@ -743,13 +743,18 @@ export function InventoryDashboard() {
   // Insumos y complementos comparten el mismo formulario simple: nombre y
   // unidad, sin material ni pureza.
   const isSimpleItem = itemForm.item_type === "SUPPLY" || itemForm.item_type === "COMPLEMENT";
-  // Salidas: productos terminados. Entradas: materia prima, insumos y complementos.
+  // Salidas: productos terminados. Entradas: SOLO el tipo de la pestaña desde
+  // la que se abrió (materia prima, insumos o complementos) — sin mezclar.
   const movementItemTypes: InventoryItemType[] =
-    movementForm.movement_type === "SALIDA" ? ["FINISHED_PRODUCT"] : ["RAW_MATERIAL", "SUPPLY", "COMPLEMENT"];
+    movementForm.movement_type === "SALIDA"
+      ? ["FINISHED_PRODUCT"]
+      : movementEntryType === "RAW_MATERIAL" || movementEntryType === "SUPPLY" || movementEntryType === "COMPLEMENT"
+        ? [movementEntryType]
+        : ["RAW_MATERIAL", "SUPPLY", "COMPLEMENT"];
   const movementItems = useMemo(
     () => items.filter((item) => !item.archived_at && movementItemTypes.includes(item.item_type)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, movementForm.movement_type],
+    [items, movementForm.movement_type, movementEntryType],
   );
   const movementSelectedItem = movementForm.item_id
     ? items.find((item) => item.id === movementForm.item_id) ?? null

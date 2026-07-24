@@ -2687,7 +2687,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           value={material.inventoryItemId}
                         >
                           <option value="">Seleccionar materia prima</option>
-                          {rawMaterials.map((item) => (
+                          {/* Solo materia prima: los insumos van por etapa. */}
+                          {rawMaterials.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
                             <option key={item.id} value={item.id}>{item.name} - {item.current_stock} {item.unit_code}</option>
                           ))}
                         </select>
@@ -2901,8 +2902,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             }}
                             style={{ flex: 2 }}
                           >
-                            <option value="">Seleccionar material</option>
-                            {rawMaterials.map((m) => {
+                            <option value="">Seleccionar insumo</option>
+                            {/* Solo insumos: la materia prima es la del proceso. */}
+                            {rawMaterials.filter((m) => m.item_type === "SUPPLY").map((m) => {
                               // Sin stock no se puede elegir: la etapa lo consumiría al avanzar.
                               const isOut = Number(m.current_stock) <= 0;
                               return (
