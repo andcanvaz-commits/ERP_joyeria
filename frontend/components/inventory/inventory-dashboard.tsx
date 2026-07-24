@@ -3671,7 +3671,9 @@ export function InventoryDashboard() {
                   <tr>
                     <th>Linea</th>
                     <th>Cantidad</th>
-                    <th>Seccion</th>
+                    {/* Ancho fijo: el select de tipo de complemento aparece y
+                        desaparece; sin esto la columna salta y rompe la ventana. */}
+                    <th style={{ width: 360 }}>Seccion</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3709,54 +3711,59 @@ export function InventoryDashboard() {
                             ) : null}
                           </span>
                         ) : (
-                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <select
-                              className="field"
-                              onChange={(event) =>
-                                setXmlImportDraft((current) => {
-                                  if (!current) return current;
-                                  const nextType = event.target.value as InventoryItemType;
-                                  const nextLines = current.lines.map((candidate, candidateIndex) =>
-                                    candidateIndex === lineIndex
-                                      ? { ...candidate, itemType: nextType, complementTypeId: nextType === "COMPLEMENT" ? candidate.complementTypeId : null }
-                                      : candidate,
-                                  );
-                                  return { ...current, lines: nextLines };
-                                })
-                              }
-                              value={line.itemType}
-                            >
-                              <option value="RAW_MATERIAL">Materia prima</option>
-                              <option value="SUPPLY">Insumo</option>
-                              <option value="COMPLEMENT">Complemento</option>
-                            </select>
-                            {line.itemType === "COMPLEMENT" ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "flex", gap: 8 }}>
                               <select
                                 className="field"
                                 onChange={(event) =>
                                   setXmlImportDraft((current) => {
                                     if (!current) return current;
+                                    const nextType = event.target.value as InventoryItemType;
                                     const nextLines = current.lines.map((candidate, candidateIndex) =>
-                                      candidateIndex === lineIndex ? { ...candidate, complementTypeId: event.target.value || null } : candidate,
+                                      candidateIndex === lineIndex
+                                        ? { ...candidate, itemType: nextType, complementTypeId: nextType === "COMPLEMENT" ? candidate.complementTypeId : null }
+                                        : candidate,
                                     );
                                     return { ...current, lines: nextLines };
                                   })
                                 }
-                                value={line.complementTypeId ?? ""}
+                                style={{ flex: 1, minWidth: 0 }}
+                                value={line.itemType}
                               >
-                                <option value="">Tipo de complemento…</option>
-                                {complementTypes.map((type) => (
-                                  <option key={type.id} value={type.id}>{type.name}</option>
-                                ))}
+                                <option value="RAW_MATERIAL">Materia prima</option>
+                                <option value="SUPPLY">Insumo</option>
+                                <option value="COMPLEMENT">Complemento</option>
                               </select>
-                            ) : null}
+                              {line.itemType === "COMPLEMENT" ? (
+                                <select
+                                  className="field"
+                                  onChange={(event) =>
+                                    setXmlImportDraft((current) => {
+                                      if (!current) return current;
+                                      const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                        candidateIndex === lineIndex ? { ...candidate, complementTypeId: event.target.value || null } : candidate,
+                                      );
+                                      return { ...current, lines: nextLines };
+                                    })
+                                  }
+                                  style={{ flex: 1, minWidth: 0 }}
+                                  value={line.complementTypeId ?? ""}
+                                >
+                                  <option value="">Tipo de complemento…</option>
+                                  {complementTypes.map((type) => (
+                                    <option key={type.id} value={type.id}>{type.name}</option>
+                                  ))}
+                                </select>
+                              ) : null}
+                            </div>
                             <button
-                              className="button"
+                              className="iconTextButton"
                               onClick={() => { setLinkPickerLineIndex(lineIndex); setLinkPickerSearch(""); }}
+                              style={{ alignSelf: "flex-start" }}
                               title="Vincular a existente"
                               type="button"
                             >
-                              <Repeat aria-hidden="true" size={15} />
+                              <Repeat aria-hidden="true" size={14} />
                               Vincular a existente
                             </button>
                           </div>
@@ -3788,7 +3795,7 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>Vincular a existente</h2>
-                <p className="panelText">Elige el item del inventario al que entra esta linea. Se recuerda el codigo del proveedor para las proximas facturas.</p>
+                <p className="panelText">Elige el item del inventario al que entra esta linea (solo para esta importacion).</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setLinkPickerLineIndex(null)} type="button">
                 <X aria-hidden="true" size={18} />
