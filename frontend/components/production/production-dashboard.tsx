@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -249,11 +249,19 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
   // Claves de modelo que ya tienen receta de ensamble: filtra los pickers en
-  // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR).
+  // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR) y, en
+  // mantenimiento, el picker de "Crear receta" (solo piezas sin receta aún).
   const { data: recipeModelKeys = EMPTY_RECIPE_MODEL_KEYS } = useQuery({
     queryKey: ["assembly-recipe-model-keys"],
     queryFn: listAssemblyRecipeModelKeys,
-    enabled: Boolean(currentUser) && variant === "production",
+    enabled: Boolean(currentUser),
+  });
+  // Piezas de producto terminado para el picker de "Crear receta" en
+  // mantenimiento (misma queryKey que ProductTypesManager, comparten caché).
+  const { data: finishedProductsList = EMPTY_RAW_MATERIALS } = useQuery({
+    queryKey: ["finished-products"],
+    queryFn: () => listInventoryItems("FINISHED_PRODUCT"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
   });
   // Segmentos del catálogo (para resolver el código de material de la
   // materia prima elegida): la clave de receta ahora incluye el material.
@@ -335,6 +343,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [recipeModalModelKey, setRecipeModalModelKey] = useState<string | null>(null);
   const [recipeLines, setRecipeLines] = useState<Array<{ itemId: string; label: string; perUnit: string }>>([]);
   const [isRecipeComplementPickerOpen, setIsRecipeComplementPickerOpen] = useState(false);
+  // Origen de la modal de receta: "order" = flujo de Crear orden (ENSAMBLAR,
+  // toca orderProduct/orderRecipe); "maintenance" = tile "Crear receta" (no
+  // debe tocar el estado de la orden en curso).
+  const [recipeModalContext, setRecipeModalContext] = useState<"order" | "maintenance">("order");
+  // Picker de pieza abierto desde el tile "Crear receta" de mantenimiento.
+  const [isMaintenanceRecipePickerOpen, setIsMaintenanceRecipePickerOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
   const [editPlanProduct, setEditPlanProduct] = useState<ProductChoice | null>(null);
   // Orden a la que se le esta definiendo el ensamble (complementos APROBADOS
@@ -1330,6 +1344,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       if (recipe.model_key) {
         setOrderRecipe(null);
         setRecipeLines([]);
+        setRecipeModalContext("order");
         setRecipeModalModelKey(recipe.model_key);
         return;
       }
@@ -1387,15 +1402,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   // Cierra la modal de receta. clearProduct=true (X/Cancelar): sin receta no
-  // hay ensamble, así que se limpia también la selección de producto.
+  // hay ensamble, así que se limpia también la selección de producto — pero
+  // solo si la modal se abrió desde Crear orden; desde mantenimiento no hay
+  // producto de orden que limpiar.
   function closeRecipeModal(clearProduct: boolean) {
     setRecipeModalModelKey(null);
     setRecipeLines([]);
     setIsRecipeComplementPickerOpen(false);
-    if (clearProduct) {
+    if (clearProduct && recipeModalContext === "order") {
       setOrderProduct(null);
       setOrderRecipe(null);
     }
+    setRecipeModalContext("order");
   }
 
   function addRecipeLine(item: InventoryItem) {
@@ -1432,10 +1450,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         recipeModalModelKey,
         recipeLines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
       );
-      const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalModelKey : recipeModalModelKey;
-      setOrderRecipe({ key, recipe: saved });
+      if (recipeModalContext === "order") {
+        const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalModelKey : recipeModalModelKey;
+        setOrderRecipe({ key, recipe: saved });
+      }
       setRecipeModalModelKey(null);
       setRecipeLines([]);
+      setRecipeModalContext("order");
       setSuccess("Receta guardada.");
       await queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] });
     } catch (nextError) {
@@ -1572,6 +1593,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <Puzzle aria-hidden="true" size={22} />
                 <strong>Complementos</strong>
                 <span>{complementsList.length} complementos creados.</span>
+              </button>
+            </div>
+          </section>
+
+          <section className="maintenanceSection" aria-label="Recetas de ensamble">
+            <h2>Recetas de ensamble</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setIsMaintenanceRecipePickerOpen(true)} type="button">
+                <ScrollText aria-hidden="true" size={22} />
+                <strong>Crear receta</strong>
+                <span>Complementos por unidad de un producto.</span>
               </button>
             </div>
           </section>
@@ -2136,6 +2168,32 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               setItemPickerFor(null);
             }}
             requireStock={false}
+            // Solo en ENSAMBLAR (crear orden): marca qué piezas ya tienen
+            // receta de ensamble definida, para no tener que abrirlas a ciegas.
+            rowBadge={
+              itemPickerFor === "create" && assemblyMode === "ENSAMBLAR"
+                ? (item) => {
+                    const key = `${orderMaterialCode ?? ""}${pieceModelKey(item) ?? ""}`;
+                    const hasRecipe = recipeModelKeys.includes(key);
+                    return (
+                      <span
+                        title={hasRecipe ? "Con receta" : "Sin receta"}
+                        style={{
+                          display: "grid",
+                          placeItems: "center",
+                          width: 22,
+                          height: 22,
+                          borderRadius: 999,
+                          background: hasRecipe ? "var(--primary-strong, #b3261e)" : "transparent",
+                          border: hasRecipe ? "none" : "1px solid var(--muted)",
+                        }}
+                      >
+                        <ScrollText aria-hidden="true" color={hasRecipe ? "#ffffff" : "var(--muted)"} size={13} />
+                      </span>
+                    );
+                  }
+                : undefined
+            }
             tabs={tabsBar}
             title="Elegir producto"
           />
@@ -2162,9 +2220,32 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         />
       ) : null}
 
+      {/* Picker de pieza para el tile "Crear receta" de mantenimiento: solo
+          piezas con código completo de 7 dígitos que aún no tienen receta. */}
+      {isMaintenanceRecipePickerOpen ? (
+        <FinishedItemPicker
+          items={finishedProductsList.filter((item) => {
+            const code = item.product_code;
+            return typeof code === "string" && code.length === 7 && !recipeModelKeys.includes(code);
+          })}
+          onClose={() => setIsMaintenanceRecipePickerOpen(false)}
+          onSelect={(item) => {
+            const code = item.product_code;
+            if (!code) return;
+            setRecipeModalContext("maintenance");
+            setRecipeLines([]);
+            setRecipeModalModelKey(code);
+            setIsMaintenanceRecipePickerOpen(false);
+          }}
+          requireStock={false}
+          title="Elegir producto"
+        />
+      ) : null}
+
       {/* Modal de receta: se abre cuando el tipo elegido en ENSAMBLAR no tiene
-          receta aún. Cerrar (X) también limpia la selección de producto: sin
-          receta no hay ensamble. */}
+          receta aún, o desde el tile "Crear receta" de mantenimiento. Cerrar
+          (X) también limpia la selección de producto de la orden, pero solo
+          si la modal vino de Crear orden (recipeModalContext === "order"). */}
       {recipeModalModelKey ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir receta">
           <section className="modalWindow processViewWindow">
@@ -2245,7 +2326,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {isRecipeComplementPickerOpen ? (
         <ComplementPicker
           excludeIds={recipeLines.map((line) => line.itemId)}
-          items={complementItems}
+          items={variant === "maintenance" ? complementsList : complementItems}
           onClose={() => setIsRecipeComplementPickerOpen(false)}
           onSelect={(item) => addRecipeLine(item)}
           title="Elegir complementos"
