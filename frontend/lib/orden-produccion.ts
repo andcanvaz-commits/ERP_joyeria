@@ -76,15 +76,8 @@ export function buildOrdenProduccion(
       detalle: `Producto final: ${product.product_name ?? "—"}`
     });
   }
-  // Combinacion de complementos aplicada al ensamble (una fila por complemento).
-  for (const item of run.assembly_items ?? []) {
-    const unit = (run.complements ?? []).find((c) => c.item_id === item.complement_item_id)?.unit_code ?? "und";
-    recepcionRows.push({
-      gramos: num(item.quantity),
-      unidad: unit,
-      detalle: `Ensamble: ${item.name ?? "—"}`
-    });
-  }
+  // Los complementos del ensamble NO se listan en recepción: ya van dentro
+  // del producto final ensamblado (su entrega quedó en la mitad de ENTREGA).
 
   return {
     folio: run.production_code ?? DASH,
