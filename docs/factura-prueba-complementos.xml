@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<factura id="comprobante" version="1.1.0">
+  <infoTributaria>
+    <ambiente>1</ambiente>
+    <tipoEmision>1</tipoEmision>
+    <razonSocial>IMPORTADORA DE INSUMOS DE JOYERIA S.A.</razonSocial>
+    <ruc>0999999999001</ruc>
+    <claveAcceso>2307202601099999999900110010010000001231234567813</claveAcceso>
+    <codDoc>01</codDoc>
+    <estab>001</estab>
+    <ptoEmi>001</ptoEmi>
+    <secuencial>000000123</secuencial>
+  </infoTributaria>
+  <infoFactura>
+    <fechaEmision>23/07/2026</fechaEmision>
+    <razonSocialComprador>JOYERIA RP</razonSocialComprador>
+    <identificacionComprador>0102030405001</identificacionComprador>
+    <totalSinImpuestos>118.50</totalSinImpuestos>
+    <importeTotal>132.72</importeTotal>
+  </infoFactura>
+  <detalles>
+    <detalle>
+      <codigoPrincipal>BR-ACERO-08</codigoPrincipal>
+      <descripcion>BROCHE MOSQUETON ACERO 8MM</descripcion>
+      <cantidad>50</cantidad>
+      <unidadMedida>und</unidadMedida>
+      <precioUnitario>0.45</precioUnitario>
+      <precioTotalSinImpuesto>22.50</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>CAD-BASE-45</codigoPrincipal>
+      <descripcion>CADENA BASE ESLABON FINO 45CM</descripcion>
+      <cantidad>30</cantidad>
+      <unidadMedida>und</unidadMedida>
+      <precioUnitario>1.20</precioUnitario>
+      <precioTotalSinImpuesto>36.00</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>DIJE-CRZ-12</codigoPrincipal>
+      <descripcion>DIJE CRUZ CASTING 12MM</descripcion>
+      <cantidad>40</cantidad>
+      <unidadMedida>und</unidadMedida>
+      <precioUnitario>0.90</precioUnitario>
+      <precioTotalSinImpuesto>36.00</precioTotalSinImpuesto>
+    </detalle>
+    <detalle>
+      <codigoPrincipal>SOLD-PL-01</codigoPrincipal>
+      <descripcion>SOLDADURA DE PLATA EN HILO</descripcion>
+      <cantidad>100</cantidad>
+      <unidadMedida>g</unidadMedida>
+      <precioUnitario>0.24</precioUnitario>
+      <precioTotalSinImpuesto>24.00</precioTotalSinImpuesto>
+    </detalle>
+  </detalles>
+</factura>
