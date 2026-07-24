@@ -2470,24 +2470,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{selectedStatsRun.process_name}</h2>
                 <p>{numericText(selectedStatsRun.quantity)} unidades</p>
               </div>
-              {selectedStatsRun.status !== "RECIBIDA" && selectedStatsRun.status !== "CANCELADA" ? (
-                <button className="iconTextButton" onClick={() => {
-                  const firstProduct = (selectedStatsRun.products ?? [])[0];
-                  setEditPlanProduct(
-                    firstProduct
-                      ? {
-                          targetItemId: firstProduct.target_item_id ?? undefined,
-                          productTypeId: firstProduct.product_type_id ?? undefined,
-                          label: firstProduct.product_name ?? "",
-                        }
-                      : null
-                  );
-                  setEditPlanRun(selectedStatsRun);
-                }} type="button">
-                  <Pencil aria-hidden="true" size={14} />
-                  Editar producto
-                </button>
-              ) : null}
+              {/* Producción finalizada: el producto ya no se edita aquí (el
+                  plan se cambia solo mientras la orden sigue en proceso). */}
               {selectedStatsRun.assembly_pending ? (
                 <button
                   className="button buttonPrimary"
