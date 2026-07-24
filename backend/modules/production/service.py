@@ -1296,6 +1296,20 @@ class ProductionService:
         # productos finales declarados (misma logica de conversion de siempre:
         # herencia de material, codigo de catalogo y par de movimientos).
         # Sin plan (ordenes viejas): el lote queda para conversion manual.
+        # Orden de ensamble: el kardex del producto final debe contar los
+        # complementos combinados, no una conversión genérica.
+        assembly_note = None
+        if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_items:
+            from sqlalchemy import select
+
+            item_ids = [entry.complement_item_id for entry in run.assembly_items]
+            rows = self.repository.session.execute(
+                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            names = {row[0]: row[1] for row in rows}
+            assembly_note = " + ".join(
+                names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
+            )
         for product in run.products:
             conversion = (
                 LotConversionCreate(target_item_id=product.target_item_id, quantity=product.quantity)
@@ -1304,7 +1318,7 @@ class ProductionService:
             )
             try:
                 self.inventory_service.convert_lot_to_product(
-                    lot.id, conversion, user_id=current_user.id
+                    lot.id, conversion, user_id=current_user.id, assembly_note=assembly_note
                 )
             except (InventoryDomainError, InventoryNotFoundError) as exc:
                 raise ProductionDomainError(

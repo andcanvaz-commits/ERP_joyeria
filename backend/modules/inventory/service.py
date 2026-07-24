@@ -560,7 +560,11 @@ class InventoryService(InventoryIntegrationPort):
         return created.code
 
     def convert_lot_to_product(
-        self, lot_item_id: UUID, payload: LotConversionCreate, user_id: UUID | None
+        self,
+        lot_item_id: UUID,
+        payload: LotConversionCreate,
+        user_id: UUID | None,
+        assembly_note: str | None = None,
     ) -> InventoryItemRead:
         """Convierte parcialmente un lote de proceso terminado (SKU = código OP)
         en un producto del catálogo. Consumo y producción quedan como el par de
@@ -703,7 +707,13 @@ class InventoryService(InventoryIntegrationPort):
         # Una sola operación contada completa en ambos asientos: el kardex de
         # cada lado dice de dónde vino y en qué acabó.
         target_label = (target.description or "").strip() or target.name
-        story = f"Conversion: lote {lot.sku} -> {target_label} ({product_code})"[:240]
+        # Ensamble de producción: el kardex cuenta el lote Y los complementos
+        # que se combinaron; una conversión simple solo lote → producto.
+        story = (
+            f"Ensamble: lote {lot.sku} + {assembly_note} -> {target_label} ({product_code})"
+            if assembly_note
+            else f"Conversion: lote {lot.sku} -> {target_label} ({product_code})"
+        )[:240]
         self.create_movement(
             InventoryMovementCreate(
                 item_id=lot.id,
