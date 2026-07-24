@@ -153,24 +153,6 @@ export function deleteComplementType(typeId: string) {
   return apiRequest<void>(`/api/inventory/complement-types/${typeId}`, { method: "DELETE" });
 }
 
-// Alias codigo de proveedor -> item del inventario: siguientes facturas XML
-// con ese codigo entran directas aunque el nombre del proveedor cambie.
-export type SupplierItemAlias = {
-  supplier_code: string;
-  item_id: string;
-};
-
-export function listItemAliases() {
-  return apiRequest<SupplierItemAlias[]>("/api/inventory/item-aliases");
-}
-
-export function upsertItemAlias(supplierCode: string, itemId: string) {
-  return apiRequest<SupplierItemAlias>("/api/inventory/item-aliases", {
-    method: "POST",
-    body: JSON.stringify({ supplier_code: supplierCode, item_id: itemId }),
-  });
-}
-
 export async function downloadInventoryMovementSourceFile(movementId: string) {
   const response = await fetch(`${API_URL}/api/inventory/movements/${movementId}/source-file`, {
     credentials: "include",

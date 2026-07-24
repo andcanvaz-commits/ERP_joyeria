@@ -80,17 +80,3 @@ class InventoryMovement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     item: Mapped[InventoryItem] = relationship(back_populates="movements")
-
-
-class SupplierItemAlias(Base):
-    """Vinculo codigo del proveedor (codigoPrincipal de la factura XML) → item
-    del inventario: siguientes facturas entran directas aunque cambie el nombre."""
-
-    __tablename__ = "supplier_item_aliases"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    supplier_code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
-    item_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("inventory_items.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

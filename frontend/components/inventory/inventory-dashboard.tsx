@@ -29,11 +29,9 @@ import {
   listComplementTypes,
   listInventoryItems,
   listInventoryMovements,
-  listItemAliases,
   revertLastEntry,
   unarchiveInventoryItem,
   updateInventoryItem,
-  upsertItemAlias,
   type CreateInventoryMovementPayload,
   type SaveInventoryItemPayload,
 } from "@/lib/inventory-api";
@@ -125,13 +123,13 @@ type XmlInvoiceDetail = {
 };
 
 // Linea de factura en revision: tipo elegible solo si el item no existe aun.
-// complementTypeId solo aplica a lineas nuevas de tipo COMPLEMENT. linkAlias
-// marca un vinculo manual hecho en esta sesion (se guarda como alias al confirmar).
+// complementTypeId solo aplica a lineas nuevas de tipo COMPLEMENT. manualLink
+// marca un vinculo manual hecho con el picker, valido solo para esta importacion.
 type XmlImportLine = XmlInvoiceDetail & {
   itemType: InventoryItemType;
   existingItem: InventoryItem | null;
   complementTypeId: string | null;
-  linkAlias?: boolean;
+  manualLink?: boolean;
 };
 
 type XmlImportDraft = {
@@ -1571,22 +1569,11 @@ export function InventoryDashboard() {
         throw new Error("No encontramos productos dentro de esta factura XML.");
       }
 
-      // Alias de codigo de proveedor -> item: si una linea trae un codigo que ya
-      // vinculamos antes, entra directo a ese item aunque el nombre haya cambiado.
-      const aliases = await listItemAliases().catch(() => []);
-      const aliasByCode = new Map(aliases.map((alias) => [alias.supplier_code.toUpperCase(), alias.item_id]));
-
-      // Pre-clasifica cada linea: alias de codigo primero; si no, nombre ya
-      // existente en inventario entra a ese item (tipo bloqueado); si es
-      // nueva, default segun la pestaña activa.
+      // Pre-clasifica cada linea: nombre ya existente en inventario entra a
+      // ese item (tipo bloqueado); si es nueva, default segun la pestaña activa.
       const defaultType: InventoryItemType =
         itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
       const lines = invoice.details.map<XmlImportLine>((detail) => {
-        const aliasedItemId = detail.code ? aliasByCode.get(detail.code.toUpperCase()) : undefined;
-        const aliasedItem = aliasedItemId ? items.find((candidate) => candidate.id === aliasedItemId) ?? null : null;
-        if (aliasedItem) {
-          return { ...detail, itemType: aliasedItem.item_type, existingItem: aliasedItem, complementTypeId: null };
-        }
         const matches = items.filter(
           (candidate) =>
             (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY" || candidate.item_type === "COMPLEMENT") &&
@@ -1624,7 +1611,6 @@ export function InventoryDashboard() {
     setError(null);
     try {
       let imported = 0;
-      let aliasWarnings = 0;
       let nextItems = items;
       for (const line of xmlImportDraft.lines) {
         let item =
@@ -1664,23 +1650,10 @@ export function InventoryDashboard() {
           source_file_content: xmlImportDraft.content,
         });
         imported += 1;
-
-        // Vinculo manual hecho en esta revision: se recuerda el codigo del
-        // proveedor para que la proxima factura entre directa a este item.
-        if (line.linkAlias && line.code) {
-          try {
-            await upsertItemAlias(line.code, item.id);
-          } catch {
-            aliasWarnings += 1;
-          }
-        }
       }
 
       setXmlImportDraft(null);
-      setSuccess(
-        `Factura XML importada: ${imported} lineas registradas.` +
-          (aliasWarnings > 0 ? ` (${aliasWarnings} vinculo${aliasWarnings === 1 ? "" : "s"} no se pudo guardar, se pedira de nuevo la proxima vez.)` : ""),
-      );
+      setSuccess(`Factura XML importada: ${imported} lineas registradas.`);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo importar la factura XML.");
@@ -3713,7 +3686,7 @@ export function InventoryDashboard() {
                         {line.existingItem ? (
                           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             {itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}
-                            {line.linkAlias ? (
+                            {line.manualLink ? (
                               <button
                                 aria-label="Deshacer vinculo"
                                 className="iconOnlyButton"
@@ -3722,7 +3695,7 @@ export function InventoryDashboard() {
                                     if (!current) return current;
                                     const nextLines = current.lines.map((candidate, candidateIndex) =>
                                       candidateIndex === lineIndex
-                                        ? { ...candidate, existingItem: null, linkAlias: false, complementTypeId: null }
+                                        ? { ...candidate, existingItem: null, manualLink: false, complementTypeId: null }
                                         : candidate,
                                     );
                                     return { ...current, lines: nextLines };
@@ -3858,7 +3831,7 @@ export function InventoryDashboard() {
                             if (!current) return current;
                             const nextLines = current.lines.map((line, lineIndex) =>
                               lineIndex === targetIndex
-                                ? { ...line, existingItem: candidate, itemType: candidate.item_type, complementTypeId: null, linkAlias: true }
+                                ? { ...line, existingItem: candidate, itemType: candidate.item_type, complementTypeId: null, manualLink: true }
                                 : line,
                             );
                             return { ...current, lines: nextLines };

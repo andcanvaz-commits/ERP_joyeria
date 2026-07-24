@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 
 from backend.modules.config.settings import settings
-from backend.modules.inventory.models import ComplementType, InventoryItem, InventoryMovement, SupplierItemAlias
+from backend.modules.inventory.models import ComplementType, InventoryItem, InventoryMovement
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.schemas import (
     ComplementTypeCreate,
@@ -18,8 +18,6 @@ from backend.modules.inventory.schemas import (
     InventorySummary,
     LotConversionCreate,
     ProductCombineCreate,
-    SupplierItemAliasCreate,
-    SupplierItemAliasRead,
 )
 from backend.modules.shared.contracts.inventory import (
     InventoryAvailabilityLine,
@@ -406,34 +404,6 @@ class InventoryService(InventoryIntegrationPort):
         if complement_type is None:
             raise InventoryNotFoundError("Tipo de complemento no encontrado.")
         return complement_type
-
-    def list_item_aliases(self) -> list[SupplierItemAliasRead]:
-        rows = self.repository.session.execute(
-            select(SupplierItemAlias).order_by(SupplierItemAlias.supplier_code.asc())
-        ).scalars().all()
-        return [SupplierItemAliasRead.model_validate(row) for row in rows]
-
-    def upsert_item_alias(self, payload: SupplierItemAliasCreate) -> SupplierItemAliasRead:
-        supplier_code = payload.supplier_code.strip().upper()
-        if not supplier_code:
-            raise InventoryDomainError("El codigo de proveedor no puede estar vacio.")
-        item = self.repository.get_item(payload.item_id)
-        if item is None:
-            raise InventoryNotFoundError("Item de inventario no encontrado.")
-        if item.item_type not in ("RAW_MATERIAL", "SUPPLY", "COMPLEMENT"):
-            raise InventoryDomainError(
-                "Solo se puede vincular a materias primas, insumos o complementos."
-            )
-        alias = self.repository.session.execute(
-            select(SupplierItemAlias).where(SupplierItemAlias.supplier_code == supplier_code)
-        ).scalars().first()
-        if alias is None:
-            alias = SupplierItemAlias(supplier_code=supplier_code, item_id=item.id)
-            self.repository.session.add(alias)
-        else:
-            alias.item_id = item.id
-        self.repository.flush()
-        return SupplierItemAliasRead.model_validate(alias)
 
     def _resolve_complement_type_id(
         self, item_type: str, complement_type_id: UUID | None
