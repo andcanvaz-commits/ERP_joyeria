@@ -1185,6 +1185,16 @@ class ProductionService:
             ).scalars()
         )
 
+    def list_assembly_recipes(self) -> list[AssemblyRecipeRead]:
+        """Todas las recetas de ensamble con sus complementos (para la vista
+        de mantenimiento)."""
+        from sqlalchemy import select
+
+        keys = self.repository.session.execute(
+            select(AssemblyRecipe.model_key).order_by(AssemblyRecipe.model_key)
+        ).scalars().all()
+        return [self._recipe_read_for_key(key) for key in keys]
+
     def get_assembly_recipe(
         self,
         product_type_id: UUID | None,

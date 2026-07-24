@@ -1067,10 +1067,34 @@ textarea {
   color: var(--danger);
 }
 
+/* Éxito en la identidad papel+oro del sistema (no verde). */
 .noticeSuccess {
-  border: 1px solid #a9dec8;
-  background: #effaf5;
+  border: 1px solid #DCCA9E;
+  background: #F8F3E6;
   color: var(--success);
+}
+
+.toastCloseButton {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  line-height: 0;
+  border-radius: 6px;
+  opacity: 0.65;
+}
+
+.toastCloseButton:hover {
+  opacity: 1;
+  background: rgba(23, 21, 15, 0.06);
+}
+
+.notice .noticeInner {
+  padding-right: 24px;
 }
 
 .toastProgressBar {

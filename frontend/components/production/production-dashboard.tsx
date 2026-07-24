@@ -37,6 +37,7 @@ import {
   finishProductionRunStage,
   getAssemblyRecipe,
   listAssemblyRecipeModelKeys,
+  listAssemblyRecipes,
   listProcesses,
   listProductionRuns,
   startProductionRun,
@@ -50,6 +51,7 @@ import { CaliperScale } from "@/components/ui/caliper-scale";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
 
 type StageForm = {
@@ -194,6 +196,7 @@ const EMPTY_USERS: ManagedUser[] = [];
 const EMPTY_RUNS: ProductionRun[] = [];
 const EMPTY_RAW_MATERIALS: InventoryItem[] = [];
 const EMPTY_RECIPE_MODEL_KEYS: string[] = [];
+const EMPTY_ASSEMBLY_RECIPES: AssemblyRecipe[] = [];
 const EMPTY_CATALOG_SEGMENTS: CatalogSegment[] = [];
 
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
@@ -265,10 +268,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   });
   // Segmentos del catálogo (para resolver el código de material de la
   // materia prima elegida): la clave de receta ahora incluye el material.
+  // En mantenimiento se usan para decodificar las claves de las recetas.
   const { data: catalogSegments = EMPTY_CATALOG_SEGMENTS } = useQuery({
     queryKey: ["catalog-segments"],
     queryFn: listCatalogSegments,
-    enabled: Boolean(currentUser) && variant === "production",
+    enabled: Boolean(currentUser),
+  });
+  // Recetas completas (con complementos) para la vista de mantenimiento.
+  const { data: assemblyRecipes = EMPTY_ASSEMBLY_RECIPES } = useQuery({
+    queryKey: ["assembly-recipes"],
+    queryFn: listAssemblyRecipes,
+    enabled: Boolean(currentUser) && variant === "maintenance",
   });
 
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
@@ -349,6 +359,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [recipeModalContext, setRecipeModalContext] = useState<"order" | "maintenance">("order");
   // Picker de pieza abierto desde el tile "Crear receta" de mantenimiento.
   const [isMaintenanceRecipePickerOpen, setIsMaintenanceRecipePickerOpen] = useState(false);
+  // Modal "Recetas" de mantenimiento: lista las recetas de ensamble existentes.
+  const [isRecipesViewOpen, setIsRecipesViewOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
   const [editPlanProduct, setEditPlanProduct] = useState<ProductChoice | null>(null);
   // Orden a la que se le esta definiendo el ensamble (complementos APROBADOS
@@ -1458,12 +1470,34 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setRecipeLines([]);
       setRecipeModalContext("order");
       setSuccess("Receta guardada.");
-      await queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] }),
+        queryClient.invalidateQueries({ queryKey: ["assembly-recipes"] }),
+      ]);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo guardar la receta.");
     } finally {
       setIsSaving(false);
     }
+  }
+
+  // Describe la clave de una receta (material+categoría+modelo, 7 dígitos):
+  // prefiere la pieza de inventario con ese código de producto; si no hay
+  // pieza, decodifica la clave contra el catálogo de segmentos.
+  function describeRecipeKey(key: string): { product: string; material: string } {
+    const material =
+      catalogSegments.find((segment) => segment.kind === "MATERIAL" && segment.code === key.slice(0, 1))?.label ??
+      `Material ${key.slice(0, 1)}`;
+    const piece = finishedProductsList.find((item) => item.product_code === key);
+    if (piece) {
+      const description = piece.description?.trim();
+      return { product: description ? description : piece.name, material };
+    }
+    const model = catalogSegments.find(
+      (segment) => segment.kind === "MODEL" && segment.parent_code === key.slice(1, 3) && segment.code === key.slice(3),
+    );
+    const category = catalogSegments.find((segment) => segment.kind === "CATEGORY" && segment.code === key.slice(1, 3));
+    return { product: model?.label ?? category?.label ?? key, material };
   }
 
   // Ids de tipos permitidos para el CatalogProductPicker según modal (el
@@ -1480,18 +1514,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     <div className="content">
       {error || success ? (
         <div className="toastStack" aria-live="polite" aria-atomic="true">
-          {error ? (
-            <div className="notice noticeError" key={error}>
-              <span className="noticeInner">{error}</span>
-              <span className="toastProgressBar" aria-hidden="true" />
-            </div>
-          ) : null}
-          {success ? (
-            <div className="notice noticeSuccess" key={success}>
-              <span className="noticeInner">{success}</span>
-              <span className="toastProgressBar" aria-hidden="true" />
-            </div>
-          ) : null}
+          {error ? <ToastNotice key={error} kind="error" message={error} onClose={() => setError(null)} progress /> : null}
+          {success ? <ToastNotice key={success} kind="success" message={success} onClose={() => setSuccess(null)} progress /> : null}
         </div>
       ) : null}
 
@@ -1604,6 +1628,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <ScrollText aria-hidden="true" size={22} />
                 <strong>Crear receta</strong>
                 <span>Complementos por unidad de un producto.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setIsRecipesViewOpen(true)} type="button">
+                <FileText aria-hidden="true" size={22} />
+                <strong>Recetas</strong>
+                <span>{assemblyRecipes.length} recetas creadas.</span>
               </button>
             </div>
           </section>
@@ -2218,6 +2247,86 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           }}
           title="Elegir tipo de producto"
         />
+      ) : null}
+
+      {/* Modal "Recetas" de mantenimiento: lista las recetas de ensamble
+          existentes con sus complementos; Editar abre la modal de receta
+          prellenada con las líneas actuales. */}
+      {isRecipesViewOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Recetas de ensamble">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Recetas de ensamble</h2>
+                <p>Complementos por unidad de cada producto</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsRecipesViewOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+
+            {assemblyRecipes.length === 0 ? (
+              <p className="panelText">Aún no hay recetas de ensamble.</p>
+            ) : (
+              <div className="tableWrap">
+                <table className="table tableAuto">
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Producto</th>
+                      <th>Material</th>
+                      <th>Complementos</th>
+                      <th aria-label="Editar" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assemblyRecipes.map((recipe) => {
+                      const modelKey = recipe.model_key;
+                      if (!modelKey) return null;
+                      const { product, material } = describeRecipeKey(modelKey);
+                      return (
+                        <tr key={modelKey}>
+                          <td>{modelKey}</td>
+                          <td>{product}</td>
+                          <td>{material}</td>
+                          <td>
+                            {recipe.items.map((item) => (
+                              <div key={item.complement_item_id}>
+                                {Number(item.quantity_per_unit)}× {item.name ?? "Complemento"}
+                              </div>
+                            ))}
+                          </td>
+                          <td>
+                            <button
+                              aria-label={`Editar receta ${modelKey}`}
+                              className="iconOnlyButton"
+                              onClick={() => {
+                                setIsRecipesViewOpen(false);
+                                setRecipeModalContext("maintenance");
+                                setRecipeLines(
+                                  recipe.items.map((item) => ({
+                                    itemId: item.complement_item_id,
+                                    label: item.name ?? "Complemento",
+                                    perUnit: String(Number(item.quantity_per_unit)),
+                                  })),
+                                );
+                                setRecipeModalModelKey(modelKey);
+                              }}
+                              title="Editar receta"
+                              type="button"
+                            >
+                              <Pencil aria-hidden="true" size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
       ) : null}
 
       {/* Picker de pieza para el tile "Crear receta" de mantenimiento: solo

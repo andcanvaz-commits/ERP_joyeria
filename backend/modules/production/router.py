@@ -242,6 +242,15 @@ def list_assembly_recipe_model_keys(
     return service.list_assembly_recipe_model_keys()
 
 
+@router.get("/assembly-recipes/all", response_model=list[AssemblyRecipeRead])
+def list_assembly_recipes(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> list[AssemblyRecipeRead]:
+    ensure_permission(current_user, "production.runs.read")
+    return service.list_assembly_recipes()
+
+
 @router.get("/assembly-recipes", response_model=AssemblyRecipeRead)
 def get_assembly_recipe(
     product_type_id: UUID | None = None,

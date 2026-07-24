@@ -10,6 +10,7 @@ import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
 import { matchMaterialSegment as matchMaterialSegmentShared } from "@/lib/material-match";
 import { listUnits } from "@/lib/units-api";
@@ -1690,18 +1691,8 @@ export function InventoryDashboard() {
     <div className="content">
       {(error || success) ? (
         <div className="toastStack" aria-live="polite" aria-atomic="true">
-          {error ? (
-            <div className="notice noticeError" key={error}>
-              <span className="noticeInner">{error}</span>
-              <span className="toastProgressBar" aria-hidden="true" />
-            </div>
-          ) : null}
-          {success ? (
-            <div className="notice noticeSuccess" key={success}>
-              <span className="noticeInner">{success}</span>
-              <span className="toastProgressBar" aria-hidden="true" />
-            </div>
-          ) : null}
+          {error ? <ToastNotice key={error} kind="error" message={error} onClose={() => setError(null)} progress /> : null}
+          {success ? <ToastNotice key={success} kind="success" message={success} onClose={() => setSuccess(null)} progress /> : null}
         </div>
       ) : null}
 

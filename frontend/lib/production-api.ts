@@ -159,3 +159,7 @@ export function upsertAssemblyRecipe(
 export function listAssemblyRecipeModelKeys() {
   return apiRequest<string[]>("/api/production/assembly-recipes/types");
 }
+
+export function listAssemblyRecipes() {
+  return apiRequest<AssemblyRecipe[]>("/api/production/assembly-recipes/all");
+}

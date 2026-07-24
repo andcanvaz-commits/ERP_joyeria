@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import { createUnit, deleteUnit, listUnits } from "@/lib/units-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import { Pager, usePagination } from "@/components/shared/pager";
 
 export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
@@ -73,8 +74,8 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
 
         {error || success ? (
           <div className="toastStack" aria-live="polite">
-            {error ? <div className="notice noticeError noticeCompact" key={error} style={{ pointerEvents: "auto" }}><span className="noticeInner">{error}</span></div> : null}
-            {success ? <div className="notice noticeSuccess noticeCompact" key={success} style={{ pointerEvents: "auto" }}><span className="noticeInner">{success}</span></div> : null}
+            {error ? <ToastNotice key={error} kind="error" message={error} onClose={() => setError(null)} compact /> : null}
+            {success ? <ToastNotice key={success} kind="success" message={success} onClose={() => setSuccess(null)} compact /> : null}
           </div>
         ) : null}
 
