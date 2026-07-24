@@ -29,9 +29,11 @@ import {
   listComplementTypes,
   listInventoryItems,
   listInventoryMovements,
+  listItemAliases,
   revertLastEntry,
   unarchiveInventoryItem,
   updateInventoryItem,
+  upsertItemAlias,
   type CreateInventoryMovementPayload,
   type SaveInventoryItemPayload,
 } from "@/lib/inventory-api";
@@ -123,11 +125,13 @@ type XmlInvoiceDetail = {
 };
 
 // Linea de factura en revision: tipo elegible solo si el item no existe aun.
-// complementTypeId solo aplica a lineas nuevas de tipo COMPLEMENT.
+// complementTypeId solo aplica a lineas nuevas de tipo COMPLEMENT. linkAlias
+// marca un vinculo manual hecho en esta sesion (se guarda como alias al confirmar).
 type XmlImportLine = XmlInvoiceDetail & {
   itemType: InventoryItemType;
   existingItem: InventoryItem | null;
   complementTypeId: string | null;
+  linkAlias?: boolean;
 };
 
 type XmlImportDraft = {
@@ -417,6 +421,10 @@ export function InventoryDashboard() {
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
   // Borrador de factura XML: se revisa y clasifica cada linea antes de importar.
   const [xmlImportDraft, setXmlImportDraft] = useState<XmlImportDraft | null>(null);
+  // Linea (indice dentro del borrador) para la que se abrio el picker de
+  // "vincular a existente"; null = cerrado.
+  const [linkPickerLineIndex, setLinkPickerLineIndex] = useState<number | null>(null);
+  const [linkPickerSearch, setLinkPickerSearch] = useState("");
   const [isArchivedOpen, setIsArchivedOpen] = useState(false);
   // Orden cuya etapa actual se consulta (quien avanzo a esa etapa y cuando).
   const [stageInfoRun, setStageInfoRun] = useState<ProductionRun | null>(null);
@@ -1563,11 +1571,22 @@ export function InventoryDashboard() {
         throw new Error("No encontramos productos dentro de esta factura XML.");
       }
 
-      // Pre-clasifica cada linea: si el nombre ya existe en inventario entra a ese
-      // item (tipo bloqueado); si es nueva, default segun la pestaña activa.
+      // Alias de codigo de proveedor -> item: si una linea trae un codigo que ya
+      // vinculamos antes, entra directo a ese item aunque el nombre haya cambiado.
+      const aliases = await listItemAliases().catch(() => []);
+      const aliasByCode = new Map(aliases.map((alias) => [alias.supplier_code.toUpperCase(), alias.item_id]));
+
+      // Pre-clasifica cada linea: alias de codigo primero; si no, nombre ya
+      // existente en inventario entra a ese item (tipo bloqueado); si es
+      // nueva, default segun la pestaña activa.
       const defaultType: InventoryItemType =
         itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
       const lines = invoice.details.map<XmlImportLine>((detail) => {
+        const aliasedItemId = detail.code ? aliasByCode.get(detail.code.toUpperCase()) : undefined;
+        const aliasedItem = aliasedItemId ? items.find((candidate) => candidate.id === aliasedItemId) ?? null : null;
+        if (aliasedItem) {
+          return { ...detail, itemType: aliasedItem.item_type, existingItem: aliasedItem, complementTypeId: null };
+        }
         const matches = items.filter(
           (candidate) =>
             (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY" || candidate.item_type === "COMPLEMENT") &&
@@ -1605,6 +1624,7 @@ export function InventoryDashboard() {
     setError(null);
     try {
       let imported = 0;
+      let aliasWarnings = 0;
       let nextItems = items;
       for (const line of xmlImportDraft.lines) {
         let item =
@@ -1644,10 +1664,23 @@ export function InventoryDashboard() {
           source_file_content: xmlImportDraft.content,
         });
         imported += 1;
+
+        // Vinculo manual hecho en esta revision: se recuerda el codigo del
+        // proveedor para que la proxima factura entre directa a este item.
+        if (line.linkAlias && line.code) {
+          try {
+            await upsertItemAlias(line.code, item.id);
+          } catch {
+            aliasWarnings += 1;
+          }
+        }
       }
 
       setXmlImportDraft(null);
-      setSuccess(`Factura XML importada: ${imported} lineas registradas.`);
+      setSuccess(
+        `Factura XML importada: ${imported} lineas registradas.` +
+          (aliasWarnings > 0 ? ` (${aliasWarnings} vinculo${aliasWarnings === 1 ? "" : "s"} no se pudo guardar, se pedira de nuevo la proxima vez.)` : ""),
+      );
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo importar la factura XML.");
@@ -3678,9 +3711,32 @@ export function InventoryDashboard() {
                       <td>{numericText(line.quantity)} {line.unitCode || "und"}</td>
                       <td>
                         {line.existingItem ? (
-                          <span>{itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}
+                            {line.linkAlias ? (
+                              <button
+                                aria-label="Deshacer vinculo"
+                                className="iconOnlyButton"
+                                onClick={() =>
+                                  setXmlImportDraft((current) => {
+                                    if (!current) return current;
+                                    const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                      candidateIndex === lineIndex
+                                        ? { ...candidate, existingItem: null, linkAlias: false, complementTypeId: null }
+                                        : candidate,
+                                    );
+                                    return { ...current, lines: nextLines };
+                                  })
+                                }
+                                title="Deshacer vinculo"
+                                type="button"
+                              >
+                                <X aria-hidden="true" size={13} />
+                              </button>
+                            ) : null}
+                          </span>
                         ) : (
-                          <div style={{ display: "flex", gap: 8 }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                             <select
                               className="field"
                               onChange={(event) =>
@@ -3721,6 +3777,15 @@ export function InventoryDashboard() {
                                 ))}
                               </select>
                             ) : null}
+                            <button
+                              className="button"
+                              onClick={() => { setLinkPickerLineIndex(lineIndex); setLinkPickerSearch(""); }}
+                              title="Vincular a existente"
+                              type="button"
+                            >
+                              <Repeat aria-hidden="true" size={15} />
+                              Vincular a existente
+                            </button>
                           </div>
                         )}
                       </td>
@@ -3739,6 +3804,89 @@ export function InventoryDashboard() {
                 <Save aria-hidden="true" size={17} />
                 {isSaving ? "Importando" : `Importar ${xmlImportDraft.lines.length} ${xmlImportDraft.lines.length === 1 ? "linea" : "lineas"}`}
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {xmlImportDraft && linkPickerLineIndex !== null ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Vincular a existente">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Vincular a existente</h2>
+                <p className="panelText">Elige el item del inventario al que entra esta linea. Se recuerda el codigo del proveedor para las proximas facturas.</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setLinkPickerLineIndex(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <input
+              className="field"
+              onChange={(event) => setLinkPickerSearch(event.target.value)}
+              placeholder="Buscar por nombre…"
+              style={{ marginTop: 12, marginBottom: 12 }}
+              type="text"
+              value={linkPickerSearch}
+            />
+            <div className="tableWrap pagedListFloor" style={{ minHeight: 200, maxHeight: 360, overflowY: "auto" }}>
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Tipo</th>
+                    <th>SKU</th>
+                    <th className="num">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items
+                    .filter(
+                      (candidate) =>
+                        (candidate.item_type === "RAW_MATERIAL" ||
+                          candidate.item_type === "SUPPLY" ||
+                          candidate.item_type === "COMPLEMENT") &&
+                        !candidate.archived_at &&
+                        candidate.name.toLowerCase().includes(linkPickerSearch.trim().toLowerCase()),
+                    )
+                    .map((candidate) => (
+                      <tr
+                        key={candidate.id}
+                        onClick={() => {
+                          const targetIndex = linkPickerLineIndex;
+                          setXmlImportDraft((current) => {
+                            if (!current) return current;
+                            const nextLines = current.lines.map((line, lineIndex) =>
+                              lineIndex === targetIndex
+                                ? { ...line, existingItem: candidate, itemType: candidate.item_type, complementTypeId: null, linkAlias: true }
+                                : line,
+                            );
+                            return { ...current, lines: nextLines };
+                          });
+                          setLinkPickerLineIndex(null);
+                        }}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td>{candidate.name}</td>
+                        <td>{itemTypeLabel(candidate.item_type)}</td>
+                        <td>{candidate.sku}</td>
+                        <td className="num">
+                          {Number(candidate.current_stock).toLocaleString("es-EC")} {candidate.unit_code}
+                        </td>
+                      </tr>
+                    ))}
+                  {items.filter(
+                    (candidate) =>
+                      (candidate.item_type === "RAW_MATERIAL" ||
+                        candidate.item_type === "SUPPLY" ||
+                        candidate.item_type === "COMPLEMENT") &&
+                      !candidate.archived_at &&
+                      candidate.name.toLowerCase().includes(linkPickerSearch.trim().toLowerCase()),
+                  ).length === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">Sin resultados.</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>

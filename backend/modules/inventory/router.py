@@ -18,6 +18,8 @@ from backend.modules.inventory.schemas import (
     InventorySummary,
     LotConversionCreate,
     ProductCombineCreate,
+    SupplierItemAliasCreate,
+    SupplierItemAliasRead,
 )
 from backend.modules.inventory.service import InventoryDomainError, InventoryNotFoundError, InventoryService
 from backend.modules.security.permissions import require_permission
@@ -246,6 +248,30 @@ def combine_products(
     ensure_permission(current_user, "inventory.movements.create")
     try:
         return service.combine_products(payload, user_id=current_user.id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/item-aliases", response_model=list[SupplierItemAliasRead])
+def list_item_aliases(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> list[SupplierItemAliasRead]:
+    ensure_permission(current_user, "inventory.read")
+    return service.list_item_aliases()
+
+
+@router.post("/item-aliases", response_model=SupplierItemAliasRead, status_code=status.HTTP_201_CREATED)
+def upsert_item_alias(
+    payload: SupplierItemAliasCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> SupplierItemAliasRead:
+    ensure_permission(current_user, "inventory.items.create")
+    try:
+        return service.upsert_item_alias(payload)
     except InventoryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except InventoryDomainError as exc:
