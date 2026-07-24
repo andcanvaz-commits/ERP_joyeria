@@ -1811,11 +1811,31 @@ export function InventoryDashboard() {
                 </div>
               ) : null}
               {itemFilter === "COMPLEMENT" ? (
-                // Complementos entra solo por registro manual: sin factura XML.
-                <button className="button" onClick={openManualEntry} type="button">
-                  <Plus aria-hidden="true" size={17} />
-                  Entrada
-                </button>
+                <div className="actionMenu" ref={entryMenuRef}>
+                  <button className="button" onClick={() => setIsEntryMenuOpen((current) => !current)} type="button">
+                    <Plus aria-hidden="true" size={17} />
+                    Entrada
+                    <ChevronDown aria-hidden="true" size={15} />
+                  </button>
+                  {isEntryMenuOpen ? (
+                    <div className="actionMenuPanel">
+                      <button onClick={openManualEntry} type="button">
+                        <Plus aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Manual</strong>
+                          <small>Registrar ingreso directo</small>
+                        </span>
+                      </button>
+                      <button onClick={openXmlInvoiceInput} type="button">
+                        <Upload aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Factura XML</strong>
+                          <small>Importar lineas de compra</small>
+                        </span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY" || itemFilter === "COMPLEMENT" || itemFilter === "FINISHED_PRODUCT") &&
               archivedItems.length > 0 ? (
