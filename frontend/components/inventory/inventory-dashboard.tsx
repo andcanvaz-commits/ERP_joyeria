@@ -1378,7 +1378,7 @@ export function InventoryDashboard() {
   function openManualEntry() {
     // Preselecciona un item del tipo de la pestaña activa (materia prima, insumo o complemento).
     const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
-    const firstItem = items.find((item) => item.item_type === entryType);
+    const firstItem = entryType === "COMPLEMENT" ? undefined : items.find((item) => item.item_type === entryType);
     setMovementForm({ ...emptyMovementForm(), item_id: firstItem?.id || "", movement_type: "ENTRADA" });
     setMovementEntryType(entryType);
     setIsMovementFormOpen(true);
@@ -1520,6 +1520,10 @@ export function InventoryDashboard() {
 
   async function handleCreateMovement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!movementForm.item_id) {
+      setError("Elige el complemento.");
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
