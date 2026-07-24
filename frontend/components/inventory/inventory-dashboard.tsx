@@ -423,6 +423,8 @@ export function InventoryDashboard() {
   // "vincular a existente"; null = cerrado.
   const [linkPickerLineIndex, setLinkPickerLineIndex] = useState<number | null>(null);
   const [linkPickerSearch, setLinkPickerSearch] = useState("");
+  // Filtro de seccion dentro del picker de vincular (TODOS = las tres).
+  const [linkPickerType, setLinkPickerType] = useState<"TODOS" | InventoryItemType>("TODOS");
   const [isArchivedOpen, setIsArchivedOpen] = useState(false);
   // Orden cuya etapa actual se consulta (quien avanzo a esa etapa y cuando).
   const [stageInfoRun, setStageInfoRun] = useState<ProductionRun | null>(null);
@@ -3758,7 +3760,7 @@ export function InventoryDashboard() {
                             </div>
                             <button
                               className="iconTextButton"
-                              onClick={() => { setLinkPickerLineIndex(lineIndex); setLinkPickerSearch(""); }}
+                              onClick={() => { setLinkPickerLineIndex(lineIndex); setLinkPickerSearch(""); setLinkPickerType("TODOS"); }}
                               style={{ alignSelf: "flex-start" }}
                               title="Vincular a existente"
                               type="button"
@@ -3801,14 +3803,28 @@ export function InventoryDashboard() {
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            <input
-              className="field"
-              onChange={(event) => setLinkPickerSearch(event.target.value)}
-              placeholder="Buscar por nombre…"
-              style={{ marginTop: 12, marginBottom: 12 }}
-              type="text"
-              value={linkPickerSearch}
-            />
+            <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 12 }}>
+              <input
+                className="field"
+                onChange={(event) => setLinkPickerSearch(event.target.value)}
+                placeholder="Buscar por nombre…"
+                style={{ flex: 1, minWidth: 0 }}
+                type="text"
+                value={linkPickerSearch}
+              />
+              <select
+                aria-label="Filtrar por seccion"
+                className="field"
+                onChange={(event) => setLinkPickerType(event.target.value as "TODOS" | InventoryItemType)}
+                style={{ width: 180 }}
+                value={linkPickerType}
+              >
+                <option value="TODOS">Todas las secciones</option>
+                <option value="RAW_MATERIAL">Materia prima</option>
+                <option value="SUPPLY">Insumos</option>
+                <option value="COMPLEMENT">Complementos</option>
+              </select>
+            </div>
             <div className="tableWrap pagedListFloor" style={{ minHeight: 200, maxHeight: 360, overflowY: "auto" }}>
               <table className="table tableAuto">
                 <thead>
@@ -3826,6 +3842,7 @@ export function InventoryDashboard() {
                         (candidate.item_type === "RAW_MATERIAL" ||
                           candidate.item_type === "SUPPLY" ||
                           candidate.item_type === "COMPLEMENT") &&
+                        (linkPickerType === "TODOS" || candidate.item_type === linkPickerType) &&
                         !candidate.archived_at &&
                         candidate.name.toLowerCase().includes(linkPickerSearch.trim().toLowerCase()),
                     )
@@ -3860,6 +3877,7 @@ export function InventoryDashboard() {
                       (candidate.item_type === "RAW_MATERIAL" ||
                         candidate.item_type === "SUPPLY" ||
                         candidate.item_type === "COMPLEMENT") &&
+                      (linkPickerType === "TODOS" || candidate.item_type === linkPickerType) &&
                       !candidate.archived_at &&
                       candidate.name.toLowerCase().includes(linkPickerSearch.trim().toLowerCase()),
                   ).length === 0 ? (
