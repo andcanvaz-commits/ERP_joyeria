@@ -502,15 +502,14 @@ export function InventoryDashboard() {
   const canSeeAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
 
   useEffect(() => {
-    if (!canSeeAudit && itemFilter === "ORDENES_TERMINADAS") {
+    if (itemFilter === "ORDENES_TERMINADAS") {
       setItemFilter("RAW_MATERIAL");
     }
-  }, [canSeeAudit, itemFilter]);
+  }, [itemFilter]);
 
-  // "Procesos terminados" es legado: solo admin lo ve para convertir lotes viejos.
-  const visibleItemTypes = ITEM_TYPES.filter(
-    (tab) => tab.value !== "ORDENES_TERMINADAS" || canSeeAudit,
-  );
+  // "Procesos terminados" ya no vive en inventario: la sección Procesos de
+  // producción lista las órdenes; aquí solo quedan los stocks.
+  const visibleItemTypes = ITEM_TYPES.filter((tab) => tab.value !== "ORDENES_TERMINADAS");
 
   const {
     data,
