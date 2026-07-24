@@ -447,6 +447,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const receivedRuns = runs
     .filter((run) => run.status === "RECIBIDA")
     .sort((a, b) => (b.received_at ?? "").localeCompare(a.received_at ?? ""));
+  const pendingReceptionRuns = runs
+    .filter((run) => run.status === "PENDIENTE_RECEPCION")
+    .sort((a, b) => (b.finished_at ?? "").localeCompare(a.finished_at ?? ""));
+  // Tabla unificada "Procesos": listos para iniciar, en curso y terminados, en ese orden.
+  const processRows = [
+    ...[...approvedMaterialRuns].sort((a, b) => (b.materials_approved_at ?? "").localeCompare(a.materials_approved_at ?? "")),
+    ...[...inProgressRuns].sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? "")),
+    ...pendingReceptionRuns,
+    ...receivedRuns,
+  ];
 
   useEffect(() => {
     if (finishedRuns.length === 0 || hasInitializedHistory) {
@@ -497,13 +507,30 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   function runStatusLabel(status: ProductionRun["status"]) {
     const labels: Record<ProductionRun["status"], string> = {
       PENDIENTE_INVENTARIO: "Pendiente de Inventario",
-      MATERIALES_APROBADOS: "Materiales aprobados",
+      MATERIALES_APROBADOS: "Lista para iniciar",
       EN_PROCESO: "En proceso",
-      PENDIENTE_RECEPCION: "Pendiente de recepcion",
+      PENDIENTE_RECEPCION: "Pendiente de recepción",
       RECIBIDA: "Recibida",
       CANCELADA: "Cancelada",
     };
     return labels[status] ?? status;
+  }
+
+  // Fecha contextual por estado: la más relevante para cada etapa del flujo.
+  function processRowDate(run: ProductionRun) {
+    if (run.status === "MATERIALES_APROBADOS") return timeLabel(run.materials_approved_at);
+    if (run.status === "EN_PROCESO") return timeLabel(run.started_at);
+    if (run.status === "RECIBIDA") return timeLabel(run.received_at);
+    return timeLabel(run.finished_at);
+  }
+
+  // Merma solo cuando hay dato registrado; evita "0 g" ruidoso en filas sin merma aun.
+  function processRowWaste(run: ProductionRun) {
+    if (!run.waste_weight && !run.waste_percent) return "—";
+    const parts: string[] = [];
+    if (run.waste_weight) parts.push(`${numericText(run.waste_weight)} g`);
+    if (run.waste_percent) parts.push(`${numericText(run.waste_percent)}%`);
+    return parts.join(" · ");
   }
 
   function runStatusTone(status: ProductionRun["status"]): "neutral" | "active" | "done" | "danger" | "warning" {
@@ -1661,38 +1688,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </article>
           </section>
 
-          {/* Ready to start */}
-          {approvedMaterialRuns.length > 0 ? (
-            <section className="card panelBody" aria-label="Listas para iniciar">
-              <div className="panelHeader">
-                <div>
-                  <h2 className="panelTitle">Listas para iniciar</h2>
-                  <p className="panelText">{approvedMaterialRuns.length} ordenes con materiales aprobados</p>
-                </div>
-                <Play aria-hidden="true" size={20} />
-              </div>
-              <div className="readyToStartList">
-                {approvedMaterialRuns.map((run) => (
-                  <div className="readyToStartRow" key={run.id}>
-                    <div className="readyToStartInfo">
-                      <strong>{run.process_name}</strong>
-                      <span>{numericText(run.quantity)} unidades · Material: {numericText(run.total_required_material)} {run.raw_material_unit_code} · Aprobado: {timeLabel(run.materials_approved_at)}</span>
-                    </div>
-                    <button
-                      className="button buttonPrimary"
-                      disabled={isSaving}
-                      onClick={() => void handleStartApprovedRun(run)}
-                      type="button"
-                    >
-                      <Play aria-hidden="true" size={15} />
-                      Iniciar
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
           {/* History */}
           <section className="card panelBody productionMovementsPanel" aria-label="Movimientos de produccion">
             <div className="panelHeader">
@@ -1747,15 +1742,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             )}
           </section>
 
-          {/* Procesos terminados: solo lectura — mermas y datos de recepción. */}
-          <section className="card panelBody" aria-label="Procesos terminados">
+          {/* Procesos: listos para iniciar, en curso y terminados, en un solo lugar. */}
+          <section className="card panelBody" aria-label="Procesos">
             <div className="panelHeader">
               <div>
-                <h2 className="panelTitle">Procesos terminados</h2>
-                <p className="panelText">Mermas e información de las órdenes recibidas</p>
+                <h2 className="panelTitle">Procesos</h2>
+                <p className="panelText">Ordenes listas para iniciar, en curso y terminadas</p>
               </div>
             </div>
-            {receivedRuns.length > 0 ? (
+            {processRows.length > 0 ? (
               <div className="tableWrap">
                 <table className="table">
                   <thead>
@@ -1763,27 +1758,54 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <th>#</th>
                       <th>Proceso</th>
                       <th className="num">Cantidad</th>
-                      <th className="num">Merma final</th>
-                      <th>Recibida</th>
+                      <th>Estado</th>
+                      <th>Fecha</th>
+                      <th className="num">Merma</th>
                       <th aria-label="Acciones" />
                     </tr>
                   </thead>
                   <tbody>
-                    {receivedRuns.map((run) => (
+                    {processRows.map((run) => (
                       <tr key={run.id}>
-                        <td>{run.production_code ?? "—"}</td>
+                        <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
                         <td>{run.process_name}</td>
                         <td className="num">{numericText(run.quantity)} und</td>
-                        <td className="num">
-                          {run.waste_weight ? `${numericText(run.waste_weight)} g` : "0 g"}
-                          {run.waste_percent ? ` · ${numericText(run.waste_percent)}%` : ""}
-                        </td>
-                        <td>{timeLabel(run.received_at)}</td>
+                        <td><StatusPunch label={runStatusLabel(run.status)} tone={runStatusTone(run.status)} /></td>
+                        <td>{processRowDate(run)}</td>
+                        <td className="num">{processRowWaste(run)}</td>
                         <td>
-                          <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
-                            <Eye aria-hidden="true" size={14} />
-                            Visualizar
-                          </button>
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                            {run.status === "MATERIALES_APROBADOS" ? (
+                              <button
+                                className="button buttonPrimary"
+                                disabled={isSaving}
+                                onClick={() => void handleStartApprovedRun(run)}
+                                type="button"
+                              >
+                                <Play aria-hidden="true" size={14} />
+                                Iniciar
+                              </button>
+                            ) : null}
+                            {run.status === "EN_PROCESO" ? (
+                              <button className="button buttonPrimary" onClick={() => openRunStagesModal(run)} type="button">
+                                Gestionar
+                              </button>
+                            ) : null}
+                            {run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA" ? (
+                              <>
+                                {run.assembly_pending ? (
+                                  <button className="button buttonPrimary" onClick={() => openAssemblyModal(run)} type="button">
+                                    <Puzzle aria-hidden="true" size={14} />
+                                    Definir ensamble
+                                  </button>
+                                ) : null}
+                                <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+                                  <Eye aria-hidden="true" size={14} />
+                                  Visualizar
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1791,7 +1813,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </table>
               </div>
             ) : (
-              <div className="emptyState">No hay procesos terminados.</div>
+              <div className="emptyState">No hay procesos.</div>
             )}
           </section>
         </>
