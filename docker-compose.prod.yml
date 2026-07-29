@@ -45,6 +45,8 @@ services:
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?define SEED_ADMIN_PASSWORD en .env}
       # Poner true una vez para forzar el reseteo de la clave del admin existente.
       SEED_ADMIN_RESET_ON_BOOT: ${SEED_ADMIN_RESET_ON_BOOT:-false}
+      # Dominio de los correos generados por el sistema (parte despues del @).
+      SYSTEM_EMAIL_DOMAIN: ${SYSTEM_EMAIL_DOMAIN:-fenixglobal}
     # Sin puertos: nginx habla con api por la red interna.
     restart: always
     depends_on:

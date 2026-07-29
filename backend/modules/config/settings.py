@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     seed_admin_username: str = "admin"
     seed_admin_password: str | None = None
     seed_admin_reset_on_boot: bool = False
-    system_email_domain: str = "erp.local"
+    system_email_domain: str = "fenixglobal"
 
     @property
     def is_production(self) -> bool:
