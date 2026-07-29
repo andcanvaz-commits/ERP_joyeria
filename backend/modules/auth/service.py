@@ -119,7 +119,12 @@ def role_email_identifier(role: str) -> str:
 
 def generate_system_email(username: str, role: str) -> str:
     normalized_username = username.strip().lower().replace(" ", ".")
-    return f"{normalized_username}.{role_email_identifier(role)}@{settings.system_email_domain}"
+    identifier = role_email_identifier(role)
+    # Evita duplicar el identificador cuando el username ya lo incluye
+    # (ej. username "admin" con rol admin -> admin@dominio, no admin.admin@).
+    if normalized_username == identifier or normalized_username.endswith(f".{identifier}"):
+        return f"{normalized_username}@{settings.system_email_domain}"
+    return f"{normalized_username}.{identifier}@{settings.system_email_domain}"
 
 
 def generate_username_base(first_name: str, last_name: str) -> str:
@@ -426,7 +431,9 @@ def seed_user(
     user.permissions = permissions
     user.first_name = user.first_name or "Admin"
     user.last_name = user.last_name or "Sistema"
-    user.email = user.email or generate_system_email(username, role)
+    # Re-sincroniza el correo del sistema para que un cambio de dominio
+    # (SYSTEM_EMAIL_DOMAIN) aplique a usuarios sembrados ya existentes.
+    user.email = generate_system_email(username, role)
     user.is_active = True
     if reset_password:
         user.password_hash = hash_password(password)
