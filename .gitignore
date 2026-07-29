@@ -32,8 +32,11 @@ backups/
 backups_local/
 
 # Artefactos de herramientas (Claude Code, Ruflo security audit, superpowers)
-.claude/
+# Se ignora todo .claude/ excepto skills del proyecto, que sí van al repo.
+.claude/*
+!.claude/skills/
 .claude-flow/
 .superpowers/
 .swarm/
+.agents/
 ruvector.db

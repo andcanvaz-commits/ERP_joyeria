@@ -1,5 +1,23 @@
 # ERP_joyeria
 
+Sistema ERP web para joyería: producción, inventario, merma, reportes y seguridad.
+Las reglas de negocio y arquitectura del proyecto están en `CLAUDE.md`.
+
+## Estructura del repositorio
+
+```text
+backend/            API FastAPI (modelos, servicios, endpoints, migraciones Alembic)
+frontend/           Aplicación web Next.js
+nginx/              Configuración de Nginx para producción
+docs/               Documentación: especificaciones, planes y ejemplos
+docs/agentes/       Prompts y tareas históricas usadas con agentes de IA
+docker-compose.yml  Stack de desarrollo (API, web, PostgreSQL)
+Dockerfile          Imagen de la API (el contexto de build es la raíz del repo)
+requirements.txt    Dependencias Python de la API
+alembic.ini         Configuración de migraciones
+CLAUDE.md           Especificación funcional y reglas técnicas del sistema
+```
+
 ## Desarrollo con Docker
 
 Requisitos:
