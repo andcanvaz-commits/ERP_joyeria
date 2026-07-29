@@ -703,8 +703,6 @@ export function InventoryDashboard() {
         .reduce((total, item) => total + itemTotalValue(item), 0),
     [items],
   );
-  // El total de complementos ahora se calcula por grupo drilleado
-  // (complementItemsValue), no global: ver complementGroups más abajo.
   // Kardex del item abierto: sus movimientos con saldo corrido (mas reciente
   // primero). El saldo se calcula en orden cronologico ascendente.
   const viewingItemKardex = useMemo(() => {
@@ -1305,10 +1303,6 @@ export function InventoryDashboard() {
     return (complementDrilledGroup?.items ?? []).map((item) => ({ item }));
   }, [searchActive, displayItems, complementDrilledGroup]);
   const complementItemsPager = usePagination(complementItemRows, TAB_PAGE_SIZE, `${complementDrillGroup ?? ""}|${search}`);
-  const complementItemsValue = useMemo(
-    () => complementItemRows.reduce((total, row) => total + itemTotalValue(row.item), 0),
-    [complementItemRows],
-  );
   const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
   const wipRows = [
     ...inProcessRunsFiltered.map((run) => ({ kind: "run" as const, run, item: null })),
@@ -2180,30 +2174,24 @@ export function InventoryDashboard() {
                       <tr>
                         <th className="num" style={{ width: 40 }}>#</th>
                         <th>Complemento</th>
-                        <th>Descripción</th>
+                        <th>Ley/pureza</th>
                         <th className="num">Stock</th>
                         <th>Estado</th>
-                        <th className="num">Costo promedio</th>
-                        <th className="num">Valor total</th>
                         <th aria-label="Acciones" />
                       </tr>
                     </thead>
                     <tbody>
                       {complementItemsPager.pageItems.map((row, index) => {
                         const item = row.item;
-                        const averageCost = item.average_cost ?? "0";
-                        const totalValue = Number(item.current_stock) * Number(averageCost);
                         const status = stockStatus(item);
                         const suggestion = archiveSuggestion(item);
                         return (
                           <tr key={item.id}>
                             <td className="num">{complementItemsPager.page * complementItemsPager.pageSize + index + 1}</td>
                             <td>{item.name}</td>
-                            <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
+                            <td>{item.purity ?? "—"}</td>
                             <td className="num">{itemStockText(item)}</td>
                             <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
-                            <td className="num">$ {numericText(averageCost)}</td>
-                            <td className="num">$ {numericText(String(totalValue))}</td>
                             <td>
                               <div className="rowActions">
                                 {canArchive(item) ? (
@@ -2226,24 +2214,15 @@ export function InventoryDashboard() {
                         );
                       })}
                       {searchActive && complementItemRows.length === 0 ? (
-                        <tr><td colSpan={8}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
+                        <tr><td colSpan={6}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
                       ) : null}
                       {!isLoading && !searchActive && complementItemRows.length === 0 ? (
-                        <tr><td colSpan={8}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
+                        <tr><td colSpan={6}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
                       ) : null}
                       {isLoading ? (
-                        <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
+                        <tr><td colSpan={6}><div className="emptyState">Cargando inventario...</div></td></tr>
                       ) : null}
                     </tbody>
-                    {!isLoading && complementItemRows.length > 0 ? (
-                      <tfoot>
-                        <tr className="totalRow">
-                          <td colSpan={6}>Valor total de complementos</td>
-                          <td className="num">$ {moneyText(complementItemsValue)}</td>
-                          <td />
-                        </tr>
-                      </tfoot>
-                    ) : null}
                   </table>
                   <Pager {...complementItemsPager} />
                 </div>
