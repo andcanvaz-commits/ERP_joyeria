@@ -43,6 +43,22 @@ def get_inventory_service():
 INVENTORY_ADMIN_ONLY = {"inventory.items.update", "inventory.items.delete"}
 
 
+def _find_waiting_production_runs(session, item_id):
+    """Ordenes ESPERANDO_MATERIAL que necesitan este item de materia prima:
+    candidatas para el aviso de 'destinar' al registrar un ingreso."""
+    from sqlalchemy import select
+    from backend.modules.production.models import ProductionRun, ProductionRunStatus
+
+    return list(
+        session.execute(
+            select(ProductionRun).where(
+                ProductionRun.raw_material_item_id == item_id,
+                ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
+            )
+        ).scalars().all()
+    )
+
+
 def ensure_permission(current_user: CurrentUser, permission: str) -> None:
     is_admin = current_user.role in {"admin", "Admin"}
     if permission in INVENTORY_ADMIN_ONLY:
@@ -276,11 +292,26 @@ def create_movement(
             detail="Solo se permiten ingresos y salidas manuales de inventario de materia prima.",
         )
     try:
-        return service.create_movement(payload, user_id=current_user.id)
+        result = service.create_movement(payload, user_id=current_user.id)
     except InventoryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except InventoryDomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    if payload.movement_type == "ENTRADA" and result.item.item_type == "RAW_MATERIAL":
+        from backend.modules.inventory.schemas import WaitingProductionRunSummary
+
+        waiting_runs = _find_waiting_production_runs(service.repository.session, payload.item_id)
+        result.waiting_production_runs = [
+            WaitingProductionRunSummary(
+                run_id=run.id,
+                production_code=run.production_code,
+                root_production_code=run.root_production_code or run.production_code,
+                missing_quantity=run.quantity,
+            )
+            for run in waiting_runs
+        ]
+    return result
 
 
 @router.get("/movements/{movement_id}/source-file")
