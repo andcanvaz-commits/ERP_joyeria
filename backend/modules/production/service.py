@@ -794,6 +794,46 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(run)
 
+    def allocate_material(
+        self, run_id: UUID, quantity_units: Decimal, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        """Inventario destina un ingreso nuevo a una corrida ESPERANDO_MATERIAL:
+        aprueba materiales e inicia la corrida automaticamente. Si el ingreso no
+        alcanza para toda la corrida, la parte de nuevo (mismo folio raiz)."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.WAITING_MATERIAL:
+            raise ProductionDomainError(
+                "Solo se puede destinar material a ordenes en estado ESPERANDO_MATERIAL."
+            )
+        if quantity_units <= 0:
+            raise ProductionDomainError("La cantidad a destinar debe ser mayor a cero.")
+        if quantity_units > run.quantity:
+            raise ProductionDomainError("No puedes destinar mas unidades de las que la orden necesita.")
+
+        from backend.modules.inventory.models import InventoryItem
+
+        raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
+        if raw_material is None:
+            raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
+
+        required_material = run.raw_material_quantity_per_unit * quantity_units
+        if raw_material.current_stock < required_material:
+            raise ProductionDomainError(
+                f"Stock insuficiente de '{raw_material.name}': disponible "
+                f"{raw_material.current_stock} {raw_material.unit_code}, se requieren "
+                f"{required_material} {raw_material.unit_code}."
+            )
+
+        if quantity_units < run.quantity:
+            self._split_run_for_partial_material(run, quantity_units)
+
+        run.status = ProductionRunStatus.PENDING_INVENTORY
+        self.repository.flush()
+        self.approve_materials(run.id, current_user)
+        return self.start_run(run.id, current_user)
+
     def start_run(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         run = self.repository.get_run(run_id)
         if run is None:

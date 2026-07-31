@@ -1,0 +1,95 @@
+from decimal import Decimal
+
+import pytest
+
+from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
+from backend.tests.production.test_material_split import _create_run
+
+
+def _create_waiting_child(production_service, current_user, process, raw_material, target_complement):
+    """100 unidades pedidas, stock alcanza para 60: aprobar parte y deja una
+    hija ESPERANDO_MATERIAL de 40 unidades. Devuelve (padre_id, hija)."""
+    raw_material.current_stock = Decimal("600")
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+    approved = production_service.approve_materials(run_read.id, current_user)
+    children = [
+        r for r in production_service.repository.list_runs() if r.parent_run_id == approved.id
+    ]
+    return approved.id, children[0]
+
+
+def test_allocate_material_full_amount_starts_run(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
+    raw_material.current_stock = Decimal("400")  # cubre las 40 unidades faltantes
+    db_session.flush()
+
+    result = production_service.allocate_material(child.id, Decimal("40"), current_user)
+
+    assert result.status == "EN_PROCESO"
+    assert result.quantity == Decimal("40")
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")
+    grandchildren = [
+        r for r in production_service.repository.list_runs() if r.parent_run_id == child.id
+    ]
+    assert grandchildren == []
+
+
+def test_allocate_material_partial_amount_splits_again(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
+    raw_material.current_stock = Decimal("250")  # solo cubre 25 de las 40 faltantes
+    db_session.flush()
+
+    result = production_service.allocate_material(child.id, Decimal("25"), current_user)
+
+    assert result.status == "EN_PROCESO"
+    assert result.quantity == Decimal("25")
+    grandchildren = [
+        r for r in production_service.repository.list_runs() if r.parent_run_id == child.id
+    ]
+    assert len(grandchildren) == 1
+    assert grandchildren[0].status == "ESPERANDO_MATERIAL"
+    assert grandchildren[0].quantity == Decimal("15")
+    assert grandchildren[0].root_production_code == child.root_production_code
+    assert grandchildren[0].production_code == f"{child.root_production_code}-C"
+
+
+def test_allocate_material_rejects_more_than_needed(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
+
+    with pytest.raises(ProductionDomainError, match="No puedes destinar mas"):
+        production_service.allocate_material(child.id, Decimal("999"), current_user)
+
+
+def test_allocate_material_rejects_insufficient_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
+    raw_material.current_stock = Decimal("100")  # solo cubre 10 de las 40 pedidas
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError, match="Stock insuficiente"):
+        production_service.allocate_material(child.id, Decimal("40"), current_user)
+
+
+def test_allocate_material_rejects_wrong_status(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+
+    with pytest.raises(ProductionDomainError, match="ESPERANDO_MATERIAL"):
+        production_service.allocate_material(run_read.id, Decimal("10"), current_user)
+
+
+def test_allocate_material_missing_run_raises_not_found(production_service, current_user):
+    import uuid
+
+    with pytest.raises(ProductionNotFoundError):
+        production_service.allocate_material(uuid.uuid4(), Decimal("1"), current_user)
