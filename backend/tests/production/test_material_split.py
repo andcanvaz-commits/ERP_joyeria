@@ -38,6 +38,11 @@ def test_split_run_creates_waiting_child_with_shared_root_code(
     assert child.production_code == f"{run.production_code}-B"
     assert len(child.stages) == 1
     assert child.stages[0].stage_name == "Etapa unica"
+    # El stage_code de la hija no debe colisionar con el del padre (mismo
+    # nombre de etapa, misma secuencia de orden): el sufijo del split debe
+    # distinguirlos para no romper la trazabilidad.
+    assert child.stages[0].stage_code != run.stages[0].stage_code
+    assert child.stages[0].stage_code.endswith("-B")
 
     # El plan de productos se reparte exacto: 60 al padre, 40 a la hija.
     assert sum(p.quantity for p in run.products) == Decimal("60")
@@ -58,6 +63,11 @@ def test_next_split_code_increments_letter_per_child(
     assert first_child.production_code == f"{run.production_code}-B"
     assert second_child.production_code == f"{run.production_code}-C"
     assert second_child.root_production_code == run.production_code
+
+    # Los stage_code de las tres corridas (padre, hija, nieta) deben ser
+    # todos distintos entre si, no solo hija != padre.
+    codes = {run.stages[0].stage_code, first_child.stages[0].stage_code, second_child.stages[0].stage_code}
+    assert len(codes) == 3
 
 
 def test_split_run_splits_complements_proportionally(
