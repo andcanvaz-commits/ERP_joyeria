@@ -559,6 +559,124 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(run)
 
+    def _next_split_code(self, root_code: str) -> str:
+        """Siguiente sufijo de folio para una corrida hija: -B, -C, -D... El
+        folio raiz (sin sufijo) es siempre la corrida original."""
+        from sqlalchemy import select
+
+        existing_codes = self.repository.session.execute(
+            select(ProductionRun.production_code).where(
+                ProductionRun.root_production_code == root_code
+            )
+        ).scalars().all()
+        used_suffixes = {
+            code.rsplit("-", 1)[-1]
+            for code in existing_codes
+            if code and code.startswith(f"{root_code}-")
+        }
+        letter_index = 1
+        while True:
+            letter = chr(ord("A") + letter_index)
+            if letter not in used_suffixes:
+                return f"{root_code}-{letter}"
+            letter_index += 1
+
+    def _split_run_for_partial_material(self, run: ProductionRun, covered_qty: Decimal) -> ProductionRun:
+        """Reduce `run` a `covered_qty` unidades y crea una corrida hija
+        ESPERANDO_MATERIAL con el remanente, mismo folio raiz. Reparte el plan
+        de productos (piezas enteras, llenado del padre primero) y los
+        complementos solicitados (proporcional) entre ambas."""
+        original_quantity = run.quantity
+        missing_qty = original_quantity - covered_qty
+        root_code = run.root_production_code or run.production_code
+
+        child = ProductionRun(
+            process_id=run.process_id,
+            process_name=run.process_name,
+            quantity=missing_qty,
+            status=ProductionRunStatus.WAITING_MATERIAL,
+            assembly_mode=run.assembly_mode,
+            raw_material_item_id=run.raw_material_item_id,
+            raw_material_quantity_per_unit=run.raw_material_quantity_per_unit,
+            raw_material_unit_code=run.raw_material_unit_code,
+            total_required_material=run.raw_material_quantity_per_unit * missing_qty,
+            waste_limit_percent=run.waste_limit_percent,
+            expected_finished_weight=run.raw_material_quantity_per_unit * missing_qty,
+            created_by_user_id=run.created_by_user_id,
+            target_product_type_id=run.target_product_type_id,
+            requested_at=datetime.utcnow(),
+            root_production_code=root_code,
+            parent_run_id=run.id,
+        )
+        child.production_code = self._next_split_code(root_code)
+
+        process = self.repository.get(run.process_id)
+        active_stages = (
+            sorted((s for s in process.stages if s.is_active), key=lambda s: s.stage_order)
+            if process is not None
+            else []
+        )
+        run_seq = int(child.production_code.split("-")[2]) if child.production_code else 0
+        for stage in active_stages:
+            child.stages.append(
+                ProductionRunStage(
+                    source_stage_id=stage.id,
+                    stage_name=stage.name,
+                    phase_name=stage.phase_name,
+                    stage_type=stage.stage_type,
+                    quality_check=stage.quality_check,
+                    rework_action=stage.rework_action,
+                    rework_target_order=stage.rework_target_order,
+                    stage_order=stage.stage_order,
+                    requires_weighing=stage.requires_weighing,
+                    status=ProductionRunStageStatus.PENDING,
+                    stage_code=_stage_code_for(stage.name, run_seq, stage.stage_order),
+                )
+            )
+
+        # Plan de productos: piezas enteras, se llena el padre en el orden de
+        # las lineas declaradas y el remanente de cada linea va a la hija.
+        # Sin division/redondeo: la suma siempre cuadra exacto.
+        remaining_parent_capacity = covered_qty
+        for product in list(run.products):
+            take = min(product.quantity, remaining_parent_capacity)
+            remaining_parent_capacity -= take
+            child_take = product.quantity - take
+            product.quantity = take
+            if child_take > 0:
+                child.products.append(
+                    ProductionRunProduct(
+                        product_type_id=product.product_type_id,
+                        target_item_id=product.target_item_id,
+                        quantity=child_take,
+                    )
+                )
+        run.products = [product for product in run.products if product.quantity > 0]
+
+        # Complementos: proporcional (no son piezas enteras necesariamente).
+        ratio_missing = missing_qty / original_quantity
+        for complement in list(run.complements):
+            child_qty = complement.quantity * ratio_missing
+            complement.quantity = complement.quantity - child_qty
+            if child_qty > 0:
+                child.complements.append(
+                    ProductionComplementRequest(
+                        item_id=complement.item_id,
+                        quantity=child_qty,
+                        unit_code=complement.unit_code,
+                        status=ComplementRequestStatus.PENDING,
+                    )
+                )
+
+        run.quantity = covered_qty
+        run.total_required_material = run.raw_material_quantity_per_unit * covered_qty
+        run.expected_finished_weight = run.total_required_material
+        run.root_production_code = root_code
+
+        self.repository.add_run(child)
+        self.repository.flush()
+        return child
+
     def approve_materials(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para aprobar materiales.")
