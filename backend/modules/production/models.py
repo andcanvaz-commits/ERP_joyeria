@@ -217,6 +217,7 @@ class ProductionRun(Base):
     products: Mapped[list["ProductionRunProduct"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
+        order_by="ProductionRunProduct.line_order",
     )
     # Complementos de inventario solicitados para ensamblar con la producción.
     complements: Mapped[list["ProductionComplementRequest"]] = relationship(
@@ -305,6 +306,10 @@ class ProductionRunProduct(Base):
     # product_type_id — exactamente uno de los dos).
     target_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    # Orden de declaracion de la linea: el split de una orden por falta de
+    # materia prima llena el padre en este orden; sin esto, Postgres no
+    # garantiza el orden de lectura de la coleccion tras un reload.
+    line_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     run: Mapped["ProductionRun"] = relationship(back_populates="products")
 

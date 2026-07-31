@@ -505,12 +505,13 @@ class ProductionService:
                 )
             )
 
-        for product in payload.products:
+        for line_order, product in enumerate(payload.products):
             run.products.append(
                 ProductionRunProduct(
                     product_type_id=product.product_type_id,
                     target_item_id=product.target_item_id,
                     quantity=product.quantity,
+                    line_order=line_order,
                 )
             )
         for complement, item in zip(payload.complements, complement_items):
@@ -553,8 +554,9 @@ class ProductionService:
                 product_type_id=product.product_type_id,
                 target_item_id=product.target_item_id,
                 quantity=product.quantity,
+                line_order=line_order,
             )
-            for product in payload.products
+            for line_order, product in enumerate(payload.products)
         ]
         self.repository.flush()
         return self._read_with_names(run)
@@ -616,8 +618,13 @@ class ProductionService:
             if process is not None
             else []
         )
-        run_seq = int(child.production_code.split("-")[2]) if child.production_code else 0
+        code_parts = child.production_code.split("-") if child.production_code else []
+        run_seq = int(code_parts[2]) if len(code_parts) > 2 else 0
+        split_suffix = code_parts[3] if len(code_parts) > 3 else None
         for stage in active_stages:
+            stage_code = _stage_code_for(stage.name, run_seq, stage.stage_order)
+            if split_suffix:
+                stage_code = f"{stage_code}-{split_suffix}"
             child.stages.append(
                 ProductionRunStage(
                     source_stage_id=stage.id,
@@ -630,7 +637,7 @@ class ProductionService:
                     stage_order=stage.stage_order,
                     requires_weighing=stage.requires_weighing,
                     status=ProductionRunStageStatus.PENDING,
-                    stage_code=_stage_code_for(stage.name, run_seq, stage.stage_order),
+                    stage_code=stage_code,
                 )
             )
 
@@ -649,6 +656,7 @@ class ProductionService:
                         product_type_id=product.product_type_id,
                         target_item_id=product.target_item_id,
                         quantity=child_take,
+                        line_order=product.line_order,
                     )
                 )
         run.products = [product for product in run.products if product.quantity > 0]

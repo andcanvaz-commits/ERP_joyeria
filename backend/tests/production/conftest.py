@@ -58,6 +58,20 @@ def target_complement(db_session) -> InventoryItem:
 
 
 @pytest.fixture()
+def complement_item(db_session) -> InventoryItem:
+    item = InventoryItem(
+        item_type="COMPLEMENT",
+        name="Complemento test",
+        sku=f"CO-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und",
+        current_stock=Decimal("0"),
+    )
+    db_session.add(item)
+    db_session.flush()
+    return item
+
+
+@pytest.fixture()
 def process(db_session, raw_material) -> ProductionProcess:
     proc = ProductionProcess(
         name=f"Proceso test {uuid.uuid4().hex[:6]}",
