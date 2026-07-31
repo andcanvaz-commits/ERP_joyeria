@@ -152,6 +152,15 @@ class InventoryMovementCreate(BaseModel):
     source_file_content: str | None = Field(default=None, max_length=2_000_000)
 
 
+class WaitingProductionRunSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    run_id: UUID
+    production_code: str | None = None
+    root_production_code: str | None = None
+    missing_quantity: Decimal
+
+
 class InventoryMovementRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -170,6 +179,9 @@ class InventoryMovementRead(BaseModel):
     created_by_name: str | None = None
     created_at: datetime
     item: InventoryItemRead
+    # Ordenes ESPERANDO_MATERIAL de esta materia prima: se llena solo en la
+    # respuesta de un ENTRADA, para que el frontend ofrezca "destinar".
+    waiting_production_runs: list[WaitingProductionRunSummary] = Field(default_factory=list)
 
 
 class InventorySummary(BaseModel):
