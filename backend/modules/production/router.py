@@ -8,6 +8,7 @@ from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.service import InventoryService
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    AllocateMaterialPayload,
     AssemblyRecipeRead,
     AssemblyRecipeUpsert,
     ProductionProcessCreate,
@@ -181,6 +182,24 @@ def reject_run_materials(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.reject_materials(run_id, current_user, payload.reason if payload else None)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/allocate-material", response_model=ProductionRunRead)
+def allocate_run_material(
+    run_id: UUID,
+    payload: AllocateMaterialPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    # Igual que approve-materials: inventario puede destinar material a una
+    # orden que quedo esperando por falta de stock.
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.allocate_material(run_id, payload.quantity_units, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
