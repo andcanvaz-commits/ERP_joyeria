@@ -171,6 +171,14 @@ class MaterialRejectPayload(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class AllocateMaterialPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # En unidades de producto (piezas), no en peso: inventario piensa en
+    # "cuantas piezas cubro", no convierte gramos a mano.
+    quantity_units: Decimal = Field(gt=0, decimal_places=0)
+
+
 class ProductionRunStageFinish(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -299,6 +307,8 @@ class ProductionRunRead(BaseModel):
     process_id: UUID
     process_name: str
     production_code: str | None = None
+    root_production_code: str | None = None
+    parent_run_id: UUID | None = None
     quantity: Decimal
     status: str
     # Modo del plan: ASIGNAR (split directo) o ENSAMBLAR (un producto + complementos).
