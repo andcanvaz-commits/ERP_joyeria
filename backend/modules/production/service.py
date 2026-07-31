@@ -693,6 +693,27 @@ class ProductionService:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
         if run.status != ProductionRunStatus.PENDING_INVENTORY:
             raise ProductionDomainError("Solo se pueden aprobar materiales de ordenes pendientes de Inventario.")
+
+        from backend.modules.inventory.models import InventoryItem
+
+        raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
+        if raw_material is None:
+            raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
+
+        # Si falta materia prima, la orden se parte: la porcion que el stock
+        # alcanza a cubrir sigue su curso normal aqui mismo; el remanente
+        # queda como corrida hija ESPERANDO_MATERIAL bajo el mismo folio raiz
+        # (ver ProductionService.allocate_material para como se resuelve).
+        if raw_material.current_stock < run.total_required_material:
+            covered_qty = raw_material.current_stock // run.raw_material_quantity_per_unit
+            if covered_qty <= 0:
+                raise ProductionDomainError(
+                    f"Stock insuficiente de '{raw_material.name}': disponible "
+                    f"{raw_material.current_stock} {raw_material.unit_code}, se requieren "
+                    f"{run.raw_material_quantity_per_unit} {raw_material.unit_code} para 1 unidad."
+                )
+            self._split_run_for_partial_material(run, covered_qty)
+
         try:
             self.inventory_service.consume_material_for_production(
                 item_id=run.raw_material_item_id,

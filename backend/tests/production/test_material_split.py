@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from backend.modules.production.models import ProductionRunStatus
 from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate
+from backend.modules.production.service import ProductionDomainError
 
 
 def _create_run(production_service, current_user, process, raw_material, target_complement, quantity):
@@ -127,3 +128,61 @@ def test_split_run_respects_declared_product_line_order_after_reload(
     assert [p.quantity for p in parent_lines] == [Decimal("60")]
     child_lines = sorted(child.products, key=lambda p: p.line_order)
     assert [p.quantity for p in child_lines] == [Decimal("10"), Decimal("30")]
+
+
+def test_approve_materials_splits_when_stock_insufficient(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("600")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+
+    approved = production_service.approve_materials(run_read.id, current_user)
+
+    assert approved.status == "MATERIALES_APROBADOS"
+    assert approved.quantity == Decimal("60")
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")
+
+    children = [
+        r for r in production_service.repository.list_runs()
+        if r.parent_run_id == approved.id
+    ]
+    assert len(children) == 1
+    assert children[0].status == "ESPERANDO_MATERIAL"
+    assert children[0].quantity == Decimal("40")
+    assert children[0].root_production_code == approved.production_code
+
+
+def test_approve_materials_no_split_when_stock_sufficient(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+
+    approved = production_service.approve_materials(run_read.id, current_user)
+
+    assert approved.status == "MATERIALES_APROBADOS"
+    assert approved.quantity == Decimal("100")
+    children = [
+        r for r in production_service.repository.list_runs()
+        if r.parent_run_id == approved.id
+    ]
+    assert children == []
+
+
+def test_approve_materials_raises_when_stock_covers_zero_units(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("5")  # menos de 10g (1 unidad)
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+
+    import pytest
+
+    with pytest.raises(ProductionDomainError, match="Stock insuficiente"):
+        production_service.approve_materials(run_read.id, current_user)
+
+    run = production_service.repository.get_run(run_read.id)
+    assert run.status == "PENDIENTE_INVENTARIO"
