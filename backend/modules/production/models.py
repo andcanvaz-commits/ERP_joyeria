@@ -131,6 +131,10 @@ class ProductionProcessStageIngredient(Base):
 
 class ProductionRunStatus:
     PENDING_INVENTORY = "PENDIENTE_INVENTARIO"
+    # Corrida creada por split (falta materia prima): no entra en la cola
+    # normal de aprobacion; solo se activa cuando inventario le destina
+    # material desde un ingreso nuevo (ver ProductionService.allocate_material).
+    WAITING_MATERIAL = "ESPERANDO_MATERIAL"
     MATERIALS_APPROVED = "MATERIALES_APROBADOS"
     IN_PROGRESS = "EN_PROCESO"
     PENDING_RECEPTION = "PENDIENTE_RECEPCION"
@@ -177,7 +181,14 @@ class ProductionRun(Base):
     actual_finished_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     waste_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     waste_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
-    production_code: Mapped[str | None] = mapped_column(String(30), nullable=True, unique=True, index=True)
+    # Ya no es unico: una orden partida por falta de materia prima genera
+    # corridas hijas con el mismo root_production_code (el "certificado") y
+    # su propio production_code con sufijo (OP-2026-0001-B, -C, ...).
+    production_code: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    root_production_code: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    parent_run_id: Mapped[PyUUID | None] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="SET NULL"), nullable=True
+    )
     created_by_user_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     started_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     materials_approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
