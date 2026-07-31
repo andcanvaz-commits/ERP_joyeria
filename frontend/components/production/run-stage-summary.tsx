@@ -64,8 +64,11 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
   const muted = { color: "var(--muted)" } as const;
   // Altura de fila fija + relleno hasta completar la página: el modal no debe
   // cambiar de tamaño al pasar de página (preferencia de UI del proyecto).
+  // Solo aplica si de verdad hay más de una página: con una sola página no
+  // hay tamaño previo que igualar, y rellenar infla el modal sin motivo
+  // (aparece scroll aunque el contenido real quepa de sobra).
   const ROW_HEIGHT = 36;
-  const fillerCount = rows.length > 0 ? Math.max(0, pageSize - pager.pageItems.length) : 0;
+  const fillerCount = pager.pageCount > 1 ? Math.max(0, pageSize - pager.pageItems.length) : 0;
   const oneLine = {
     whiteSpace: "nowrap",
     overflow: "hidden",

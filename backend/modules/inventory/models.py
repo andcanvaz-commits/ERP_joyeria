@@ -9,6 +9,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.modules.database.base import Base
 
 
+class ComplementType(Base):
+    """Tipo de complemento para organizar la pestaña Complementos
+    (ej. complementos de cadenas, de aretes). Solo catalogo, no inventario."""
+
+    __tablename__ = "complement_types"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 class InventoryItem(Base):
     __tablename__ = "inventory_items"
 
@@ -38,6 +50,10 @@ class InventoryItem(Base):
     # Archivado: item agotado que se oculta del inventario activo sin perder
     # historial. Una nueva entrada lo desarchiva automaticamente.
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Tipo de complemento (solo items COMPLEMENT): organiza la pestaña por grupos.
+    complement_type_id: Mapped[PyUUID | None] = mapped_column(
+        ForeignKey("complement_types.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

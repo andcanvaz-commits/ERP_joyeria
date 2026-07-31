@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/api";
-import type { ProductionProcess, ProductionRun } from "@/types/production";
+import type { AssemblyRecipe, ProductionProcess, ProductionRun } from "@/types/production";
 
 export type CreateProductionProcessPayload = {
   name: string;
@@ -64,11 +64,37 @@ export function createProductionRun(payload: {
   process_id: string;
   quantity: string;
   raw_material_item_id: string;
-  target_product_type_id?: string | null;
+  // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
+  assembly_mode: "ASIGNAR" | "ENSAMBLAR";
+  // Plan de resultantes: la suma de cantidades debe igualar quantity.
+  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>;
+  // Complementos solicitados al inventario (opcional).
+  complements?: Array<{ item_id: string; quantity: string }>;
 }) {
   return apiRequest<ProductionRun>("/api/production/runs", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function updateProductionRunProducts(
+  runId: string,
+  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>,
+) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/products`, {
+    method: "PUT",
+    body: JSON.stringify({ products }),
+  });
+}
+
+// Define la combinacion de complementos aplicada al ensamble del resultante.
+export function defineRunAssembly(
+  runId: string,
+  items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
+) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/assembly`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
   });
 }
 
@@ -110,4 +136,30 @@ export function receiveProductionRunFinishedProduct(runId: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/receive-finished`, {
     method: "POST",
   });
+}
+
+export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: string; materialItemId?: string }) {
+  const query = params.productTypeId
+    ? `product_type_id=${params.productTypeId}`
+    : `item_id=${params.itemId}`;
+  const materialParam = params.materialItemId ? `&material_item_id=${params.materialItemId}` : "";
+  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes?${query}${materialParam}`);
+}
+
+export function upsertAssemblyRecipe(
+  modelKey: string,
+  items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
+) {
+  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes/${modelKey}`, {
+    method: "PUT",
+    body: JSON.stringify({ items }),
+  });
+}
+
+export function listAssemblyRecipeModelKeys() {
+  return apiRequest<string[]>("/api/production/assembly-recipes/types");
+}
+
+export function listAssemblyRecipes() {
+  return apiRequest<AssemblyRecipe[]>("/api/production/assembly-recipes/all");
 }

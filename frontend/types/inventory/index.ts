@@ -1,4 +1,4 @@
-export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
+export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "COMPLEMENT" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
 
 export type InventoryMovementType =
   | "ENTRADA"
@@ -30,6 +30,14 @@ export type InventoryItem = {
   weight_per_unit?: string | null;
   elaboration_date?: string | null;
   archived_at?: string | null;
+  // Tipo de complemento del catalogo (solo aplica a item_type COMPLEMENT).
+  complement_type_id?: string | null;
+};
+
+export type ComplementType = {
+  id: string;
+  name: string;
+  is_active: boolean;
 };
 
 export type InventoryMovement = {

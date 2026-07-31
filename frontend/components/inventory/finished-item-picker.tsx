@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
@@ -23,6 +23,8 @@ export function FinishedItemPicker({
   onSelect,
   onCreate,
   onClose,
+  tabs,
+  rowBadge,
 }: {
   title: string;
   subtitle?: string;
@@ -34,6 +36,10 @@ export function FinishedItemPicker({
   // Si viene, muestra "Crear producto nuevo" para destinos que aún no existen.
   onCreate?: () => void;
   onClose: () => void;
+  // Slot opcional debajo del header (ej. pestañas Productos | Complementos).
+  tabs?: ReactNode;
+  // Marca opcional por fila (ej. indicador de receta de ensamble).
+  rowBadge?: (item: InventoryItem) => ReactNode;
 }) {
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const [drillType, setDrillType] = useState<string | null>(null);
@@ -92,6 +98,8 @@ export function FinishedItemPicker({
           </button>
         </div>
 
+        {tabs}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: typeGroups.length >= DRILL_PAGE_SIZE ? 460 : undefined }}>
           {drilledType ? (
             <div className="drillBar">
@@ -115,6 +123,7 @@ export function FinishedItemPicker({
                     <th>Producto</th>
                     <th>Material</th>
                     <th className="num">Stock</th>
+                    {rowBadge ? <th aria-label="Receta" style={{ width: 28 }} /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -140,10 +149,11 @@ export function FinishedItemPicker({
                           return base;
                         })()}
                       </td>
+                      {rowBadge ? <td>{rowBadge(item)}</td> : null}
                     </tr>
                   ))}
                   {drilledType.pieces.length === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">{requireStock ? "Sin piezas con stock en este tipo." : "Sin piezas en este tipo."}</div></td></tr>
+                    <tr><td colSpan={rowBadge ? 5 : 4}><div className="emptyState">{requireStock ? "Sin piezas con stock en este tipo." : "Sin piezas en este tipo."}</div></td></tr>
                   ) : null}
                 </tbody>
               </table>

@@ -2,10 +2,14 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import func, select
+
 from backend.modules.config.settings import settings
-from backend.modules.inventory.models import InventoryItem, InventoryMovement
+from backend.modules.inventory.models import ComplementType, InventoryItem, InventoryMovement
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.schemas import (
+    ComplementTypeCreate,
+    ComplementTypeRead,
     InventoryItemCreate,
     InventoryItemRead,
     InventoryItemUpdate,
@@ -60,13 +64,14 @@ NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA"
 ITEM_TYPE_PREFIXES = {
     "RAW_MATERIAL": "MP",
     "SUPPLY": "IN",
+    "COMPLEMENT": "CO",
     "WORK_IN_PROGRESS": "PP",
     "FINISHED_PRODUCT": "PT",
 }
 
 # Tipos que el usuario gestiona directamente (crear/editar/eliminar);
 # los demás los administra el flujo de producción.
-MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "FINISHED_PRODUCT")
+MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "FINISHED_PRODUCT")
 
 
 class InventoryService(InventoryIntegrationPort):
@@ -89,6 +94,7 @@ class InventoryService(InventoryIntegrationPort):
             elaboration_date=payload.elaboration_date,
             unit_code=payload.unit_code.strip(),
             minimum_stock=payload.minimum_stock,
+            complement_type_id=self._resolve_complement_type_id(payload.item_type, payload.complement_type_id),
         )
         self.repository.add_item(item)
         self.repository.flush()
@@ -115,6 +121,15 @@ class InventoryService(InventoryIntegrationPort):
         # edición existentes no envían el campo y no deben vaciarlo.
         if "weight_per_unit" in payload.model_fields_set:
             item.weight_per_unit = payload.weight_per_unit
+        # Igual que weight_per_unit: solo tocar complement_type_id si el
+        # cliente lo mandó explícitamente, salvo que el item deje de ser
+        # COMPLEMENT (en cuyo caso siempre se limpia).
+        if payload.item_type != "COMPLEMENT":
+            item.complement_type_id = None
+        elif "complement_type_id" in payload.model_fields_set:
+            item.complement_type_id = self._resolve_complement_type_id(
+                payload.item_type, payload.complement_type_id
+            )
         self.repository.flush()
         return InventoryItemRead.model_validate(item)
 
@@ -332,11 +347,75 @@ class InventoryService(InventoryIntegrationPort):
         return InventorySummary(
             raw_materials=sum(1 for item in items if item.item_type == "RAW_MATERIAL"),
             supplies=sum(1 for item in items if item.item_type == "SUPPLY"),
+            complements=sum(1 for item in items if item.item_type == "COMPLEMENT"),
             work_in_progress=sum(1 for item in items if item.item_type == "WORK_IN_PROGRESS"),
             finished_products=sum(1 for item in items if item.item_type == "FINISHED_PRODUCT"),
             low_stock_items=low_stock_items,
             total_items=len(items),
         )
+
+    def list_complement_types(self) -> list[ComplementTypeRead]:
+        rows = self.repository.session.execute(
+            select(ComplementType).order_by(ComplementType.name.asc())
+        ).scalars().all()
+        return [ComplementTypeRead.model_validate(row) for row in rows]
+
+    def create_complement_type(self, payload: ComplementTypeCreate) -> ComplementTypeRead:
+        name = payload.name.strip()
+        if self._get_complement_type_by_name(name) is not None:
+            raise InventoryDomainError("Ya existe un tipo de complemento con ese nombre.")
+        complement_type = ComplementType(name=name)
+        self.repository.session.add(complement_type)
+        self.repository.flush()
+        return ComplementTypeRead.model_validate(complement_type)
+
+    def update_complement_type(self, type_id: UUID, payload: ComplementTypeCreate) -> ComplementTypeRead:
+        complement_type = self._get_complement_type_or_raise(type_id)
+        name = payload.name.strip()
+        existing = self._get_complement_type_by_name(name)
+        if existing is not None and existing.id != complement_type.id:
+            raise InventoryDomainError("Ya existe un tipo de complemento con ese nombre.")
+        complement_type.name = name
+        self.repository.flush()
+        return ComplementTypeRead.model_validate(complement_type)
+
+    def delete_complement_type(self, type_id: UUID) -> None:
+        complement_type = self._get_complement_type_or_raise(type_id)
+        in_use = self.repository.session.execute(
+            select(func.count(InventoryItem.id)).where(
+                InventoryItem.item_type == "COMPLEMENT",
+                InventoryItem.complement_type_id == type_id,
+            )
+        ).scalar_one()
+        if in_use:
+            raise InventoryDomainError(
+                "No se puede eliminar: hay complementos que usan este tipo."
+            )
+        self.repository.session.delete(complement_type)
+        self.repository.flush()
+
+    def _get_complement_type_by_name(self, name: str) -> ComplementType | None:
+        return self.repository.session.execute(
+            select(ComplementType).where(func.lower(ComplementType.name) == name.strip().lower())
+        ).scalars().first()
+
+    def _get_complement_type_or_raise(self, type_id: UUID) -> ComplementType:
+        complement_type = self.repository.session.get(ComplementType, type_id)
+        if complement_type is None:
+            raise InventoryNotFoundError("Tipo de complemento no encontrado.")
+        return complement_type
+
+    def _resolve_complement_type_id(
+        self, item_type: str, complement_type_id: UUID | None
+    ) -> UUID | None:
+        """Solo los items COMPLEMENT pueden tener tipo de complemento; para
+        el resto del catálogo el campo se anula sin importar lo que venga."""
+        if item_type != "COMPLEMENT" or complement_type_id is None:
+            return None
+        complement_type = self.repository.session.get(ComplementType, complement_type_id)
+        if complement_type is None or not complement_type.is_active:
+            raise InventoryDomainError("Tipo de complemento no encontrado o inactivo.")
+        return complement_type_id
 
     def check_material_availability(
         self,
@@ -481,7 +560,12 @@ class InventoryService(InventoryIntegrationPort):
         return created.code
 
     def convert_lot_to_product(
-        self, lot_item_id: UUID, payload: LotConversionCreate, user_id: UUID | None
+        self,
+        lot_item_id: UUID,
+        payload: LotConversionCreate,
+        user_id: UUID | None,
+        assembly_note: str | None = None,
+        extra_grams_per_unit: Decimal | None = None,
     ) -> InventoryItemRead:
         """Convierte parcialmente un lote de proceso terminado (SKU = código OP)
         en un producto del catálogo. Consumo y producción quedan como el par de
@@ -525,8 +609,15 @@ class InventoryService(InventoryIntegrationPort):
         run_info = self._run_grams_per_unit(run) if run is not None else None
         if run_info is not None:
             weight_per_unit, entry_unit = run_info
+            if extra_grams_per_unit:
+                # Ensamble: el peso final suma el peso real del lote mas los
+                # gramos de los complementos combinados (sin dato -> no se
+                # inventa peso, solo se suma lo que aporta la combinacion).
+                weight_per_unit = weight_per_unit + extra_grams_per_unit
             entry_quantity = payload.quantity * weight_per_unit
         else:
+            # Fallback en unidades (sin peso de la orden): los extra_grams no
+            # tienen base para prorratearse, se ignoran.
             weight_per_unit = None
             entry_quantity = payload.quantity
             entry_unit = lot.unit_code
@@ -624,7 +715,13 @@ class InventoryService(InventoryIntegrationPort):
         # Una sola operación contada completa en ambos asientos: el kardex de
         # cada lado dice de dónde vino y en qué acabó.
         target_label = (target.description or "").strip() or target.name
-        story = f"Conversion: lote {lot.sku} -> {target_label} ({product_code})"[:240]
+        # Ensamble de producción: el kardex cuenta el lote Y los complementos
+        # que se combinaron; una conversión simple solo lote → producto.
+        story = (
+            f"Ensamble: lote {lot.sku} + {assembly_note} -> {target_label} ({product_code})"
+            if assembly_note
+            else f"Conversion: lote {lot.sku} -> {target_label} ({product_code})"
+        )[:240]
         self.create_movement(
             InventoryMovementCreate(
                 item_id=lot.id,
@@ -651,6 +748,55 @@ class InventoryService(InventoryIntegrationPort):
         )
         self.repository.flush()
         return InventoryItemRead.model_validate(target)
+
+    def convert_lot_to_complement(
+        self, lot_item_id: UUID, complement_item_id: UUID, quantity: Decimal, user_id: UUID | None
+    ) -> InventoryItemRead:
+        """Convierte unidades de un lote de producción en stock de un
+        complemento fabricado en casa: par CONVERSION_SALIDA/ENTRADA, sin
+        catálogo de producto (los complementos no llevan código de modelo)."""
+        lot = self._get_item_or_raise(lot_item_id)
+        if lot.item_type != "FINISHED_PRODUCT":
+            raise InventoryDomainError("Solo se pueden convertir lotes de procesos terminados.")
+        is_production_lot = any(
+            movement.reference_type == "production_order"
+            for movement in self.repository.list_movements(lot.id)
+        )
+        if not is_production_lot:
+            raise InventoryDomainError("El item no es un lote de una orden de produccion.")
+        if lot.current_stock < quantity:
+            raise InventoryDomainError("Stock insuficiente en el lote.")
+
+        complement = self._get_item_or_raise(complement_item_id)
+        if complement.item_type != "COMPLEMENT":
+            raise InventoryDomainError("El destino debe ser un complemento del inventario.")
+
+        story = f"Conversion: lote {lot.sku} -> {complement.name} (complemento)"[:240]
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=lot.id,
+                movement_type="CONVERSION_SALIDA",
+                quantity=quantity,
+                reason=story,
+                reference_type="lot_conversion",
+                reference_id=complement.id,
+            ),
+            user_id=user_id,
+        )
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=complement.id,
+                movement_type="CONVERSION_ENTRADA",
+                quantity=quantity,
+                reason=story,
+                reference_type="lot_conversion",
+                reference_id=lot.id,
+            ),
+            user_id=user_id,
+            lot_code=lot.sku,
+        )
+        self.repository.flush()
+        return InventoryItemRead.model_validate(complement)
 
     def combine_products(
         self, payload: ProductCombineCreate, user_id: UUID | None

@@ -15,6 +15,7 @@ import type { ProductionRun } from "@/types/production";
 const INVENTORY_TYPE_LABELS: Record<InventoryItemType, string> = {
   RAW_MATERIAL: "Materia prima",
   SUPPLY: "Insumos",
+  COMPLEMENT: "Complementos",
   WORK_IN_PROGRESS: "En proceso",
   FINISHED_PRODUCT: "Terminados",
 };
@@ -152,7 +153,7 @@ export function SystemDashboard() {
     return inventoryItems.reduce<Record<InventoryItemType, number>>((acc, item) => {
       acc[item.item_type] = (acc[item.item_type] ?? 0) + 1;
       return acc;
-    }, { RAW_MATERIAL: 0, SUPPLY: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0 });
+    }, { RAW_MATERIAL: 0, SUPPLY: 0, COMPLEMENT: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0 });
   }, [inventoryItems]);
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;

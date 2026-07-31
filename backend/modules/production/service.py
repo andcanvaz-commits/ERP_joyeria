@@ -4,14 +4,25 @@ from uuid import UUID
 
 from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.schemas import InventoryMovementCreate
-from backend.modules.inventory.service import InventoryDomainError, InventoryService
+from backend.modules.inventory.service import (
+    InventoryDomainError,
+    InventoryNotFoundError,
+    InventoryService,
+)
 from backend.modules.production.models import (
+    AssemblyMode,
+    AssemblyRecipe,
+    AssemblyRecipeItem,
+    ComplementRequestStatus,
+    ProductionComplementRequest,
     ProductionProcess,
     ProductionProcessMaterial,
     ProductionProcessProductType,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
+    ProductionRunAssemblyItem,
+    ProductionRunProduct,
     ProductionRunStage,
     ProductionRunStageDecision,
     ProductionRunStageStatus,
@@ -21,12 +32,18 @@ from backend.modules.production.models import (
 DECISION_STAGE_TYPES = {"DECISION", "CONTROL"}
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    AssemblyRecipeItemRead,
+    AssemblyRecipeRead,
+    AssemblyRecipeUpsert,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunStageFinish,
+    RunAssemblyDefine,
+    RunAssemblyLineCreate,
+    RunProductsUpdate,
     SupplyConsumptionRead,
 )
 
@@ -158,6 +175,67 @@ class ProductionService:
         missing = [pid for pid in product_type_ids if pid not in found]
         if missing:
             raise ProductionDomainError("Un tipo de producto seleccionado no existe en el catalogo.")
+
+    def _validate_run_products(
+        self,
+        process: ProductionProcess,
+        quantity: Decimal,
+        products: list,
+        assembly_mode: str = AssemblyMode.ASSIGN,
+    ) -> None:
+        """Valida el plan de resultantes: tipos activos del catalogo o piezas
+        existentes del inventario, permitidos por el proceso (si restringe, solo
+        aplica a tipos), sin repetidos y reglas de cantidad segun el modo."""
+        keys = [p.product_type_id or p.target_item_id for p in products]
+        if len(keys) != len(set(keys)):
+            raise ProductionDomainError("No repitas el mismo producto resultante.")
+
+        from backend.modules.product_types.models import ProductType
+        from backend.modules.inventory.models import InventoryItem
+
+        allowed = {link.product_type_id for link in process.product_types}
+        for product in products:
+            if product.product_type_id is not None:
+                product_type = self.repository.session.get(ProductType, product.product_type_id)
+                if product_type is None or not product_type.is_active:
+                    raise ProductionDomainError("Un producto resultante no existe o esta inactivo.")
+                if allowed and product.product_type_id not in allowed:
+                    raise ProductionDomainError(
+                        f"El proceso no puede producir '{product_type.name}'."
+                    )
+            else:
+                item = self.repository.session.get(InventoryItem, product.target_item_id)
+                if item is None or item.item_type not in ("FINISHED_PRODUCT", "COMPLEMENT"):
+                    raise ProductionDomainError(
+                        "El destino seleccionado no existe como pieza en el inventario."
+                    )
+                if item.item_type == "FINISHED_PRODUCT":
+                    if not item.product_code or len(item.product_code) != 7:
+                        raise ProductionDomainError(
+                            "La pieza destino debe tener un codigo de catalogo de 7 digitos."
+                        )
+                # COMPLEMENT: la joyeria fabrica su propio complemento; no
+                # lleva codigo de catalogo (recetas/claves de modelo no aplican).
+
+        if assembly_mode == AssemblyMode.ASSEMBLE:
+            if len(products) != 1 or products[0].quantity != quantity:
+                raise ProductionDomainError(
+                    "En modo ensamblar el plan es un solo producto con la cantidad de la orden."
+                )
+            single = products[0]
+            if single.target_item_id is not None:
+                item = self.repository.session.get(InventoryItem, single.target_item_id)
+                if item is not None and item.item_type != "FINISHED_PRODUCT":
+                    raise ProductionDomainError(
+                        "En ensamblar el producto final debe ser un producto terminado del catalogo."
+                    )
+            return
+
+        total = sum((p.quantity for p in products), Decimal("0"))
+        if total != quantity:
+            raise ProductionDomainError(
+                f"El plan de productos suma {total} y la orden fabrica {quantity}: deben coincidir."
+            )
 
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
@@ -366,14 +444,30 @@ class ProductionService:
         if not active_stages:
             raise ProductionDomainError("El proceso debe tener al menos una etapa activa.")
 
-        # Producto objetivo (opcional): es la intención declarada, cualquier
-        # tipo activo del catálogo vale.
-        if payload.target_product_type_id is not None:
-            from backend.modules.product_types.models import ProductType
+        self._validate_run_products(
+            process, payload.quantity, payload.products, payload.assembly_mode
+        )
 
-            target_type = self.repository.session.get(ProductType, payload.target_product_type_id)
-            if target_type is None or not target_type.is_active:
-                raise ProductionDomainError("El producto objetivo no existe o esta inactivo.")
+        if payload.assembly_mode == AssemblyMode.ASSEMBLE and not payload.complements:
+            raise ProductionDomainError(
+                "Una orden de ensamble necesita al menos un complemento solicitado."
+            )
+
+        complement_item_ids = [complement.item_id for complement in payload.complements]
+        if len(complement_item_ids) != len(set(complement_item_ids)):
+            raise ProductionDomainError("No repitas el mismo complemento en la solicitud.")
+
+        # Complementos: items de la pestaña Complementos del inventario.
+        from backend.modules.inventory.models import InventoryItem
+
+        complement_items = []
+        for complement in payload.complements:
+            item = self.repository.session.get(InventoryItem, complement.item_id)
+            if item is None or item.item_type != "COMPLEMENT":
+                raise ProductionDomainError(
+                    "Un complemento solicitado no existe en la pestaña Complementos."
+                )
+            complement_items.append(item)
 
         total_required = quantity_per_unit * payload.quantity
         run = ProductionRun(
@@ -381,10 +475,10 @@ class ProductionService:
             process_name=process.name,
             quantity=payload.quantity,
             status=ProductionRunStatus.PENDING_INVENTORY,
+            assembly_mode=payload.assembly_mode,
             raw_material_item_id=payload.raw_material_item_id,
             raw_material_quantity_per_unit=quantity_per_unit,
             raw_material_unit_code=unit_code,
-            target_product_type_id=payload.target_product_type_id,
             total_required_material=total_required,
             waste_limit_percent=process.waste_limit_percent,
             expected_finished_weight=total_required,
@@ -411,6 +505,24 @@ class ProductionService:
                 )
             )
 
+        for product in payload.products:
+            run.products.append(
+                ProductionRunProduct(
+                    product_type_id=product.product_type_id,
+                    target_item_id=product.target_item_id,
+                    quantity=product.quantity,
+                )
+            )
+        for complement, item in zip(payload.complements, complement_items):
+            run.complements.append(
+                ProductionComplementRequest(
+                    item_id=item.id,
+                    quantity=complement.quantity,
+                    unit_code=item.unit_code,
+                    status=ComplementRequestStatus.PENDING,
+                )
+            )
+
         self.repository.add_run(run)
         self.repository.flush()
         self.inventory_service.reserve_materials_for_production(
@@ -418,7 +530,34 @@ class ProductionService:
             requirements=(),
         )
         self.repository.flush()
-        return ProductionRunRead.model_validate(run)
+        return self._read_with_names(run)
+
+    def update_run_products(
+        self, run_id: UUID, payload: RunProductsUpdate, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status in (ProductionRunStatus.RECEIVED, ProductionRunStatus.CANCELLED):
+            raise ProductionDomainError(
+                "El plan de productos ya no se puede cambiar: la orden fue recibida o cancelada."
+            )
+        process = self.repository.get(run.process_id)
+        if process is None:
+            raise ProductionNotFoundError("Proceso de la orden no encontrado.")
+        self._validate_run_products(
+            process, run.quantity, payload.products, run.assembly_mode
+        )
+        run.products = [
+            ProductionRunProduct(
+                product_type_id=product.product_type_id,
+                target_item_id=product.target_item_id,
+                quantity=product.quantity,
+            )
+            for product in payload.products
+        ]
+        self.repository.flush()
+        return self._read_with_names(run)
 
     def approve_materials(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
@@ -462,6 +601,30 @@ class ProductionService:
                         )
                     except InventoryDomainError as exc:
                         raise ProductionDomainError(f"Insumo '{supply_name}': {exc}") from exc
+        # Complementos solicitados en la orden: se aprueban y descuentan junto
+        # con la materia prima. Si falta stock, toda la aprobacion se revierte.
+        from backend.modules.inventory.models import InventoryItem as _InventoryItem
+
+        now = datetime.utcnow()
+        for complement in run.complements:
+            if complement.status != ComplementRequestStatus.PENDING:
+                continue
+            item = self.repository.session.get(_InventoryItem, complement.item_id)
+            item_name = item.name if item is not None else "complemento"
+            try:
+                self.inventory_service.consume_material_for_production(
+                    item_id=complement.item_id,
+                    quantity=complement.quantity,
+                    production_run_id=run.id,
+                    user_id=current_user.id,
+                    production_code=run.production_code,
+                    reason=f"Complemento para ensamble: {item_name}.",
+                )
+            except InventoryDomainError as exc:
+                raise ProductionDomainError(f"Complemento '{item_name}': {exc}") from exc
+            complement.status = ComplementRequestStatus.APPROVED
+            complement.approved_by_user_id = current_user.id
+            complement.approved_at = now
         run.status = ProductionRunStatus.MATERIALS_APPROVED
         run.materials_approved_at = datetime.utcnow()
         run.materials_approved_by_user_id = current_user.id
@@ -478,6 +641,9 @@ class ProductionService:
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = (reason or "").strip() or None
         run.rejected_at = datetime.utcnow()
+        for complement in run.complements:
+            if complement.status == ComplementRequestStatus.PENDING:
+                complement.status = ComplementRequestStatus.REJECTED
         self.repository.flush()
         return self._read_with_names(run)
 
@@ -557,11 +723,54 @@ class ProductionService:
                 if m.item_id != run.raw_material_item_id
             ]
 
+    def _attach_plan_names(self, reads: list, runs: list) -> None:
+        """Nombres del plan de resultantes (tipo de producto o pieza destino),
+        de los complementos y de la combinacion de ensamble aplicada, para las
+        vistas y el acta."""
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+        from backend.modules.product_types.models import ProductType
+
+        type_ids = {p.product_type_id for run in runs for p in run.products if p.product_type_id}
+        target_item_ids = {p.target_item_id for run in runs for p in run.products if p.target_item_id}
+        item_ids = {c.item_id for run in runs for c in run.complements}
+        assembly_item_ids = {a.complement_item_id for run in runs for a in run.assembly_items}
+        item_ids |= assembly_item_ids
+        item_ids |= target_item_ids
+        type_names: dict = {}
+        if type_ids:
+            rows = self.repository.session.execute(
+                select(ProductType.id, ProductType.name).where(ProductType.id.in_(type_ids))
+            ).all()
+            type_names = {row[0]: row[1] for row in rows}
+        item_names: dict = {}
+        target_names: dict = {}
+        if item_ids:
+            rows = self.repository.session.execute(
+                select(
+                    InventoryItem.id, InventoryItem.name, InventoryItem.description
+                ).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            for item_id, name, description in rows:
+                item_names[item_id] = name
+                target_names[item_id] = (description or "").strip() or name
+        for read in reads:
+            for product in read.products:
+                if product.product_type_id is not None:
+                    product.product_name = type_names.get(product.product_type_id)
+                else:
+                    product.product_name = target_names.get(product.target_item_id)
+            for complement in read.complements:
+                complement.name = item_names.get(complement.item_id)
+            for assembly_item in read.assembly_items:
+                assembly_item.name = item_names.get(assembly_item.complement_item_id)
+
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
         self._attach_allowed_types([read], [run])
         self._attach_supply_consumptions([read], [run])
+        self._attach_plan_names([read], [run])
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
@@ -570,6 +779,7 @@ class ProductionService:
         _populate_run_names(self.repository.session, reads, runs)
         self._attach_allowed_types(reads, runs)
         self._attach_supply_consumptions(reads, runs)
+        self._attach_plan_names(reads, runs)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:
@@ -750,6 +960,93 @@ class ProductionService:
             )
         )
 
+    def _model_part_for_piece(self, item_id: UUID) -> str | None:
+        """Parte de modelo (categoria+modelo, 6 digitos, SIN el material) de
+        una pieza de inventario: los ultimos 6 digitos de su codigo de
+        catalogo. None si la pieza no tiene codigo de catalogo o no es
+        producto terminado."""
+        from backend.modules.inventory.models import InventoryItem
+
+        item = self.repository.session.get(InventoryItem, item_id)
+        if (
+            item is None
+            or item.item_type != "FINISHED_PRODUCT"
+            or not item.product_code
+            or len(item.product_code) != 7
+        ):
+            return None
+        return item.product_code[1:]
+
+    def _material_code_for_item(self, item_id: UUID | None) -> str | None:
+        """Codigo de material (1 digito) de la materia prima de la orden,
+        empatando su texto de material contra el catalogo. NO crea el
+        segmento si no existe: esto es una consulta (GET), y un GET no debe
+        escribir en el catalogo (a diferencia de la conversion de recepcion,
+        que sí puede crear un material nuevo)."""
+        if item_id is None:
+            return None
+        from sqlalchemy import select
+        from backend.modules.catalog.models import CatalogSegment
+        from backend.modules.inventory.models import InventoryItem
+
+        item = self.repository.session.get(InventoryItem, item_id)
+        if item is None:
+            return None
+        text = (item.material_type or item.name or "").strip()
+        if not text:
+            return None
+        clean = text.upper()
+
+        segments = self.repository.session.execute(
+            select(CatalogSegment).where(
+                CatalogSegment.kind == "MATERIAL",
+                CatalogSegment.is_active.is_(True),
+            )
+        ).scalars().all()
+        exact = next((s for s in segments if s.label.strip().upper() == clean), None)
+        if exact is not None:
+            return exact.code
+        partial = sorted(
+            (s for s in segments if s.label.strip().upper() in clean),
+            key=lambda s: -len(s.label),
+        )
+        return partial[0].code if partial else None
+
+    def _model_key_for_run(self, run: ProductionRun) -> str | None:
+        """En modo ENSAMBLAR el plan tiene una sola fila: la clave completa es
+        el material de la orden (raw_material_item_id) + la parte de modelo
+        de la pieza destino, o de categoria+modelo si trae un tipo del
+        catálogo. Requiere ambas partes; si alguna falta, no hay clave."""
+        material_code = self._material_code_for_item(run.raw_material_item_id)
+        if material_code is None:
+            return None
+        product = next(iter(run.products), None)
+        if product is None:
+            return None
+        if product.target_item_id is not None:
+            part = self._model_part_for_piece(product.target_item_id)
+        elif product.product_type_id is not None:
+            from backend.modules.product_types.models import ProductType
+
+            product_type = self.repository.session.get(ProductType, product.product_type_id)
+            part = None
+            if product_type is not None:
+                candidate = f"{product_type.category_code}{product_type.model_code}"
+                part = candidate if len(candidate) == 6 else None
+        else:
+            part = None
+        return f"{material_code}{part}" if part else None
+
+    def _approved_complement_totals(self, run: ProductionRun) -> dict:
+        """Suma por item de los complementos APROBADOS de la orden (lo que
+        inventario realmente entregó, disponible para ensamblar)."""
+        totals: dict = {}
+        for complement in run.complements:
+            if complement.status != ComplementRequestStatus.APPROVED:
+                continue
+            totals[complement.item_id] = totals.get(complement.item_id, Decimal("0")) + complement.quantity
+        return totals
+
     def _finish_run(self, run: ProductionRun, final_weight: Decimal | None) -> None:
         run.status = ProductionRunStatus.PENDING_RECEPTION
         run.finished_at = datetime.utcnow()
@@ -767,6 +1064,226 @@ class ProductionService:
             else Decimal("0")
         )
 
+        # Auto-ensamble: si la orden es ENSAMBLAR y existe una receta aprendida
+        # para su tipo de producto, y los complementos aprobados alcanzan para
+        # cubrirla completa, se aplica sola y la orden queda lista para recibir.
+        # Si no hay receta o no alcanza, queda pendiente de definir manualmente.
+        if run.assembly_mode == AssemblyMode.ASSEMBLE:
+            from sqlalchemy import select
+
+            model_key = self._model_key_for_run(run)
+            recipe = None
+            if model_key is not None:
+                recipe = self.repository.session.execute(
+                    select(AssemblyRecipe).where(AssemblyRecipe.model_key == model_key)
+                ).scalars().first()
+
+            approved = self._approved_complement_totals(run)
+            covers_recipe = recipe is not None and all(
+                item.quantity_per_unit * run.quantity <= approved.get(item.complement_item_id, Decimal("0"))
+                for item in recipe.items
+            )
+            if covers_recipe:
+                for item in recipe.items:
+                    run.assembly_items.append(
+                        ProductionRunAssemblyItem(
+                            complement_item_id=item.complement_item_id,
+                            quantity=item.quantity_per_unit * run.quantity,
+                        )
+                    )
+                run.assembly_pending = False
+            else:
+                run.assembly_pending = True
+
+    def define_run_assembly(
+        self, run_id: UUID, payload: RunAssemblyDefine, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.assembly_mode != AssemblyMode.ASSEMBLE:
+            raise ProductionDomainError("Esta orden no es de ensamble.")
+        if run.status != ProductionRunStatus.PENDING_RECEPTION:
+            raise ProductionDomainError(
+                "El ensamble se define cuando la producción está pendiente de recepción."
+            )
+        if not run.assembly_pending:
+            raise ProductionDomainError("El ensamble ya está definido.")
+
+        item_ids = [line.complement_item_id for line in payload.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ProductionDomainError("No repitas el mismo complemento en el ensamble.")
+
+        from backend.modules.inventory.models import InventoryItem
+
+        approved = self._approved_complement_totals(run)
+        for line in payload.items:
+            item = self.repository.session.get(InventoryItem, line.complement_item_id)
+            item_name = item.name if item is not None else "complemento"
+            if line.complement_item_id not in approved:
+                raise ProductionDomainError(
+                    f"El complemento '{item_name}' no fue solicitado/aprobado en esta orden."
+                )
+            needed = line.quantity_per_unit * run.quantity
+            if needed > approved[line.complement_item_id]:
+                raise ProductionDomainError(
+                    f"Complemento '{item_name}': el ensamble necesita {needed} y la orden solo "
+                    f"tiene {approved[line.complement_item_id]} aprobados."
+                )
+
+        run.assembly_items = [
+            ProductionRunAssemblyItem(
+                complement_item_id=line.complement_item_id,
+                quantity=line.quantity_per_unit * run.quantity,
+            )
+            for line in payload.items
+        ]
+        run.assembly_pending = False
+
+        # Receta aprendida: si la orden empata con una clave de modelo, se
+        # guarda (o actualiza) esta combinación para que futuros ensambles del
+        # mismo modelo se apliquen solos.
+        model_key = self._model_key_for_run(run)
+        if model_key is not None:
+            self._upsert_recipe_items(model_key, payload.items)
+
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def _upsert_recipe_items(
+        self, model_key: str, lines: list[RunAssemblyLineCreate]
+    ) -> None:
+        """Reemplaza los items de la receta de ensamble de la clave de modelo
+        (o la crea si aun no existe)."""
+        from sqlalchemy import select
+
+        recipe = self.repository.session.execute(
+            select(AssemblyRecipe).where(AssemblyRecipe.model_key == model_key)
+        ).scalars().first()
+        new_items = [
+            AssemblyRecipeItem(
+                complement_item_id=line.complement_item_id,
+                quantity_per_unit=line.quantity_per_unit,
+            )
+            for line in lines
+        ]
+        if recipe is not None:
+            recipe.items = new_items
+            recipe.updated_at = datetime.utcnow()
+        else:
+            recipe = AssemblyRecipe(model_key=model_key, items=new_items)
+            self.repository.session.add(recipe)
+
+    def list_assembly_recipe_model_keys(self) -> list[str]:
+        """Claves de modelo que ya tienen receta de ensamble (para filtrar
+        los pickers de asignacion)."""
+        from sqlalchemy import select
+
+        return list(
+            self.repository.session.execute(
+                select(AssemblyRecipe.model_key)
+            ).scalars()
+        )
+
+    def list_assembly_recipes(self) -> list[AssemblyRecipeRead]:
+        """Todas las recetas de ensamble con sus complementos (para la vista
+        de mantenimiento)."""
+        from sqlalchemy import select
+
+        keys = self.repository.session.execute(
+            select(AssemblyRecipe.model_key).order_by(AssemblyRecipe.model_key)
+        ).scalars().all()
+        return [self._recipe_read_for_key(key) for key in keys]
+
+    def get_assembly_recipe(
+        self,
+        product_type_id: UUID | None,
+        item_id: UUID | None,
+        material_item_id: UUID | None = None,
+    ) -> AssemblyRecipeRead:
+        """Consulta la receta de ensamble aprendida para la clave de modelo de
+        un tipo de producto, o para la pieza indicada (se resuelve su parte
+        de modelo primero). La clave completa exige ademas la materia prima
+        de la orden (material_item_id): sin ella no se puede saber a que
+        material corresponde la receta, asi que se devuelve vacia (el flujo
+        de creacion de orden siempre la envia)."""
+        if (product_type_id is None) == (item_id is None):
+            raise ProductionDomainError(
+                "Indica el tipo de producto o la pieza (uno de los dos)."
+            )
+        if item_id is not None:
+            part = self._model_part_for_piece(item_id)
+        else:
+            from backend.modules.product_types.models import ProductType
+
+            product_type = self.repository.session.get(ProductType, product_type_id)
+            part = None
+            if product_type is not None:
+                key = f"{product_type.category_code}{product_type.model_code}"
+                part = key if len(key) == 6 else None
+        material_code = self._material_code_for_item(material_item_id)
+        if part is None or material_code is None:
+            return AssemblyRecipeRead(model_key=None, items=[])
+        return self._recipe_read_for_key(f"{material_code}{part}")
+
+    def upsert_assembly_recipe(
+        self, model_key: str, payload: AssemblyRecipeUpsert, current_user: CurrentUser
+    ) -> AssemblyRecipeRead:
+        """Crea o reemplaza manualmente la receta de ensamble de una clave de
+        modelo (misma regla que la receta aprendida automaticamente)."""
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+
+        if len(model_key) != 7 or not model_key.isdigit():
+            raise ProductionDomainError("Clave de modelo inválida.")
+
+        item_ids = [line.complement_item_id for line in payload.items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ProductionDomainError("No repitas el mismo complemento en la receta.")
+
+        items = self.repository.session.execute(
+            select(InventoryItem).where(InventoryItem.id.in_(item_ids))
+        ).scalars().all()
+        items_by_id = {item.id: item for item in items}
+        for line in payload.items:
+            item = items_by_id.get(line.complement_item_id)
+            if item is None:
+                raise ProductionDomainError("El complemento indicado no existe.")
+            if item.item_type != "COMPLEMENT":
+                raise ProductionDomainError(f"'{item.name}' no es un complemento.")
+
+        self._upsert_recipe_items(model_key, payload.items)
+        self.repository.flush()
+        return self._recipe_read_for_key(model_key)
+
+    def _recipe_read_for_key(self, model_key: str) -> AssemblyRecipeRead:
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryItem
+
+        recipe = self.repository.session.execute(
+            select(AssemblyRecipe).where(AssemblyRecipe.model_key == model_key)
+        ).scalars().first()
+        if recipe is None:
+            return AssemblyRecipeRead(model_key=model_key, items=[])
+        complement_ids = list({item.complement_item_id for item in recipe.items})
+        names: dict = {}
+        if complement_ids:
+            rows = self.repository.session.execute(
+                select(InventoryItem.id, InventoryItem.name).where(
+                    InventoryItem.id.in_(complement_ids)
+                )
+            ).all()
+            names = {row[0]: row[1] for row in rows}
+        items = [
+            AssemblyRecipeItemRead(
+                complement_item_id=item.complement_item_id,
+                name=names.get(item.complement_item_id),
+                quantity_per_unit=item.quantity_per_unit,
+            )
+            for item in recipe.items
+        ]
+        return AssemblyRecipeRead(model_key=model_key, items=items)
+
     def receive_finished_product(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para recibir producto terminado.")
@@ -775,13 +1292,16 @@ class ProductionService:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
         if run.status != ProductionRunStatus.PENDING_RECEPTION:
             raise ProductionDomainError("Solo se puede recibir una produccion finalizada y pendiente de recepcion.")
+        if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_pending:
+            raise ProductionDomainError("Producción debe definir el ensamble antes de recibir.")
 
         # El lote hereda el material (metal) de la orden para que la conversión
         # a producto del catálogo no tenga que preguntarlo.
         from backend.modules.inventory.models import InventoryItem
+        from backend.modules.inventory.schemas import LotConversionCreate
 
         raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
-        self.inventory_service.create_finished_product_lot(
+        lot = self.inventory_service.create_finished_product_lot(
             name=run.process_name,
             unit_code="und",
             production_order_id=run.id,
@@ -792,6 +1312,68 @@ class ProductionService:
             purity=raw_material.purity if raw_material else None,
             received_by_user_id=current_user.id,
         )
+        # Con plan de resultantes: el lote se convierte aqui mismo en los
+        # productos finales declarados (misma logica de conversion de siempre:
+        # herencia de material, codigo de catalogo y par de movimientos).
+        # Sin plan (ordenes viejas): el lote queda para conversion manual.
+        # Orden de ensamble: el kardex del producto final debe contar los
+        # complementos combinados, no una conversión genérica.
+        assembly_note = None
+        extra_grams_per_unit = None
+        if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_items:
+            from sqlalchemy import select
+
+            item_ids = [entry.complement_item_id for entry in run.assembly_items]
+            rows = self.repository.session.execute(
+                select(InventoryItem).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            complements = {row[0].id: row[0] for row in rows}
+            names = {item_id: item.name for item_id, item in complements.items()}
+            assembly_note = " + ".join(
+                names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
+            )
+            # El ensamblado pesa lote + complementos: si el complemento se
+            # mide en gramos, suma su cantidad total; si es por unidad con
+            # peso_por_unidad conocido, suma cantidad x peso; sin dato de
+            # peso no se inventa, no aporta.
+            extra_grams = Decimal("0")
+            for entry in run.assembly_items:
+                item = complements.get(entry.complement_item_id)
+                if item is None:
+                    continue
+                if item.unit_code == "g":
+                    extra_grams += entry.quantity
+                elif item.weight_per_unit:
+                    extra_grams += entry.quantity * item.weight_per_unit
+            if run.quantity and extra_grams > 0:
+                extra_grams_per_unit = extra_grams / run.quantity
+        for product in run.products:
+            try:
+                if product.target_item_id is not None:
+                    target = self.repository.session.get(InventoryItem, product.target_item_id)
+                    if target is not None and target.item_type == "COMPLEMENT":
+                        self.inventory_service.convert_lot_to_complement(
+                            lot.id, product.target_item_id, product.quantity, user_id=current_user.id
+                        )
+                        continue
+                    conversion = LotConversionCreate(
+                        target_item_id=product.target_item_id, quantity=product.quantity
+                    )
+                else:
+                    conversion = LotConversionCreate(
+                        product_type_id=product.product_type_id, quantity=product.quantity
+                    )
+                self.inventory_service.convert_lot_to_product(
+                    lot.id,
+                    conversion,
+                    user_id=current_user.id,
+                    assembly_note=assembly_note,
+                    extra_grams_per_unit=extra_grams_per_unit,
+                )
+            except (InventoryDomainError, InventoryNotFoundError) as exc:
+                raise ProductionDomainError(
+                    f"No se pudo convertir el lote al producto planificado: {exc}"
+                ) from exc
         run.status = ProductionRunStatus.RECEIVED
         run.received_at = datetime.utcnow()
         run.received_by_user_id = current_user.id

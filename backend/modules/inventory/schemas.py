@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "WORK_IN_PROGRESS", "FINISHED_PRODUCT"]
+InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WORK_IN_PROGRESS", "FINISHED_PRODUCT"]
 InventoryMovementType = Literal[
     "ENTRADA",
     "SALIDA",
@@ -18,6 +18,20 @@ InventoryMovementType = Literal[
     "CONVERSION_SALIDA",
     "CONVERSION_ENTRADA",
 ]
+
+
+class ComplementTypeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
+
+
+class ComplementTypeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    name: str
+    is_active: bool
 
 
 class InventoryItemCreate(BaseModel):
@@ -32,6 +46,9 @@ class InventoryItemCreate(BaseModel):
     elaboration_date: date | None = None
     unit_code: str = Field(min_length=1, max_length=20)
     minimum_stock: Decimal | None = Field(default=None, ge=0)
+    # Tipo de complemento: solo aplica a items COMPLEMENT; el servicio lo
+    # ignora para el resto de tipos.
+    complement_type_id: UUID | None = None
 
 
 class InventoryItemUpdate(BaseModel):
@@ -51,6 +68,9 @@ class InventoryItemUpdate(BaseModel):
     # Excel de la empresa. Solo se toca si viene en el payload: los
     # formularios que no lo envían no lo borran.
     weight_per_unit: Decimal | None = Field(default=None, gt=0)
+    # Tipo de complemento: solo aplica a items COMPLEMENT; el servicio lo
+    # ignora para el resto de tipos.
+    complement_type_id: UUID | None = None
 
 
 class InventoryItemRead(BaseModel):
@@ -75,6 +95,7 @@ class InventoryItemRead(BaseModel):
     current_stock: Decimal
     average_cost: Decimal = Decimal("0")
     archived_at: datetime | None = None
+    complement_type_id: UUID | None = None
 
 
 class LotConversionCreate(BaseModel):
@@ -156,6 +177,7 @@ class InventorySummary(BaseModel):
 
     raw_materials: int
     supplies: int
+    complements: int
     work_in_progress: int
     finished_products: int
     low_stock_items: int

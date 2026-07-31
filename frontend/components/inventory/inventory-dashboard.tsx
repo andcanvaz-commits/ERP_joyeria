@@ -10,10 +10,13 @@ import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
+import { matchMaterialSegment as matchMaterialSegmentShared } from "@/lib/material-match";
 import { listUnits } from "@/lib/units-api";
 import { listProductTypes } from "@/lib/product-types-api";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
+import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import {
   archiveInventoryItem,
@@ -24,6 +27,7 @@ import {
   deleteInventoryItem,
   downloadInventoryMovementSourceFile,
   getInventorySummary,
+  listComplementTypes,
   listInventoryItems,
   listInventoryMovements,
   revertLastEntry,
@@ -46,6 +50,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
   { value: "SUPPLY", label: "Insumos" },
+  { value: "COMPLEMENT", label: "Complementos" },
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
   { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Productos terminados" },
@@ -119,9 +124,13 @@ type XmlInvoiceDetail = {
 };
 
 // Linea de factura en revision: tipo elegible solo si el item no existe aun.
+// complementTypeId solo aplica a lineas nuevas de tipo COMPLEMENT. manualLink
+// marca un vinculo manual hecho con el picker, valido solo para esta importacion.
 type XmlImportLine = XmlInvoiceDetail & {
   itemType: InventoryItemType;
   existingItem: InventoryItem | null;
+  complementTypeId: string | null;
+  manualLink?: boolean;
 };
 
 type XmlImportDraft = {
@@ -364,6 +373,10 @@ export function InventoryDashboard() {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [itemFilter]);
+  // Cambiar de pestaña vuelve al nivel tipos del drill-down de complementos.
+  useEffect(() => {
+    setComplementDrillGroup(null);
+  }, [itemFilter]);
   const [search, setSearch] = useState("");
   // Panel de filtros avanzados (se abre con el icono junto a la busqueda).
   const [showFilters, setShowFilters] = useState(false);
@@ -379,6 +392,9 @@ export function InventoryDashboard() {
   // Grupos de productos terminados expandidos (por nombre de categoria).
   // Drill-down de producto terminado: nivel actual (tipo → categoría → piezas).
   const [drillGroup, setDrillGroup] = useState<string | null>(null);
+  // Drill-down de complementos: nivel actual (tipo → items). Estado propio,
+  // no comparte el de producto terminado.
+  const [complementDrillGroup, setComplementDrillGroup] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -396,10 +412,20 @@ export function InventoryDashboard() {
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
+  // Tipo de item que originó el modal de movimiento (fijado al abrirlo): decide
+  // si el selector de item es el flat select o el picker de complementos.
+  const [movementEntryType, setMovementEntryType] = useState<InventoryItemType | null>(null);
+  const [isComplementPickerOpen, setIsComplementPickerOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
   // Borrador de factura XML: se revisa y clasifica cada linea antes de importar.
   const [xmlImportDraft, setXmlImportDraft] = useState<XmlImportDraft | null>(null);
+  // Linea (indice dentro del borrador) para la que se abrio el picker de
+  // "vincular a existente"; null = cerrado.
+  const [linkPickerLineIndex, setLinkPickerLineIndex] = useState<number | null>(null);
+  const [linkPickerSearch, setLinkPickerSearch] = useState("");
+  // Filtro de seccion dentro del picker de vincular (TODOS = las tres).
+  const [linkPickerType, setLinkPickerType] = useState<"TODOS" | InventoryItemType>("TODOS");
   const [isArchivedOpen, setIsArchivedOpen] = useState(false);
   // Orden cuya etapa actual se consulta (quien avanzo a esa etapa y cuando).
   const [stageInfoRun, setStageInfoRun] = useState<ProductionRun | null>(null);
@@ -476,6 +502,16 @@ export function InventoryDashboard() {
   });
   const canSeeAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
 
+  useEffect(() => {
+    if (itemFilter === "ORDENES_TERMINADAS") {
+      setItemFilter("RAW_MATERIAL");
+    }
+  }, [itemFilter]);
+
+  // "Procesos terminados" ya no vive en inventario: la sección Procesos de
+  // producción lista las órdenes; aquí solo quedan los stocks.
+  const visibleItemTypes = ITEM_TYPES.filter((tab) => tab.value !== "ORDENES_TERMINADAS");
+
   const {
     data,
     isLoading: isBundleLoading,
@@ -500,6 +536,13 @@ export function InventoryDashboard() {
   const { data: catalogSegments = [] } = useQuery({
     queryKey: ["catalog-segments"],
     queryFn: listCatalogSegments,
+    enabled: Boolean(currentUser),
+  });
+
+  // Tipos de complemento del catalogo: agrupan la pestaña Complementos.
+  const { data: complementTypes = [] } = useQuery({
+    queryKey: ["complement-types"],
+    queryFn: listComplementTypes,
     enabled: Boolean(currentUser),
   });
 
@@ -695,16 +738,27 @@ export function InventoryDashboard() {
   const canSeeMovementAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const editingItem = editingItemId ? items.find((item) => item.id === editingItemId) ?? null : null;
   const isEditingXmlItem = editingItem ? isXmlInvoiceItem(editingItem) : false;
-  // Salidas: productos terminados. Entradas: materia prima e insumos.
+  // Insumos y complementos comparten el mismo formulario simple: nombre y
+  // unidad, sin material ni pureza.
+  const isSimpleItem = itemForm.item_type === "SUPPLY" || itemForm.item_type === "COMPLEMENT";
+  // Salidas: productos terminados. Entradas: SOLO el tipo de la pestaña desde
+  // la que se abrió (materia prima, insumos o complementos) — sin mezclar.
   const movementItemTypes: InventoryItemType[] =
-    movementForm.movement_type === "SALIDA" ? ["FINISHED_PRODUCT"] : ["RAW_MATERIAL", "SUPPLY"];
+    movementForm.movement_type === "SALIDA"
+      ? ["FINISHED_PRODUCT"]
+      : movementEntryType === "RAW_MATERIAL" || movementEntryType === "SUPPLY" || movementEntryType === "COMPLEMENT"
+        ? [movementEntryType]
+        : ["RAW_MATERIAL", "SUPPLY", "COMPLEMENT"];
   const movementItems = useMemo(
     () => items.filter((item) => !item.archived_at && movementItemTypes.includes(item.item_type)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, movementForm.movement_type],
+    [items, movementForm.movement_type, movementEntryType],
   );
+  const movementSelectedItem = movementForm.item_id
+    ? items.find((item) => item.id === movementForm.item_id) ?? null
+    : null;
   // Archivados de la pestaña ACTIVA: cada menú (materia prima, insumos,
-  // productos terminados) tiene su propia vista de archivados, no compartida.
+  // complementos, productos terminados) tiene su propia vista de archivados, no compartida.
   const archivedItems = useMemo(
     () =>
       items
@@ -989,19 +1043,12 @@ export function InventoryDashboard() {
   }
 
   // Empata el texto de material de una pieza con el segmento del catálogo
-  // (para armar el código de producto). Exacto primero; si no, el segmento
-  // cuya etiqueta esté contenida en el texto (ej. "ORO 18K" → ORO), tomando
-  // la etiqueta más larga que calce.
+  // (para armar el código de producto). Lógica compartida con producción
+  // (lib/material-match.ts): exacto primero; si no, el segmento cuya
+  // etiqueta esté contenida en el texto (ej. "ORO 18K" → ORO), tomando la
+  // etiqueta más larga que calce.
   function matchMaterialSegment(text: string | null | undefined) {
-    if (!text) return null;
-    const clean = text.trim().toUpperCase();
-    const materialSegments = catalogSegments.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
-    const exact = materialSegments.find((segment) => segment.label.trim().toUpperCase() === clean);
-    if (exact) return exact;
-    const partial = materialSegments
-      .filter((segment) => clean.includes(segment.label.trim().toUpperCase()))
-      .sort((a, b) => b.label.length - a.label.length);
-    return partial[0] ?? null;
+    return matchMaterialSegmentShared(text, catalogSegments);
   }
 
   // REGLA ÚNICA: el material y la pureza del ensamble son los de la pieza
@@ -1222,6 +1269,40 @@ export function InventoryDashboard() {
     return items.map((item) => ({ kind: "item" as const, item, material: null as null }));
   }, [searchActive, displayItems, drilledGroup]);
   const piecesPager = usePagination(pieceRows, TAB_PAGE_SIZE, `${drillGroup ?? ""}|${search}`);
+  // Drill-down de complementos: tipo → items. Sin tipo (o tipo eliminado) cae
+  // al grupo "Sin tipo", que siempre queda al final.
+  const complementTypeNameById = useMemo(
+    () => new Map(complementTypes.map((type) => [type.id, type.name])),
+    [complementTypes],
+  );
+  const complementGroups = useMemo(() => {
+    const byName = new Map<string, InventoryItem[]>();
+    for (const item of displayItems) {
+      const name = (item.complement_type_id && complementTypeNameById.get(item.complement_type_id)) || "Sin tipo";
+      const list = byName.get(name);
+      if (list) list.push(item);
+      else byName.set(name, [item]);
+    }
+    const groups = [...byName.entries()].map(([name, groupItems]) => ({
+      name,
+      items: groupItems,
+      itemCount: groupItems.length,
+      totalStock: groupItems.reduce((acc, it) => acc + Number(it.current_stock), 0),
+      unitCode: groupItems[0]?.unit_code ?? "und",
+    }));
+    return groups.sort((a, b) => {
+      if (a.name === "Sin tipo") return 1;
+      if (b.name === "Sin tipo") return -1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [displayItems, complementTypeNameById]);
+  const complementDrilledGroup = complementGroups.find((g) => g.name === complementDrillGroup) ?? null;
+  const complementGroupsPager = usePagination(complementGroups, TAB_PAGE_SIZE, filterKey);
+  const complementItemRows = useMemo(() => {
+    if (searchActive) return displayItems.map((item) => ({ item }));
+    return (complementDrilledGroup?.items ?? []).map((item) => ({ item }));
+  }, [searchActive, displayItems, complementDrilledGroup]);
+  const complementItemsPager = usePagination(complementItemRows, TAB_PAGE_SIZE, `${complementDrillGroup ?? ""}|${search}`);
   const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
   const wipRows = [
     ...inProcessRunsFiltered.map((run) => ({ kind: "run" as const, run, item: null })),
@@ -1302,10 +1383,11 @@ export function InventoryDashboard() {
   }
 
   function openManualEntry() {
-    // Preselecciona un item del tipo de la pestaña activa (materia prima o insumo).
-    const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
-    const firstItem = items.find((item) => item.item_type === entryType);
+    // Preselecciona un item del tipo de la pestaña activa (materia prima, insumo o complemento).
+    const entryType = itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
+    const firstItem = entryType === "COMPLEMENT" ? undefined : items.find((item) => item.item_type === entryType);
     setMovementForm({ ...emptyMovementForm(), item_id: firstItem?.id || "", movement_type: "ENTRADA" });
+    setMovementEntryType(entryType);
     setIsMovementFormOpen(true);
     setIsEntryMenuOpen(false);
   }
@@ -1313,6 +1395,7 @@ export function InventoryDashboard() {
   function openFinishedProductExit() {
     const firstFinishedProduct = items.find((item) => item.item_type === "FINISHED_PRODUCT");
     setMovementForm({ ...emptyMovementForm(), item_id: firstFinishedProduct?.id || "", movement_type: "SALIDA" });
+    setMovementEntryType("FINISHED_PRODUCT");
     setIsMovementFormOpen(true);
   }
 
@@ -1401,22 +1484,27 @@ export function InventoryDashboard() {
     setIsSaving(true);
     setError(null);
     try {
-      const isSupply = itemForm.item_type === "SUPPLY";
       const materialType = itemForm.material_type?.trim() || "";
       if (!isEditingXmlItem && !materialType) {
-        setError(isSupply ? "Escribe el nombre del insumo." : "Escribe el tipo de materia prima.");
+        setError(
+          itemForm.item_type === "SUPPLY"
+            ? "Escribe el nombre del insumo."
+            : itemForm.item_type === "COMPLEMENT"
+              ? "Escribe el nombre del complemento."
+              : "Escribe el tipo de materia prima.",
+        );
         setIsSaving(false);
         return;
       }
       const payload = {
         ...itemForm,
         // Para materia prima el nombre ES el tipo (ya no hay campo Nombre aparte);
-        // para insumos el campo es directamente el nombre.
+        // para insumos y complementos el campo es directamente el nombre.
         name: isEditingXmlItem ? itemForm.name : materialType,
         description: isEditingXmlItem ? editingItem?.description ?? null : itemForm.description?.trim() || null,
         unit_code: isEditingXmlItem ? editingItem?.unit_code ?? itemForm.unit_code : itemForm.unit_code,
-        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : isSupply ? null : materialType,
-        purity: isEditingXmlItem ? editingItem?.purity ?? null : isSupply ? null : itemForm.purity?.trim() || null,
+        material_type: isEditingXmlItem ? editingItem?.material_type ?? null : isSimpleItem ? null : materialType,
+        purity: isEditingXmlItem ? editingItem?.purity ?? null : isSimpleItem ? null : itemForm.purity?.trim() || null,
       };
       if (editingItemId) {
         await updateInventoryItem(editingItemId, payload);
@@ -1439,6 +1527,10 @@ export function InventoryDashboard() {
 
   async function handleCreateMovement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!movementForm.item_id) {
+      setError("Elige el complemento.");
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
@@ -1478,17 +1570,18 @@ export function InventoryDashboard() {
         throw new Error("No encontramos productos dentro de esta factura XML.");
       }
 
-      // Pre-clasifica cada linea: si el nombre ya existe en inventario entra a ese
-      // item (tipo bloqueado); si es nueva, default segun la pestaña activa.
-      const defaultType: InventoryItemType = itemFilter === "SUPPLY" ? "SUPPLY" : "RAW_MATERIAL";
+      // Pre-clasifica cada linea: nombre ya existente en inventario entra a
+      // ese item (tipo bloqueado); si es nueva, default segun la pestaña activa.
+      const defaultType: InventoryItemType =
+        itemFilter === "SUPPLY" ? "SUPPLY" : itemFilter === "COMPLEMENT" ? "COMPLEMENT" : "RAW_MATERIAL";
       const lines = invoice.details.map<XmlImportLine>((detail) => {
         const matches = items.filter(
           (candidate) =>
-            (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY") &&
+            (candidate.item_type === "RAW_MATERIAL" || candidate.item_type === "SUPPLY" || candidate.item_type === "COMPLEMENT") &&
             candidate.name.toLowerCase() === detail.description.toLowerCase(),
         );
         const existingItem = matches.find((candidate) => candidate.item_type === defaultType) ?? matches[0] ?? null;
-        return { ...detail, itemType: existingItem?.item_type ?? defaultType, existingItem };
+        return { ...detail, itemType: existingItem?.item_type ?? defaultType, existingItem, complementTypeId: null };
       });
 
       setIsEntryMenuOpen(false);
@@ -1508,6 +1601,13 @@ export function InventoryDashboard() {
 
   async function handleConfirmXmlImport() {
     if (!xmlImportDraft) return;
+    const missingComplementType = xmlImportDraft.lines.some(
+      (line) => !line.existingItem && line.itemType === "COMPLEMENT" && !line.complementTypeId,
+    );
+    if (missingComplementType) {
+      setError("Elige el tipo de complemento en las líneas marcadas como complemento.");
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
@@ -1532,6 +1632,7 @@ export function InventoryDashboard() {
             name: line.description,
             description: metadata,
             unit_code: line.unitCode || "und",
+            complement_type_id: line.itemType === "COMPLEMENT" ? line.complementTypeId : undefined,
           });
           nextItems = [...nextItems, item];
         }
@@ -1584,18 +1685,8 @@ export function InventoryDashboard() {
     <div className="content">
       {(error || success) ? (
         <div className="toastStack" aria-live="polite" aria-atomic="true">
-          {error ? (
-            <div className="notice noticeError" key={error}>
-              <span className="noticeInner">{error}</span>
-              <span className="toastProgressBar" aria-hidden="true" />
-            </div>
-          ) : null}
-          {success ? (
-            <div className="notice noticeSuccess" key={success}>
-              <span className="noticeInner">{success}</span>
-              <span className="toastProgressBar" aria-hidden="true" />
-            </div>
-          ) : null}
+          {error ? <ToastNotice key={error} kind="error" message={error} onClose={() => setError(null)} progress /> : null}
+          {success ? <ToastNotice key={success} kind="success" message={success} onClose={() => setSuccess(null)} progress /> : null}
         </div>
       ) : null}
 
@@ -1650,11 +1741,13 @@ export function InventoryDashboard() {
                   ? "Ingresos manuales y facturas XML de materia prima"
                   : itemFilter === "SUPPLY"
                     ? "Quimicos y materiales auxiliares de fabricacion"
-                    : itemFilter === "FINISHED_PRODUCT"
-                      ? "Salidas comerciales de productos terminados"
-                      : itemFilter === "ORDENES_TERMINADAS"
-                        ? "Ordenes de produccion recibidas en inventario"
-                        : "Seguimiento de productos en proceso"}
+                    : itemFilter === "COMPLEMENT"
+                      ? "Empaques y accesorios para ensamble de produccion"
+                      : itemFilter === "FINISHED_PRODUCT"
+                        ? "Salidas comerciales de productos terminados"
+                        : itemFilter === "ORDENES_TERMINADAS"
+                          ? "Ordenes de produccion recibidas en inventario"
+                          : "Seguimiento de productos en proceso"}
               </p>
             </div>
             <div className="rowActions">
@@ -1714,7 +1807,34 @@ export function InventoryDashboard() {
                   ) : null}
                 </div>
               ) : null}
-              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY" || itemFilter === "FINISHED_PRODUCT") &&
+              {itemFilter === "COMPLEMENT" ? (
+                <div className="actionMenu" ref={entryMenuRef}>
+                  <button className="button" onClick={() => setIsEntryMenuOpen((current) => !current)} type="button">
+                    <Plus aria-hidden="true" size={17} />
+                    Entrada
+                    <ChevronDown aria-hidden="true" size={15} />
+                  </button>
+                  {isEntryMenuOpen ? (
+                    <div className="actionMenuPanel">
+                      <button onClick={openManualEntry} type="button">
+                        <Plus aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Manual</strong>
+                          <small>Registrar ingreso directo</small>
+                        </span>
+                      </button>
+                      <button onClick={openXmlInvoiceInput} type="button">
+                        <Upload aria-hidden="true" size={16} />
+                        <span>
+                          <strong>Factura XML</strong>
+                          <small>Importar lineas de compra</small>
+                        </span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {(itemFilter === "RAW_MATERIAL" || itemFilter === "SUPPLY" || itemFilter === "COMPLEMENT" || itemFilter === "FINISHED_PRODUCT") &&
               archivedItems.length > 0 ? (
                 <button className="button" onClick={() => setIsArchivedOpen(true)} type="button">
                   <Inbox aria-hidden="true" size={17} />
@@ -1767,7 +1887,7 @@ export function InventoryDashboard() {
                   }}
                 />
               ) : null}
-              {ITEM_TYPES.map((type) => (
+              {visibleItemTypes.map((type) => (
                 <button
                   className={itemFilter === type.value ? "segmentActive" : ""}
                   key={type.value}
@@ -2030,6 +2150,114 @@ export function InventoryDashboard() {
                 ) : null}
               </table>
               <Pager {...rawItemsPager} />
+            </div>
+          ) : itemFilter === "COMPLEMENT" ? (
+            <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 10, minHeight: 0 }}>
+              {complementDrilledGroup ? (
+                <div className="drillBar">
+                  <button className="button" onClick={() => setComplementDrillGroup(null)} type="button">
+                    <ChevronLeft aria-hidden="true" size={15} /> Volver
+                  </button>
+                  <span className="drillCrumbs">
+                    <button onClick={() => setComplementDrillGroup(null)} type="button">Complementos</button>
+                    <span className="drillCrumbSep">/</span>
+                    <span>{complementDrilledGroup.name}</span>
+                  </span>
+                </div>
+              ) : null}
+
+              {searchActive || complementDrilledGroup ? (
+                // Nivel items (o búsqueda global): la tabla de complementos de siempre.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable">
+                    <thead>
+                      <tr>
+                        <th className="num" style={{ width: 40 }}>#</th>
+                        <th>Complemento</th>
+                        <th>Ley/pureza</th>
+                        <th className="num">Stock</th>
+                        <th>Estado</th>
+                        <th aria-label="Acciones" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {complementItemsPager.pageItems.map((row, index) => {
+                        const item = row.item;
+                        const status = stockStatus(item);
+                        const suggestion = archiveSuggestion(item);
+                        return (
+                          <tr key={item.id}>
+                            <td className="num">{complementItemsPager.page * complementItemsPager.pageSize + index + 1}</td>
+                            <td>{item.name}</td>
+                            <td>{item.purity ?? "—"}</td>
+                            <td className="num">{itemStockText(item)}</td>
+                            <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
+                            <td>
+                              <div className="rowActions">
+                                {canArchive(item) ? (
+                                  <button
+                                    aria-label="Archivar item agotado"
+                                    className={`iconOnlyButton${suggestion ? " archiveSuggested" : ""}`}
+                                    onClick={() => void handleArchiveItem(item)}
+                                    title={suggestion ?? "Archivar item agotado"}
+                                    type="button"
+                                  >
+                                    <Inbox aria-hidden="true" size={15} />
+                                  </button>
+                                ) : null}
+                                <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
+                                  <Eye aria-hidden="true" size={15} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {searchActive && complementItemRows.length === 0 ? (
+                        <tr><td colSpan={6}><div className="emptyState">Sin resultados para la búsqueda.</div></td></tr>
+                      ) : null}
+                      {!isLoading && !searchActive && complementItemRows.length === 0 ? (
+                        <tr><td colSpan={6}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
+                      ) : null}
+                      {isLoading ? (
+                        <tr><td colSpan={6}><div className="emptyState">Cargando inventario...</div></td></tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                  <Pager {...complementItemsPager} />
+                </div>
+              ) : (
+                // Nivel tipos: headers de tipo.
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable tableAuto">
+                    <thead>
+                      <tr>
+                        <th>Tipo</th>
+                        <th className="num">Complementos</th>
+                        <th className="num">Stock</th>
+                        <th aria-label="Abrir" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {complementGroupsPager.pageItems.map((group) => (
+                        <tr key={group.name} onClick={() => setComplementDrillGroup(group.name)} style={{ cursor: "pointer" }}>
+                          <td><strong>{group.name}</strong></td>
+                          <td className="num">{group.itemCount}</td>
+                          <td className="num">{numericText(String(group.totalStock))} {group.unitCode}</td>
+                          <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
+                        </tr>
+                      ))}
+                      {!isLoading && complementGroups.length === 0 ? (
+                        <tr><td colSpan={4}><div className="emptyState">Sin complementos registrados. Crea el primero.</div></td></tr>
+                      ) : null}
+                      {isLoading ? (
+                        <tr><td colSpan={4}><div className="emptyState">Cargando inventario...</div></td></tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                  <Pager {...complementGroupsPager} />
+                </div>
+              )}
             </div>
           ) : itemFilter === "FINISHED_PRODUCT" ? (
             <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 10, minHeight: 0 }}>
@@ -2583,7 +2811,15 @@ export function InventoryDashboard() {
           <form className="modalWindow processFormWindow" onSubmit={handleSaveItem}>
             <div className="modalHeader">
               <div>
-                <h2>{editingItemId ? "Editar item" : itemForm.item_type === "SUPPLY" ? "Crear insumo" : "Crear item"}</h2>
+                <h2>
+                  {editingItemId
+                    ? "Editar item"
+                    : itemForm.item_type === "SUPPLY"
+                      ? "Crear insumo"
+                      : itemForm.item_type === "COMPLEMENT"
+                        ? "Crear complemento"
+                        : "Crear item"}
+                </h2>
                 <p>Mantenimiento de inventario</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsItemFormOpen(false)} type="button">
@@ -2597,11 +2833,11 @@ export function InventoryDashboard() {
               </label>
             ) : (
               <label className="fieldGroup">
-                <span>{itemForm.item_type === "SUPPLY" ? "Nombre" : "Tipo"}</span>
+                <span>{isSimpleItem ? "Nombre" : "Tipo"}</span>
                 <input
                   className="field"
                   onChange={(event) => setItemForm((current) => ({ ...current, material_type: event.target.value }))}
-                  placeholder={itemForm.item_type === "SUPPLY" ? "Ej. Bórax, Ácido para baño" : "Ej. Oro, Plata"}
+                  placeholder={isSimpleItem ? "Ej. Bórax, Ácido para baño" : "Ej. Oro, Plata"}
                   value={itemForm.material_type ?? ""}
                 />
               </label>
@@ -2616,7 +2852,7 @@ export function InventoryDashboard() {
                 </select>
               </label>
             ) : null}
-            {!isEditingXmlItem && itemForm.item_type !== "SUPPLY" ? (
+            {!isEditingXmlItem && !isSimpleItem ? (
               <label className="fieldGroup">
                 <span>Ley / pureza</span>
                 <input
@@ -2657,12 +2893,18 @@ export function InventoryDashboard() {
             </div>
             <label className="fieldGroup">
               <span>Item</span>
-              <select className="field" onChange={(event) => setMovementForm((current) => ({ ...current, item_id: event.target.value }))} value={movementForm.item_id}>
-                <option value="">Seleccionar item</option>
-                {movementItems.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name} - {item.sku}</option>
-                ))}
-              </select>
+              {movementEntryType === "COMPLEMENT" && movementForm.movement_type !== "SALIDA" ? (
+                <button className="button" onClick={() => setIsComplementPickerOpen(true)} type="button">
+                  {movementSelectedItem ? `${movementSelectedItem.name} · ${movementSelectedItem.sku}` : "Elegir complemento"}
+                </button>
+              ) : (
+                <select className="field" onChange={(event) => setMovementForm((current) => ({ ...current, item_id: event.target.value }))} value={movementForm.item_id}>
+                  <option value="">Seleccionar item</option>
+                  {movementItems.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} - {item.sku}</option>
+                  ))}
+                </select>
+              )}
             </label>
             <label className="fieldGroup">
               <span>Cantidad</span>
@@ -2691,6 +2933,18 @@ export function InventoryDashboard() {
             </div>
           </form>
         </div>
+      ) : null}
+
+      {isComplementPickerOpen ? (
+        <ComplementPicker
+          title="Elegir complemento"
+          items={items}
+          onSelect={(item) => {
+            setMovementForm((current) => ({ ...current, item_id: item.id }));
+            setIsComplementPickerOpen(false);
+          }}
+          onClose={() => setIsComplementPickerOpen(false)}
+        />
       ) : null}
 
       {stageInfoRun ? (() => {
@@ -3393,7 +3647,9 @@ export function InventoryDashboard() {
                   <tr>
                     <th>Linea</th>
                     <th>Cantidad</th>
-                    <th>Seccion</th>
+                    {/* Ancho fijo: el select de tipo de complemento aparece y
+                        desaparece; sin esto la columna salta y rompe la ventana. */}
+                    <th style={{ width: 360 }}>Seccion</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3406,24 +3662,87 @@ export function InventoryDashboard() {
                       <td>{numericText(line.quantity)} {line.unitCode || "und"}</td>
                       <td>
                         {line.existingItem ? (
-                          <span>{itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {itemTypeLabel(line.existingItem.item_type)} · {line.existingItem.sku}
+                            {line.manualLink ? (
+                              <button
+                                aria-label="Deshacer vinculo"
+                                className="iconOnlyButton"
+                                onClick={() =>
+                                  setXmlImportDraft((current) => {
+                                    if (!current) return current;
+                                    const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                      candidateIndex === lineIndex
+                                        ? { ...candidate, existingItem: null, manualLink: false, complementTypeId: null }
+                                        : candidate,
+                                    );
+                                    return { ...current, lines: nextLines };
+                                  })
+                                }
+                                title="Deshacer vinculo"
+                                type="button"
+                              >
+                                <X aria-hidden="true" size={13} />
+                              </button>
+                            ) : null}
+                          </span>
                         ) : (
-                          <select
-                            className="field"
-                            onChange={(event) =>
-                              setXmlImportDraft((current) => {
-                                if (!current) return current;
-                                const nextLines = current.lines.map((candidate, candidateIndex) =>
-                                  candidateIndex === lineIndex ? { ...candidate, itemType: event.target.value as InventoryItemType } : candidate,
-                                );
-                                return { ...current, lines: nextLines };
-                              })
-                            }
-                            value={line.itemType}
-                          >
-                            <option value="RAW_MATERIAL">Materia prima</option>
-                            <option value="SUPPLY">Insumo</option>
-                          </select>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <select
+                                className="field"
+                                onChange={(event) =>
+                                  setXmlImportDraft((current) => {
+                                    if (!current) return current;
+                                    const nextType = event.target.value as InventoryItemType;
+                                    const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                      candidateIndex === lineIndex
+                                        ? { ...candidate, itemType: nextType, complementTypeId: nextType === "COMPLEMENT" ? candidate.complementTypeId : null }
+                                        : candidate,
+                                    );
+                                    return { ...current, lines: nextLines };
+                                  })
+                                }
+                                style={{ flex: 1, minWidth: 0 }}
+                                value={line.itemType}
+                              >
+                                <option value="RAW_MATERIAL">Materia prima</option>
+                                <option value="SUPPLY">Insumo</option>
+                                <option value="COMPLEMENT">Complemento</option>
+                              </select>
+                              {line.itemType === "COMPLEMENT" ? (
+                                <select
+                                  className="field"
+                                  onChange={(event) =>
+                                    setXmlImportDraft((current) => {
+                                      if (!current) return current;
+                                      const nextLines = current.lines.map((candidate, candidateIndex) =>
+                                        candidateIndex === lineIndex ? { ...candidate, complementTypeId: event.target.value || null } : candidate,
+                                      );
+                                      return { ...current, lines: nextLines };
+                                    })
+                                  }
+                                  style={{ flex: 1, minWidth: 0 }}
+                                  value={line.complementTypeId ?? ""}
+                                >
+                                  <option value="">Tipo de complemento…</option>
+                                  {complementTypes.map((type) => (
+                                    <option key={type.id} value={type.id}>{type.name}</option>
+                                  ))}
+                                </select>
+                              ) : null}
+                            </div>
+                            <button
+                              className="iconTextButton"
+                              onClick={() => { setLinkPickerLineIndex(lineIndex); setLinkPickerSearch(""); setLinkPickerType("TODOS"); }}
+                              style={{ alignSelf: "flex-start" }}
+                              title="Vincular a existente"
+                              type="button"
+                            >
+                              <Repeat aria-hidden="true" size={14} />
+                              Vincular a existente
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -3441,6 +3760,105 @@ export function InventoryDashboard() {
                 <Save aria-hidden="true" size={17} />
                 {isSaving ? "Importando" : `Importar ${xmlImportDraft.lines.length} ${xmlImportDraft.lines.length === 1 ? "linea" : "lineas"}`}
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {xmlImportDraft && linkPickerLineIndex !== null ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Vincular a existente">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Vincular a existente</h2>
+                <p className="panelText">Elige el item del inventario al que entra esta linea (solo para esta importacion).</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setLinkPickerLineIndex(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, marginBottom: 12 }}>
+              <input
+                className="field"
+                onChange={(event) => setLinkPickerSearch(event.target.value)}
+                placeholder="Buscar por nombre…"
+                style={{ flex: 1, minWidth: 0 }}
+                type="text"
+                value={linkPickerSearch}
+              />
+              <select
+                aria-label="Filtrar por seccion"
+                className="field"
+                onChange={(event) => setLinkPickerType(event.target.value as "TODOS" | InventoryItemType)}
+                style={{ width: 180 }}
+                value={linkPickerType}
+              >
+                <option value="TODOS">Todas las secciones</option>
+                <option value="RAW_MATERIAL">Materia prima</option>
+                <option value="SUPPLY">Insumos</option>
+                <option value="COMPLEMENT">Complementos</option>
+              </select>
+            </div>
+            <div className="tableWrap pagedListFloor" style={{ minHeight: 200, maxHeight: 360, overflowY: "auto" }}>
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Tipo</th>
+                    <th>SKU</th>
+                    <th className="num">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items
+                    .filter(
+                      (candidate) =>
+                        (candidate.item_type === "RAW_MATERIAL" ||
+                          candidate.item_type === "SUPPLY" ||
+                          candidate.item_type === "COMPLEMENT") &&
+                        (linkPickerType === "TODOS" || candidate.item_type === linkPickerType) &&
+                        !candidate.archived_at &&
+                        candidate.name.toLowerCase().includes(linkPickerSearch.trim().toLowerCase()),
+                    )
+                    .map((candidate) => (
+                      <tr
+                        key={candidate.id}
+                        onClick={() => {
+                          const targetIndex = linkPickerLineIndex;
+                          setXmlImportDraft((current) => {
+                            if (!current) return current;
+                            const nextLines = current.lines.map((line, lineIndex) =>
+                              lineIndex === targetIndex
+                                ? { ...line, existingItem: candidate, itemType: candidate.item_type, complementTypeId: null, manualLink: true }
+                                : line,
+                            );
+                            return { ...current, lines: nextLines };
+                          });
+                          setLinkPickerLineIndex(null);
+                        }}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td>{candidate.name}</td>
+                        <td>{itemTypeLabel(candidate.item_type)}</td>
+                        <td>{candidate.sku}</td>
+                        <td className="num">
+                          {Number(candidate.current_stock).toLocaleString("es-EC")} {candidate.unit_code}
+                        </td>
+                      </tr>
+                    ))}
+                  {items.filter(
+                    (candidate) =>
+                      (candidate.item_type === "RAW_MATERIAL" ||
+                        candidate.item_type === "SUPPLY" ||
+                        candidate.item_type === "COMPLEMENT") &&
+                      (linkPickerType === "TODOS" || candidate.item_type === linkPickerType) &&
+                      !candidate.archived_at &&
+                      candidate.name.toLowerCase().includes(linkPickerSearch.trim().toLowerCase()),
+                  ).length === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">Sin resultados.</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>

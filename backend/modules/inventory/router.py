@@ -7,6 +7,8 @@ from backend.modules.auth.dependencies import CurrentUser, get_current_user
 from backend.modules.database.session import SessionLocal
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.schemas import (
+    ComplementTypeCreate,
+    ComplementTypeRead,
     InventoryItemCreate,
     InventoryItemRead,
     InventoryItemType,
@@ -115,6 +117,59 @@ def delete_item(
     ensure_permission(current_user, "inventory.items.delete")
     try:
         service.delete_item(item_id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/complement-types", response_model=list[ComplementTypeRead])
+def list_complement_types(
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> list[ComplementTypeRead]:
+    ensure_permission(current_user, "inventory.read")
+    return service.list_complement_types()
+
+
+@router.post("/complement-types", response_model=ComplementTypeRead, status_code=status.HTTP_201_CREATED)
+def create_complement_type(
+    payload: ComplementTypeCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ComplementTypeRead:
+    ensure_permission(current_user, "inventory.items.create")
+    try:
+        return service.create_complement_type(payload)
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.put("/complement-types/{type_id}", response_model=ComplementTypeRead)
+def update_complement_type(
+    type_id: UUID,
+    payload: ComplementTypeCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ComplementTypeRead:
+    ensure_permission(current_user, "inventory.items.update")
+    try:
+        return service.update_complement_type(type_id, payload)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.delete("/complement-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_complement_type(
+    type_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> None:
+    ensure_permission(current_user, "inventory.items.delete")
+    try:
+        service.delete_complement_type(type_id)
     except InventoryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except InventoryDomainError as exc:

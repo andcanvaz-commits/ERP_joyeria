@@ -138,6 +138,17 @@ class ProductionRunStatus:
     CANCELLED = "CANCELADA"
 
 
+class AssemblyMode:
+    ASSIGN = "ASIGNAR"
+    ASSEMBLE = "ENSAMBLAR"
+
+
+class ComplementRequestStatus:
+    PENDING = "PENDIENTE"
+    APPROVED = "APROBADA"
+    REJECTED = "RECHAZADA"
+
+
 class ProductionRunStageStatus:
     PENDING = "PENDIENTE"
     IN_PROGRESS = "EN_PROCESO"
@@ -152,6 +163,11 @@ class ProductionRun(Base):
     process_name: Mapped[str] = mapped_column(String(180), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default=ProductionRunStatus.PENDING_INVENTORY)
+    # Modo de la orden: ASIGNAR (split directo) o ENSAMBLAR (con complementos).
+    assembly_mode: Mapped[str] = mapped_column(String(20), nullable=False, default=AssemblyMode.ASSIGN)
+    # ENSAMBLAR sin receta aplicable: producción debe definir la combinación
+    # antes de que inventario pueda recibir.
+    assembly_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     raw_material_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     raw_material_quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     raw_material_unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -184,6 +200,22 @@ class ProductionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
         order_by="ProductionRunStage.stage_order",
+    )
+    # Plan de productos resultantes declarado al crear la orden (split):
+    # a qué tipos del catálogo se convierte el lote al recibirlo.
+    products: Mapped[list["ProductionRunProduct"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+    # Complementos de inventario solicitados para ensamblar con la producción.
+    complements: Mapped[list["ProductionComplementRequest"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+    # Combinación de complementos aplicada al ensamble (cantidades totales).
+    assembly_items: Mapped[list["ProductionRunAssemblyItem"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
     )
 
 
@@ -242,3 +274,91 @@ class ProductionRunStageDecision(Base):
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     stage: Mapped["ProductionRunStage"] = relationship(back_populates="decisions")
+
+
+class ProductionRunProduct(Base):
+    __tablename__ = "production_run_products"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_type_id: Mapped[PyUUID | None] = mapped_column(
+        ForeignKey("product_types.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # Destino por pieza existente del inventario (opcional; excluyente con
+    # product_type_id — exactamente uno de los dos).
+    target_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="products")
+
+
+class ProductionComplementRequest(Base):
+    __tablename__ = "production_complement_requests"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ComplementRequestStatus.PENDING
+    )
+    approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="complements")
+
+
+class AssemblyRecipe(Base):
+    """Receta de ensamble por tipo de producto: qué complementos y cuántos POR
+    UNIDAD. Se aprende del primer ensamble manual y luego aplica sola."""
+
+    __tablename__ = "assembly_recipes"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    # Clave de modelo: material(1)+categoria(2)+modelo(4), el codigo de
+    # catalogo completo de 7 digitos — la receta NO se comparte entre
+    # materiales (oro y plata tienen recetas distintas).
+    model_key: Mapped[str] = mapped_column(String(7), nullable=False, unique=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    items: Mapped[list["AssemblyRecipeItem"]] = relationship(
+        back_populates="recipe",
+        cascade="all, delete-orphan",
+    )
+
+
+class AssemblyRecipeItem(Base):
+    __tablename__ = "assembly_recipe_items"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    recipe_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("assembly_recipes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    complement_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+
+    recipe: Mapped["AssemblyRecipe"] = relationship(back_populates="items")
+
+
+class ProductionRunAssemblyItem(Base):
+    __tablename__ = "production_run_assembly_items"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    complement_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="assembly_items")

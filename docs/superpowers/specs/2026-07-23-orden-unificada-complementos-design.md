@@ -107,7 +107,20 @@ cree los productos finales directamente al aceptar el acta.
 - Import de Excel pendiente (pesos y códigos oficiales) — tarea aparte.
 - Cambios al constructor de procesos.
 
-## 6. Riesgos y precauciones
+## 6. Desvíos aceptados en implementación (2026-07-23)
+
+- El picker de complementos es inline en la modal de crear orden (no abre la
+  vista de inventario); más directo, mismo resultado.
+- La aprobación de complementos va dentro de aprobar/rechazar materiales (un
+  solo paso atómico de inventario), no como resolución individual.
+- Admin conserva la pestaña legada "Procesos terminados" en inventario para
+  convertir lotes viejos sin plan; el jefe de inventario la pierde.
+- La creación de complementos vive en un `ComplementsManager` de mantenimiento
+  (espejo de insumos), porque toda creación de ítems vive en managers.
+- El backfill de la migración solo migra el producto objetivo de órdenes
+  vivas (excluye RECIBIDA/CANCELADA) para no alterar actas históricas.
+
+## 7. Riesgos y precauciones
 
 - `pg_dump` antes de la migración Alembic (regla del proyecto).
 - No inventar datos de prueba en BD sin permiso; borrar tras verificar.

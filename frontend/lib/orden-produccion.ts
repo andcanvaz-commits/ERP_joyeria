@@ -68,6 +68,16 @@ export function buildOrdenProduccion(
       detalle: `Producto terminado: ${run.process_name}`
     });
   }
+  // Productos finales creados al recibir (plan de resultantes de la orden).
+  for (const product of run.products ?? []) {
+    recepcionRows.push({
+      gramos: num(product.quantity),
+      unidad: "und",
+      detalle: `Producto final: ${product.product_name ?? "—"}`
+    });
+  }
+  // Los complementos del ensamble NO se listan en recepción: ya van dentro
+  // del producto final ensamblado (su entrega quedó en la mitad de ENTREGA).
 
   return {
     folio: run.production_code ?? DASH,
