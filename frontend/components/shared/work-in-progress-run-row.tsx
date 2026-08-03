@@ -1,4 +1,4 @@
-import { Eye } from "lucide-react";
+import { ChevronDown, Eye } from "lucide-react";
 import type { ProductionRun } from "@/types/production";
 import { runCurrentStage, runCurrentWaste, runCurrentWeight } from "@/lib/production-run-helpers";
 
@@ -16,12 +16,11 @@ function dateLabel(value: string | null | undefined): string {
 }
 
 /** Encabezado de la tabla "productos en proceso" compartido entre inventario
- * y produccion. `withManage` agrega la columna de accion "Gestionar". */
+ * y produccion. */
 export function WorkInProgressTableHead() {
   return (
     <tr>
       <th>Orden</th>
-      <th>Folio raíz</th>
       <th>Proceso</th>
       <th className="num">Cantidad</th>
       <th className="num">Peso actual</th>
@@ -33,24 +32,34 @@ export function WorkInProgressTableHead() {
   );
 }
 
-export const WORK_IN_PROGRESS_COLUMN_COUNT = 9;
+export const WORK_IN_PROGRESS_COLUMN_COUNT = 8;
 
 /** Fila de una orden en proceso, misma info en inventario y produccion.
  * `onWasteHistory`/`onStageInfo` habilitan los popovers de detalle (solo
  * inventario los usa hoy); `onManage` agrega el boton de gestion (solo
- * produccion, que es quien puede operar la orden). */
+ * produccion, que es quien puede operar la orden). Si `run` es la raiz de
+ * una orden dividida, `otherPartsCount`/`isExpanded`/`onToggleExpand`
+ * agregan el desplegable; `indent` marca las partes ya desplegadas. */
 export function WorkInProgressRunRow({
   run,
   onView,
   onWasteHistory,
   onStageInfo,
-  onManage
+  onManage,
+  otherPartsCount = 0,
+  isExpanded = false,
+  onToggleExpand,
+  indent = false
 }: {
   run: ProductionRun;
   onView: (run: ProductionRun) => void;
   onWasteHistory?: (run: ProductionRun) => void;
   onStageInfo?: (run: ProductionRun) => void;
   onManage?: (run: ProductionRun) => void;
+  otherPartsCount?: number;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  indent?: boolean;
 }) {
   const currentStage = runCurrentStage(run);
   const currentWaste = runCurrentWaste(run);
@@ -60,8 +69,22 @@ export function WorkInProgressRunRow({
 
   return (
     <tr>
-      <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
-      <td>{rootCode ? <span className="rootBadgeTag">de {rootCode}</span> : "—"}</td>
+      <td style={indent ? { paddingLeft: 28 } : undefined}>
+        {otherPartsCount > 0 && onToggleExpand ? (
+          <button
+            aria-label={isExpanded ? "Colapsar partes" : "Desplegar partes"}
+            className="iconOnlyButton"
+            onClick={onToggleExpand}
+            style={{ marginRight: 4 }}
+            type="button"
+          >
+            <ChevronDown aria-hidden="true" size={14} style={{ transform: isExpanded ? undefined : "rotate(-90deg)", transition: "transform 0.15s" }} />
+          </button>
+        ) : null}
+        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}
+        {otherPartsCount > 0 ? <span className="rootBadgeTag">+{otherPartsCount} partes</span> : null}
+        {otherPartsCount === 0 && rootCode ? <span className="rootBadgeTag">de {rootCode}</span> : null}
+      </td>
       <td>{run.process_name}</td>
       <td className="num">{numText(run.quantity)} und</td>
       <td className="num">{numText(runCurrentWeight(run))} {run.raw_material_unit_code}</td>

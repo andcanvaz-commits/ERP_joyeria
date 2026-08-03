@@ -6,7 +6,7 @@ import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, 
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
-import { buildItemNameMap, buildOrdenProduccion, canPrintEntrega, canPrintRecepcion, getRunFamily } from "@/lib/orden-produccion";
+import { buildItemNameMap, buildOrdenProduccion, canPrintEntrega, canPrintRecepcion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
@@ -435,6 +435,8 @@ export function InventoryDashboard() {
   const [allocateQuantities, setAllocateQuantities] = useState<Record<string, string>>({});
   const [allocateErrors, setAllocateErrors] = useState<Record<string, string>>({});
   const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
+  // Partes de una orden dividida, colapsadas por defecto en "Productos en proceso".
+  const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
   // Salida de productos terminados: uno o mas productos, cada uno con su
   // propia cantidad, elegidos desde el mismo picker que usa el inventario.
   const [salidaLines, setSalidaLines] = useState<Array<{ item: InventoryItem; quantity: string }>>([]);
@@ -1356,9 +1358,39 @@ export function InventoryDashboard() {
   }, [searchActive, displayItems, complementDrilledGroup]);
   const complementItemsPager = usePagination(complementItemRows, TAB_PAGE_SIZE, `${complementDrillGroup ?? ""}|${search}`);
   const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
+  // Agrupa por familia: una orden dividida se colapsa en su raiz, con las
+  // demas partes desplegables debajo (solo si tambien estan EN_PROCESO).
+  const wipRunEntries: Array<{
+    kind: "run";
+    run: ProductionRun;
+    item: null;
+    otherPartsCount: number;
+    isExpanded: boolean;
+    familyKey: string;
+    indent: boolean;
+  }> = [];
+  for (const [key, family] of groupRunFamilies(inProcessRunsFiltered).entries()) {
+    const root = family.find((r) => !r.parent_run_id) ?? family[0];
+    const otherParts = family.filter((r) => r.id !== root.id);
+    const isExpanded = expandedFamilies.has(key);
+    wipRunEntries.push({ kind: "run", run: root, item: null, otherPartsCount: otherParts.length, isExpanded, familyKey: key, indent: false });
+    if (isExpanded) {
+      for (const part of otherParts) {
+        wipRunEntries.push({ kind: "run", run: part, item: null, otherPartsCount: 0, isExpanded: false, familyKey: key, indent: true });
+      }
+    }
+  }
   const wipRows = [
-    ...inProcessRunsFiltered.map((run) => ({ kind: "run" as const, run, item: null })),
-    ...displayItems.map((item) => ({ kind: "item" as const, run: null, item })),
+    ...wipRunEntries,
+    ...displayItems.map((item) => ({
+      kind: "item" as const,
+      run: null,
+      item,
+      otherPartsCount: 0,
+      isExpanded: false,
+      familyKey: "",
+      indent: false,
+    })),
   ];
   const wipPager = usePagination(wipRows, TAB_PAGE_SIZE, filterKey);
   // Últimos movimientos de todo el inventario, sin filtro por pestaña ni fecha.
@@ -1442,6 +1474,15 @@ export function InventoryDashboard() {
     setMovementEntryType(entryType);
     setIsMovementFormOpen(true);
     setIsEntryMenuOpen(false);
+  }
+
+  function toggleFamilyExpanded(key: string) {
+    setExpandedFamilies((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function openFinishedProductExit() {
@@ -2582,6 +2623,10 @@ export function InventoryDashboard() {
                         onView={setViewingRun}
                         onWasteHistory={setWasteHistoryRun}
                         onStageInfo={setStageInfoRun}
+                        otherPartsCount={row.otherPartsCount}
+                        isExpanded={row.isExpanded}
+                        onToggleExpand={row.otherPartsCount > 0 ? () => toggleFamilyExpanded(row.familyKey) : undefined}
+                        indent={row.indent}
                       />
                     );
                   }
@@ -2590,7 +2635,6 @@ export function InventoryDashboard() {
                   return (
                     <tr key={item.id}>
                       <td>{item.sku}</td>
-                      <td>—</td>
                       <td>{item.name}</td>
                       <td className="num">{itemStockText(item)}</td>
                       <td className="num">—</td>
