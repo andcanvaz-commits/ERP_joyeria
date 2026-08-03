@@ -53,7 +53,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
-import { groupRunFamilies } from "@/lib/orden-produccion";
+import { WorkInProgressRunRow, WorkInProgressTableHead } from "@/components/shared/work-in-progress-run-row";
 
 type StageForm = {
   name: string;
@@ -334,7 +334,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
-  const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   const [showResponsables, setShowResponsables] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   // Modo de destino del resultante: asignar a una pieza/tipo existente o
@@ -473,9 +472,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
-  const runFamilies = groupRunFamilies(runs);
-  const inProgressFamilyKeys = Array.from(new Set(inProgressRuns.map((run) => run.root_production_code || run.production_code || run.id)));
-  const inProgressFamilies = inProgressFamilyKeys.map((key) => runFamilies.get(key) ?? []).filter((family) => family.length > 0);
   const finishedRuns = runs.filter((run) => run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA");
   const waitingMaterialRuns = runs.filter((run) => run.status === "ESPERANDO_MATERIAL");
   const recentFinishedRuns = finishedRuns.slice(0, 3);
@@ -1724,85 +1720,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <p className="panelText">{inProgressRuns.length} {inProgressRuns.length === 1 ? "orden activa" : "ordenes activas"}</p>
                 </div>
               </div>
-              {inProgressFamilies.length > 0 ? (
-                <div className="productionRunsVertical">
-                  {inProgressFamilies.map((family) => {
-                    if (family.length === 1) {
-                      const run = family[0];
-                      const currentStage = run.stages.find((s) => s.status === "EN_PROCESO") ?? run.stages.find((s) => s.status === "PENDIENTE") ?? null;
-                      const doneCount = run.stages.filter((s) => s.status === "FINALIZADA").length;
-                      return (
-                        <div className="productionRunListRow" key={run.id} {...openableProps(() => openRunStagesModal(run), `Gestionar orden ${run.process_name}`)}>
-                          {/* Title row: name + code left, timing + button right */}
-                          <div className="productionRunListRowHead">
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
-                              {run.production_code ? (
-                                <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
-                              ) : null}
-                              {rootBadge(run)}
-                              <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
-                              <button className="button buttonPrimary runInlineBtn" onClick={() => openRunStagesModal(run)} type="button">
-                                Gestionar
-                              </button>
-                            </div>
-                          </div>
-                          {/* Meta: current stage + qty + started */}
-                          <div className="productionRunListRowMeta">
-                            {currentStage ? <span>{currentStage.stage_order}. {currentStage.stage_name}</span> : null}
-                            {currentStage ? <span aria-hidden="true">·</span> : null}
-                            <span>{numericText(run.quantity)} und</span>
-                            <span aria-hidden="true">·</span>
-                            <span>Inició {hourLabel(run.started_at)}</span>
-                          </div>
-                          {/* Progress: caliper scale for stage advance */}
-                          <CaliperScale
-                            ariaLabel="Avance de la orden"
-                            label={`${doneCount}/${run.stages.length}`}
-                            max={run.stages.length}
-                            ticks={run.stages.length}
-                            value={doneCount}
-                          />
-                          {/* Tiempo transcurrido desde el inicio de la orden. */}
-                          <div className="productionRunListRowMeta">
-                            <span>Tiempo en proceso: {elapsedLabel(run.started_at, nowTick)}</span>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    const root = family.find((r) => !r.parent_run_id) ?? family[0];
-                    const activeCount = family.filter((r) => r.status === "EN_PROCESO").length;
-                    const waitingCount = family.filter((r) => r.status === "ESPERANDO_MATERIAL").length;
-                    return (
-                      <div className="productionRunListRow" key={root.root_production_code ?? root.production_code} {...openableProps(() => setFamilyRuns(family), `Ver partes de la orden ${root.process_name}`)}>
-                        <div className="productionRunListRowHead">
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
-                            <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
-                              {root.root_production_code ?? root.production_code}
-                            </span>
-                            <span className="rootBadgeTag">Dividida en {family.length} partes</span>
-                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{root.process_name}</strong>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
-                            <button className="button buttonPrimary runInlineBtn" onClick={() => setFamilyRuns(family)} type="button">
-                              Ver partes
-                            </button>
-                          </div>
-                        </div>
-                        <div className="productionRunListRowMeta">
-                          <span>{activeCount} en proceso</span>
-                          {waitingCount > 0 ? (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span>{waitingCount} esperando material</span>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })}
+              {inProgressRuns.length > 0 ? (
+                <div className="tableWrap">
+                  <table className="table inventoryItemsTable">
+                    <thead>
+                      <WorkInProgressTableHead />
+                    </thead>
+                    <tbody>
+                      {inProgressRuns.map((run) => (
+                        <WorkInProgressRunRow key={run.id} run={run} onView={openStatsModal} onManage={openRunStagesModal} />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               ) : (
                 <div className="emptyState">No hay procesos en transcurso.</div>
@@ -2819,55 +2748,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </>
               );
             })() : null}
-          </section>
-        </div>
-      ) : null}
-
-      {familyRuns ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Partes de la orden">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Orden {familyRuns[0].root_production_code ?? familyRuns[0].production_code}</h2>
-                <p>Dividida en {familyRuns.length} partes por falta de materia prima</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setFamilyRuns(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div className="tableWrap">
-              <table className="table tableAuto">
-                <thead>
-                  <tr>
-                    <th>Orden</th>
-                    <th>Estado</th>
-                    <th className="num">Cantidad</th>
-                    <th aria-label="Accion" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {familyRuns.map((familyRun) => (
-                    <tr key={familyRun.id}>
-                      <td><span className="orderCodeTag">{familyRun.production_code}</span></td>
-                      <td><StatusPunch label={runStatusLabel(familyRun.status)} tone={runStatusTone(familyRun.status)} /></td>
-                      <td className="num">{numericText(familyRun.quantity)} und</td>
-                      <td>
-                        <button
-                          className="button buttonPrimary"
-                          onClick={() => {
-                            setFamilyRuns(null);
-                            openRunStagesModal(familyRun);
-                          }}
-                          type="button"
-                        >
-                          Gestionar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </section>
         </div>
       ) : null}
