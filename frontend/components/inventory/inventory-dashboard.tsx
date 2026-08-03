@@ -410,6 +410,16 @@ export function InventoryDashboard() {
   const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
   const [viewingRun, setViewingRun] = useState<ProductionRun | null>(null);
   const [printPreview, setPrintPreview] = useState<{ family: ProductionRun[]; mode: DocMode } | null>(null);
+  // Aviso de split: se muestra en ventana propia (no como toast) porque
+  // trae varios datos a la vez y conviene que el usuario lo lea con calma.
+  const [splitNotice, setSplitNotice] = useState<{
+    processName: string;
+    rootCode: string;
+    startedCode: string;
+    startedQuantity: string;
+    waitingCode: string;
+    waitingQuantity: string;
+  } | null>(null);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -953,11 +963,17 @@ export function InventoryDashboard() {
       const updated = await approveProductionRunMaterials(run.id);
       const nextRuns = await listProductionRuns();
       const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === updated.id);
-      setSuccess(
-        splitChild
-          ? `Salida de materia prima aprobada. La orden se dividio por falta de stock: ${numericText(splitChild.quantity)} unidades quedaron esperando material en ${splitChild.production_code}.`
-          : "Salida de materia prima aprobada. Produccion ya puede iniciar.",
-      );
+      setSuccess("Salida de materia prima aprobada.");
+      if (splitChild) {
+        setSplitNotice({
+          processName: updated.process_name,
+          rootCode: updated.root_production_code ?? updated.production_code ?? "",
+          startedCode: updated.production_code ?? "",
+          startedQuantity: numericText(updated.quantity),
+          waitingCode: splitChild.production_code ?? "",
+          waitingQuantity: numericText(splitChild.quantity),
+        });
+      }
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
@@ -1037,11 +1053,17 @@ export function InventoryDashboard() {
       const nextRuns = await listProductionRuns();
       const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === started.id);
       setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
-      setSuccess(
-        splitChild
-          ? `Material destinado a la orden ${run.production_code ?? run.run_id}. Ese ingreso no alcanzo para todo: la orden se dividio de nuevo, ${numericText(splitChild.quantity)} unidades quedaron esperando material en ${splitChild.production_code}.`
-          : `Material destinado a la orden ${run.production_code ?? run.run_id}.`,
-      );
+      setSuccess(`Material destinado a la orden ${run.production_code ?? run.run_id}.`);
+      if (splitChild) {
+        setSplitNotice({
+          processName: started.process_name,
+          rootCode: started.root_production_code ?? started.production_code ?? "",
+          startedCode: started.production_code ?? "",
+          startedQuantity: numericText(started.quantity),
+          waitingCode: splitChild.production_code ?? "",
+          waitingQuantity: numericText(splitChild.quantity),
+        });
+      }
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
       await queryClient.invalidateQueries({ queryKey: ["production"] });
       const family = getRunFamily(nextRuns, started);
@@ -2998,7 +3020,7 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>Ordenes esperando esta materia prima</h2>
-                <p>Este ingreso puede cubrir corridas que quedaron esperando material.</p>
+                <p>Este ingreso puede cubrir partes de ordenes que quedaron esperando material.</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setAllocateRuns([])} type="button">
                 <X aria-hidden="true" size={18} />
@@ -3060,6 +3082,37 @@ export function InventoryDashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {splitNotice ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Orden dividida">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>La orden {splitNotice.rootCode} se dividió</h2>
+                <p>{splitNotice.processName}: no había materia prima suficiente para toda la cantidad pedida.</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setSplitNotice(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
+                <span><span className="orderCodeTag">{splitNotice.startedCode}</span> ya en producción</span>
+                <strong>{splitNotice.startedQuantity} und</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
+                <span><span className="orderCodeTag">{splitNotice.waitingCode}</span> esperando material</span>
+                <strong>{splitNotice.waitingQuantity} und</strong>
+              </div>
+            </div>
+            <div className="modalActions">
+              <button className="button buttonPrimary" onClick={() => setSplitNotice(null)} type="button">
+                Entendido
+              </button>
             </div>
           </section>
         </div>

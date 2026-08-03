@@ -1776,18 +1776,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     const activeCount = family.filter((r) => r.status === "EN_PROCESO").length;
                     const waitingCount = family.filter((r) => r.status === "ESPERANDO_MATERIAL").length;
                     return (
-                      <div className="productionRunListRow" key={root.root_production_code ?? root.production_code} {...openableProps(() => setFamilyRuns(family), `Ver familia de la orden ${root.process_name}`)}>
+                      <div className="productionRunListRow" key={root.root_production_code ?? root.production_code} {...openableProps(() => setFamilyRuns(family), `Ver partes de la orden ${root.process_name}`)}>
                         <div className="productionRunListRowHead">
                           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
                             <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
                               {root.root_production_code ?? root.production_code}
                             </span>
-                            <span className="rootBadgeTag">Familia · {family.length} corridas</span>
+                            <span className="rootBadgeTag">Dividida en {family.length} partes</span>
                             <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{root.process_name}</strong>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
                             <button className="button buttonPrimary runInlineBtn" onClick={() => setFamilyRuns(family)} type="button">
-                              Ver familia
+                              Ver partes
                             </button>
                           </div>
                         </div>
@@ -2824,12 +2824,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       ) : null}
 
       {familyRuns ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Familia de la orden">
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Partes de la orden">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
                 <h2>Orden {familyRuns[0].root_production_code ?? familyRuns[0].production_code}</h2>
-                <p>{familyRuns.length} corridas de esta orden, dividida por falta de materia prima</p>
+                <p>Dividida en {familyRuns.length} partes por falta de materia prima</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setFamilyRuns(null)} type="button">
                 <X aria-hidden="true" size={18} />
