@@ -951,8 +951,13 @@ export function InventoryDashboard() {
     setIsSavingProduction(true);
     try {
       const updated = await approveProductionRunMaterials(run.id);
-      setSuccess("Salida de materia prima aprobada. Produccion ya puede iniciar.");
       const nextRuns = await listProductionRuns();
+      const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === updated.id);
+      setSuccess(
+        splitChild
+          ? `Salida de materia prima aprobada. La orden se dividio por falta de stock: ${numericText(splitChild.quantity)} unidades quedaron esperando material en ${splitChild.production_code}.`
+          : "Salida de materia prima aprobada. Produccion ya puede iniciar.",
+      );
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
@@ -1022,9 +1027,15 @@ export function InventoryDashboard() {
     setAllocateErrors((current) => ({ ...current, [run.run_id]: "" }));
     setAllocatingRunId(run.run_id);
     try {
-      await allocateProductionRunMaterial(run.run_id, quantity);
+      const started = await allocateProductionRunMaterial(run.run_id, quantity);
+      const nextRuns = await listProductionRuns();
+      const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === started.id);
       setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
-      setSuccess(`Material destinado a la orden ${run.production_code ?? run.run_id}.`);
+      setSuccess(
+        splitChild
+          ? `Material destinado a la orden ${run.production_code ?? run.run_id}. Ese ingreso no alcanzo para todo: la orden se dividio de nuevo, ${numericText(splitChild.quantity)} unidades quedaron esperando material en ${splitChild.production_code}.`
+          : `Material destinado a la orden ${run.production_code ?? run.run_id}.`,
+      );
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
       await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
@@ -2988,6 +2999,7 @@ export function InventoryDashboard() {
                 <thead>
                   <tr>
                     <th>Orden</th>
+                    <th>Proceso</th>
                     <th className="num">Falta</th>
                     <th className="num">Destinar</th>
                     <th aria-label="Accion" />
@@ -3002,7 +3014,8 @@ export function InventoryDashboard() {
                           <span className="rootBadgeTag">de {run.root_production_code}</span>
                         ) : null}
                       </td>
-                      <td className="num">{numericText(run.missing_quantity)}</td>
+                      <td>{run.process_name ?? "—"}</td>
+                      <td className="num">{numericText(run.missing_quantity)} und</td>
                       <td className="num">
                         <input
                           className="field"

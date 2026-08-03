@@ -44,6 +44,7 @@ export type WaitingProductionRunSummary = {
   run_id: string;
   production_code: string | null;
   root_production_code: string | null;
+  process_name: string | null;
   missing_quantity: string;
 };
 
