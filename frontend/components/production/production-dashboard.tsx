@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
@@ -385,8 +385,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, []);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
-  // Partes de una orden dividida, colapsadas por defecto en la tabla "Procesos".
-  const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
+  // Ventana con las demas partes de una orden dividida.
+  const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   const [printingWasteRun, setPrintingWasteRun] = useState<ProductionRun | null>(null);
   useEffect(() => {
     if (!printingWasteRun) return;
@@ -729,15 +729,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
     const previousStages = stages.slice(0, index);
     return previousStages.every((previousStage) => previousStage.status === "FINALIZADA");
-  }
-
-  function toggleFamilyExpanded(key: string) {
-    setExpandedFamilies((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
   }
 
   function openRunStagesModal(run: ProductionRun) {
@@ -1786,23 +1777,33 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </div>
               {inProgressRuns.length > 0 ? (
                 <div className="productionRunsVertical">
-                  {inProgressRuns.map((run) => {
-                    const currentStage = run.stages.find((s) => s.status === "EN_PROCESO") ?? run.stages.find((s) => s.status === "PENDIENTE") ?? null;
-                    const doneCount = run.stages.filter((s) => s.status === "FINALIZADA").length;
+                  {Array.from(groupRunFamilies(inProgressRuns).entries()).map(([key, family]) => {
+                    const root = family.find((r) => !r.parent_run_id) ?? family[0];
+                    const otherParts = family.filter((r) => r.id !== root.id);
+                    const isSplit = otherParts.length > 0;
+                    const primaryAction = () => (isSplit ? setFamilyRuns(family) : openRunStagesModal(root));
+                    const currentStage = root.stages.find((s) => s.status === "EN_PROCESO") ?? root.stages.find((s) => s.status === "PENDIENTE") ?? null;
+                    const doneCount = root.stages.filter((s) => s.status === "FINALIZADA").length;
                     return (
-                      <div className="productionRunListRow" key={run.id} {...openableProps(() => openRunStagesModal(run), `Gestionar orden ${run.process_name}`)}>
+                      <div className="productionRunListRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Gestionar"} orden ${root.process_name}`)}>
                         {/* Title row: name + code left, timing + button right */}
                         <div className="productionRunListRowHead">
                           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
-                            {run.production_code ? (
-                              <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
+                            {root.production_code ? (
+                              <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{root.production_code}</span>
                             ) : null}
-                            {rootBadge(run)}
-                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
+                            {isSplit ? (
+                              <button className="rootBadgeTag" onClick={(event) => { event.stopPropagation(); setFamilyRuns(family); }} style={{ cursor: "pointer", border: "none" }} type="button">
+                                +{otherParts.length} partes
+                              </button>
+                            ) : (
+                              rootBadge(root)
+                            )}
+                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{root.process_name}</strong>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
-                            <button className="button buttonPrimary runInlineBtn" onClick={() => openRunStagesModal(run)} type="button">
-                              Gestionar
+                            <button className="button buttonPrimary runInlineBtn" onClick={primaryAction} type="button">
+                              {isSplit ? "Ver partes" : "Gestionar"}
                             </button>
                           </div>
                         </div>
@@ -1810,21 +1811,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <div className="productionRunListRowMeta">
                           {currentStage ? <span>{currentStage.stage_order}. {currentStage.stage_name}</span> : null}
                           {currentStage ? <span aria-hidden="true">·</span> : null}
-                          <span>{numericText(run.quantity)} und</span>
+                          <span>{numericText(root.quantity)} und</span>
                           <span aria-hidden="true">·</span>
-                          <span>Inició {hourLabel(run.started_at)}</span>
+                          <span>Inició {hourLabel(root.started_at)}</span>
                         </div>
                         {/* Progress: caliper scale for stage advance */}
                         <CaliperScale
                           ariaLabel="Avance de la orden"
-                          label={`${doneCount}/${run.stages.length}`}
-                          max={run.stages.length}
-                          ticks={run.stages.length}
+                          label={`${doneCount}/${root.stages.length}`}
+                          max={root.stages.length}
+                          ticks={root.stages.length}
                           value={doneCount}
                         />
                         {/* Tiempo transcurrido desde el inicio de la orden. */}
                         <div className="productionRunListRowMeta">
-                          <span>Tiempo en proceso: {elapsedLabel(run.started_at, nowTick)}</span>
+                          <span>Tiempo en proceso: {elapsedLabel(root.started_at, nowTick)}</span>
                         </div>
                       </div>
                     );
@@ -1898,60 +1899,28 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     {processFamilies.map(([key, family]) => {
                       const root = family.find((r) => !r.parent_run_id) ?? family[0];
                       const otherParts = family.filter((r) => r.id !== root.id);
-                      const isExpanded = expandedFamilies.has(key);
                       const rootStage = runCurrentStage(root);
                       return (
-                        <Fragment key={key}>
-                          <tr>
-                            <td>
-                              {otherParts.length > 0 ? (
-                                <button
-                                  aria-label={isExpanded ? "Colapsar partes" : "Desplegar partes"}
-                                  className="iconOnlyButton"
-                                  onClick={() => toggleFamilyExpanded(key)}
-                                  style={{ marginRight: 4 }}
-                                  type="button"
-                                >
-                                  <ChevronDown
-                                    aria-hidden="true"
-                                    size={14}
-                                    style={{ transform: isExpanded ? undefined : "rotate(-90deg)", transition: "transform 0.15s" }}
-                                  />
-                                </button>
-                              ) : null}
-                              {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : "—"}
-                              {otherParts.length > 0 ? <span className="rootBadgeTag">+{otherParts.length} partes</span> : rootBadge(root)}
-                            </td>
-                            <td>{root.process_name}</td>
-                            <td className="num">{numericText(root.quantity)} und</td>
-                            <td className="num">{numericText(runCurrentWeight(root))} {root.raw_material_unit_code}</td>
-                            <td>{rootStage ? `${rootStage.stage_order}. ${rootStage.stage_name}` : "—"}</td>
-                            <td><StatusPunch label={runStatusLabel(root.status)} tone={runStatusTone(root.status)} /></td>
-                            <td>{processRowDate(root)}</td>
-                            <td className="num">{processRowWaste(root)}</td>
-                            <td>{processRowActions(root)}</td>
-                          </tr>
-                          {isExpanded
-                            ? otherParts.map((part) => {
-                                const partStage = runCurrentStage(part);
-                                return (
-                                  <tr key={part.id}>
-                                    <td style={{ paddingLeft: 28 }}>
-                                      {part.production_code ? <span className="orderCodeTag">{part.production_code}</span> : "—"}
-                                    </td>
-                                    <td>{part.process_name}</td>
-                                    <td className="num">{numericText(part.quantity)} und</td>
-                                    <td className="num">{numericText(runCurrentWeight(part))} {part.raw_material_unit_code}</td>
-                                    <td>{partStage ? `${partStage.stage_order}. ${partStage.stage_name}` : "—"}</td>
-                                    <td><StatusPunch label={runStatusLabel(part.status)} tone={runStatusTone(part.status)} /></td>
-                                    <td>{processRowDate(part)}</td>
-                                    <td className="num">{processRowWaste(part)}</td>
-                                    <td>{processRowActions(part)}</td>
-                                  </tr>
-                                );
-                              })
-                            : null}
-                        </Fragment>
+                        <tr key={key}>
+                          <td>
+                            {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : "—"}
+                            {otherParts.length > 0 ? (
+                              <button className="rootBadgeTag" onClick={() => setFamilyRuns(family)} style={{ cursor: "pointer", border: "none" }} type="button">
+                                +{otherParts.length} partes
+                              </button>
+                            ) : (
+                              rootBadge(root)
+                            )}
+                          </td>
+                          <td>{root.process_name}</td>
+                          <td className="num">{numericText(root.quantity)} und</td>
+                          <td className="num">{numericText(runCurrentWeight(root))} {root.raw_material_unit_code}</td>
+                          <td>{rootStage ? `${rootStage.stage_order}. ${rootStage.stage_name}` : "—"}</td>
+                          <td><StatusPunch label={runStatusLabel(root.status)} tone={runStatusTone(root.status)} /></td>
+                          <td>{processRowDate(root)}</td>
+                          <td className="num">{processRowWaste(root)}</td>
+                          <td>{processRowActions(root)}</td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -2794,6 +2763,44 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </>
               );
             })() : null}
+          </section>
+        </div>
+      ) : null}
+
+      {familyRuns ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Partes de la orden">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Orden {familyRuns[0].root_production_code ?? familyRuns[0].production_code}</h2>
+                <p>Dividida en {familyRuns.length} partes por falta de materia prima</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setFamilyRuns(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="tableWrap">
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th>Estado</th>
+                    <th className="num">Cantidad</th>
+                    <th aria-label="Accion" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {familyRuns.map((familyRun) => (
+                    <tr key={familyRun.id}>
+                      <td><span className="orderCodeTag">{familyRun.production_code}</span></td>
+                      <td><StatusPunch label={runStatusLabel(familyRun.status)} tone={runStatusTone(familyRun.status)} /></td>
+                      <td className="num">{numericText(familyRun.quantity)} und</td>
+                      <td>{processRowActions(familyRun)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         </div>
       ) : null}

@@ -1,4 +1,4 @@
-import { ChevronDown, Eye } from "lucide-react";
+import { Eye } from "lucide-react";
 import type { ProductionRun } from "@/types/production";
 import { runCurrentStage, runCurrentWaste, runCurrentWeight } from "@/lib/production-run-helpers";
 
@@ -38,8 +38,8 @@ export const WORK_IN_PROGRESS_COLUMN_COUNT = 8;
  * `onWasteHistory`/`onStageInfo` habilitan los popovers de detalle (solo
  * inventario los usa hoy); `onManage` agrega el boton de gestion (solo
  * produccion, que es quien puede operar la orden). Si `run` es la raiz de
- * una orden dividida, `otherPartsCount`/`isExpanded`/`onToggleExpand`
- * agregan el desplegable; `indent` marca las partes ya desplegadas. */
+ * una orden dividida, `otherPartsCount`+`onOpenFamily` muestran el boton
+ * "+N partes" que abre la ventana con las demas partes. */
 export function WorkInProgressRunRow({
   run,
   onView,
@@ -47,9 +47,7 @@ export function WorkInProgressRunRow({
   onStageInfo,
   onManage,
   otherPartsCount = 0,
-  isExpanded = false,
-  onToggleExpand,
-  indent = false
+  onOpenFamily
 }: {
   run: ProductionRun;
   onView: (run: ProductionRun) => void;
@@ -57,9 +55,7 @@ export function WorkInProgressRunRow({
   onStageInfo?: (run: ProductionRun) => void;
   onManage?: (run: ProductionRun) => void;
   otherPartsCount?: number;
-  isExpanded?: boolean;
-  onToggleExpand?: () => void;
-  indent?: boolean;
+  onOpenFamily?: () => void;
 }) {
   const currentStage = runCurrentStage(run);
   const currentWaste = runCurrentWaste(run);
@@ -69,21 +65,15 @@ export function WorkInProgressRunRow({
 
   return (
     <tr>
-      <td style={indent ? { paddingLeft: 28 } : undefined}>
-        {otherPartsCount > 0 && onToggleExpand ? (
-          <button
-            aria-label={isExpanded ? "Colapsar partes" : "Desplegar partes"}
-            className="iconOnlyButton"
-            onClick={onToggleExpand}
-            style={{ marginRight: 4 }}
-            type="button"
-          >
-            <ChevronDown aria-hidden="true" size={14} style={{ transform: isExpanded ? undefined : "rotate(-90deg)", transition: "transform 0.15s" }} />
-          </button>
-        ) : null}
+      <td>
         {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}
-        {otherPartsCount > 0 ? <span className="rootBadgeTag">+{otherPartsCount} partes</span> : null}
-        {otherPartsCount === 0 && rootCode ? <span className="rootBadgeTag">de {rootCode}</span> : null}
+        {otherPartsCount > 0 && onOpenFamily ? (
+          <button className="rootBadgeTag" onClick={onOpenFamily} style={{ cursor: "pointer", border: "none" }} type="button">
+            +{otherPartsCount} partes
+          </button>
+        ) : rootCode ? (
+          <span className="rootBadgeTag">de {rootCode}</span>
+        ) : null}
       </td>
       <td>{run.process_name}</td>
       <td className="num">{numText(run.quantity)} und</td>
