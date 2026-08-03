@@ -1790,6 +1790,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     const primaryAction = () => (isSplit ? setFamilyRuns(family) : openRunStagesModal(root));
                     const currentStage = root.stages.find((s) => s.status === "EN_PROCESO") ?? root.stages.find((s) => s.status === "PENDIENTE") ?? null;
                     const doneCount = root.stages.filter((s) => s.status === "FINALIZADA").length;
+                    const totalQuantity = isSplit
+                      ? family.reduce((total, part) => total + Number(part.quantity), 0)
+                      : Number(root.quantity);
                     return (
                       <div className="productionRunListRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Gestionar"} orden ${root.process_name}`)}>
                         {/* Title row: name + code left, timing + button right */}
@@ -1817,9 +1820,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <div className="productionRunListRowMeta">
                           {currentStage ? <span>{currentStage.stage_order}. {currentStage.stage_name}</span> : null}
                           {currentStage ? <span aria-hidden="true">·</span> : null}
-                          <span>{numericText(root.quantity)} und</span>
-                          <span aria-hidden="true">·</span>
-                          <span>Inició {hourLabel(root.started_at)}</span>
+                          <span>{numericText(totalQuantity)} und</span>
+                          {isSplit ? null : (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>Inició {hourLabel(root.started_at)}</span>
+                            </>
+                          )}
                         </div>
                         {/* Progress: caliper scale for stage advance */}
                         <CaliperScale
@@ -1907,13 +1914,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       const otherParts = family.filter((r) => r.id !== root.id);
                       const rootStage = runCurrentStage(root);
                       return (
-                        <tr key={key}>
+                        <tr
+                          key={key}
+                          onClick={otherParts.length > 0 ? () => setFamilyRuns(family) : undefined}
+                          style={otherParts.length > 0 ? { cursor: "pointer" } : undefined}
+                        >
                           <td>
                             {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : "—"}
                             {otherParts.length > 0 ? (
-                              <button className="rootBadgeTag" onClick={() => setFamilyRuns(family)} style={{ cursor: "pointer", border: "none" }} type="button">
-                                +{otherParts.length} partes
-                              </button>
+                              <span className="rootBadgeTag">+{otherParts.length} partes</span>
                             ) : (
                               rootBadge(root)
                             )}
@@ -1925,7 +1934,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <td><StatusPunch label={runStatusLabel(root.status)} tone={runStatusTone(root.status)} /></td>
                           <td>{processRowDate(root)}</td>
                           <td className="num">{processRowWaste(root)}</td>
-                          <td>{processRowActions(root)}</td>
+                          <td onClick={stopClick}>{processRowActions(root)}</td>
                         </tr>
                       );
                     })}
@@ -2504,7 +2513,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       ) : null}
 
       {isRunStagesOpen && selectedRunForStages ? (
-        <div className="modalBackdrop modalBackdropAnchor" role="dialog" aria-modal="true">
+        <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
@@ -2792,6 +2801,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     <th>Orden</th>
                     <th>Estado</th>
                     <th className="num">Cantidad</th>
+                    <th>Inició</th>
                     <th aria-label="Accion" />
                   </tr>
                 </thead>
@@ -2801,6 +2811,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <td><span className="orderCodeTag">{familyRun.production_code}</span></td>
                       <td><StatusPunch label={runStatusLabel(familyRun.status)} tone={runStatusTone(familyRun.status)} /></td>
                       <td className="num">{numericText(familyRun.quantity)} und</td>
+                      <td>{familyRun.started_at ? hourLabel(familyRun.started_at) : "—"}</td>
                       <td>{processRowActions(familyRun)}</td>
                     </tr>
                   ))}

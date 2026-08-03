@@ -4316,7 +4316,7 @@ export function InventoryDashboard() {
       ) : null}
 
       {viewingRun ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Avance de produccion">
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Avance de produccion">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
