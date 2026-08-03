@@ -111,6 +111,13 @@ export function approveProductionRunMaterials(runId: string) {
   });
 }
 
+export function allocateProductionRunMaterial(runId: string, quantityUnits: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/allocate-material`, {
+    method: "POST",
+    body: JSON.stringify({ quantity_units: quantityUnits }),
+  });
+}
+
 export function startProductionRun(runId: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/start`, {
     method: "POST",
