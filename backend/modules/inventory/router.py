@@ -307,6 +307,7 @@ def create_movement(
                 run_id=run.id,
                 production_code=run.production_code,
                 root_production_code=run.root_production_code or run.production_code,
+                process_name=run.process_name,
                 missing_quantity=run.quantity,
             )
             for run in waiting_runs
