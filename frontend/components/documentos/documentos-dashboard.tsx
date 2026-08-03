@@ -11,7 +11,8 @@ import {
   buildOrdenProduccion,
   canPrintEntrega,
   canPrintRecepcion,
-  formatDocDate
+  formatDocDate,
+  groupRunFamilies
 } from "@/lib/orden-produccion";
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
@@ -40,14 +41,16 @@ export function DocumentosDashboard() {
   // Una orden rechazada no genera acta: no aparece en Documentos.
   const runs = (data?.runs ?? []).filter((run) => run.status !== "CANCELADA");
   const items = data?.items ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState<DocMode | null>(null);
 
   const itemNames = useMemo(() => buildItemNameMap(items), [items]);
-  const selectedRun = runs.find((run) => run.id === selectedId) ?? null;
+  const families = useMemo(() => groupRunFamilies(runs), [runs]);
+  const familyList = useMemo(() => Array.from(families.entries()), [families]);
+  const selectedFamily = selectedKey ? families.get(selectedKey) ?? null : null;
   const model = useMemo(
-    () => (selectedRun ? buildOrdenProduccion(selectedRun, itemNames) : null),
-    [selectedRun, itemNames]
+    () => (selectedFamily ? buildOrdenProduccion(selectedFamily, itemNames) : null),
+    [selectedFamily, itemNames]
   );
 
   useEffect(() => {
@@ -79,23 +82,26 @@ export function DocumentosDashboard() {
             {!isLoading && runs.length === 0 ? (
               <div className="emptyState">No hay órdenes registradas.</div>
             ) : null}
-            {runs.map((run) => {
-              const isSel = run.id === selectedId;
+            {familyList.map(([key, family]) => {
+              const isSel = key === selectedKey;
+              const root = family.find((run) => !run.parent_run_id) ?? family[0];
+              const receivedCount = family.filter((run) => run.status === "RECIBIDA").length;
+              const statusText =
+                family.length === 1
+                  ? STATUS_LABEL[family[0].status]
+                  : `${receivedCount}/${family.length} recibidas`;
               return (
                 <button
                   className={`processPicker${isSel ? " processPickerActive" : ""}`}
-                  key={run.id}
-                  onClick={() => setSelectedId(run.id)}
+                  key={key}
+                  onClick={() => setSelectedKey(key)}
                   type="button"
                 >
                   <span style={{ display: "grid", gap: 2, textAlign: "left" }}>
                     <strong style={{ color: "var(--text)", fontSize: 14 }}>
-                      {run.production_code ?? "Sin folio"} · {run.process_name}
+                      {key} · {root.process_name}
                     </strong>
-                    <span>
-                      {STATUS_LABEL[run.status]}
-                      {run.received_at ? ` · Recibida ${formatDocDate(run.received_at)}` : ""}
-                    </span>
+                    <span>{statusText}</span>
                   </span>
                 </button>
               );
@@ -103,12 +109,12 @@ export function DocumentosDashboard() {
           </div>
 
           <div className="documentosPreview">
-            {model && selectedRun ? (
+            {model && selectedFamily ? (
               <>
                 <div className="documentosActions">
                   <button
                     className="button"
-                    disabled={!canPrintEntrega(selectedRun)}
+                    disabled={!selectedFamily || !canPrintEntrega(selectedFamily)}
                     onClick={() => setPrintMode("entrega")}
                     type="button"
                   >
@@ -117,7 +123,7 @@ export function DocumentosDashboard() {
                   </button>
                   <button
                     className="button"
-                    disabled={!canPrintRecepcion(selectedRun)}
+                    disabled={!selectedFamily || !canPrintRecepcion(selectedFamily)}
                     onClick={() => setPrintMode("recepcion")}
                     type="button"
                   >
@@ -126,7 +132,7 @@ export function DocumentosDashboard() {
                   </button>
                   <button
                     className="button buttonPrimary"
-                    disabled={!canPrintRecepcion(selectedRun)}
+                    disabled={!selectedFamily || !canPrintRecepcion(selectedFamily)}
                     onClick={() => setPrintMode("completo")}
                     type="button"
                   >
