@@ -2831,10 +2831,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   Definir ensamble
                 </button>
               ) : null}
-              <button className="button" onClick={() => setPrintingWasteRun(selectedStatsRun)} type="button">
-                <Printer aria-hidden="true" size={14} />
-                Imprimir
-              </button>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
@@ -2877,6 +2873,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               ) : null}
             </div>
             <RunStageSummaryTable run={selectedStatsRun} />
+            <div className="modalActions">
+              <button className="button buttonPrimary" onClick={() => setPrintingWasteRun(selectedStatsRun)} type="button">
+                <Printer aria-hidden="true" size={14} />
+                Imprimir
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
