@@ -37,12 +37,13 @@ import {
   type SaveInventoryItemPayload,
 } from "@/lib/inventory-api";
 import {
+  allocateProductionRunMaterial,
   approveProductionRunMaterials,
   rejectProductionRunMaterials,
   listProductionRuns,
   receiveProductionRunFinishedProduct,
 } from "@/lib/production-api";
-import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
+import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType, WaitingProductionRunSummary } from "@/types/inventory";
 import type { ProductionRun, ProductionRunStage } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
@@ -416,6 +417,12 @@ export function InventoryDashboard() {
   // si el selector de item es el flat select o el picker de complementos.
   const [movementEntryType, setMovementEntryType] = useState<InventoryItemType | null>(null);
   const [isComplementPickerOpen, setIsComplementPickerOpen] = useState(false);
+  // Modal automatico "Destinar material": aparece tras registrar un ingreso
+  // que puede cubrir corridas ESPERANDO_MATERIAL de la misma materia prima.
+  const [allocateRuns, setAllocateRuns] = useState<WaitingProductionRunSummary[]>([]);
+  const [allocateQuantities, setAllocateQuantities] = useState<Record<string, string>>({});
+  const [allocateErrors, setAllocateErrors] = useState<Record<string, string>>({});
+  const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
   // Borrador de factura XML: se revisa y clasifica cada linea antes de importar.
@@ -1010,6 +1017,26 @@ export function InventoryDashboard() {
     }
   }
 
+  async function handleAllocateRun(run: WaitingProductionRunSummary) {
+    const quantity = allocateQuantities[run.run_id] ?? String(Number(run.missing_quantity));
+    setAllocateErrors((current) => ({ ...current, [run.run_id]: "" }));
+    setAllocatingRunId(run.run_id);
+    try {
+      await allocateProductionRunMaterial(run.run_id, quantity);
+      setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
+      setSuccess(`Material destinado a la orden ${run.production_code ?? run.run_id}.`);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
+    } catch (nextError) {
+      setAllocateErrors((current) => ({
+        ...current,
+        [run.run_id]: nextError instanceof Error ? nextError.message : "No se pudo destinar el material.",
+      }));
+    } finally {
+      setAllocatingRunId(null);
+    }
+  }
+
   async function handleConvertLot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!convertRun) return;
@@ -1538,7 +1565,7 @@ export function InventoryDashboard() {
         movementForm.movement_type === "ENTRADA" && movementForm.unit_cost
           ? movementForm.unit_cost
           : null;
-      await createInventoryMovement({
+      const created = await createInventoryMovement({
         ...movementForm,
         unit_cost: unitCost,
         // Motivo ya no se pide en el formulario; se usa uno por defecto.
@@ -1550,6 +1577,15 @@ export function InventoryDashboard() {
       setIsMovementFormOpen(false);
       setMovementForm(emptyMovementForm());
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      if (created.waiting_production_runs.length > 0) {
+        setAllocateRuns(created.waiting_production_runs);
+        setAllocateQuantities(
+          Object.fromEntries(
+            created.waiting_production_runs.map((run) => [run.run_id, String(Number(run.missing_quantity))]),
+          ),
+        );
+        setAllocateErrors({});
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo registrar el movimiento.");
     } finally {
@@ -2932,6 +2968,77 @@ export function InventoryDashboard() {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {allocateRuns.length > 0 ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Destinar material">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Ordenes esperando esta materia prima</h2>
+                <p>Este ingreso puede cubrir corridas que quedaron esperando material.</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setAllocateRuns([])} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="tableWrap">
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th className="num">Falta</th>
+                    <th className="num">Destinar</th>
+                    <th aria-label="Accion" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {allocateRuns.map((run) => (
+                    <tr key={run.run_id}>
+                      <td>
+                        <span className="orderCodeTag">{run.production_code ?? run.run_id}</span>
+                        {run.root_production_code && run.root_production_code !== run.production_code ? (
+                          <span className="rootBadgeTag">de {run.root_production_code}</span>
+                        ) : null}
+                      </td>
+                      <td className="num">{numericText(run.missing_quantity)}</td>
+                      <td className="num">
+                        <input
+                          className="field"
+                          max={Number(run.missing_quantity)}
+                          min="1"
+                          onChange={(event) =>
+                            setAllocateQuantities((current) => ({ ...current, [run.run_id]: event.target.value }))
+                          }
+                          step="1"
+                          style={{ width: 90 }}
+                          type="number"
+                          value={allocateQuantities[run.run_id] ?? String(Number(run.missing_quantity))}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="button buttonPrimary"
+                          disabled={allocatingRunId === run.run_id}
+                          onClick={() => void handleAllocateRun(run)}
+                          type="button"
+                        >
+                          <Repeat aria-hidden="true" size={14} />
+                          {allocatingRunId === run.run_id ? "Destinando" : "Destinar"}
+                        </button>
+                        {allocateErrors[run.run_id] ? (
+                          <div>
+                            <small style={{ color: "var(--danger, #c0392b)" }}>{allocateErrors[run.run_id]}</small>
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
       ) : null}
 
