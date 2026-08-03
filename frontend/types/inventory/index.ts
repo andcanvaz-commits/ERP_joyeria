@@ -40,6 +40,13 @@ export type ComplementType = {
   is_active: boolean;
 };
 
+export type WaitingProductionRunSummary = {
+  run_id: string;
+  production_code: string | null;
+  root_production_code: string | null;
+  missing_quantity: string;
+};
+
 export type InventoryMovement = {
   id: string;
   item_id: string;
@@ -56,6 +63,9 @@ export type InventoryMovement = {
   created_by_name?: string | null;
   created_at: string;
   item: InventoryItem;
+  // Ordenes ESPERANDO_MATERIAL de esta materia prima: solo viene poblado en
+  // la respuesta de un movimiento ENTRADA sobre un item RAW_MATERIAL.
+  waiting_production_runs: WaitingProductionRunSummary[];
 };
 
 export type InventorySummary = {
