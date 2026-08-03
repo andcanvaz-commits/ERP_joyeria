@@ -6,7 +6,7 @@ import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, 
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
-import { buildItemNameMap, buildOrdenProduccion } from "@/lib/orden-produccion";
+import { buildItemNameMap, buildOrdenProduccion, canPrintEntrega, canPrintRecepcion, getRunFamily } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
@@ -409,7 +409,7 @@ export function InventoryDashboard() {
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => dateKey(new Date()));
   const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
   const [viewingRun, setViewingRun] = useState<ProductionRun | null>(null);
-  const [printPreview, setPrintPreview] = useState<{ run: ProductionRun; mode: DocMode } | null>(null);
+  const [printPreview, setPrintPreview] = useState<{ family: ProductionRun[]; mode: DocMode } | null>(null);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -965,7 +965,10 @@ export function InventoryDashboard() {
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
-      setPrintPreview({ run: updated, mode: "entrega" });
+      const family = getRunFamily(nextRuns, updated);
+      if (canPrintEntrega(family)) {
+        setPrintPreview({ family, mode: "entrega" });
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
     } finally {
@@ -1014,7 +1017,10 @@ export function InventoryDashboard() {
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
-      setPrintPreview({ run: updated, mode: "recepcion" });
+      const family = getRunFamily(nextRuns, updated);
+      if (canPrintRecepcion(family)) {
+        setPrintPreview({ family, mode: "recepcion" });
+      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
     } finally {
@@ -1038,6 +1044,10 @@ export function InventoryDashboard() {
       );
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
       await queryClient.invalidateQueries({ queryKey: ["production"] });
+      const family = getRunFamily(nextRuns, started);
+      if (!splitChild && canPrintEntrega(family)) {
+        setPrintPreview({ family, mode: "entrega" });
+      }
     } catch (nextError) {
       setAllocateErrors((current) => ({
         ...current,
@@ -4203,7 +4213,7 @@ export function InventoryDashboard() {
               </button>
             </div>
             <div className="documentosPreviewFrame">
-              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.run, docItemNames)} mode="completo" />
+              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.family, docItemNames)} mode="completo" />
             </div>
             <div className="modalActions">
               <button className="button" onClick={() => setPrintPreview(null)} type="button">
@@ -4221,7 +4231,7 @@ export function InventoryDashboard() {
       {printingMode && printPreview
         ? createPortal(
             <div className="printArea">
-              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.run, docItemNames)} mode={printingMode} />
+              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.family, docItemNames)} mode={printingMode} />
             </div>,
             document.body
           )
