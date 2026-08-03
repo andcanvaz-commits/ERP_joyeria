@@ -472,6 +472,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
   const finishedRuns = runs.filter((run) => run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA");
+  const waitingMaterialRuns = runs.filter((run) => run.status === "ESPERANDO_MATERIAL");
   const recentFinishedRuns = finishedRuns.slice(0, 3);
   const receivedRuns = runs
     .filter((run) => run.status === "RECIBIDA")
@@ -541,6 +542,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       PENDIENTE_RECEPCION: "Pendiente de recepción",
       RECIBIDA: "Recibida",
       CANCELADA: "Cancelada",
+      ESPERANDO_MATERIAL: "Esperando material",
     };
     return labels[status] ?? status;
   }
@@ -570,8 +572,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       PENDIENTE_RECEPCION: "warning",
       RECIBIDA: "done",
       CANCELADA: "danger",
+      ESPERANDO_MATERIAL: "warning",
     };
     return tones[status] ?? "neutral";
+  }
+
+  // Chip "de <folio raiz>": solo cuando esta corrida es parte de un split
+  // (su folio raiz existe y es distinto de su propio folio).
+  function rootBadge(run: ProductionRun) {
+    if (!run.root_production_code || run.root_production_code === run.production_code) return null;
+    return (
+      <span className="rootBadgeTag" title={`Parte de la orden ${run.root_production_code}`}>
+        de {run.root_production_code}
+      </span>
+    );
   }
 
   function buildCalendarDays(monthKey: string) {
@@ -1714,6 +1728,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             {run.production_code ? (
                               <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
                             ) : null}
+                            {rootBadge(run)}
                             <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
@@ -1777,7 +1792,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <tbody>
                     {processRows.map((run) => (
                       <tr key={run.id}>
-                        <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
+                        <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}{rootBadge(run)}</td>
                         <td>{run.process_name}</td>
                         <td className="num">{numericText(run.quantity)} und</td>
                         <td><StatusPunch label={runStatusLabel(run.status)} tone={runStatusTone(run.status)} /></td>
@@ -1853,6 +1868,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     <div className="readyToStartInfo">
                       <strong>
                         {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                        {rootBadge(run)}
                         {run.process_name}
                       </strong>
                       <span>{numericText(run.quantity)} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
@@ -2451,6 +2467,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {selectedRunForStages.production_code ? (
                     <span style={{ display: "inline-block", marginRight: 10, fontFamily: "monospace", fontSize: 13, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 5, padding: "2px 8px" }}>{selectedRunForStages.production_code}</span>
                   ) : null}
+                  {rootBadge(selectedRunForStages)}
                   {selectedRunForStages.process_name}
                 </h2>
                 <p>

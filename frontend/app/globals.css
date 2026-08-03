@@ -3609,6 +3609,22 @@ textarea {
   border: 1px solid #D5DBE1;
 }
 
+/* Chip secundario: indica que esta orden es parte de un folio raiz (split
+   por falta de materia prima). Tono neutro para no competir con el
+   orderCodeTag principal. */
+.rootBadgeTag {
+  display: inline-block;
+  margin-right: 6px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace), monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
 /* Pasos del formulario de mantenimiento (crear tipo / categoria / producto).
    Cada paso es una opcion alternativa: tarjeta delimitada + separador "o". */
 .formStep {
