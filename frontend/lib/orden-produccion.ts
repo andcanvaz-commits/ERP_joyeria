@@ -19,8 +19,8 @@ export type OrdenProduccionModel = {
   cantidad: number;
   categoria: string;
   responsableProduccion: string;
-  entrega: DocSide;
-  recepcion: DocSide;
+  entrega: DocSide[];
+  recepcion: DocSide[];
   cancelada: boolean;
 };
 
@@ -37,65 +37,111 @@ export function buildItemNameMap(items: InventoryItem[]): Map<string, string> {
   return new Map(items.map((item) => [item.id, item.name]));
 }
 
-/** Construye el modelo del comprobante "Orden de Producción" desde una orden real. */
+/** Clave de familia: el folio raiz si esta corrida es parte de un split,
+ * si no su propio folio (o su id como ultimo recurso). */
+export function runFamilyKey(run: ProductionRun): string {
+  return run.root_production_code || run.production_code || run.id;
+}
+
+/** Agrupa corridas por familia (folio raiz + sus hijas), cada grupo
+ * ordenado por production_code para que la raiz siempre quede primero. */
+export function groupRunFamilies(runs: ProductionRun[]): Map<string, ProductionRun[]> {
+  const groups = new Map<string, ProductionRun[]>();
+  for (const run of runs) {
+    const key = runFamilyKey(run);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(run);
+    } else {
+      groups.set(key, [run]);
+    }
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => (a.production_code ?? "").localeCompare(b.production_code ?? ""));
+  }
+  return groups;
+}
+
+/** Atajo: la familia completa (dentro de `runs`) a la que pertenece `run`. */
+export function getRunFamily(runs: ProductionRun[], run: ProductionRun): ProductionRun[] {
+  const key = runFamilyKey(run);
+  return runs.filter((candidate) => runFamilyKey(candidate) === key)
+    .sort((a, b) => (a.production_code ?? "").localeCompare(b.production_code ?? ""));
+}
+
+/** Construye el modelo del comprobante "Orden de Producción" desde una
+ * familia completa (folio raiz + hijas de split, o un solo run si nunca se
+ * partio). Un evento de ENTREGA/RECEPCION por cada miembro que la tenga. */
 export function buildOrdenProduccion(
-  run: ProductionRun,
+  family: ProductionRun[],
   itemNames: Map<string, string>
 ): OrdenProduccionModel {
-  const materialName = itemNames.get(run.raw_material_item_id) ?? run.process_name;
+  const root = family.find((run) => !run.parent_run_id) ?? family[0];
+  const materialName = itemNames.get(root.raw_material_item_id) ?? root.process_name;
+  const materialUnit = root.raw_material_unit_code || "g";
 
-  const materialUnit = run.raw_material_unit_code || "g";
-  const entregaRows: DocRow[] = [
-    { gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }
-  ];
-  // Insumos que salieron de inventario junto con la materia prima, cada uno
-  // con su unidad real.
-  for (const supply of run.supply_consumptions ?? []) {
-    entregaRows.push({
-      gramos: num(supply.quantity),
-      unidad: supply.unit_code || "g",
-      detalle: `Insumo: ${supply.name}`
-    });
-  }
+  const entrega: DocSide[] = [];
+  const recepcion: DocSide[] = [];
 
-  // Recepción: solo lo que realmente entra a inventario (el producto). La merma
-  // no se "recibe": queda registrada en el kardex y el resumen del proceso.
-  const recepcionRows: DocRow[] = [];
-  if (run.actual_finished_weight !== null) {
-    recepcionRows.push({
-      gramos: num(run.actual_finished_weight),
-      unidad: materialUnit,
-      detalle: `Producto terminado: ${run.process_name}`
-    });
+  for (const run of family) {
+    if (run.materials_approved_at !== null) {
+      const rows: DocRow[] = [
+        { gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }
+      ];
+      // Insumos que salieron de inventario junto con la materia prima, cada uno
+      // con su unidad real.
+      for (const supply of run.supply_consumptions ?? []) {
+        rows.push({
+          gramos: num(supply.quantity),
+          unidad: supply.unit_code || "g",
+          detalle: `Insumo: ${supply.name}`
+        });
+      }
+      entrega.push({
+        fecha: run.materials_approved_at,
+        responsable: run.materials_approved_by_name ?? DASH,
+        rows
+      });
+    }
+
+    // Recepción: solo lo que realmente entra a inventario (el producto). La merma
+    // no se "recibe": queda registrada en el kardex y el resumen del proceso.
+    if (run.received_at !== null) {
+      const rows: DocRow[] = [];
+      if (run.actual_finished_weight !== null) {
+        rows.push({
+          gramos: num(run.actual_finished_weight),
+          unidad: materialUnit,
+          detalle: `Producto terminado: ${run.process_name}`
+        });
+      }
+      // Productos finales creados al recibir (plan de resultantes de la orden).
+      for (const product of run.products ?? []) {
+        rows.push({
+          gramos: num(product.quantity),
+          unidad: "und",
+          detalle: `Producto final: ${product.product_name ?? "—"}`
+        });
+      }
+      // Los complementos del ensamble NO se listan en recepción: ya van dentro
+      // del producto final ensamblado (su entrega quedó en la mitad de ENTREGA).
+      recepcion.push({
+        fecha: run.received_at,
+        responsable: run.received_by_name ?? DASH,
+        rows
+      });
+    }
   }
-  // Productos finales creados al recibir (plan de resultantes de la orden).
-  for (const product of run.products ?? []) {
-    recepcionRows.push({
-      gramos: num(product.quantity),
-      unidad: "und",
-      detalle: `Producto final: ${product.product_name ?? "—"}`
-    });
-  }
-  // Los complementos del ensamble NO se listan en recepción: ya van dentro
-  // del producto final ensamblado (su entrega quedó en la mitad de ENTREGA).
 
   return {
-    folio: run.production_code ?? DASH,
-    procesoNombre: run.process_name,
-    cantidad: num(run.quantity),
+    folio: root.root_production_code ?? root.production_code ?? DASH,
+    procesoNombre: root.process_name,
+    cantidad: family.reduce((total, run) => total + num(run.quantity), 0),
     categoria: materialName,
-    responsableProduccion: run.created_by_name ?? DASH,
-    entrega: {
-      fecha: run.materials_approved_at,
-      responsable: run.materials_approved_by_name ?? DASH,
-      rows: entregaRows
-    },
-    recepcion: {
-      fecha: run.received_at,
-      responsable: run.received_by_name ?? DASH,
-      rows: recepcionRows
-    },
-    cancelada: run.status === "CANCELADA"
+    responsableProduccion: root.created_by_name ?? DASH,
+    entrega,
+    recepcion,
+    cancelada: family.every((run) => run.status === "CANCELADA")
   };
 }
 
@@ -112,12 +158,22 @@ export function formatDocDate(iso: string | null): string {
   return date.toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-/** ¿La mitad de entrega ya puede imprimirse? (materiales aprobados) */
-export function canPrintEntrega(run: ProductionRun): boolean {
-  return run.materials_approved_at !== null;
+/** ¿La familia completa ya arranco (nadie quedo ESPERANDO_MATERIAL)? Solo
+ * ahi tiene sentido imprimir la entrega unificada. */
+export function canPrintEntrega(family: ProductionRun[]): boolean {
+  return (
+    family.length > 0 &&
+    family.some((run) => run.materials_approved_at !== null) &&
+    !family.some((run) => run.status === "ESPERANDO_MATERIAL" || run.status === "PENDIENTE_INVENTARIO")
+  );
 }
 
-/** ¿La mitad de recepción / el documento completo ya pueden imprimirse? (recibido) */
-export function canPrintRecepcion(run: ProductionRun): boolean {
-  return run.received_at !== null;
+/** ¿Toda la familia ya fue recibida (o cancelada)? Solo ahi la recepcion
+ * unificada esta completa. */
+export function canPrintRecepcion(family: ProductionRun[]): boolean {
+  return (
+    family.length > 0 &&
+    family.some((run) => run.status === "RECIBIDA") &&
+    family.every((run) => run.status === "RECIBIDA" || run.status === "CANCELADA")
+  );
 }
