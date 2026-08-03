@@ -88,6 +88,11 @@ export type ProductionRun = {
   process_id: string;
   process_name: string;
   production_code?: string | null;
+  // Folio de la orden original cuando esta corrida nacio de un split por
+  // falta de materia prima (null si nunca se partio).
+  root_production_code?: string | null;
+  // Corrida padre de la que se partio esta (null si es la original).
+  parent_run_id?: string | null;
   quantity: string;
   status:
     | "PENDIENTE_INVENTARIO"
@@ -95,7 +100,8 @@ export type ProductionRun = {
     | "EN_PROCESO"
     | "PENDIENTE_RECEPCION"
     | "RECIBIDA"
-    | "CANCELADA";
+    | "CANCELADA"
+    | "ESPERANDO_MATERIAL";
   raw_material_item_id: string;
   raw_material_quantity_per_unit: string;
   raw_material_unit_code: string;

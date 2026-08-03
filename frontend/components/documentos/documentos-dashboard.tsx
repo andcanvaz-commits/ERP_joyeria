@@ -23,7 +23,8 @@ const STATUS_LABEL: Record<ProductionRun["status"], string> = {
   EN_PROCESO: "En proceso",
   PENDIENTE_RECEPCION: "Pendiente de recepción",
   RECIBIDA: "Recibida",
-  CANCELADA: "Cancelada"
+  CANCELADA: "Cancelada",
+  ESPERANDO_MATERIAL: "Esperando material"
 };
 
 async function fetchDocumentosBundle(): Promise<{ runs: ProductionRun[]; items: InventoryItem[] }> {

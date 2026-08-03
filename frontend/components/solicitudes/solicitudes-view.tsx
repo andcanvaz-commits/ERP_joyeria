@@ -16,6 +16,7 @@ const STATUS_LABELS: Record<ProductionRun["status"], string> = {
   PENDIENTE_RECEPCION: "Pendiente de recepcion",
   RECIBIDA: "Recibida",
   CANCELADA: "Rechazada / cancelada",
+  ESPERANDO_MATERIAL: "Esperando material",
 };
 
 const STAGE_STATUS_LABELS: Record<string, string> = {

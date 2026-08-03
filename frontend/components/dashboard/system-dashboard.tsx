@@ -39,6 +39,7 @@ const RUN_STATUS_LABELS: Record<ProductionRun["status"], string> = {
   PENDIENTE_RECEPCION: "Pendiente recepcion",
   RECIBIDA: "Recibida",
   CANCELADA: "Cancelada",
+  ESPERANDO_MATERIAL: "Esperando material",
 };
 
 function numericText(value: string | null) {
