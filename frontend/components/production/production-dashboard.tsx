@@ -1677,6 +1677,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <span>Esperando inventario</span>
             </div>
             <div className="productionStatCard">
+              <strong>{waitingMaterialRuns.length}</strong>
+              <span>Esperando material</span>
+            </div>
+            <div className="productionStatCard">
               <strong>{approvedMaterialRuns.length}</strong>
               <span>Listas para iniciar</span>
             </div>
@@ -1765,6 +1769,40 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <div className="emptyState">No hay procesos en transcurso.</div>
               )}
             </article>
+          </section>
+
+          {/* Ordenes que un split dejo esperando material: solo lectura aqui,
+              se resuelven desde inventario (ver modal "Destinar material"). */}
+          <section className="card panelBody" aria-label="Esperando material">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Esperando material</h2>
+                <p className="panelText">{waitingMaterialRuns.length} {waitingMaterialRuns.length === 1 ? "orden espera" : "ordenes esperan"} materia prima</p>
+              </div>
+            </div>
+            {waitingMaterialRuns.length > 0 ? (
+              <div className="productionRunsVertical">
+                {waitingMaterialRuns.map((run) => (
+                  <div className="productionRunListRow" key={run.id}>
+                    <div className="productionRunListRowHead">
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
+                        {run.production_code ? (
+                          <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
+                        ) : null}
+                        {rootBadge(run)}
+                        <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
+                      </div>
+                      <StatusPunch label={runStatusLabel(run.status)} tone={runStatusTone(run.status)} />
+                    </div>
+                    <div className="productionRunListRowMeta">
+                      <span>Faltan {numericText(run.quantity)} und</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="emptyState">No hay ordenes esperando material.</div>
+            )}
           </section>
 
           {/* Procesos: listos para iniciar, en curso y terminados, en un solo lugar. */}
