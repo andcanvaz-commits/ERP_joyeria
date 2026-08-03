@@ -45,7 +45,7 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
 // producción (fin de orden e historial) e inventario (merma por fase).
 // En etapas que no pesan, el peso se hereda de la última etapa pesada anterior
 // (el material sigue siendo el mismo) y se muestra atenuado.
-export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun; pageSize?: number }) {
+export function RunStageSummaryTable({ run, pageSize = 5, print = false }: { run: ProductionRun; pageSize?: number; print?: boolean }) {
   const stages = [...run.stages].sort((a, b) => a.stage_order - b.stage_order);
   const unit = run.raw_material_unit_code || "g";
   let carried = Number(run.total_required_material ?? 0);
@@ -61,6 +61,8 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
     return { stage, pending, initial, hasInitial, final, hasFinal, decision };
   });
   const pager = usePagination(rows, pageSize, run.id);
+  // Impresion: todas las filas de una, sin paginar.
+  const visibleRows = print ? rows : pager.pageItems;
   const muted = { color: "var(--muted)" } as const;
   // Altura de fila fija + relleno hasta completar la página: el modal no debe
   // cambiar de tamaño al pasar de página (preferencia de UI del proyecto).
@@ -68,7 +70,7 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
   // hay tamaño previo que igualar, y rellenar infla el modal sin motivo
   // (aparece scroll aunque el contenido real quepa de sobra).
   const ROW_HEIGHT = 36;
-  const fillerCount = pager.pageCount > 1 ? Math.max(0, pageSize - pager.pageItems.length) : 0;
+  const fillerCount = !print && pager.pageCount > 1 ? Math.max(0, pageSize - pager.pageItems.length) : 0;
   const oneLine = {
     whiteSpace: "nowrap",
     overflow: "hidden",
@@ -89,7 +91,7 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
           </tr>
         </thead>
         <tbody>
-          {pager.pageItems.map(({ stage, pending, initial, hasInitial, final, hasFinal, decision }) => (
+          {visibleRows.map(({ stage, pending, initial, hasInitial, final, hasFinal, decision }) => (
             <tr key={stage.id} style={{ height: ROW_HEIGHT }}>
               <td style={oneLine} title={stage.phase_name ? `${stage.stage_name} · ${stage.phase_name}` : stage.stage_name}>
                 {stage.stage_order}. {stage.stage_name}
@@ -120,7 +122,7 @@ export function RunStageSummaryTable({ run, pageSize = 5 }: { run: ProductionRun
           ) : null}
         </tbody>
       </table>
-      <Pager {...pager} />
+      {print ? null : <Pager {...pager} />}
     </div>
   );
 }

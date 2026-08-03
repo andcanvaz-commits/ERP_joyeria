@@ -4381,6 +4381,32 @@ textarea:disabled {
   min-width: 0;
 }
 
+.wasteReportPrint {
+  padding: 12px;
+  color: #1a1a1a;
+}
+
+.wasteReportPrint h1 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+
+.wasteReportPrint h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.wasteReportPrint > p {
+  font-size: 12px;
+  color: #444;
+  margin: 0 0 14px;
+}
+
+.wasteReportPrint .userPreviewGrid {
+  margin-bottom: 16px;
+}
+
 @media print {
   @page {
     size: A4 landscape;

@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -383,6 +384,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, []);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
+  const [printingWasteRun, setPrintingWasteRun] = useState<ProductionRun | null>(null);
+  useEffect(() => {
+    if (!printingWasteRun) return;
+    const timer = setTimeout(() => {
+      window.print();
+      setPrintingWasteRun(null);
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [printingWasteRun]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyMonth, setHistoryMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -2772,6 +2782,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   Definir ensamble
                 </button>
               ) : null}
+              <button className="button" onClick={() => setPrintingWasteRun(selectedStatsRun)} type="button">
+                <Printer aria-hidden="true" size={14} />
+                Imprimir
+              </button>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
@@ -2817,6 +2831,28 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </section>
         </div>
       ) : null}
+
+      {printingWasteRun
+        ? createPortal(
+            <div className="printArea">
+              <div className="wasteReportPrint">
+                <h1>Reporte de merma</h1>
+                <h2>
+                  {printingWasteRun.production_code ?? printingWasteRun.process_name} · {printingWasteRun.process_name}
+                </h2>
+                <p>
+                  {numericText(printingWasteRun.quantity)} unidades · Estado: {runStatusLabel(printingWasteRun.status)}
+                  {printingWasteRun.finished_at ? ` · Finalizó: ${timeLabel(printingWasteRun.finished_at)}` : ""}
+                </p>
+                <div className="userPreviewGrid">
+                  <RunWasteHero run={printingWasteRun} />
+                </div>
+                <RunStageSummaryTable run={printingWasteRun} print />
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       {isHistoryOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de procesos">
