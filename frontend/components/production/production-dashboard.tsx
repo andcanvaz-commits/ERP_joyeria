@@ -565,6 +565,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   // Fecha contextual por estado: la más relevante para cada etapa del flujo.
+  // Cuenta ordenes distintas, no corridas sueltas: una orden partida en
+  // varias corridas (mismo folio raiz) cuenta una sola vez.
+  function countOrders(list: ProductionRun[]): number {
+    return groupRunFamilies(list).size;
+  }
+
   function processRowDate(run: ProductionRun) {
     if (run.status === "MATERIALES_APROBADOS") return timeLabel(run.materials_approved_at);
     if (run.status === "EN_PROCESO") return timeLabel(run.started_at);
@@ -1729,23 +1735,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           {/* Stats bar */}
           <section className="productionStatsRow" aria-label="Metricas de produccion">
             <div className="productionStatCard">
-              <strong>{runs.filter((r) => r.status === "PENDIENTE_INVENTARIO").length}</strong>
+              <strong>{countOrders(runs.filter((r) => r.status === "PENDIENTE_INVENTARIO"))}</strong>
               <span>Esperando inventario</span>
             </div>
             <div className="productionStatCard">
-              <strong>{waitingMaterialRuns.length}</strong>
+              <strong>{countOrders(waitingMaterialRuns)}</strong>
               <span>Esperando material</span>
             </div>
             <div className="productionStatCard">
-              <strong>{approvedMaterialRuns.length}</strong>
+              <strong>{countOrders(approvedMaterialRuns)}</strong>
               <span>Listas para iniciar</span>
             </div>
             <div className="productionStatCard">
-              <strong>{inProgressRuns.length}</strong>
+              <strong>{countOrders(inProgressRuns)}</strong>
               <span>En proceso</span>
             </div>
             <div className="productionStatCard">
-              <strong>{finishedRuns.length}</strong>
+              <strong>{countOrders(finishedRuns)}</strong>
               <span>Finalizadas</span>
             </div>
           </section>
@@ -1772,7 +1778,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div className="panelHeader">
                 <div>
                   <h2 className="panelTitle">En proceso</h2>
-                  <p className="panelText">{inProgressRuns.length} {inProgressRuns.length === 1 ? "orden activa" : "ordenes activas"}</p>
+                  <p className="panelText">{countOrders(inProgressRuns)} {countOrders(inProgressRuns) === 1 ? "orden activa" : "ordenes activas"}</p>
                 </div>
               </div>
               {inProgressRuns.length > 0 ? (
@@ -1843,7 +1849,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="panelHeader">
               <div>
                 <h2 className="panelTitle">Esperando material</h2>
-                <p className="panelText">{waitingMaterialRuns.length} {waitingMaterialRuns.length === 1 ? "orden espera" : "ordenes esperan"} materia prima</p>
+                <p className="panelText">{countOrders(waitingMaterialRuns)} {countOrders(waitingMaterialRuns) === 1 ? "orden espera" : "ordenes esperan"} materia prima</p>
               </div>
             </div>
             {waitingMaterialRuns.length > 0 ? (
