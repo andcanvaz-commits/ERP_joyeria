@@ -2112,56 +2112,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </div>
       ) : null}
 
-      {editPlanRun ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Editar producto resultante</h2>
-                <p>{editPlanRun.production_code ?? ""} · fabrica {numericText(editPlanRun.quantity)} und</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setEditPlanRun(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <label className="fieldGroup">
-              <span>Producto</span>
-              {renderProductChooser(editPlanProduct, () => {
-                setAssignPickerTab("PRODUCTOS");
-                setItemPickerFor("edit");
-              })}
-            </label>
-            <button
-              className="button buttonPrimary"
-              disabled={isSaving || !editPlanProduct || (!editPlanProduct.targetItemId && !editPlanProduct.productTypeId)}
-              onClick={() => void (async () => {
-                if (!editPlanProduct || (!editPlanProduct.targetItemId && !editPlanProduct.productTypeId)) {
-                  setError("Elige el producto a fabricar.");
-                  return;
-                }
-                setError(null);
-                setSuccess(null);
-                setIsSaving(true);
-                try {
-                  await updateProductionRunProducts(editPlanRun.id, [productRowToPayload(editPlanProduct, editPlanRun.quantity)]);
-                  setSuccess("Producto actualizado.");
-                  setEditPlanRun(null);
-                  await reload();
-                } catch (nextError) {
-                  setError(nextError instanceof Error ? nextError.message : "No se pudo actualizar el producto.");
-                } finally {
-                  setIsSaving(false);
-                }
-              })()}
-              type="button"
-            >
-              <Save aria-hidden="true" size={15} />
-              Guardar plan
-            </button>
-          </section>
-        </div>
-      ) : null}
-
       {/* Definir ensamble: combinacion de complementos APROBADOS de la orden,
           por unidad × cantidad fabricada. Se guarda como receta a futuro. */}
       {assemblyRun ? (() => {
@@ -2594,24 +2544,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {numericText(selectedRunForStages.quantity)} {Number(selectedRunForStages.quantity) === 1 ? "unidad" : "unidades"}
                 </p>
               </div>
-              {selectedRunForStages.status !== "RECIBIDA" && selectedRunForStages.status !== "CANCELADA" ? (
-                <button className="iconTextButton" onClick={() => {
-                  const firstProduct = (selectedRunForStages.products ?? [])[0];
-                  setEditPlanProduct(
-                    firstProduct
-                      ? {
-                          targetItemId: firstProduct.target_item_id ?? undefined,
-                          productTypeId: firstProduct.product_type_id ?? undefined,
-                          label: firstProduct.product_name ?? "",
-                        }
-                      : null
-                  );
-                  setEditPlanRun(selectedRunForStages);
-                }} type="button">
-                  <Pencil aria-hidden="true" size={14} />
-                  Editar producto
-                </button>
-              ) : null}
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
