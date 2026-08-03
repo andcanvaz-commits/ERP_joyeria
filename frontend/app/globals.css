@@ -4274,16 +4274,10 @@ textarea:disabled {
   font-size: 14px;
 }
 
-.opColMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.opColMeta strong {
-  font-weight: 800;
+.opGroupRow td {
+  background: var(--surface-muted);
+  font-weight: 700;
+  padding: 3px 6px;
 }
 
 .opTable {

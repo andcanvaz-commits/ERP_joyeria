@@ -3,30 +3,41 @@ import { DocSide, OrdenProduccionModel, formatDocDate, formatGramos } from "@/li
 export type DocMode = "entrega" | "recepcion" | "completo";
 
 const MIN_ROWS = 5;
+const DASH_RESPONSABLE = "—";
+
+type DisplayRow = { gramos: number; unidad: string; detalle: string } | null;
+type DisplayLine =
+  | { kind: "group"; fecha: string | null; responsable: string }
+  | { kind: "row"; row: DisplayRow };
 
 function SideColumn({
-  side,
+  events,
   title,
   dataClass
 }: {
-  side: DocSide;
+  events: DocSide[];
   title: string;
   dataClass: string;
 }) {
-  const rows: (typeof side.rows[number] | null)[] = [...side.rows];
-  while (rows.length < MIN_ROWS) rows.push(null);
+  const lines: DisplayLine[] = [];
+  for (const event of events) {
+    lines.push({ kind: "group", fecha: event.fecha, responsable: event.responsable });
+    for (const row of event.rows) {
+      lines.push({ kind: "row", row });
+    }
+  }
+  const rowCount = lines.filter((line) => line.kind === "row").length;
+  for (let i = rowCount; i < MIN_ROWS; i += 1) {
+    lines.push({ kind: "row", row: null });
+  }
+  if (events.length === 0) {
+    lines.push({ kind: "group", fecha: null, responsable: DASH_RESPONSABLE });
+    for (let i = 0; i < MIN_ROWS; i += 1) lines.push({ kind: "row", row: null });
+  }
 
   return (
     <section className="opCol">
       <div className="opColHead">{title}</div>
-      <div className="opColMeta">
-        <span>
-          Fecha: <strong className={dataClass}>{formatDocDate(side.fecha) || " "}</strong>
-        </span>
-        <span>
-          Responsable Inventario: <strong className={dataClass}>{side.responsable}</strong>
-        </span>
-      </div>
       <table className="opTable">
         <thead>
           <tr>
@@ -36,13 +47,23 @@ function SideColumn({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={index}>
-              <td>{row && index === 0 ? <span className={dataClass}>{formatDocDate(side.fecha)}</span> : " "}</td>
-              <td className="opTdGramos">{row ? <span className={dataClass}>{formatGramos(row.gramos)} {row.unidad}</span> : " "}</td>
-              <td>{row ? <span className={dataClass}>{row.detalle}</span> : " "}</td>
-            </tr>
-          ))}
+          {lines.map((line, index) =>
+            line.kind === "group" ? (
+              <tr className="opGroupRow" key={`group-${index}`}>
+                <td colSpan={3}>
+                  <span className={dataClass}>
+                    {formatDocDate(line.fecha) || " "} · Responsable Inventario: {line.responsable}
+                  </span>
+                </td>
+              </tr>
+            ) : (
+              <tr key={`row-${index}`}>
+                <td> </td>
+                <td className="opTdGramos">{line.row ? <span className={dataClass}>{formatGramos(line.row.gramos)} {line.row.unidad}</span> : " "}</td>
+                <td>{line.row ? <span className={dataClass}>{line.row.detalle}</span> : " "}</td>
+              </tr>
+            )
+          )}
         </tbody>
       </table>
     </section>
@@ -71,9 +92,9 @@ export function OrdenProduccionDoc({
         </div>
 
         <div className="opBody">
-          <SideColumn side={model.entrega} title="ENTREGADO" dataClass="opEntregaData" />
+          <SideColumn events={model.entrega} title="ENTREGADO" dataClass="opEntregaData" />
           <div className="opDivider" aria-hidden="true" />
-          <SideColumn side={model.recepcion} title="RECIBIDO" dataClass="opRecepcionData" />
+          <SideColumn events={model.recepcion} title="RECIBIDO" dataClass="opRecepcionData" />
         </div>
 
         {model.cancelada ? <div className="opStamp opStampCancel">CANCELADO</div> : null}
