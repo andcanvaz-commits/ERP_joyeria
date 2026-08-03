@@ -47,6 +47,8 @@ import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMove
 import type { ProductionRun, ProductionRunStage } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
+import { WorkInProgressRunRow, WorkInProgressTableHead, WORK_IN_PROGRESS_COLUMN_COUNT } from "@/components/shared/work-in-progress-run-row";
+import { runCurrentStage, runCurrentWaste, runCurrentWeight } from "@/lib/production-run-helpers";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
@@ -800,24 +802,6 @@ export function InventoryDashboard() {
     return !item.archived_at && Number(item.current_stock) <= 0;
   }
 
-  // Peso actual de una orden en proceso: ultimo peso final registrado en sus
-  // etapas; si aun no hay, el peso inicial mas reciente; si nada, el material
-  // total entregado a la orden.
-  function runCurrentWeight(run: ProductionRun) {
-    const stages = [...run.stages].sort((left, right) => left.stage_order - right.stage_order);
-    let weight: string | null = null;
-    for (const stage of stages) {
-      if (stage.initial_weight) weight = stage.initial_weight;
-      if (stage.final_weight) weight = stage.final_weight;
-    }
-    return weight ?? run.total_required_material;
-  }
-
-  // Merma acumulada: suma de la merma registrada etapa por etapa.
-  function runCurrentWaste(run: ProductionRun) {
-    return run.stages.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
-  }
-
   // Peso final efectivo de la orden (misma regla que el backend): el pesado
   // real al finalizar o el de la última etapa que pesó; una orden que nunca
   // pesó terminó con su peso inicial (materia prima total).
@@ -836,14 +820,6 @@ export function InventoryDashboard() {
   function runQuantityText(run: ProductionRun) {
     const total = runFinalWeight(run);
     return `${numericText(run.quantity)} unidades${total ? ` · ${numericText(String(total))} g` : ""}`;
-  }
-
-  function runCurrentStage(run: ProductionRun) {
-    return (
-      run.stages.find((stage) => stage.status === "EN_PROCESO") ??
-      run.stages.find((stage) => stage.status === "PENDIENTE") ??
-      null
-    );
   }
 
   function archiveSuggestion(item: InventoryItem) {
@@ -2547,65 +2523,19 @@ export function InventoryDashboard() {
           <div className="tableWrap">
             <table className="table inventoryItemsTable">
               <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Proceso</th>
-                  <th className="num">Cantidad</th>
-                  <th className="num">Peso actual</th>
-                  <th className="num">Merma actual</th>
-                  <th>Etapa actual</th>
-                  <th>Fecha de inicio</th>
-                  <th aria-label="Acciones" />
-                </tr>
+                <WorkInProgressTableHead />
               </thead>
               <tbody>
                 {wipPager.pageItems.map((row) => {
                   if (row.kind === "run" && row.run) {
-                    const run = row.run;
-                    const currentStage = runCurrentStage(run);
-                    const currentWaste = runCurrentWaste(run);
                     return (
-                      <tr key={`run-${run.id}`}>
-                        <td>{run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : "—"}</td>
-                        <td>{run.process_name}</td>
-                        <td className="num">{numericText(run.quantity)} und</td>
-                        <td className="num">{numericText(runCurrentWeight(run))} {run.raw_material_unit_code}</td>
-                        <td className="num">
-                          <button
-                            className="iconTextButton"
-                            onClick={() => setWasteHistoryRun(run)}
-                            title="Ver merma por fase"
-                            type="button"
-                          >
-                            {numericText(String(currentWaste))} {run.raw_material_unit_code}
-                          </button>
-                        </td>
-                        <td>
-                          {currentStage ? (
-                            <button
-                              className="iconTextButton"
-                              onClick={() => setStageInfoRun(run)}
-                              title="Ver quien avanzo a esta etapa"
-                              type="button"
-                            >
-                              {currentStage.stage_name} ({currentStage.stage_order}/{run.stages.length})
-                            </button>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td>
-                          {productionTimeLabel(run.started_at)}
-                          {run.started_by_name ? <><br /><small>Inició: {run.started_by_name}</small></> : null}
-                        </td>
-                        <td>
-                          <div className="rowActions">
-                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingRun(run)} title="Visualizar" type="button">
-                              <Eye aria-hidden="true" size={15} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                      <WorkInProgressRunRow
+                        key={`run-${row.run.id}`}
+                        run={row.run}
+                        onView={setViewingRun}
+                        onWasteHistory={setWasteHistoryRun}
+                        onStageInfo={setStageInfoRun}
+                      />
                     );
                   }
                   if (!row.item) return null;
@@ -2613,6 +2543,7 @@ export function InventoryDashboard() {
                   return (
                     <tr key={item.id}>
                       <td>{item.sku}</td>
+                      <td>—</td>
                       <td>{item.name}</td>
                       <td className="num">{itemStockText(item)}</td>
                       <td className="num">—</td>
@@ -2630,10 +2561,10 @@ export function InventoryDashboard() {
                   );
                 })}
                 {!isLoading && displayItems.length === 0 && inProcessRunsFiltered.length === 0 ? (
-                  <tr><td colSpan={8}><div className="emptyState">{anyAdvancedFilter ? "Sin productos en proceso para los filtros." : "No hay productos en proceso."}</div></td></tr>
+                  <tr><td colSpan={WORK_IN_PROGRESS_COLUMN_COUNT}><div className="emptyState">{anyAdvancedFilter ? "Sin productos en proceso para los filtros." : "No hay productos en proceso."}</div></td></tr>
                 ) : null}
                 {isLoading ? (
-                  <tr><td colSpan={8}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  <tr><td colSpan={WORK_IN_PROGRESS_COLUMN_COUNT}><div className="emptyState">Cargando inventario...</div></td></tr>
                 ) : null}
               </tbody>
             </table>
