@@ -435,6 +435,12 @@ export function InventoryDashboard() {
   const [allocateQuantities, setAllocateQuantities] = useState<Record<string, string>>({});
   const [allocateErrors, setAllocateErrors] = useState<Record<string, string>>({});
   const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
+  // Salida de productos terminados: uno o mas productos, cada uno con su
+  // propia cantidad, elegidos desde el mismo picker que usa el inventario.
+  const [salidaLines, setSalidaLines] = useState<Array<{ item: InventoryItem; quantity: string }>>([]);
+  const [isSalidaFormOpen, setIsSalidaFormOpen] = useState(false);
+  const [isSalidaPickerOpen, setIsSalidaPickerOpen] = useState(false);
+  const [isSavingSalida, setIsSavingSalida] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
   // Borrador de factura XML: se revisa y clasifica cada linea antes de importar.
@@ -1439,10 +1445,51 @@ export function InventoryDashboard() {
   }
 
   function openFinishedProductExit() {
-    const firstFinishedProduct = items.find((item) => item.item_type === "FINISHED_PRODUCT");
-    setMovementForm({ ...emptyMovementForm(), item_id: firstFinishedProduct?.id || "", movement_type: "SALIDA" });
-    setMovementEntryType("FINISHED_PRODUCT");
-    setIsMovementFormOpen(true);
+    setSalidaLines([]);
+    setIsSalidaFormOpen(true);
+  }
+
+  function handleAddSalidaLine(item: InventoryItem) {
+    setSalidaLines((current) => [...current, { item, quantity: "1" }]);
+    setIsSalidaPickerOpen(false);
+  }
+
+  function handleRemoveSalidaLine(itemId: string) {
+    setSalidaLines((current) => current.filter((line) => line.item.id !== itemId));
+  }
+
+  function handleUpdateSalidaQuantity(itemId: string, quantity: string) {
+    setSalidaLines((current) => current.map((line) => (line.item.id === itemId ? { ...line, quantity } : line)));
+  }
+
+  async function handleSubmitSalida() {
+    setError(null);
+    setIsSavingSalida(true);
+    try {
+      for (const line of salidaLines) {
+        await createInventoryMovement({
+          item_id: line.item.id,
+          movement_type: "SALIDA",
+          quantity: line.quantity,
+          unit_cost: null,
+          reason: "Salida de producto terminado",
+          reference_type: null,
+          reference_id: null,
+        });
+      }
+      setSuccess(
+        salidaLines.length === 1
+          ? "Salida registrada correctamente."
+          : `Salida registrada: ${salidaLines.length} productos.`,
+      );
+      setIsSalidaFormOpen(false);
+      setSalidaLines([]);
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo registrar la salida.");
+    } finally {
+      setIsSavingSalida(false);
+    }
   }
 
   function openXmlInvoiceInput() {
@@ -2943,6 +2990,91 @@ export function InventoryDashboard() {
             </div>
           </form>
         </div>
+      ) : null}
+
+      {isSalidaFormOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Registrar salida de productos terminados">
+          <section className="modalWindow processFormWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Registrar salida</h2>
+                <p>Elige uno o más productos terminados y la cantidad de cada uno</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsSalidaFormOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="tableWrap">
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th className="num">Stock</th>
+                    <th className="num">Cantidad a sacar</th>
+                    <th aria-label="Quitar" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {salidaLines.map((line) => (
+                    <tr key={line.item.id}>
+                      <td>
+                        <span className={`orderCodeTag${metalTagClass(line.item.product_code)}`}>#{line.item.product_code}</span>
+                        {(line.item.description ?? "").trim() || line.item.name}
+                      </td>
+                      <td className="num">{numericText(line.item.current_stock)} {line.item.unit_code}</td>
+                      <td className="num">
+                        <input
+                          className="field"
+                          max={Number(line.item.current_stock)}
+                          min="0.0001"
+                          onChange={(event) => handleUpdateSalidaQuantity(line.item.id, event.target.value)}
+                          step="0.0001"
+                          style={{ width: 100 }}
+                          type="number"
+                          value={line.quantity}
+                        />
+                      </td>
+                      <td>
+                        <button aria-label="Quitar" className="iconOnlyButton" onClick={() => handleRemoveSalidaLine(line.item.id)} type="button">
+                          <X aria-hidden="true" size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {salidaLines.length === 0 ? (
+                    <tr><td colSpan={4}><div className="emptyState">Agrega al menos un producto.</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <div className="modalActions">
+              <button className="button" onClick={() => setIsSalidaPickerOpen(true)} type="button">
+                <Plus aria-hidden="true" size={14} />
+                Agregar producto
+              </button>
+              <button
+                className="button buttonPrimary"
+                disabled={isSavingSalida || salidaLines.length === 0}
+                onClick={() => void handleSubmitSalida()}
+                type="button"
+              >
+                <Save aria-hidden="true" size={17} />
+                {isSavingSalida ? "Guardando" : "Registrar salida"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isSalidaPickerOpen ? (
+        <FinishedItemPicker
+          title="Agregar producto a la salida"
+          items={items}
+          excludeIds={salidaLines.map((line) => line.item.id)}
+          requireStock
+          onSelect={handleAddSalidaLine}
+          onClose={() => setIsSalidaPickerOpen(false)}
+        />
       ) : null}
 
       {allocateRuns.length > 0 ? (
