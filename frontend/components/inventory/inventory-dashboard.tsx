@@ -163,6 +163,58 @@ function movementOperationLabel(movement: { movement_type: InventoryMovementType
   return movementTypeLabel(movement.movement_type);
 }
 
+export type MovementDisplayEntry =
+  | { kind: "movement"; movement: InventoryMovement; movements: null; run: null; lotCode?: undefined; at: number }
+  | { kind: "movement-group"; movement: null; movements: InventoryMovement[]; run: null; lotCode: string; at: number }
+  | { kind: "rejection"; movement: null; movements: null; run: ProductionRun; at: number };
+
+// Agrupa movimientos por lote/orden (lot_code): una orden dividida en varias
+// partes queda en un solo renglon con ventana propia para ver cada
+// movimiento; sin lote o con un solo movimiento, se ve igual que antes.
+// Reutilizado por el panel "Movimientos" y el modal "Historial".
+function groupMovementEntries(movements: InventoryMovement[], rejections: ProductionRun[] = []): MovementDisplayEntry[] {
+  const byLotCode = new Map<string, InventoryMovement[]>();
+  const ungrouped: InventoryMovement[] = [];
+  for (const movement of movements) {
+    if (movement.lot_code) {
+      const list = byLotCode.get(movement.lot_code);
+      if (list) list.push(movement);
+      else byLotCode.set(movement.lot_code, [movement]);
+    } else {
+      ungrouped.push(movement);
+    }
+  }
+  const moves: MovementDisplayEntry[] = ungrouped.map((movement) => ({
+    kind: "movement",
+    movement,
+    movements: null,
+    run: null,
+    at: new Date(movement.created_at).getTime(),
+  }));
+  const groups: MovementDisplayEntry[] = Array.from(byLotCode.entries()).flatMap(([lotCode, list]): MovementDisplayEntry[] => {
+    const sorted = [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (sorted.length === 1) {
+      return [{ kind: "movement", movement: sorted[0], movements: null, run: null, at: new Date(sorted[0].created_at).getTime() }];
+    }
+    return [{
+      kind: "movement-group",
+      movement: null,
+      movements: sorted,
+      run: null,
+      lotCode,
+      at: new Date(sorted[0].created_at).getTime(),
+    }];
+  });
+  const rejectionEntries: MovementDisplayEntry[] = rejections.map((run) => ({
+    kind: "rejection",
+    movement: null,
+    movements: null,
+    run,
+    at: new Date(run.rejected_at ?? "").getTime(),
+  }));
+  return [...moves, ...groups, ...rejectionEntries].sort((left, right) => right.at - left.at);
+}
+
 // Stock de un item con su equivalencia: gramos ↔ unidades cuando el item
 // tiene peso por unidad; su unidad base cuando no. Formato único para todo
 // el sistema ("40 g · 4 und").
@@ -435,6 +487,8 @@ export function InventoryDashboard() {
   const [allocateQuantities, setAllocateQuantities] = useState<Record<string, string>>({});
   const [allocateErrors, setAllocateErrors] = useState<Record<string, string>>({});
   const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
+  // Ventana con los movimientos individuales de un mismo lote/orden.
+  const [movementGroupWindow, setMovementGroupWindow] = useState<{ lotCode: string; movements: InventoryMovement[] } | null>(null);
   // Ventana con las demas partes de una orden dividida.
   const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   // Salida de productos terminados: uno o mas productos, cada uno con su
@@ -868,12 +922,9 @@ export function InventoryDashboard() {
   const selectedDateEntries = useMemo(() => {
     const moves = sortedMovements
       .filter((movement) => movement.movement_type !== "CONVERSION_SALIDA")
-      .filter((movement) => movementDateKey(movement) === selectedHistoryDate)
-      .map((movement) => ({ kind: "movement" as const, movement, run: null, at: new Date(movement.created_at).getTime() }));
-    const rejections = rejectedRuns
-      .filter((run) => rejectionDateKey(run) === selectedHistoryDate)
-      .map((run) => ({ kind: "rejection" as const, movement: null, run, at: new Date(run.rejected_at ?? "").getTime() }));
-    return [...moves, ...rejections].sort((left, right) => right.at - left.at);
+      .filter((movement) => movementDateKey(movement) === selectedHistoryDate);
+    const rejections = rejectedRuns.filter((run) => rejectionDateKey(run) === selectedHistoryDate);
+    return groupMovementEntries(moves, rejections);
   }, [selectedHistoryDate, sortedMovements, rejectedRuns]);
   const calendarDays = useMemo(() => buildCalendarDays(historyMonth), [historyMonth]);
   const historyMonthLabel = useMemo(() => {
@@ -1376,21 +1427,8 @@ export function InventoryDashboard() {
     // Conversión/ensamble = una operación: se muestra solo la ENTRADA (su
     // detalle ya cuenta la salida); el asiento de salida vive en el kardex
     // del item de origen.
-    const moves = sortedMovements
-      .filter((movement) => movement.movement_type !== "CONVERSION_SALIDA")
-      .map((movement) => ({
-        kind: "movement" as const,
-        movement,
-        run: null,
-        at: new Date(movement.created_at).getTime(),
-      }));
-    const rejections = rejectedRuns.map((run) => ({
-      kind: "rejection" as const,
-      movement: null,
-      run,
-      at: new Date(run.rejected_at ?? "").getTime(),
-    }));
-    return [...moves, ...rejections].sort((left, right) => right.at - left.at);
+    const visibleMovements = sortedMovements.filter((movement) => movement.movement_type !== "CONVERSION_SALIDA");
+    return groupMovementEntries(visibleMovements, rejectedRuns);
   }, [sortedMovements, rejectedRuns]);
   const movementsPager = usePagination(movementPanelEntries, MOVEMENTS_PAGE_SIZE);
   const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, kardexItem?.id ?? "");
@@ -1405,16 +1443,7 @@ export function InventoryDashboard() {
   );
   // Historial por calendario: 4 por página (el panel de movimientos sigue en 3).
   const historyDayPager = usePagination(selectedDateEntries, 4, selectedHistoryDate);
-  const historySearchEntries = useMemo(
-    () =>
-      historySearchResults.map((movement) => ({
-        kind: "movement" as const,
-        movement,
-        run: null,
-        at: new Date(movement.created_at).getTime(),
-      })),
-    [historySearchResults],
-  );
+  const historySearchEntries = useMemo(() => groupMovementEntries(historySearchResults), [historySearchResults]);
   const historyResultsPager = usePagination(historySearchEntries, 4, historySearch);
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
@@ -2651,6 +2680,36 @@ export function InventoryDashboard() {
           </div>
           <div className="movementList">
             {movementsPager.pageItems.map((entry) => {
+              if (entry.kind === "movement-group" && entry.movements) {
+                const groupMovements = entry.movements;
+                const first = groupMovements[0];
+                const totalLabel = `${groupMovements.length} movimientos`;
+                return (
+                  <article
+                    className="movementRow"
+                    key={`group-${entry.lotCode}`}
+                    {...openableProps(
+                      () => setMovementGroupWindow({ lotCode: entry.lotCode, movements: groupMovements }),
+                      `Ver movimientos de ${entry.lotCode}`,
+                    )}
+                  >
+                    <div>
+                      <strong>Movimientos de la orden</strong>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{entry.lotCode}</span>
+                      <span>{movementDateLabel(first.created_at)} - {totalLabel}</span>
+                    </div>
+                    <div>
+                      <span>{movementTimeLabel(first.created_at)}</span>
+                    </div>
+                    <span className="rowActions" onClick={stopClick}>
+                      <button className="iconTextButton" onClick={() => setMovementGroupWindow({ lotCode: entry.lotCode, movements: groupMovements })} type="button">
+                        <Eye aria-hidden="true" size={15} />
+                        Ver todos
+                      </button>
+                    </span>
+                  </article>
+                );
+              }
               if (entry.kind === "rejection" && entry.run) {
                 const run = entry.run;
                 return (
@@ -2794,6 +2853,36 @@ export function InventoryDashboard() {
                 </div>
                 <div className="movementList movementHistoryEntries pagedListFloor">
                   {(historySearchActive ? historyResultsPager : historyDayPager).pageItems.map((entry) => {
+                    if (entry.kind === "movement-group" && entry.movements) {
+                      const groupMovements = entry.movements;
+                      const first = groupMovements[0];
+                      return (
+                        <article
+                          className="movementRow"
+                          key={`group-${entry.lotCode}`}
+                          {...openableProps(
+                            () => setMovementGroupWindow({ lotCode: entry.lotCode, movements: groupMovements }),
+                            `Ver movimientos de ${entry.lotCode}`,
+                          )}
+                        >
+                          <div>
+                            <strong>Movimientos de la orden</strong>
+                            <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{entry.lotCode}</span>
+                            <span>
+                              {historySearchActive ? `${movementDateLabel(first.created_at)} · ` : ""}
+                              {movementTimeLabel(first.created_at)} - {groupMovements.length} movimientos
+                            </span>
+                          </div>
+                          <div />
+                          <span className="rowActions" onClick={stopClick}>
+                            <button className="iconTextButton" onClick={() => setMovementGroupWindow({ lotCode: entry.lotCode, movements: groupMovements })} type="button">
+                              <Eye aria-hidden="true" size={15} />
+                              Ver todos
+                            </button>
+                          </span>
+                        </article>
+                      );
+                    }
                     if (entry.kind === "rejection" && entry.run) {
                       const run = entry.run;
                       return (
@@ -3227,6 +3316,59 @@ export function InventoryDashboard() {
                           onClick={() => {
                             setFamilyRuns(null);
                             setViewingRun(familyRun);
+                          }}
+                          title="Visualizar"
+                          type="button"
+                        >
+                          <Eye aria-hidden="true" size={15} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {movementGroupWindow ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Movimientos de la orden">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Movimientos de {movementGroupWindow.lotCode}</h2>
+                <p>{movementGroupWindow.movements.length} movimientos de esta orden</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMovementGroupWindow(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="tableWrap">
+              <table className="table tableAuto">
+                <thead>
+                  <tr>
+                    <th>Operación</th>
+                    <th>Item</th>
+                    <th className="num">Cantidad</th>
+                    <th>Fecha</th>
+                    <th aria-label="Accion" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {movementGroupWindow.movements.map((movement) => (
+                    <tr key={movement.id}>
+                      <td>{movementOperationLabel(movement)}</td>
+                      <td>{movement.item.name}</td>
+                      <td className="num">{movementAmountText(movement)}</td>
+                      <td>{movementDateLabel(movement.created_at)} {movementTimeLabel(movement.created_at)}</td>
+                      <td>
+                        <button
+                          aria-label="Visualizar"
+                          className="iconOnlyButton"
+                          onClick={() => {
+                            setMovementGroupWindow(null);
+                            setViewingMovement(movement);
                           }}
                           title="Visualizar"
                           type="button"

@@ -487,7 +487,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
   const finishedRuns = runs.filter((run) => run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA");
   const waitingMaterialRuns = runs.filter((run) => run.status === "ESPERANDO_MATERIAL");
-  const recentFinishedRuns = finishedRuns.slice(0, 3);
+  // Igual que "En proceso": una orden dividida cuenta una sola vez entre las
+  // recientes, con boton para ver las demas partes en ventana.
+  const recentFinishedFamilies = Array.from(groupRunFamilies(finishedRuns).entries()).slice(0, 3);
   const receivedRuns = runs
     .filter((run) => run.status === "RECIBIDA")
     .sort((a, b) => (b.received_at ?? "").localeCompare(a.received_at ?? ""));
@@ -1971,36 +1973,57 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 Historial
               </button>
             </div>
-            {recentFinishedRuns.length > 0 ? (
+            {recentFinishedFamilies.length > 0 ? (
               <div className="readyToStartList">
-                {recentFinishedRuns.map((run) => (
-                  <div className="readyToStartRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
-                    <div className="readyToStartInfo">
-                      <strong>
-                        {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                        {rootBadge(run)}
-                        {run.process_name}
-                      </strong>
-                      <span>{numericText(run.quantity)} unidades · Merma: {numericText(run.waste_percent)}% · Finalizado: {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}</span>
+                {recentFinishedFamilies.map(([key, family]) => {
+                  const root = family.find((r) => !r.parent_run_id) ?? family[0];
+                  const otherParts = family.filter((r) => r.id !== root.id);
+                  const isSplit = otherParts.length > 0;
+                  const primaryAction = () => (isSplit ? setFamilyRuns(family) : openStatsModal(root));
+                  return (
+                    <div className="readyToStartRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Ver resumen de"} ${root.process_name}`)}>
+                      <div className="readyToStartInfo">
+                        <strong>
+                          {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : null}
+                          {isSplit ? (
+                            <button className="rootBadgeTag" onClick={(event) => { event.stopPropagation(); setFamilyRuns(family); }} style={{ cursor: "pointer", border: "none" }} type="button">
+                              +{otherParts.length} partes
+                            </button>
+                          ) : (
+                            rootBadge(root)
+                          )}
+                          {root.process_name}
+                        </strong>
+                        <span>{numericText(root.quantity)} unidades · Merma: {numericText(root.waste_percent)}% · Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
+                        {isSplit ? (
+                          <button className="iconTextButton" onClick={() => setFamilyRuns(family)} type="button">
+                            <Eye aria-hidden="true" size={14} />
+                            Ver partes
+                          </button>
+                        ) : (
+                          <>
+                            {root.assembly_pending ? (
+                              <button
+                                className="button buttonPrimary"
+                                onClick={() => openAssemblyModal(root)}
+                                type="button"
+                              >
+                                <Puzzle aria-hidden="true" size={14} />
+                                Definir ensamble
+                              </button>
+                            ) : null}
+                            <button className="iconTextButton" onClick={() => openStatsModal(root)} type="button">
+                              <Eye aria-hidden="true" size={14} />
+                              Visualizar
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
-                      {run.assembly_pending ? (
-                        <button
-                          className="button buttonPrimary"
-                          onClick={() => openAssemblyModal(run)}
-                          type="button"
-                        >
-                          <Puzzle aria-hidden="true" size={14} />
-                          Definir ensamble
-                        </button>
-                      ) : null}
-                      <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
-                        <Eye aria-hidden="true" size={14} />
-                        Visualizar
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="emptyState">No hay historial disponible.</div>
