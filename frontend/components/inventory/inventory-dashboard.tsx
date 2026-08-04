@@ -3474,15 +3474,17 @@ export function InventoryDashboard() {
                       : `${parts.length} partes · ${movementGroupWindow.movements.length} movimientos en total`}
                   </p>
                 </div>
-                {selectedPart ? (
-                  <button className="button" onClick={() => setSelectedPartCode(null)} type="button">
-                    <ChevronLeft aria-hidden="true" size={16} />
-                    Volver
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  {selectedPart ? (
+                    <button className="button" onClick={() => setSelectedPartCode(null)} type="button">
+                      <ChevronLeft aria-hidden="true" size={16} />
+                      Volver
+                    </button>
+                  ) : null}
+                  <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMovementGroupWindow(null)} type="button">
+                    <X aria-hidden="true" size={18} />
                   </button>
-                ) : null}
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMovementGroupWindow(null)} type="button">
-                  <X aria-hidden="true" size={18} />
-                </button>
+                </div>
               </div>
               <div className="tableWrap">
                 {selectedPart ? (
