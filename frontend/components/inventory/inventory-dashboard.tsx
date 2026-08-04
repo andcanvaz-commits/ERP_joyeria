@@ -497,6 +497,12 @@ export function InventoryDashboard() {
   const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
   // Ventana con los movimientos individuales de un mismo lote/orden.
   const [movementGroupWindow, setMovementGroupWindow] = useState<{ lotCode: string; movements: InventoryMovement[] } | null>(null);
+  // Dentro de la ventana de movimientos de la orden: null = resumen por
+  // parte; con valor = se entro a ver los movimientos de esa parte puntual.
+  const [selectedPartCode, setSelectedPartCode] = useState<string | null>(null);
+  useEffect(() => {
+    setSelectedPartCode(null);
+  }, [movementGroupWindow?.lotCode]);
   // Ventana con las demas partes de una orden dividida.
   const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   // Ventana de partes para "Procesos terminados" (cada parte es su propio
@@ -3441,79 +3447,105 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
-      {movementGroupWindow ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Movimientos de la orden">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Movimientos de {movementGroupWindow.lotCode}</h2>
-                <p>{movementGroupWindow.movements.length} movimientos de esta orden</p>
+      {movementGroupWindow ? (() => {
+        // Especifica de que parte (folio propio) es cada movimiento: un
+        // resumen por parte, mas reciente primero. Solo al entrar a una
+        // parte se ven sus movimientos uno por uno.
+        const byPart = new Map<string, InventoryMovement[]>();
+        for (const movement of movementGroupWindow.movements) {
+          const partCode = movement.lot_code ?? "Sin folio";
+          const list = byPart.get(partCode);
+          if (list) list.push(movement);
+          else byPart.set(partCode, [movement]);
+        }
+        const parts = Array.from(byPart.entries()).sort(
+          ([, a], [, b]) => new Date(b[0].created_at).getTime() - new Date(a[0].created_at).getTime(),
+        );
+        const selectedPart = selectedPartCode ? parts.find(([code]) => code === selectedPartCode) : null;
+        return (
+          <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Movimientos de la orden">
+            <section className="modalWindow processViewWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>{selectedPart ? selectedPart[0] : `Movimientos de ${movementGroupWindow.lotCode}`}</h2>
+                  <p>
+                    {selectedPart
+                      ? `${selectedPart[1].length} movimientos de esta parte`
+                      : `${parts.length} partes · ${movementGroupWindow.movements.length} movimientos en total`}
+                  </p>
+                </div>
+                {selectedPart ? (
+                  <button className="button" onClick={() => setSelectedPartCode(null)} type="button">
+                    <ChevronLeft aria-hidden="true" size={16} />
+                    Volver
+                  </button>
+                ) : null}
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMovementGroupWindow(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setMovementGroupWindow(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div className="tableWrap">
-              <table className="table tableAuto">
-                <thead>
-                  <tr>
-                    <th>Operación</th>
-                    <th>Item</th>
-                    <th className="num">Cantidad</th>
-                    <th>Fecha</th>
-                    <th aria-label="Accion" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    // Especifica de que parte (folio propio) es cada
-                    // movimiento: un encabezado por parte, mas reciente primero.
-                    const byPart = new Map<string, InventoryMovement[]>();
-                    for (const movement of movementGroupWindow.movements) {
-                      const partCode = movement.lot_code ?? "Sin folio";
-                      const list = byPart.get(partCode);
-                      if (list) list.push(movement);
-                      else byPart.set(partCode, [movement]);
-                    }
-                    const parts = Array.from(byPart.entries()).sort(
-                      ([, a], [, b]) => new Date(b[0].created_at).getTime() - new Date(a[0].created_at).getTime(),
-                    );
-                    return parts.map(([partCode, partMovements]) => (
-                      <Fragment key={partCode}>
-                        <tr className="movementGroupHeaderRow">
-                          <td colSpan={5}>{partCode}</td>
+              <div className="tableWrap">
+                {selectedPart ? (
+                  <table className="table tableAuto">
+                    <thead>
+                      <tr>
+                        <th>Operación</th>
+                        <th>Item</th>
+                        <th className="num">Cantidad</th>
+                        <th>Fecha</th>
+                        <th aria-label="Accion" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedPart[1].map((movement) => (
+                        <tr key={movement.id}>
+                          <td>{movementOperationLabel(movement)}</td>
+                          <td>{movement.item.name}</td>
+                          <td className="num">{movementAmountText(movement)}</td>
+                          <td>{movementDateLabel(movement.created_at)} {movementTimeLabel(movement.created_at)}</td>
+                          <td>
+                            <button
+                              aria-label="Visualizar"
+                              className="iconOnlyButton"
+                              onClick={() => {
+                                setMovementGroupWindow(null);
+                                setViewingMovement(movement);
+                              }}
+                              title="Visualizar"
+                              type="button"
+                            >
+                              <Eye aria-hidden="true" size={15} />
+                            </button>
+                          </td>
                         </tr>
-                        {partMovements.map((movement) => (
-                          <tr key={movement.id}>
-                            <td>{movementOperationLabel(movement)}</td>
-                            <td>{movement.item.name}</td>
-                            <td className="num">{movementAmountText(movement)}</td>
-                            <td>{movementDateLabel(movement.created_at)} {movementTimeLabel(movement.created_at)}</td>
-                            <td>
-                              <button
-                                aria-label="Visualizar"
-                                className="iconOnlyButton"
-                                onClick={() => {
-                                  setMovementGroupWindow(null);
-                                  setViewingMovement(movement);
-                                }}
-                                title="Visualizar"
-                                type="button"
-                              >
-                                <Eye aria-hidden="true" size={15} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </Fragment>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-      ) : null}
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="table tableAuto">
+                    <thead>
+                      <tr>
+                        <th>Parte</th>
+                        <th className="num">Movimientos</th>
+                        <th aria-label="Accion" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parts.map(([partCode, partMovements]) => (
+                        <tr key={partCode} onClick={() => setSelectedPartCode(partCode)} style={{ cursor: "pointer" }}>
+                          <td>{partCode}</td>
+                          <td className="num">{partMovements.length}</td>
+                          <td style={{ textAlign: "right" }}><ChevronRight aria-hidden="true" size={15} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
 
       {isComplementPickerOpen ? (
         <ComplementPicker
