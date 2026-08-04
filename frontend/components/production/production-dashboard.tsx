@@ -738,6 +738,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   function openRunStagesModal(run: ProductionRun) {
+    // Cierra la ventana de partes si se abrio desde ahi: al terminar de
+    // gestionar y cerrar el resumen, debe volver al panel principal, no
+    // quedar la ventana de partes atras.
+    setFamilyRuns(null);
     setSelectedRunForStages(run);
     const activeIndex = run.stages.findIndex((s) => s.status !== "FINALIZADA");
     setStageModalIndex(activeIndex >= 0 ? activeIndex : 0);
@@ -753,6 +757,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   function openStatsModal(run: ProductionRun) {
+    // Mismo motivo que openRunStagesModal: no dejar la ventana de partes atras.
+    setFamilyRuns(null);
     setSelectedStatsRun(run);
     setShowResponsables(false);
     setIsStatsModalOpen(true);
