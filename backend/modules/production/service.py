@@ -720,7 +720,7 @@ class ProductionService:
                 quantity=run.total_required_material,
                 production_run_id=run.id,
                 user_id=current_user.id,
-                production_code=run.production_code,
+                production_code=run.root_production_code or run.production_code,
             )
         except InventoryDomainError as exc:
             raise ProductionDomainError(str(exc)) from exc
@@ -743,7 +743,7 @@ class ProductionService:
                             quantity=ingredient.quantity,
                             production_run_id=run.id,
                             user_id=current_user.id,
-                            production_code=run.production_code,
+                            production_code=run.root_production_code or run.production_code,
                             reason=f"Consumo de insumo en etapa {stage.stage_order}. {stage.name}.",
                         )
                     except InventoryDomainError as exc:
@@ -764,7 +764,7 @@ class ProductionService:
                     quantity=complement.quantity,
                     production_run_id=run.id,
                     user_id=current_user.id,
-                    production_code=run.production_code,
+                    production_code=run.root_production_code or run.production_code,
                     reason=f"Complemento para ensamble: {item_name}.",
                 )
             except InventoryDomainError as exc:
