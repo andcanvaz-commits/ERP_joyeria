@@ -168,18 +168,26 @@ export type MovementDisplayEntry =
   | { kind: "movement-group"; movement: null; movements: InventoryMovement[]; run: null; lotCode: string; at: number }
   | { kind: "rejection"; movement: null; movements: null; run: ProductionRun; at: number };
 
-// Agrupa movimientos por lote/orden (lot_code): una orden dividida en varias
+// Agrupa movimientos por folio raiz de la orden: una orden dividida en varias
 // partes queda en un solo renglon con ventana propia para ver cada
 // movimiento; sin lote o con un solo movimiento, se ve igual que antes.
+// `rootCodeByCode` resuelve el lot_code de cada movimiento (que puede ser el
+// folio de una parte, ej. "OP-2026-0001-B") a su folio raiz — movimientos
+// viejos guardaron el folio de la parte, no el de la orden completa.
 // Reutilizado por el panel "Movimientos" y el modal "Historial".
-function groupMovementEntries(movements: InventoryMovement[], rejections: ProductionRun[] = []): MovementDisplayEntry[] {
+function groupMovementEntries(
+  movements: InventoryMovement[],
+  rejections: ProductionRun[] = [],
+  rootCodeByCode: Map<string, string> = new Map(),
+): MovementDisplayEntry[] {
   const byLotCode = new Map<string, InventoryMovement[]>();
   const ungrouped: InventoryMovement[] = [];
   for (const movement of movements) {
     if (movement.lot_code) {
-      const list = byLotCode.get(movement.lot_code);
+      const rootCode = rootCodeByCode.get(movement.lot_code) ?? movement.lot_code;
+      const list = byLotCode.get(rootCode);
       if (list) list.push(movement);
-      else byLotCode.set(movement.lot_code, [movement]);
+      else byLotCode.set(rootCode, [movement]);
     } else {
       ungrouped.push(movement);
     }
@@ -642,6 +650,17 @@ export function InventoryDashboard() {
   const movements = data?.movements ?? [];
   const users = data?.users ?? [];
   const productionRuns = data?.runs ?? [];
+  // Folio de cualquier corrida -> folio raiz de su orden. Movimientos viejos
+  // guardaron el folio de la parte especifica, no el de la orden completa.
+  const rootCodeByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const run of productionRuns) {
+      if (run.production_code) {
+        map.set(run.production_code, run.root_production_code || run.production_code);
+      }
+    }
+    return map;
+  }, [productionRuns]);
   const isLoading = !currentUser || isBundleLoading;
 
   useEffect(() => {
@@ -927,8 +946,8 @@ export function InventoryDashboard() {
       .filter((movement) => movement.movement_type !== "CONVERSION_SALIDA")
       .filter((movement) => movementDateKey(movement) === selectedHistoryDate);
     const rejections = rejectedRuns.filter((run) => rejectionDateKey(run) === selectedHistoryDate);
-    return groupMovementEntries(moves, rejections);
-  }, [selectedHistoryDate, sortedMovements, rejectedRuns]);
+    return groupMovementEntries(moves, rejections, rootCodeByCode);
+  }, [selectedHistoryDate, sortedMovements, rejectedRuns, rootCodeByCode]);
   const calendarDays = useMemo(() => buildCalendarDays(historyMonth), [historyMonth]);
   const historyMonthLabel = useMemo(() => {
     const [year, month] = historyMonth.split("-").map(Number);
@@ -1519,8 +1538,8 @@ export function InventoryDashboard() {
     // detalle ya cuenta la salida); el asiento de salida vive en el kardex
     // del item de origen.
     const visibleMovements = sortedMovements.filter((movement) => movement.movement_type !== "CONVERSION_SALIDA");
-    return groupMovementEntries(visibleMovements, rejectedRuns);
-  }, [sortedMovements, rejectedRuns]);
+    return groupMovementEntries(visibleMovements, rejectedRuns, rootCodeByCode);
+  }, [sortedMovements, rejectedRuns, rootCodeByCode]);
   const movementsPager = usePagination(movementPanelEntries, MOVEMENTS_PAGE_SIZE);
   const kardexPager = usePagination(viewingItemKardex, MOVEMENTS_PAGE_SIZE, kardexItem?.id ?? "");
   // Archivados: 5 por página dentro del modal; vuelve a la primera al abrir.
@@ -1534,7 +1553,10 @@ export function InventoryDashboard() {
   );
   // Historial por calendario: 4 por página (el panel de movimientos sigue en 3).
   const historyDayPager = usePagination(selectedDateEntries, 4, selectedHistoryDate);
-  const historySearchEntries = useMemo(() => groupMovementEntries(historySearchResults), [historySearchResults]);
+  const historySearchEntries = useMemo(
+    () => groupMovementEntries(historySearchResults, [], rootCodeByCode),
+    [historySearchResults, rootCodeByCode],
+  );
   const historyResultsPager = usePagination(historySearchEntries, 4, historySearch);
 
   const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
