@@ -491,6 +491,9 @@ export function InventoryDashboard() {
   const [movementGroupWindow, setMovementGroupWindow] = useState<{ lotCode: string; movements: InventoryMovement[] } | null>(null);
   // Ventana con las demas partes de una orden dividida.
   const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
+  // Ventana de partes para "Procesos terminados" (cada parte es su propio
+  // lote real, la fila completa se reutiliza dentro de la ventana).
+  const [receivedFamilyRuns, setReceivedFamilyRuns] = useState<ProductionRun[] | null>(null);
   // Salida de productos terminados: uno o mas productos, cada uno con su
   // propia cantidad, elegidos desde el mismo picker que usa el inventario.
   const [salidaLines, setSalidaLines] = useState<Array<{ item: InventoryItem; quantity: string }>>([]);
@@ -1408,7 +1411,95 @@ export function InventoryDashboard() {
     return (complementDrilledGroup?.items ?? []).map((item) => ({ item }));
   }, [searchActive, displayItems, complementDrilledGroup]);
   const complementItemsPager = usePagination(complementItemRows, TAB_PAGE_SIZE, `${complementDrillGroup ?? ""}|${search}`);
-  const receivedRunsPager = usePagination(receivedRunsFiltered, TAB_PAGE_SIZE, filterKey);
+  // Igual que las demas listas: una orden dividida cuenta una sola vez, con
+  // boton para ver las demas partes en ventana (cada parte es su propio
+  // lote real, con su propio stock/acciones, por eso la ventana reutiliza
+  // la misma fila completa en vez de un resumen simple).
+  const receivedRunFamilies = Array.from(groupRunFamilies(receivedRunsFiltered).entries());
+  const receivedRunsPager = usePagination(receivedRunFamilies, TAB_PAGE_SIZE, filterKey);
+
+  // Fila completa de "Procesos terminados": cada corrida recibida es su
+  // propio lote real (stock, merma, conversion al catalogo), por eso se
+  // reutiliza igual en la tabla principal y dentro de la ventana de partes.
+  function renderReceivedRow(run: ProductionRun) {
+    const finalWaste = run.waste_weight ? Number(run.waste_weight) : runCurrentWaste(run);
+    const lotItem = items.find((item) => item.sku === run.production_code) ?? null;
+    const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
+    return (
+      <tr key={run.id}>
+        <td>{run.production_code ?? "—"}</td>
+        <td>{run.process_name}</td>
+        {/* Stock ACTUAL del lote (baja con cada conversión):
+            unidades restantes y su peso equivalente (restante ×
+            gramos por unidad del peso final de la orden). */}
+        <td className="num">{(() => {
+          const units = lotItem ? lotStock : Number(run.quantity);
+          const total = runFinalWeight(run);
+          const perUnit = total && Number(run.quantity) > 0 ? total / Number(run.quantity) : null;
+          const grams = perUnit !== null ? Number((units * perUnit).toFixed(2)) : null;
+          return `${numericText(String(units))} und${grams !== null ? ` · ${numericText(String(grams))} g` : ""}`;
+        })()}</td>
+        <td className="num">
+          <button
+            className="iconTextButton"
+            onClick={() => setWasteHistoryRun(run)}
+            title="Ver historial de merma por fase"
+            type="button"
+          >
+            {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
+            {run.waste_percent ? ` · ${numericText(run.waste_percent)}%` : ""}
+          </button>
+        </td>
+        <td>
+          <button
+            className="iconTextButton"
+            onClick={() => setReceptionInfoRun(run)}
+            title="Ver quien recibio esta orden"
+            type="button"
+          >
+            {run.received_at ? new Date(run.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+          </button>
+        </td>
+        <td>
+          <div className="rowActions">
+            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingRun(run)} title="Visualizar" type="button">
+              <Eye aria-hidden="true" size={15} />
+            </button>
+            <button
+              aria-label="Agregar al catálogo o combinar"
+              className="iconOnlyButton"
+              disabled={!lotItem || lotStock <= 0}
+              onClick={() => {
+                // Material de la pieza: automático del lote; si el
+                // lote no lo trae (lotes viejos), sale de la materia
+                // prima de la orden de producción.
+                const rawMaterial = items.find((candidate) => candidate.id === run.raw_material_item_id) ?? null;
+                const lotMaterial =
+                  lotItem?.material_type?.trim() ||
+                  rawMaterial?.material_type?.trim() ||
+                  rawMaterial?.name ||
+                  "";
+                setConvertForm({
+                  material_code: matchMaterialSegment(lotMaterial)?.code ?? "",
+                  material_type: lotMaterial,
+                  product_type_id: "",
+                  target_item_id: "",
+                  quantity: "",
+                });
+                setLotAction(null);
+                setMaterialEditFor(null);
+                setConvertRun(run);
+              }}
+              title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Agregar al catálogo o combinar"}
+              type="button"
+            >
+              <Repeat aria-hidden="true" size={15} />
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
   // Agrupa por familia: una orden dividida se colapsa en su raiz; las demas
   // partes se ven en la ventana que abre el boton "+N partes".
   const wipRunEntries = Array.from(groupRunFamilies(inProcessRunsFiltered).entries()).map(([, family]) => {
@@ -2518,86 +2609,49 @@ export function InventoryDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {receivedRunsPager.pageItems.map((run) => {
-                    const finalWaste = run.waste_weight ? Number(run.waste_weight) : runCurrentWaste(run);
-                    const lotItem = items.find((item) => item.sku === run.production_code) ?? null;
+                  {receivedRunsPager.pageItems.map(([key, family]) => {
+                    const root = family.find((r) => !r.parent_run_id) ?? family[0];
+                    const otherParts = family.filter((r) => r.id !== root.id);
+                    if (otherParts.length === 0) {
+                      return renderReceivedRow(root);
+                    }
+                    // Familia con partes recibidas por separado: fila raiz
+                    // colapsada, "+N partes" abre la ventana con cada lote.
+                    const finalWaste = root.waste_weight ? Number(root.waste_weight) : runCurrentWaste(root);
+                    const lotItem = items.find((item) => item.sku === root.production_code) ?? null;
                     const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
                     return (
-                    <tr key={run.id}>
-                      <td>{run.production_code ?? "—"}</td>
-                      <td>{run.process_name}</td>
-                      {/* Stock ACTUAL del lote (baja con cada conversión):
-                          unidades restantes y su peso equivalente (restante ×
-                          gramos por unidad del peso final de la orden). */}
-                      <td className="num">{(() => {
-                        const units = lotItem ? lotStock : Number(run.quantity);
-                        const total = runFinalWeight(run);
-                        const perUnit = total && Number(run.quantity) > 0 ? total / Number(run.quantity) : null;
-                        const grams = perUnit !== null ? Number((units * perUnit).toFixed(2)) : null;
-                        return `${numericText(String(units))} und${grams !== null ? ` · ${numericText(String(grams))} g` : ""}`;
-                      })()}</td>
-                      <td className="num">
-                        <button
-                          className="iconTextButton"
-                          onClick={() => setWasteHistoryRun(run)}
-                          title="Ver historial de merma por fase"
-                          type="button"
-                        >
+                      <tr key={key}>
+                        <td>
+                          {root.production_code ?? "—"}
+                          <button className="rootBadgeTag" onClick={() => setReceivedFamilyRuns(family)} style={{ cursor: "pointer", border: "none" }} type="button">
+                            +{otherParts.length} partes
+                          </button>
+                        </td>
+                        <td>{root.process_name}</td>
+                        <td className="num">{(() => {
+                          const units = lotItem ? lotStock : Number(root.quantity);
+                          const total = runFinalWeight(root);
+                          const perUnit = total && Number(root.quantity) > 0 ? total / Number(root.quantity) : null;
+                          const grams = perUnit !== null ? Number((units * perUnit).toFixed(2)) : null;
+                          return `${numericText(String(units))} und${grams !== null ? ` · ${numericText(String(grams))} g` : ""}`;
+                        })()}</td>
+                        <td className="num">
                           {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
-                          {run.waste_percent ? ` · ${numericText(run.waste_percent)}%` : ""}
-                        </button>
-                      </td>
-                      <td>
-                        <button
-                          className="iconTextButton"
-                          onClick={() => setReceptionInfoRun(run)}
-                          title="Ver quien recibio esta orden"
-                          type="button"
-                        >
-                          {run.received_at ? new Date(run.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
-                        </button>
-                      </td>
-                      <td>
-                        <div className="rowActions">
-                          <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingRun(run)} title="Visualizar" type="button">
-                            <Eye aria-hidden="true" size={15} />
-                          </button>
-                          <button
-                            aria-label="Agregar al catálogo o combinar"
-                            className="iconOnlyButton"
-                            disabled={!lotItem || lotStock <= 0}
-                            onClick={() => {
-                              // Material de la pieza: automático del lote; si el
-                              // lote no lo trae (lotes viejos), sale de la materia
-                              // prima de la orden de producción.
-                              const rawMaterial = items.find((candidate) => candidate.id === run.raw_material_item_id) ?? null;
-                              const lotMaterial =
-                                lotItem?.material_type?.trim() ||
-                                rawMaterial?.material_type?.trim() ||
-                                rawMaterial?.name ||
-                                "";
-                              setConvertForm({
-                                material_code: matchMaterialSegment(lotMaterial)?.code ?? "",
-                                material_type: lotMaterial,
-                                product_type_id: "",
-                                target_item_id: "",
-                                quantity: "",
-                              });
-                              setLotAction(null);
-                              setMaterialEditFor(null);
-                              setConvertRun(run);
-                            }}
-                            title={!lotItem || lotStock <= 0 ? "Lote agotado" : "Agregar al catálogo o combinar"}
-                            type="button"
-                          >
-                            <Repeat aria-hidden="true" size={15} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                          {root.waste_percent ? ` · ${numericText(root.waste_percent)}%` : ""}
+                        </td>
+                        <td>{root.received_at ? new Date(root.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
+                        <td>
+                          <div className="rowActions">
+                            <button aria-label="Ver partes" className="iconOnlyButton" onClick={() => setReceivedFamilyRuns(family)} title="Ver partes" type="button">
+                              <Eye aria-hidden="true" size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
-                  {receivedRunsFiltered.length === 0 ? (
+                  {receivedRunFamilies.length === 0 ? (
                     <tr><td colSpan={6}><div className="emptyState">{anyAdvancedFilter ? "Sin procesos para los filtros." : "No hay procesos terminados."}</div></td></tr>
                   ) : null}
                 </tbody>
@@ -3325,6 +3379,39 @@ export function InventoryDashboard() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {receivedFamilyRuns ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Partes recibidas de la orden">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Orden {receivedFamilyRuns[0].root_production_code ?? receivedFamilyRuns[0].production_code}</h2>
+                <p>{receivedFamilyRuns.length} partes recibidas por separado</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setReceivedFamilyRuns(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Proceso</th>
+                    <th className="num">Stock</th>
+                    <th className="num">Merma final</th>
+                    <th>Fecha de recepción</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {receivedFamilyRuns.map((run) => renderReceivedRow(run))}
                 </tbody>
               </table>
             </div>
