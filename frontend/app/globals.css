@@ -1638,6 +1638,16 @@ textarea {
   background: #fff7f7;
 }
 
+/* Encabezado de parte dentro de la ventana "Movimientos de la orden": mismo
+   tamaño que una fila normal de tabla, no el compacto de la hoja impresa. */
+.movementGroupHeaderRow td {
+  background: var(--surface-muted);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
 .stockPill {
   display: inline-flex;
   align-items: center;

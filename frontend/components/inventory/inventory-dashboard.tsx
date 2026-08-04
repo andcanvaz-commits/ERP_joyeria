@@ -3480,7 +3480,7 @@ export function InventoryDashboard() {
                     );
                     return parts.map(([partCode, partMovements]) => (
                       <Fragment key={partCode}>
-                        <tr className="opGroupRow">
+                        <tr className="movementGroupHeaderRow">
                           <td colSpan={5}>{partCode}</td>
                         </tr>
                         {partMovements.map((movement) => (
