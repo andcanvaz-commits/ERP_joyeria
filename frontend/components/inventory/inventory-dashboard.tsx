@@ -3465,28 +3465,49 @@ export function InventoryDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {movementGroupWindow.movements.map((movement) => (
-                    <tr key={movement.id}>
-                      <td>{movementOperationLabel(movement)}</td>
-                      <td>{movement.item.name}</td>
-                      <td className="num">{movementAmountText(movement)}</td>
-                      <td>{movementDateLabel(movement.created_at)} {movementTimeLabel(movement.created_at)}</td>
-                      <td>
-                        <button
-                          aria-label="Visualizar"
-                          className="iconOnlyButton"
-                          onClick={() => {
-                            setMovementGroupWindow(null);
-                            setViewingMovement(movement);
-                          }}
-                          title="Visualizar"
-                          type="button"
-                        >
-                          <Eye aria-hidden="true" size={15} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {(() => {
+                    // Especifica de que parte (folio propio) es cada
+                    // movimiento: un encabezado por parte, mas reciente primero.
+                    const byPart = new Map<string, InventoryMovement[]>();
+                    for (const movement of movementGroupWindow.movements) {
+                      const partCode = movement.lot_code ?? "Sin folio";
+                      const list = byPart.get(partCode);
+                      if (list) list.push(movement);
+                      else byPart.set(partCode, [movement]);
+                    }
+                    const parts = Array.from(byPart.entries()).sort(
+                      ([, a], [, b]) => new Date(b[0].created_at).getTime() - new Date(a[0].created_at).getTime(),
+                    );
+                    return parts.map(([partCode, partMovements]) => (
+                      <Fragment key={partCode}>
+                        <tr className="opGroupRow">
+                          <td colSpan={5}>{partCode}</td>
+                        </tr>
+                        {partMovements.map((movement) => (
+                          <tr key={movement.id}>
+                            <td>{movementOperationLabel(movement)}</td>
+                            <td>{movement.item.name}</td>
+                            <td className="num">{movementAmountText(movement)}</td>
+                            <td>{movementDateLabel(movement.created_at)} {movementTimeLabel(movement.created_at)}</td>
+                            <td>
+                              <button
+                                aria-label="Visualizar"
+                                className="iconOnlyButton"
+                                onClick={() => {
+                                  setMovementGroupWindow(null);
+                                  setViewingMovement(movement);
+                                }}
+                                title="Visualizar"
+                                type="button"
+                              >
+                                <Eye aria-hidden="true" size={15} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>
