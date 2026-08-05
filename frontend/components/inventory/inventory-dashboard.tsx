@@ -58,6 +58,7 @@ const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINAD
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
   { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Productos terminados" },
+  { value: "WASTE", label: "Merma" },
 ];
 
 const UNIT_OPTIONS = [
@@ -80,6 +81,8 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "MERMA", label: "Merma" },
   { value: "CONVERSION_SALIDA", label: "Conversion salida" },
   { value: "CONVERSION_ENTRADA", label: "Conversion entrada" },
+  { value: "RECLASIFICACION_SALIDA", label: "Reclasificacion salida" },
+  { value: "RECLASIFICACION_ENTRADA", label: "Reclasificacion entrada" },
 ];
 
 // Estados de orden de produccion para el filtro de las pestañas de procesos.
