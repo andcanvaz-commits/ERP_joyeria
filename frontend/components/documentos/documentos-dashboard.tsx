@@ -238,7 +238,7 @@ export function DocumentosDashboard() {
                 ))}
                 <button
                   aria-label="Abrir historial por calendario"
-                  className="iconTextButton"
+                  className="button"
                   disabled={familyEntries.length === 0}
                   onClick={openCalendar}
                   title="Historial por calendario"
