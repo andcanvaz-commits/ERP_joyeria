@@ -6,18 +6,14 @@ Uso:
     python -m backend.scripts.import_historical_orders \
         --xlsx "C:/Users/MSI I7/Desktop/Trabajo/Joyeria/Ordenes de Producción.xlsx" \
         --created-by-username <username> \
-        [--raw-material-name "PLATA MIL"] \
         [--commit]
 
-Sin --commit corre en modo dry-run: parsea, resuelve material y usuario,
-imprime el resumen, no escribe nada en la base.
+Sin --commit corre en modo dry-run: parsea, resuelve usuario, imprime el
+resumen, no escribe nada en la base.
 
---raw-material-name es opcional: si no se indica, se busca por defecto un
-unico item RAW_MATERIAL cuyo nombre contenga "plata" (falla si hay cero o
-mas de uno, listando los candidatos). Si se indica, se busca ese nombre
-exacto (sin distinguir mayusculas/minusculas) en vez de la busqueda por
-substring — util cuando el inventario real tiene varios items de plata
-(PLATA MIL, PLATA LIGADA, PLATA VARIOS, ...).
+Estas ordenes son solo el registro de las actas de papel: no referencian
+ninguna materia prima real del inventario (raw_material_item_id queda NULL)
+ni generan movimiento de inventario alguno — ver decision #6 del spec.
 """
 from __future__ import annotations
 
@@ -32,7 +28,6 @@ import openpyxl
 
 from backend.modules.auth.models import AuthUser
 from backend.modules.database.session import SessionLocal
-from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import (
     ProductionProcess,
     ProductionProcessStage,
@@ -147,24 +142,6 @@ def parse_orders(xlsx_path: Path) -> list[HistoricalOrder]:
     return orders
 
 
-def _resolve_raw_material(session, name_hint: str, *, exact: bool = False) -> InventoryItem:
-    from sqlalchemy import func, select
-
-    query = select(InventoryItem).where(InventoryItem.item_type == "RAW_MATERIAL")
-    if exact:
-        query = query.where(func.lower(InventoryItem.name) == name_hint.lower())
-    else:
-        query = query.where(InventoryItem.name.ilike(f"%{name_hint}%"))
-    candidates = list(session.execute(query).scalars())
-    if len(candidates) != 1:
-        names = ", ".join(c.name for c in candidates) or "(ninguno)"
-        raise SystemExit(
-            f"No se pudo resolver un unico item RAW_MATERIAL para '{name_hint}'. "
-            f"Candidatos encontrados: {names}. Ajusta el filtro o crea/renombra el item primero."
-        )
-    return candidates[0]
-
-
 def _resolve_user(session, username: str) -> AuthUser:
     from sqlalchemy import select
 
@@ -233,7 +210,6 @@ def build_runs_for_order(
     order: HistoricalOrder,
     folio: str,
     process: ProductionProcess,
-    raw_material: InventoryItem,
     created_by_user_id: UUID,
 ) -> list[ProductionRun]:
     entrega_count = len(order.entrega_events)
@@ -247,10 +223,12 @@ def build_runs_for_order(
 
         entrega_total = sum((line.gramos for line in entrega.lines), Decimal("0")) if entrega else Decimal("0")
         recibido_total = sum((line.gramos for line in recibido.lines), Decimal("0")) if recibido else Decimal("0")
-        # raw_material_quantity_per_unit no se usa para mostrar (event_lines
-        # lo reemplaza), pero es NOT NULL: se guarda el total entregado de
-        # esta corrida (o 1 si no hay entrega) para que quantity=1 * eso siga
-        # siendo un total_required_material internamente consistente.
+        # raw_material_quantity_per_unit/unit_code no se usan para mostrar
+        # (event_lines lo reemplaza), pero son NOT NULL: se guarda el total
+        # entregado de esta corrida (o 1 si no hay entrega) para que
+        # quantity=1 * eso siga siendo un total_required_material
+        # internamente consistente. raw_material_item_id queda NULL — estas
+        # ordenes no referencian ninguna materia prima real (decision #6).
         per_unit = entrega_total if entrega_total > 0 else Decimal("1")
 
         run = ProductionRun(
@@ -260,9 +238,9 @@ def build_runs_for_order(
             quantity=Decimal("1"),
             status=ProductionRunStatus.RECEIVED if recibido else ProductionRunStatus.PENDING_RECEPTION,
             assembly_mode="ASIGNAR",
-            raw_material_item_id=raw_material.id,
+            raw_material_item_id=None,
             raw_material_quantity_per_unit=per_unit,
-            raw_material_unit_code=raw_material.unit_code,
+            raw_material_unit_code="g",
             total_required_material=per_unit,
             waste_limit_percent=process.waste_limit_percent,
             expected_finished_weight=per_unit,
@@ -320,15 +298,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xlsx", type=Path, required=True)
     parser.add_argument("--created-by-username", type=str, required=True)
-    parser.add_argument(
-        "--raw-material-name",
-        type=str,
-        default=None,
-        help=(
-            "Nombre exacto (sin distinguir mayusculas/minusculas) del item RAW_MATERIAL a usar. "
-            "Si se omite, se busca por defecto un unico item cuyo nombre contenga 'plata'."
-        ),
-    )
     parser.add_argument("--commit", action="store_true", help="Sin esta flag corre en modo dry-run.")
     args = parser.parse_args()
 
@@ -339,16 +308,12 @@ def main() -> None:
     try:
         _abort_if_already_imported(session)
         user = _resolve_user(session, args.created_by_username)
-        if args.raw_material_name:
-            raw_material = _resolve_raw_material(session, args.raw_material_name, exact=True)
-        else:
-            raw_material = _resolve_raw_material(session, "plata")
         process = _get_or_create_process(session)
         folios = _next_folio_numbers(len(orders))
 
         all_runs: list[ProductionRun] = []
         for order, folio in zip(orders, folios):
-            runs = build_runs_for_order(order, folio, process, raw_material, user.id)
+            runs = build_runs_for_order(order, folio, process, user.id)
             all_runs.extend(runs)
             entrega_n = len(order.entrega_events)
             recibido_n = len(order.recibido_events)
@@ -358,7 +323,6 @@ def main() -> None:
             )
 
         print()
-        print(f"Material mapeado: '{raw_material.name}' ({raw_material.id})")
         print(f"Proceso: '{process.name}' ({process.id})")
         print(f"Usuario: '{user.username}' ({user.id})")
         print(f"Total corridas a insertar: {len(all_runs)}")
