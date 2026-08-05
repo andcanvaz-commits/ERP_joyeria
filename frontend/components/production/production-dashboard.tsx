@@ -10,6 +10,7 @@ import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-ma
 import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
+import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
@@ -98,6 +99,15 @@ type ProductChoice = {
 
 const SYSTEM_ROLES = ["Jefe de producción", "Admin", "Jefe de inventario"];
 
+const MATERIAL_TYPE_LABEL: Record<string, string> = {
+  RAW_MATERIAL: "Materia prima",
+  COMPLEMENT: "Complemento",
+  WASTE: "Merma",
+  SUPPLY: "Insumo",
+};
+
+const itemTypeLabel = (type: string): string => MATERIAL_TYPE_LABEL[type] ?? type;
+
 const STAGE_TYPES: { value: string; label: string }[] = [
   { value: "PROCESS", label: "Proceso" },
   { value: "THERMAL", label: "Proceso térmico" },
@@ -120,16 +130,10 @@ const emptyStage = (): StageForm => ({
   ingredients: [],
 });
 
-const emptyProcessMaterial = (): ProcessMaterialForm => ({
-  inventoryItemId: "",
-  quantityPerUnit: "",
-  unitCode: "g",
-});
-
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  materials: [emptyProcessMaterial()],
+  materials: [],
   wasteLimitPercent: "1",
   stages: [emptyStage()],
   productTypeIds: [],
@@ -146,13 +150,11 @@ function processToForm(process: ProductionProcess): ProcessForm {
   return {
     name: process.name,
     description: process.description ?? "",
-    materials: process.materials.length > 0
-      ? process.materials.map((material) => ({
-          inventoryItemId: material.inventory_item_id,
-          quantityPerUnit: material.quantity_per_unit,
-          unitCode: material.unit_code,
-        }))
-      : [emptyProcessMaterial()],
+    materials: process.materials.map((material) => ({
+      inventoryItemId: material.inventory_item_id,
+      quantityPerUnit: material.quantity_per_unit,
+      unitCode: material.unit_code,
+    })),
     wasteLimitPercent: process.waste_limit_percent ?? "1",
     stages: stages.length > 0 ? stages.map((stage) => ({
       name: stage.name,
@@ -174,13 +176,14 @@ function processToForm(process: ProductionProcess): ProcessForm {
 }
 
 async function fetchProductionBundle(variant: "production" | "maintenance") {
-  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies, nextComplements, nextFinishedItems] = await Promise.all([
+  const [nextProcesses, nextUsers, nextRuns, nextRawMaterials, nextSupplies, nextComplements, nextWaste, nextFinishedItems] = await Promise.all([
     listProcesses(),
     variant === "maintenance" ? listUsers() : Promise.resolve([]),
     variant === "production" ? listProductionRuns() : Promise.resolve([]),
     listInventoryItems("RAW_MATERIAL"),
     listInventoryItems("SUPPLY"),
     variant === "production" ? listInventoryItems("COMPLEMENT") : Promise.resolve([]),
+    variant === "production" ? listInventoryItems("WASTE") : Promise.resolve([]),
     variant === "production" ? listInventoryItems("FINISHED_PRODUCT") : Promise.resolve([]),
   ]);
   return {
@@ -191,6 +194,7 @@ async function fetchProductionBundle(variant: "production" | "maintenance") {
     // (un item archivado no debe poder elegirse para una orden nueva en vivo).
     rawMaterials: [...nextRawMaterials, ...nextSupplies].filter((item) => !item.archived_at),
     complements: nextComplements,
+    waste: nextWaste,
     finishedItems: nextFinishedItems,
   };
 }
@@ -255,6 +259,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: () => listInventoryItems("COMPLEMENT"),
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
+  // Merma reclasificada: opcion elegible como material de proceso (materia
+  // prima/complementos/merma), igual que en el picker de Inventario.
+  const { data: wasteList = EMPTY_RAW_MATERIALS } = useQuery({
+    queryKey: ["waste-items"],
+    queryFn: () => listInventoryItems("WASTE"),
+    enabled: Boolean(currentUser) && variant === "maintenance",
+  });
   // Claves de modelo que ya tienen receta de ensamble: filtra los pickers en
   // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR) y, en
   // mantenimiento, el picker de "Crear receta" (solo piezas sin receta aún).
@@ -290,8 +301,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const runs = bundle?.runs ?? EMPTY_RUNS;
   const rawMaterials = bundle?.rawMaterials ?? EMPTY_RAW_MATERIALS;
   const complementItems = bundle?.complements ?? EMPTY_RAW_MATERIALS;
+  const wasteItems = bundle?.waste ?? EMPTY_RAW_MATERIALS;
   const finishedItems = bundle?.finishedItems ?? EMPTY_RAW_MATERIALS;
   const isLoading = !currentUser || isBundleLoading;
+  // Pool del picker "Materias primas del proceso": materia prima + complementos
+  // + merma reclasificada (los 3 tipos que un proceso puede consumir).
+  const processMaterialPool = [...rawMaterialsList, ...complementsList, ...wasteList];
+  // Resuelve nombre/stock de cualquier material configurado en un proceso
+  // (materia prima, complemento o merma) al crear una orden.
+  const orderMaterialPool = [...rawMaterials, ...complementItems, ...wasteItems];
 
   // Invalidación cruzada: las acciones de producción cambian lo que muestran
   // inventario (productos en proceso, solicitudes) y el badge del menú. Sin
@@ -320,6 +338,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [formMode, setFormMode] = useState<FormMode>("create");
   const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
   const [selectedStageIndex, setSelectedStageIndex] = useState(0);
+  const [isMaterialPickerOpen, setIsMaterialPickerOpen] = useState(false);
+  const [isIngredientPickerOpen, setIsIngredientPickerOpen] = useState(false);
   const [viewingProcess, setViewingProcess] = useState<ProductionProcess | null>(null);
   const [viewingUser, setViewingUser] = useState<ManagedUser | null>(null);
   const [generatedCredentials, setGeneratedCredentials] = useState<{
@@ -471,7 +491,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
-  const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
+  const selectedMaterial = orderMaterialPool.find((item) => item.id === selectedMaterialId) ?? null;
   // Código de material (1 dígito) de la materia prima elegida: la clave de
   // receta ahora es material+categoria+modelo. Sin material elegido no se
   // puede saber qué piezas/tipos ya tienen receta, así que no se excluye
@@ -906,21 +926,26 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     });
   }
 
-  function addProcessMaterial() {
+  function addProcessMaterial(item: InventoryItem) {
     setForm((current) => ({
       ...current,
-      materials: [...current.materials, emptyProcessMaterial()],
+      materials: [...current.materials, { inventoryItemId: item.id, quantityPerUnit: "", unitCode: item.unit_code }],
     }));
+    setIsMaterialPickerOpen(false);
   }
 
   function removeProcessMaterial(materialIndex: number) {
-    setForm((current) => {
-      if (current.materials.length === 1) return current;
-      return {
-        ...current,
-        materials: current.materials.filter((_, index) => index !== materialIndex),
-      };
+    setForm((current) => ({
+      ...current,
+      materials: current.materials.filter((_, index) => index !== materialIndex),
+    }));
+  }
+
+  function addStageIngredient(item: InventoryItem) {
+    updateStage({
+      ingredients: [...selectedStage.ingredients, { inventoryItemId: item.id, quantity: "", unitCode: item.unit_code }],
     });
+    setIsIngredientPickerOpen(false);
   }
 
   function updateProcessMaterial(materialIndex: number, patch: Partial<ProcessMaterialForm>) {
@@ -2075,11 +2100,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <span>Material</span>
                 <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
                   <option value="">Seleccionar material</option>
-                  {rawMaterials.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} · {numericText(item.current_stock)} {item.unit_code}
-                    </option>
-                  ))}
+                  {/* Solo los materiales configurados en este proceso (mantenimiento). */}
+                  {(selectedProcess?.materials ?? []).map((material) => {
+                    const item = orderMaterialPool.find((candidate) => candidate.id === material.inventory_item_id);
+                    if (!item) return null;
+                    return (
+                      <option key={item.id} value={item.id}>
+                        {item.name} · {itemTypeLabel(item.item_type)} · {numericText(item.current_stock)} {item.unit_code}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
             </div>
@@ -3081,46 +3111,34 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="fieldGroup">
               <span>Materias primas del proceso</span>
               <div className="materialList">
-                {form.materials.map((material, materialIndex) => (
-                  <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "end" }}>
-                    <div className="materialRow" style={{ flex: 1 }}>
-                      <label className="fieldGroup">
-                        <span>Materia prima</span>
-                        <select
-                          className="field"
-                          disabled={isSaving}
-                          onChange={(event) => {
-                            const selected = rawMaterials.find((item) => item.id === event.target.value);
-                            updateProcessMaterial(materialIndex, {
-                              inventoryItemId: event.target.value,
-                              unitCode: selected?.unit_code ?? material.unitCode,
-                            });
-                          }}
-                          value={material.inventoryItemId}
-                        >
-                          <option value="">Seleccionar materia prima</option>
-                          {/* Solo materia prima: los insumos van por etapa. */}
-                          {rawMaterials.filter((item) => item.item_type === "RAW_MATERIAL").map((item) => (
-                            <option key={item.id} value={item.id}>{item.name} - {item.current_stock} {item.unit_code}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="fieldGroup">
-                        <span>Cantidad usada por unidad</span>
-                        <input
-                          className="field"
-                          disabled={isSaving}
-                          min="0.0001"
-                          onChange={(event) => updateProcessMaterial(materialIndex, { quantityPerUnit: event.target.value })}
-                          step="0.0001"
-                          type="number"
-                          value={material.quantityPerUnit}
-                        />
-                      </label>
-                    </div>
-                    {form.materials.length > 1 ? (
+                {form.materials.map((material, materialIndex) => {
+                  const selectedItem = processMaterialPool.find((item) => item.id === material.inventoryItemId);
+                  return (
+                    <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "end" }}>
+                      <div className="materialRow" style={{ flex: 1 }}>
+                        <label className="fieldGroup">
+                          <span>Material</span>
+                          <div className="field" style={{ display: "flex", alignItems: "center" }}>
+                            {selectedItem
+                              ? `${selectedItem.name} · ${itemTypeLabel(selectedItem.item_type)}`
+                              : material.inventoryItemId}
+                          </div>
+                        </label>
+                        <label className="fieldGroup">
+                          <span>Cantidad usada por unidad ({material.unitCode})</span>
+                          <input
+                            className="field"
+                            disabled={isSaving}
+                            min="0.0001"
+                            onChange={(event) => updateProcessMaterial(materialIndex, { quantityPerUnit: event.target.value })}
+                            step="0.0001"
+                            type="number"
+                            value={material.quantityPerUnit}
+                          />
+                        </label>
+                      </div>
                       <button
-                        aria-label="Quitar materia prima"
+                        aria-label="Quitar material"
                         className="iconOnlyButton dangerIconButton"
                         disabled={isSaving}
                         onClick={() => removeProcessMaterial(materialIndex)}
@@ -3128,13 +3146,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       >
                         <X aria-hidden="true" size={14} />
                       </button>
-                    ) : null}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
-              <button className="button" disabled={isSaving} onClick={addProcessMaterial} type="button">
+              <button className="button" disabled={isSaving} onClick={() => setIsMaterialPickerOpen(true)} type="button">
                 <Plus aria-hidden="true" size={14} />
-                Agregar materia prima
+                Agregar material
               </button>
             </div>
 
@@ -3297,77 +3315,48 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <div className="fieldGroup">
                     <span>Materiales que entran en esta etapa</span>
                     <div className="ingredientList">
-                      {selectedStage.ingredients.map((ing, ingIndex) => (
-                        <div key={ingIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <select
-                            className="field"
-                            value={ing.inventoryItemId}
-                            onChange={(e) => {
-                              const selected = rawMaterials.find((m) => m.id === e.target.value);
-                              updateStage({
-                                ingredients: selectedStage.ingredients.map((item, idx) =>
-                                  idx === ingIndex
-                                    ? { ...item, inventoryItemId: e.target.value, unitCode: selected?.unit_code ?? item.unitCode }
-                                    : item
-                                ),
-                              });
-                            }}
-                            style={{ flex: 2 }}
-                          >
-                            <option value="">Seleccionar insumo</option>
-                            {/* Solo insumos: la materia prima es la del proceso. */}
-                            {rawMaterials.filter((m) => m.item_type === "SUPPLY").map((m) => {
-                              // Sin stock no se puede elegir: la etapa lo consumiría al avanzar.
-                              const isOut = Number(m.current_stock) <= 0;
-                              return (
-                                <option disabled={isOut} key={m.id} value={m.id}>
-                                  {m.name} ({m.unit_code}){isOut ? " — agotado" : ""}
-                                </option>
-                              );
-                            })}
-                          </select>
-                          <input
-                            className="field"
-                            type="number"
-                            min="0"
-                            step="0.0001"
-                            placeholder="Cantidad"
-                            value={ing.quantity}
-                            onChange={(e) => {
-                              updateStage({
-                                ingredients: selectedStage.ingredients.map((item, idx) =>
-                                  idx === ingIndex ? { ...item, quantity: e.target.value } : item
-                                ),
-                              });
-                            }}
-                            style={{ flex: 1, minWidth: 90 }}
-                          />
-                          <span style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700, minWidth: 30 }}>
-                            {rawMaterials.find((m) => m.id === ing.inventoryItemId)?.unit_code ?? ""}
-                          </span>
-                          <button
-                            type="button"
-                            className="iconOnlyButton dangerIconButton"
-                            onClick={() => {
-                              updateStage({
-                                ingredients: selectedStage.ingredients.filter((_, idx) => idx !== ingIndex),
-                              });
-                            }}
-                            aria-label="Quitar material"
-                          >
-                            <X aria-hidden="true" size={14} />
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="button"
-                        onClick={() => {
-                          updateStage({
-                            ingredients: [...selectedStage.ingredients, { inventoryItemId: "", quantity: "", unitCode: "" }],
-                          });
-                        }}
-                      >
+                      {selectedStage.ingredients.map((ing, ingIndex) => {
+                        const selectedItem = suppliesList.find((m) => m.id === ing.inventoryItemId);
+                        return (
+                          <div key={ingIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span className="field" style={{ flex: 2, display: "flex", alignItems: "center" }}>
+                              {selectedItem?.name ?? ing.inventoryItemId}
+                            </span>
+                            <input
+                              className="field"
+                              type="number"
+                              min="0"
+                              step="0.0001"
+                              placeholder="Cantidad"
+                              value={ing.quantity}
+                              onChange={(e) => {
+                                updateStage({
+                                  ingredients: selectedStage.ingredients.map((item, idx) =>
+                                    idx === ingIndex ? { ...item, quantity: e.target.value } : item
+                                  ),
+                                });
+                              }}
+                              style={{ flex: 1, minWidth: 90 }}
+                            />
+                            <span style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700, minWidth: 30 }}>
+                              {ing.unitCode}
+                            </span>
+                            <button
+                              type="button"
+                              className="iconOnlyButton dangerIconButton"
+                              onClick={() => {
+                                updateStage({
+                                  ingredients: selectedStage.ingredients.filter((_, idx) => idx !== ingIndex),
+                                });
+                              }}
+                              aria-label="Quitar material"
+                            >
+                              <X aria-hidden="true" size={14} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <button type="button" className="button" onClick={() => setIsIngredientPickerOpen(true)}>
                         <Plus aria-hidden="true" size={14} />
                         Agregar material
                       </button>
@@ -3385,6 +3374,29 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </form>
         </div>
+      ) : null}
+
+      {isMaterialPickerOpen ? (
+        <MaterialCategoryPicker
+          allowedTypes={["RAW_MATERIAL", "COMPLEMENT", "WASTE"]}
+          excludeIds={form.materials.map((material) => material.inventoryItemId)}
+          items={processMaterialPool}
+          onClose={() => setIsMaterialPickerOpen(false)}
+          onSelect={addProcessMaterial}
+          title="Agregar material del proceso"
+        />
+      ) : null}
+
+      {isIngredientPickerOpen ? (
+        <MaterialCategoryPicker
+          allowedTypes={["SUPPLY"]}
+          excludeIds={selectedStage.ingredients.map((ing) => ing.inventoryItemId)}
+          items={suppliesList}
+          onClose={() => setIsIngredientPickerOpen(false)}
+          onSelect={addStageIngredient}
+          requireStock
+          title="Agregar insumo de la etapa"
+        />
       ) : null}
 
       {dataModal?.type === "units" ? <UnitsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}

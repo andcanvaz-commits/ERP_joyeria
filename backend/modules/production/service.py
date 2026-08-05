@@ -969,21 +969,24 @@ class ProductionService:
             type_names = {row[0]: row[1] for row in rows}
         item_names: dict = {}
         target_names: dict = {}
+        item_units: dict = {}
         if item_ids:
             rows = self.repository.session.execute(
                 select(
-                    InventoryItem.id, InventoryItem.name, InventoryItem.description
+                    InventoryItem.id, InventoryItem.name, InventoryItem.description, InventoryItem.unit_code
                 ).where(InventoryItem.id.in_(item_ids))
             ).all()
-            for item_id, name, description in rows:
+            for item_id, name, description, unit_code in rows:
                 item_names[item_id] = name
                 target_names[item_id] = (description or "").strip() or name
+                item_units[item_id] = unit_code
         for read in reads:
             for product in read.products:
                 if product.product_type_id is not None:
                     product.product_name = type_names.get(product.product_type_id)
                 else:
                     product.product_name = target_names.get(product.target_item_id)
+                    product.unit_code = item_units.get(product.target_item_id)
             for complement in read.complements:
                 complement.name = item_names.get(complement.item_id)
             for assembly_item in read.assembly_items:
@@ -1680,7 +1683,7 @@ class ProductionService:
                 raise ProductionDomainError(
                     "Una materia prima seleccionada no existe en el inventario."
                 )
-            if item_type not in ("RAW_MATERIAL", "SUPPLY"):
+            if item_type not in ("RAW_MATERIAL", "COMPLEMENT", "WASTE"):
                 raise ProductionDomainError(
-                    "Solo se pueden usar materias primas o insumos del inventario."
+                    "Solo se pueden usar materia prima, complementos o merma del inventario."
                 )
