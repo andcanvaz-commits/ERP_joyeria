@@ -6,6 +6,14 @@
 #   - Certificados TLS en ./nginx/certs/ (fullchain.pem, privkey.pem).
 #   - DNS del dominio apuntando al servidor.
 
+# Docker no rota logs por defecto: un servicio corriendo meses sin parar
+# puede llenar el disco solo con logs. Tope por servicio: 10MB x 3 archivos.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16-alpine
@@ -17,6 +25,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U erp_joyeria -d erp_joyeria"]
       interval: 10s
@@ -49,6 +58,7 @@ services:
       SYSTEM_EMAIL_DOMAIN: ${SYSTEM_EMAIL_DOMAIN:-fenixglobal.online}
     # Sin puertos: nginx habla con api por la red interna.
     restart: always
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -62,6 +72,7 @@ services:
         NEXT_PUBLIC_API_URL: ""
     # Sin puertos: nginx habla con web por la red interna.
     restart: always
+    logging: *default-logging
     depends_on:
       - api
 
@@ -85,6 +96,7 @@ services:
     volumes:
       - ./backups:/backups
     restart: always
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -101,6 +113,7 @@ services:
       - ./nginx/certs:/etc/nginx/certs:ro
       - certbot_webroot:/var/www/certbot
     restart: always
+    logging: *default-logging
     depends_on:
       - api
       - web

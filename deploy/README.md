@@ -13,11 +13,25 @@ dominio ya apuntando por DNS al servidor.
    todavia no arranco).
 6. `docker compose -f docker-compose.prod.yml --env-file .env up -d --build`
 7. Verificar `https://tudominio.com` carga y el login funciona.
-8. Renovacion automatica del certificado — agregar a `crontab -e`:
+8. Renovacion automatica del certificado y limpieza mensual de Docker —
+   agregar a `crontab -e`:
    ```
    0 3,15 * * * /ruta/al/repo/deploy/renew-tls.sh >> /var/log/erp-tls-renew.log 2>&1
+   0 4 1 * * /ruta/al/repo/deploy/prune-docker.sh >> /var/log/erp-docker-prune.log 2>&1
    ```
 
-Los backups de PostgreSQL ya corren solos (servicio `db-backup` del
-compose, dump diario en `./backups/`, retencion configurable con
-`BACKUP_RETENTION_DAYS` en `.env`).
+## Uso de disco a largo plazo
+
+- **Backups**: se auto-podan solos (`db-backup`, `BACKUP_RETENTION_DAYS` en `.env`).
+- **Logs de containers**: acotados por servicio (10MB x 3 archivos, `x-logging`
+  en `docker-compose.prod.yml`) — sin esto Docker no rota logs por defecto.
+- **Imagenes/cache de rebuilds**: `deploy/prune-docker.sh` por cron mensual
+  (no toca volumenes ni imagenes en uso).
+- **Base de datos**: crecimiento lento y normal para este tipo de datos: si
+  se importan muchas facturas XML, revisar el tamano de la tabla
+  `inventory_movements` (guarda el archivo XML original en la fila) de vez
+  en cuando con `du -sh` sobre el volumen `postgres_data` o una consulta de
+  tamano de tabla en Postgres.
+- No hay alerta automatica de disco lleno todavia — revisar `df -h` en el
+  VPS de vez en cuando, o agregar monitoreo cuando el sistema ya este en
+  uso real (mejor calibrar umbrales con datos reales que adivinar ahora).
