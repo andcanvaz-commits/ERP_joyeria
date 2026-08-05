@@ -3987,7 +3987,7 @@ textarea:disabled {
 
 .documentosLayout {
   display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 2fr);
+  grid-template-columns: minmax(300px, 1.1fr) minmax(0, 2fr);
   gap: 16px;
   align-items: start;
 }
@@ -3998,6 +3998,7 @@ textarea:disabled {
   gap: 8px;
   max-height: 70vh;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
 }
 
