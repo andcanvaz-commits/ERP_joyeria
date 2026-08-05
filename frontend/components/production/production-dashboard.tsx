@@ -354,7 +354,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Tipo de producto para el que se está definiendo la receta (modal abierta
   // cuando no es null). Las filas empiezan vacías.
   const [recipeModalModelKey, setRecipeModalModelKey] = useState<string | null>(null);
-  const [recipeLines, setRecipeLines] = useState<Array<{ itemId: string; label: string; perUnit: string }>>([]);
+  const [recipeLines, setRecipeLines] = useState<Array<{ itemId: string; label: string; unitCode: string; perUnit: string }>>([]);
   const [isRecipeComplementPickerOpen, setIsRecipeComplementPickerOpen] = useState(false);
   // Origen de la modal de receta: "order" = flujo de Crear orden (ENSAMBLAR,
   // toca orderProduct/orderRecipe); "maintenance" = tile "Crear receta" (no
@@ -485,16 +485,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
-  const finishedRuns = runs.filter((run) => run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA");
+  // Ordenes migradas del Excel historico (event_lines no vacio) no son
+  // trabajo activo de piso: no deben aparecer en las vistas operativas de
+  // Produccion (terminados/recibidos/pendientes), solo existen para su
+  // certificado en Documentos.
+  const finishedRuns = runs.filter(
+    (run) => (run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA") && (run.event_lines ?? []).length === 0
+  );
   const waitingMaterialRuns = runs.filter((run) => run.status === "ESPERANDO_MATERIAL");
   // Igual que "En proceso": una orden dividida cuenta una sola vez entre las
   // recientes, con boton para ver las demas partes en ventana.
   const recentFinishedFamilies = Array.from(groupRunFamilies(finishedRuns).entries()).slice(0, 3);
   const receivedRuns = runs
-    .filter((run) => run.status === "RECIBIDA")
+    .filter((run) => run.status === "RECIBIDA" && (run.event_lines ?? []).length === 0)
     .sort((a, b) => (b.received_at ?? "").localeCompare(a.received_at ?? ""));
   const pendingReceptionRuns = runs
-    .filter((run) => run.status === "PENDIENTE_RECEPCION")
+    .filter((run) => run.status === "PENDIENTE_RECEPCION" && (run.event_lines ?? []).length === 0)
     .sort((a, b) => (b.finished_at ?? "").localeCompare(a.finished_at ?? ""));
   // Tabla unificada "Procesos": listos para iniciar, en curso y terminados, en ese orden.
   const processRows = [
@@ -1513,7 +1519,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   function addRecipeLine(item: InventoryItem) {
-    setRecipeLines((current) => [...current, { itemId: item.id, label: item.name, perUnit: "" }]);
+    setRecipeLines((current) => [...current, { itemId: item.id, label: item.name, unitCode: item.unit_code, perUnit: "" }]);
     setIsRecipeComplementPickerOpen(false);
   }
 
@@ -2391,7 +2397,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <td>
                             {recipe.items.map((item) => (
                               <div key={item.complement_item_id}>
-                                {Number(item.quantity_per_unit)}× {item.name ?? "Complemento"}
+                                {numericText(item.quantity_per_unit)} {item.unit_code ?? ""} × {item.name ?? "Complemento"}
                               </div>
                             ))}
                           </td>
@@ -2406,6 +2412,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                   recipe.items.map((item) => ({
                                     itemId: item.complement_item_id,
                                     label: item.name ?? "Complemento",
+                                    unitCode: item.unit_code ?? "",
                                     perUnit: String(Number(item.quantity_per_unit)),
                                   })),
                                 );
@@ -2482,16 +2489,19 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <tr key={line.itemId}>
                         <td>{line.label}</td>
                         <td className="num">
-                          <input
-                            aria-label={`Cantidad por unidad de ${line.label}`}
-                            className="field"
-                            min="0"
-                            onChange={(event) => updateRecipeLinePerUnit(line.itemId, event.target.value)}
-                            step="0.0001"
-                            style={{ width: 90 }}
-                            type="number"
-                            value={line.perUnit}
-                          />
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <input
+                              aria-label={`Cantidad por unidad de ${line.label}, en ${line.unitCode || "su unidad"}`}
+                              className="field"
+                              min="0"
+                              onChange={(event) => updateRecipeLinePerUnit(line.itemId, event.target.value)}
+                              step="0.0001"
+                              style={{ width: 90 }}
+                              type="number"
+                              value={line.perUnit}
+                            />
+                            <span style={{ color: "var(--muted)", fontSize: 13 }}>{line.unitCode}</span>
+                          </span>
                         </td>
                         <td>
                           <button

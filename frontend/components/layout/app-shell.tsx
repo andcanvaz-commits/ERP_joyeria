@@ -87,7 +87,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Pendientes por seccion: inventario aprueba/recibe; produccion inicia las
   // ordenes con materiales aprobados. El punto rojo aparece donde hay accion.
   const invPending = navRuns.filter(
-    (run) => run.status === "PENDIENTE_INVENTARIO" || run.status === "PENDIENTE_RECEPCION",
+    (run) =>
+      (run.status === "PENDIENTE_INVENTARIO" || run.status === "PENDIENTE_RECEPCION") &&
+      (run.event_lines ?? []).length === 0,
   ).length;
   const prodPending = navRuns.filter((run) => run.status === "MATERIALES_APROBADOS").length;
   const navBadges: Record<string, number> = {
