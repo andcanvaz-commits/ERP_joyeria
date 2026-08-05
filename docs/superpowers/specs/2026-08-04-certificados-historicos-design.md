@@ -17,14 +17,21 @@ aparte.
 ## Regla de lectura del Excel (confirmada con el usuario)
 
 En la columna Fecha de cada tabla Entregado/Recibido: una fila con fecha
-abre un grupo nuevo; todas las filas de abajo sin fecha pertenecen a ese
-mismo grupo hasta que aparece la próxima fecha (o termina la sección). Cada
-grupo es un "evento" (una entrega o una recepción real, con su propio
-responsable). Se comprobó sobre el archivo real: de 74 secciones
-Entregado/Recibido, 11 tienen 2 o más fechas distintas (varios eventos
-dentro del mismo lado), y en 15 de las 37 órdenes la cantidad de eventos de
-Entregado no coincide con la de Recibido (ej. orden 8 "Máquinas": 3 entregas,
-5 recepciones). El modelo tiene que soportar esa asimetría.
+abre un grupo nuevo — **cada fila con fecha**, aunque repita el mismo día
+que la fila anterior (ej. dos entregas distintas logueadas el mismo 13/07);
+todas las filas de abajo sin fecha pertenecen a ese mismo grupo hasta que
+aparece la próxima fecha (o termina la sección). Cada grupo es un "evento"
+(una entrega o una recepción real, con su propio responsable). Verificado
+con el parser real contra el archivo: de 74 secciones Entregado/Recibido,
+**15** tienen 2 o más eventos (varios dentro del mismo lado), y en **12**
+de las 37 órdenes la cantidad de eventos de Entregado no coincide con la de
+Recibido (ej. orden 8 "Máquinas": 3 entregas, 5 recepciones). Solo la orden
+**29** ("Solar") no tiene ningún evento de recepción. El modelo tiene que
+soportar esa asimetría.
+(Nota: un conteo exploratorio previo con un script ad-hoc dio 11/15/4 —
+estaba mal porque deduplicaba por fecha-calendario en vez de contar cada
+fila con fecha como su propio evento; el parser real implementado en Task 6
+sigue la regla tal como está escrita arriba y es la fuente de verdad.)
 
 ## Decisiones confirmadas
 
@@ -113,6 +120,24 @@ Entregado no coincide con la de Recibido (ej. orden 8 "Máquinas": 3 entregas,
     `production_run_event_lines`), más agrupación visual por mes en la
     lista — mismo patrón de historial con fecha que ya usan otros módulos
     del sistema (inventario), sin construir un calendario nuevo desde cero.
+
+## Addendum (post-implementación, revisión final de rama)
+
+13 de las 58 corridas a crear quedan `PENDIENTE_RECEPCION` (entregaron más
+veces de las que recibieron — el papel nunca registró esa recepción, ej.
+orden 11 "Rosario 60cm": 6 entregas, 1 recepción). La revisión final
+encontró que, tal como estaba el plan, esas 13 corridas caían en las colas
+EN VIVO de Inventario (`pendingReceptionRuns`, badge de solicitudes) — un
+click en "Recibir" ahí dispara `receive_finished_product`, que sí genera un
+movimiento de inventario real. Eso viola la decisión #9 (nunca tocar stock).
+Fix aplicado: el estado se mantiene tal cual (refleja la realidad del
+papel, no se inventa un cierre), pero (a) el backend rechaza
+`receive_finished_product` sobre cualquier corrida con `event_lines` no
+vacío, y (b) el frontend excluye las corridas con `event_lines` de las
+colas de pendientes en vivo. `canPrintRecepcion`/`canPrintEntrega` se
+vuelven "algún miembro cumple" en vez de "todos" cuando la familia es
+histórica, para no bloquear la impresión de lo que sí está en el papel solo
+porque falta una recepción que nunca existió.
 
 ## Fuera de alcance
 
