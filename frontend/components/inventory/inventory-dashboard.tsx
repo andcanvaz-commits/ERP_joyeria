@@ -1138,33 +1138,14 @@ export function InventoryDashboard() {
     if (!receiveMermaConfirm || isConfirmingMerma) return;
     setIsConfirmingMerma(true);
     try {
-      const { run, suggestedName } = receiveMermaConfirm;
-      let wasteItemId = selectedWasteItemId;
-      if (!wasteItemId) {
-        const typed = wasteItemNameInput.trim();
-        const exactMatch = items.find(
-          (it) => it.item_type === "WASTE" && it.name.trim().toLowerCase() === typed.toLowerCase(),
-        );
-        if (exactMatch) {
-          wasteItemId = exactMatch.id;
-        } else if (typed) {
-          try {
-            const created = await createInventoryItem({
-              item_type: "WASTE",
-              name: typed,
-              description: null,
-              unit_code: run.raw_material_unit_code,
-            });
-            wasteItemId = created.id;
-          } catch (nextError) {
-            setError(nextError instanceof Error ? nextError.message : "No se pudo crear el item de merma.");
-            return;
-          }
-        }
-      }
+      const { run } = receiveMermaConfirm;
+      const wasteItemId = selectedWasteItemId;
+      const wasteItemName = wasteItemId ? undefined : wasteItemNameInput.trim() || undefined;
       setReceiveMermaConfirm(null);
-      void handleReceiveFinishedProduct(run, wasteItemId ?? undefined);
-      void suggestedName; // referenciado solo para claridad del closure, sin uso adicional
+      // Sin item elegido de la lista: se manda el nombre tal cual y el
+      // backend resuelve-o-crea el item WASTE (ensure_production_item),
+      // el unico camino permitido para crear items de tipo merma.
+      void handleReceiveFinishedProduct(run, wasteItemId ?? undefined, wasteItemName);
     } finally {
       setIsConfirmingMerma(false);
     }
@@ -1190,11 +1171,11 @@ export function InventoryDashboard() {
     }
   }
 
-  async function handleReceiveFinishedProduct(run: ProductionRun, wasteItemId?: string) {
+  async function handleReceiveFinishedProduct(run: ProductionRun, wasteItemId?: string, wasteItemName?: string) {
     setError(null);
     setIsSavingProduction(true);
     try {
-      const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId);
+      const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId, wasteItemName);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
@@ -2119,7 +2100,9 @@ export function InventoryDashboard() {
                         ? "Salidas comerciales de productos terminados"
                         : itemFilter === "ORDENES_TERMINADAS"
                           ? "Ordenes de produccion recibidas en inventario"
-                          : "Seguimiento de productos en proceso"}
+                          : itemFilter === "WASTE"
+                            ? "Merma recuperada de produccion, reclasificable entre items"
+                            : "Seguimiento de productos en proceso"}
               </p>
             </div>
             <div className="rowActions">
@@ -2798,6 +2781,47 @@ export function InventoryDashboard() {
                 </tbody>
               </table>
               <Pager {...receivedRunsPager} />
+            </div>
+          ) : itemFilter === "WASTE" ? (
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th className="num" style={{ width: 40 }}>#</th>
+                    <th>Merma</th>
+                    <th className="num">Stock</th>
+                    <th>Estado</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawItemsPager.pageItems.map((item, index) => {
+                    const status = stockStatus(item);
+                    return (
+                      <tr key={item.id}>
+                        <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
+                        <td>{item.name}</td>
+                        <td className="num">{itemStockText(item)}</td>
+                        <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
+                        <td>
+                          <div className="rowActions">
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
+                              <Eye aria-hidden="true" size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!isLoading && displayItems.length === 0 ? (
+                    <tr><td colSpan={5}><div className="emptyState">Sin merma registrada.</div></td></tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr><td colSpan={5}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+              <Pager {...rawItemsPager} />
             </div>
           ) : (
           <div className="tableWrap">
@@ -4736,12 +4760,30 @@ export function InventoryDashboard() {
               {viewingMovement.source_file_name ? <span><strong>Archivo</strong>{viewingMovement.source_file_name}</span> : null}
             </div>
             <p className="panelText">{viewingMovement.reason || "Sin motivo registrado"}</p>
-            {viewingMovement.source_file_name ? (
+            {viewingMovement.source_file_name || (viewingMovement.movement_type === "INGRESO_PRODUCCION" && viewingMovement.item.item_type === "WASTE") ? (
               <div className="modalActions">
-                <button className="button" onClick={() => void handleDownloadMovementSourceFile(viewingMovement)} type="button">
-                  <Download aria-hidden="true" size={16} />
-                  Descargar XML
-                </button>
+                {viewingMovement.source_file_name ? (
+                  <button className="button" onClick={() => void handleDownloadMovementSourceFile(viewingMovement)} type="button">
+                    <Download aria-hidden="true" size={16} />
+                    Descargar XML
+                  </button>
+                ) : null}
+                {viewingMovement.movement_type === "INGRESO_PRODUCCION" && viewingMovement.item.item_type === "WASTE" ? (
+                  <button
+                    className="button buttonPrimary"
+                    onClick={() => {
+                      const movement = viewingMovement;
+                      setViewingMovement(null);
+                      setReclassifyTargetId(null);
+                      setReclassifyQuantity("");
+                      setReclassifyConfirm({ movement });
+                    }}
+                    type="button"
+                  >
+                    <Repeat aria-hidden="true" size={16} />
+                    Reclasificar
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </section>
