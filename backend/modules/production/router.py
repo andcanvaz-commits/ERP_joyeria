@@ -18,6 +18,7 @@ from backend.modules.production.schemas import (
     ProductionRunRead,
     MaterialRejectPayload,
     ProductionRunStageFinish,
+    ReceiveFinishedProductPayload,
     RunAssemblyDefine,
     RunProductsUpdate,
 )
@@ -240,12 +241,13 @@ def finish_run_stage(
 @router.post("/runs/{run_id}/receive-finished", response_model=ProductionRunRead)
 def receive_finished_product(
     run_id: UUID,
+    payload: ReceiveFinishedProductPayload | None = None,
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
 ) -> ProductionRunRead:
     ensure_permission(current_user, "production.runs.update")
     try:
-        return service.receive_finished_product(run_id, current_user)
+        return service.receive_finished_product(run_id, current_user, payload)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

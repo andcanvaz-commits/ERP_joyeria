@@ -41,6 +41,7 @@ from backend.modules.production.schemas import (
     ProductionRunCreate,
     ProductionRunRead,
     ProductionRunStageFinish,
+    ReceiveFinishedProductPayload,
     RunAssemblyDefine,
     RunAssemblyLineCreate,
     RunProductsUpdate,
@@ -1506,7 +1507,9 @@ class ProductionService:
         ]
         return AssemblyRecipeRead(model_key=model_key, items=items)
 
-    def receive_finished_product(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
+    def receive_finished_product(
+        self, run_id: UUID, current_user: CurrentUser, payload: "ReceiveFinishedProductPayload | None" = None,
+    ) -> ProductionRunRead:
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para recibir producto terminado.")
         run = self.repository.get_run(run_id)
@@ -1603,6 +1606,29 @@ class ProductionService:
                 raise ProductionDomainError(
                     f"No se pudo convertir el lote al producto planificado: {exc}"
                 ) from exc
+
+        if run.waste_weight and run.waste_weight > 0:
+            if payload and payload.waste_item_id:
+                waste_item = self.repository.session.get(InventoryItem, payload.waste_item_id)
+                if waste_item is None or waste_item.item_type != "WASTE":
+                    raise ProductionDomainError("El item de destino de merma no es valido.")
+            else:
+                waste_item = self.inventory_service.ensure_production_item(
+                    item_type="WASTE", name=f"Merma {run.process_name}", unit_code=run.raw_material_unit_code,
+                )
+            self.inventory_service.create_movement(
+                InventoryMovementCreate(
+                    item_id=waste_item.id,
+                    movement_type="INGRESO_PRODUCCION",
+                    quantity=run.waste_weight,
+                    reason=f"Merma recibida de {run.production_code or run.id}",
+                    reference_type="production_run",
+                    reference_id=run.id,
+                ),
+                user_id=current_user.id,
+                lot_code=run.production_code,
+            )
+
         run.status = ProductionRunStatus.RECEIVED
         run.received_at = datetime.utcnow()
         run.received_by_user_id = current_user.id
