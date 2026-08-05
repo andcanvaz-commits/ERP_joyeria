@@ -5,11 +5,19 @@ docs/superpowers/specs/2026-08-04-certificados-historicos-design.md.
 Uso:
     python -m backend.scripts.import_historical_orders \
         --xlsx "C:/Users/MSI I7/Desktop/Trabajo/Joyeria/Ordenes de Producción.xlsx" \
-        --created-by-username <username>
+        --created-by-username <username> \
+        [--raw-material-name "PLATA MIL"] \
         [--commit]
 
 Sin --commit corre en modo dry-run: parsea, resuelve material y usuario,
 imprime el resumen, no escribe nada en la base.
+
+--raw-material-name es opcional: si no se indica, se busca por defecto un
+unico item RAW_MATERIAL cuyo nombre contenga "plata" (falla si hay cero o
+mas de uno, listando los candidatos). Si se indica, se busca ese nombre
+exacto (sin distinguir mayusculas/minusculas) en vez de la busqueda por
+substring — util cuando el inventario real tiene varios items de plata
+(PLATA MIL, PLATA LIGADA, PLATA VARIOS, ...).
 """
 from __future__ import annotations
 
@@ -139,16 +147,15 @@ def parse_orders(xlsx_path: Path) -> list[HistoricalOrder]:
     return orders
 
 
-def _resolve_raw_material(session, name_hint: str) -> InventoryItem:
-    from sqlalchemy import select
+def _resolve_raw_material(session, name_hint: str, *, exact: bool = False) -> InventoryItem:
+    from sqlalchemy import func, select
 
-    candidates = list(
-        session.execute(
-            select(InventoryItem)
-            .where(InventoryItem.item_type == "RAW_MATERIAL")
-            .where(InventoryItem.name.ilike(f"%{name_hint}%"))
-        ).scalars()
-    )
+    query = select(InventoryItem).where(InventoryItem.item_type == "RAW_MATERIAL")
+    if exact:
+        query = query.where(func.lower(InventoryItem.name) == name_hint.lower())
+    else:
+        query = query.where(InventoryItem.name.ilike(f"%{name_hint}%"))
+    candidates = list(session.execute(query).scalars())
     if len(candidates) != 1:
         names = ", ".join(c.name for c in candidates) or "(ninguno)"
         raise SystemExit(
@@ -192,6 +199,29 @@ def _get_or_create_process(session) -> ProductionProcess:
 
 def _next_folio_numbers(count: int) -> list[str]:
     return [f"OP-2026-{n:04d}" for n in range(1, count + 1)]
+
+
+FOLIO_PREFIX = "OP-2026-"
+
+
+def _abort_if_already_imported(session) -> None:
+    """production_code/root_production_code no tienen constraint UNIQUE en
+    la base (solo index=True), asi que nada evita que un segundo --commit
+    duplique las 58 corridas con los mismos folios OP-2026-0001..0037. Este
+    chequeo corre tanto en dry-run como en --commit para que el dry-run
+    tambien reporte correctamente "esto ya se importo"."""
+    from sqlalchemy import select
+
+    existing = session.execute(
+        select(ProductionRun.id)
+        .where(ProductionRun.root_production_code.like(f"{FOLIO_PREFIX}%"))
+        .limit(1)
+    ).first()
+    if existing is not None:
+        raise SystemExit(
+            "Ya existen ordenes con folio OP-2026-*, este import ya se corrio. "
+            "Abortando para no duplicar."
+        )
 
 
 def build_runs_for_order(
@@ -285,6 +315,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xlsx", type=Path, required=True)
     parser.add_argument("--created-by-username", type=str, required=True)
+    parser.add_argument(
+        "--raw-material-name",
+        type=str,
+        default=None,
+        help=(
+            "Nombre exacto (sin distinguir mayusculas/minusculas) del item RAW_MATERIAL a usar. "
+            "Si se omite, se busca por defecto un unico item cuyo nombre contenga 'plata'."
+        ),
+    )
     parser.add_argument("--commit", action="store_true", help="Sin esta flag corre en modo dry-run.")
     args = parser.parse_args()
 
@@ -293,8 +332,12 @@ def main() -> None:
 
     session = SessionLocal()
     try:
+        _abort_if_already_imported(session)
         user = _resolve_user(session, args.created_by_username)
-        raw_material = _resolve_raw_material(session, "plata")
+        if args.raw_material_name:
+            raw_material = _resolve_raw_material(session, args.raw_material_name, exact=True)
+        else:
+            raw_material = _resolve_raw_material(session, "plata")
         process = _get_or_create_process(session)
         folios = _next_folio_numbers(len(orders))
 
