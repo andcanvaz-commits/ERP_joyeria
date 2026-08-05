@@ -462,18 +462,6 @@ export function InventoryDashboard() {
     requiredQty: string;
     missingQty: string;
   } | null>(null);
-  // Confirmacion antes de recibir cuando la orden calculo merma: Inventario
-  // ve el item WASTE sugerido (por proceso) y puede cambiarlo antes de
-  // postear el INGRESO_PRODUCCION. Si waste_weight es 0/null, Recibir actua
-  // directo, sin este modal.
-  const [receiveMermaConfirm, setReceiveMermaConfirm] = useState<{
-    run: ProductionRun;
-    wasteWeight: string;
-    unit: string;
-  } | null>(null);
-  const [wasteItemNameInput, setWasteItemNameInput] = useState("");
-  const [selectedWasteItemId, setSelectedWasteItemId] = useState<string | null>(null);
-  const [isConfirmingMerma, setIsConfirmingMerma] = useState(false);
   // Reclasificar merma ya recibida: mueve cantidad de un movimiento
   // INGRESO_PRODUCCION de item WASTE hacia otro item WASTE.
   const [reclassifyConfirm, setReclassifyConfirm] = useState<{ movement: InventoryMovement } | null>(null);
@@ -1117,39 +1105,6 @@ export function InventoryDashboard() {
       setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
     } finally {
       setIsSavingProduction(false);
-    }
-  }
-
-  function handleReceiveClick(run: ProductionRun) {
-    const wasteWeight = Number(run.waste_weight ?? "0");
-    if (!(wasteWeight > 0)) {
-      void handleReceiveFinishedProduct(run);
-      return;
-    }
-    const suggestedName = `Merma ${run.process_name}`;
-    setWasteItemNameInput(suggestedName);
-    setSelectedWasteItemId(null);
-    setReceiveMermaConfirm({
-      run,
-      wasteWeight: numericText(run.waste_weight),
-      unit: run.raw_material_unit_code,
-    });
-  }
-
-  async function handleConfirmReceiveMerma() {
-    if (!receiveMermaConfirm || isConfirmingMerma) return;
-    setIsConfirmingMerma(true);
-    try {
-      const { run } = receiveMermaConfirm;
-      const wasteItemId = selectedWasteItemId;
-      const wasteItemName = wasteItemId ? undefined : wasteItemNameInput.trim() || undefined;
-      setReceiveMermaConfirm(null);
-      // Sin item elegido de la lista: se manda el nombre tal cual y el
-      // backend resuelve-o-crea el item WASTE (ensure_production_item),
-      // el unico camino permitido para crear items de tipo merma.
-      await handleReceiveFinishedProduct(run, wasteItemId ?? undefined, wasteItemName);
-    } finally {
-      setIsConfirmingMerma(false);
     }
   }
 
@@ -5012,7 +4967,7 @@ export function InventoryDashboard() {
                         <button
                           className="button buttonPrimary"
                           disabled={isSavingProduction}
-                          onClick={() => handleReceiveClick(run)}
+                          onClick={() => void handleReceiveFinishedProduct(run)}
                           type="button"
                           style={{ flexShrink: 0 }}
                         >
@@ -5102,77 +5057,6 @@ export function InventoryDashboard() {
                 type="button"
               >
                 Aprobar parcial
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-      {receiveMermaConfirm ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Confirmar recepcion de merma">
-          <section className="modalWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Merma calculada{receiveMermaConfirm.run.production_code ? ` para ${receiveMermaConfirm.run.production_code}` : ""}</h2>
-                <p>
-                  {receiveMermaConfirm.wasteWeight} {receiveMermaConfirm.unit} de merma se sumaran a un item de
-                  inventario de tipo Merma.
-                </p>
-              </div>
-              <button
-                aria-label="Cerrar"
-                className="iconOnlyButton"
-                onClick={() => setReceiveMermaConfirm(null)}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <label className="fieldGroup">
-              <span>Item de destino (existente o nuevo)</span>
-              <input
-                className="field"
-                onChange={(event) => {
-                  setWasteItemNameInput(event.target.value);
-                  setSelectedWasteItemId(null);
-                }}
-                value={wasteItemNameInput}
-              />
-            </label>
-            {(() => {
-              const term = wasteItemNameInput.trim().toLowerCase();
-              const matches = items.filter(
-                (it) => it.item_type === "WASTE" && (term === "" || it.name.toLowerCase().includes(term)),
-              );
-              if (matches.length === 0) return null;
-              return (
-                <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
-                  {matches.map((it) => (
-                    <button
-                      className={`processPicker${selectedWasteItemId === it.id ? " processPickerActive" : ""}`}
-                      key={it.id}
-                      onClick={() => {
-                        setSelectedWasteItemId(it.id);
-                        setWasteItemNameInput(it.name);
-                      }}
-                      type="button"
-                    >
-                      {it.name} · stock actual {numericText(it.current_stock)} {it.unit_code}
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
-            <div className="modalActions">
-              <button className="button" onClick={() => setReceiveMermaConfirm(null)} type="button">
-                Cancelar
-              </button>
-              <button
-                className="button buttonPrimary"
-                disabled={isConfirmingMerma}
-                onClick={() => void handleConfirmReceiveMerma()}
-                type="button"
-              >
-                Confirmar y recibir
               </button>
             </div>
           </section>
