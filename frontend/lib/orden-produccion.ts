@@ -118,7 +118,7 @@ export function buildOrdenProduccion(
           rows.push({
             gramos: num(run.actual_finished_weight),
             unidad: materialUnit,
-            detalle: `Producto terminado: ${run.process_name}`
+            detalle: run.process_name
           });
         }
         for (const product of run.products ?? []) {

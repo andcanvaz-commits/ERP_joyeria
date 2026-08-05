@@ -4273,6 +4273,13 @@ textarea:disabled {
   min-width: 0;
 }
 
+.opColSub {
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  opacity: 0.85;
+}
+
 .opColHead {
   background: var(--doc-ink);
   color: #ffffff;
