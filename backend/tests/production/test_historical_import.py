@@ -1,7 +1,10 @@
 from decimal import Decimal
 
+import pytest
+
 from backend.modules.production.models import ProductionRunEventLine, ProductionRunStatus
 from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate
+from backend.modules.production.service import ProductionDomainError
 
 
 def _create_run(production_service, current_user, process, raw_material, target_complement, quantity):
@@ -76,3 +79,27 @@ def test_event_lines_load_ordered_by_line_order(
     read = production_service._read_with_names(reloaded)
 
     assert [line.detalle for line in read.event_lines] == ["primera", "segunda"]
+
+
+def test_receive_finished_product_rejects_historical_run(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Una corrida historica migrada (con event_lines) nunca debe poder
+    recibirse por el flujo en vivo: eso generaria un movimiento de
+    inventario real que el certificado de papel nunca respaldo. Ver
+    Addendum en docs/superpowers/specs/2026-08-04-certificados-historicos-design.md."""
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 10)
+    run = production_service.repository.get_run(run_read.id)
+
+    # Simula una corrida historica migrada: tiene event_lines y quedo
+    # PENDIENTE_RECEPCION (entregaron mas veces de las que recibieron).
+    run.event_lines.append(
+        ProductionRunEventLine(side="ENTREGA", gramos=Decimal("5"), unidad="g", detalle=None, line_order=1)
+    )
+    run.status = ProductionRunStatus.PENDING_RECEPTION
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError):
+        production_service.receive_finished_product(run.id, current_user)
