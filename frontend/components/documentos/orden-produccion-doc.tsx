@@ -19,10 +19,21 @@ function SideColumn({
   title: string;
   dataClass: string;
 }) {
+  // Un solo evento (caso normal, sin split): fecha/responsable van en el
+  // subtitulo de la columna, no como fila de tabla — no tiene sentido
+  // "agrupar" cuando hay un solo grupo. Con 2+ eventos (split real, varios
+  // responsables/fechas) cada uno se distingue con su propia fila.
+  const singleEvent = events.length === 1 ? events[0] : null;
   const lines: DisplayLine[] = [];
-  for (const event of events) {
-    lines.push({ kind: "group", fecha: event.fecha, responsable: event.responsable });
-    for (const row of event.rows) {
+  if (events.length > 1) {
+    for (const event of events) {
+      lines.push({ kind: "group", fecha: event.fecha, responsable: event.responsable });
+      for (const row of event.rows) {
+        lines.push({ kind: "row", row });
+      }
+    }
+  } else if (singleEvent) {
+    for (const row of singleEvent.rows) {
       lines.push({ kind: "row", row });
     }
   }
@@ -30,14 +41,18 @@ function SideColumn({
   for (let i = rowCount; i < MIN_ROWS; i += 1) {
     lines.push({ kind: "row", row: null });
   }
-  if (events.length === 0) {
-    lines.push({ kind: "group", fecha: null, responsable: DASH_RESPONSABLE });
-    for (let i = 0; i < MIN_ROWS; i += 1) lines.push({ kind: "row", row: null });
-  }
 
   return (
     <section className="opCol">
-      <div className="opColHead">{title}</div>
+      <div className="opColHead">
+        {title}
+        {singleEvent ? (
+          <span className="opColSub">
+            {" "}
+            · {formatDocDate(singleEvent.fecha) || "—"} · {singleEvent.responsable || DASH_RESPONSABLE}
+          </span>
+        ) : null}
+      </div>
       <table className="opTable">
         <thead>
           <tr>
@@ -88,7 +103,7 @@ export function OrdenProduccionDoc({
 
         <div className="opResponsable">
           RESPONSABLE PRODUCCIÓN: <span>{model.responsableProduccion}</span>
-          <span className="opCantidad">Cantidad: {model.cantidad}</span>
+          {model.cantidad !== null ? <span className="opCantidad">Cantidad: {model.cantidad}</span> : null}
         </div>
 
         <div className="opBody">
