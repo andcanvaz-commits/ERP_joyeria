@@ -277,7 +277,7 @@ function kardexDetail(movement: InventoryMovement) {
 // Signo del movimiento sobre el stock: suma entradas/ingresos/ajustes+ y resta
 // salidas/consumos/merma/ajustes-. Base del saldo corrido del kardex.
 function movementSign(type: InventoryMovementType) {
-  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" ? 1 : -1;
+  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" || type === "RECLASIFICACION_ENTRADA" ? 1 : -1;
 }
 
 function unitLabel(value: string) {
@@ -470,7 +470,6 @@ export function InventoryDashboard() {
     run: ProductionRun;
     wasteWeight: string;
     unit: string;
-    suggestedName: string;
   } | null>(null);
   const [wasteItemNameInput, setWasteItemNameInput] = useState("");
   const [selectedWasteItemId, setSelectedWasteItemId] = useState<string | null>(null);
@@ -1130,7 +1129,6 @@ export function InventoryDashboard() {
       run,
       wasteWeight: numericText(run.waste_weight),
       unit: run.raw_material_unit_code,
-      suggestedName,
     });
   }
 
@@ -1145,7 +1143,7 @@ export function InventoryDashboard() {
       // Sin item elegido de la lista: se manda el nombre tal cual y el
       // backend resuelve-o-crea el item WASTE (ensure_production_item),
       // el unico camino permitido para crear items de tipo merma.
-      void handleReceiveFinishedProduct(run, wasteItemId ?? undefined, wasteItemName);
+      await handleReceiveFinishedProduct(run, wasteItemId ?? undefined, wasteItemName);
     } finally {
       setIsConfirmingMerma(false);
     }
