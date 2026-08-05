@@ -177,6 +177,10 @@ class ReceiveFinishedProductPayload(BaseModel):
     # Item WASTE elegido por Inventario para recibir la merma; si falta y
     # run.waste_weight > 0, el servicio resuelve/crea "Merma <proceso>".
     waste_item_id: UUID | None = None
+    # Nombre de un item WASTE a resolver-o-crear (usado cuando Inventario
+    # escribe un nombre nuevo/existente en vez de elegir uno de la lista).
+    # Ignorado si waste_item_id viene presente.
+    waste_item_name: str | None = None
 
 
 class AllocateMaterialPayload(BaseModel):

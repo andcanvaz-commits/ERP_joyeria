@@ -228,6 +228,10 @@ class InventoryService(InventoryIntegrationPort):
             raise InventoryDomainError("El item destino debe ser de tipo merma.")
         if target_item.id == source_item.id:
             raise InventoryDomainError("El item destino debe ser distinto al origen.")
+        if target_item.unit_code != source_item.unit_code:
+            raise InventoryDomainError(
+                f"No se puede reclasificar: unidades distintas ({source_item.unit_code} vs {target_item.unit_code})."
+            )
 
         move_quantity = quantity if quantity is not None else movement.quantity
         if move_quantity > source_item.current_stock:
