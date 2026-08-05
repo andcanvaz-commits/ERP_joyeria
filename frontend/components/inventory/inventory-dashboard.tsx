@@ -227,38 +227,17 @@ function groupMovementEntries(
   return [...moves, ...groups, ...rejectionEntries].sort((left, right) => right.at - left.at);
 }
 
-// Stock de un item con su equivalencia: gramos ↔ unidades cuando el item
-// tiene peso por unidad; su unidad base cuando no. Formato único para todo
-// el sistema ("40 g · 4 und").
+// Stock de un item en su unidad de medida real, sin conversion agregada
+// (nunca "· X und" al lado): cada item se muestra solo en el unit_code que
+// tiene configurado.
 function itemStockText(item: InventoryItem) {
-  const stock = Number(item.current_stock);
-  const wpu = Number(item.weight_per_unit ?? 0);
-  const base = `${numericText(item.current_stock)} ${item.unit_code}`;
-  if (!(wpu > 0) || !Number.isFinite(stock)) return base;
-  if (item.unit_code === "g") {
-    return `${base} · ${numericText(String(Number((stock / wpu).toFixed(2))))} und`;
-  }
-  if (item.unit_code === "und") {
-    return `${base} · ${numericText(String(Number((stock * wpu).toFixed(2))))} g`;
-  }
-  return base;
+  return `${numericText(item.current_stock)} ${item.unit_code}`;
 }
 
-// Cantidad de un movimiento con su equivalencia: items en gramos con peso
-// por unidad muestran también unidades; items en unidades (lotes) muestran
-// también gramos. Sin dato de peso, solo la cantidad base.
+// Cantidad de un movimiento en su unidad de medida real, sin conversion
+// agregada.
 function movementAmountText(movement: InventoryMovement) {
-  const quantity = Number(movement.quantity);
-  const wpu = Number(movement.item.weight_per_unit ?? 0);
-  const base = `${numericText(movement.quantity)} ${movement.unit_code}`;
-  if (!(wpu > 0) || !Number.isFinite(quantity)) return base;
-  if (movement.unit_code === "g") {
-    return `${base} · ${numericText(String(Number((quantity / wpu).toFixed(2))))} und`;
-  }
-  if (movement.unit_code === "und") {
-    return `${base} · ${numericText(String(Number((quantity * wpu).toFixed(2))))} g`;
-  }
-  return base;
+  return `${numericText(movement.quantity)} ${movement.unit_code}`;
 }
 
 // Detalle del kardex por lado de la operación: si el item RECIBIÓ, dice qué
