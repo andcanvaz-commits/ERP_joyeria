@@ -237,10 +237,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: listUnits,
     enabled: Boolean(currentUser) && variant === "maintenance",
   });
+  // Stock cambia desde Inventario (Entrada), que solo invalida ["inventory"]
+  // — sin refetch propio esta lista (usada con stock real en el picker de
+  // materiales del proceso) queda vieja hasta recargar la pagina.
   const { data: rawMaterialsList = EMPTY_RAW_MATERIALS } = useQuery({
     queryKey: ["raw-materials"],
     queryFn: () => listInventoryItems("RAW_MATERIAL"),
     enabled: Boolean(currentUser) && variant === "maintenance",
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
   });
   // Tipos de producto del catálogo: tile, selector del form de proceso y
   // combo de producto objetivo al crear orden.
@@ -253,11 +258,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryKey: ["supplies"],
     queryFn: () => listInventoryItems("SUPPLY"),
     enabled: Boolean(currentUser) && variant === "maintenance",
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
   });
   const { data: complementsList = EMPTY_RAW_MATERIALS } = useQuery({
     queryKey: ["complements"],
     queryFn: () => listInventoryItems("COMPLEMENT"),
     enabled: Boolean(currentUser) && variant === "maintenance",
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
   });
   // Merma reclasificada: opcion elegible como material de proceso (materia
   // prima/complementos/merma), igual que en el picker de Inventario.
@@ -265,6 +274,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryKey: ["waste-items"],
     queryFn: () => listInventoryItems("WASTE"),
     enabled: Boolean(currentUser) && variant === "maintenance",
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
   });
   // Claves de modelo que ya tienen receta de ensamble: filtra los pickers en
   // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR) y, en

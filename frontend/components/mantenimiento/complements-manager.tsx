@@ -89,12 +89,16 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
     return () => clearTimeout(timer);
   }, [success]);
 
-  async function invalidate() {
-    await queryClient.invalidateQueries({ queryKey: ["complements"] });
-    await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-    await queryClient.invalidateQueries({ queryKey: ["complement-types"] });
+  // Sin awaitear: invalidateQueries espera el refetch de las queries activas
+  // (["production"] dispara ~7 requests en paralelo) — awaitearlo dejaba
+  // isSaving atascado en true hasta que todo eso terminara, bloqueando el
+  // boton de crear el siguiente complemento sin necesidad.
+  function invalidate() {
+    void queryClient.invalidateQueries({ queryKey: ["complements"] });
+    void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    void queryClient.invalidateQueries({ queryKey: ["complement-types"] });
     // Los selectores de materiales de proceso mezclan materia prima + insumos + complementos.
-    await queryClient.invalidateQueries({ queryKey: ["production"] });
+    void queryClient.invalidateQueries({ queryKey: ["production"] });
   }
 
   async function handleCreateType(event: FormEvent) {
@@ -110,7 +114,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
       setNewTypeName("");
       setComplTypeId(created.id);
       setSuccess(`Tipo ${created.name} creado.`);
-      await queryClient.invalidateQueries({ queryKey: ["complement-types"] });
+      void queryClient.invalidateQueries({ queryKey: ["complement-types"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el tipo.");
     } finally {
@@ -143,7 +147,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
       });
       setComplName("");
       setSuccess(`Complemento ${created.name} creado.`);
-      await invalidate();
+      invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el complemento.");
     } finally {
@@ -158,7 +162,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
     try {
       await deleteInventoryItem(item.id);
       setSuccess("Complemento eliminado.");
-      await invalidate();
+      invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar el complemento.");
     }

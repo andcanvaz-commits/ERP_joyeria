@@ -49,11 +49,14 @@ export function SuppliesManager({ mode, onClose }: { mode: "create" | "view"; on
     setError(null);
   }
 
-  async function invalidate() {
-    await queryClient.invalidateQueries({ queryKey: ["supplies"] });
-    await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+  // Sin awaitear: invalidateQueries espera el refetch de las queries activas
+  // (["production"] dispara varios requests en paralelo) — awaitearlo dejaba
+  // isSaving atascado en true hasta que todo terminara.
+  function invalidate() {
+    void queryClient.invalidateQueries({ queryKey: ["supplies"] });
+    void queryClient.invalidateQueries({ queryKey: ["inventory"] });
     // Los selectores de materiales de proceso mezclan materia prima + insumos.
-    await queryClient.invalidateQueries({ queryKey: ["production"] });
+    void queryClient.invalidateQueries({ queryKey: ["production"] });
   }
 
   async function handleDelete(item: InventoryItem) {
@@ -63,7 +66,7 @@ export function SuppliesManager({ mode, onClose }: { mode: "create" | "view"; on
     try {
       await deleteInventoryItem(item.id);
       setSuccess("Insumo eliminado.");
-      await invalidate();
+      invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar el insumo.");
     }
@@ -100,7 +103,7 @@ export function SuppliesManager({ mode, onClose }: { mode: "create" | "view"; on
         setSuccess("Insumo creado.");
       }
       resetForm();
-      await invalidate();
+      invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar el insumo.");
     } finally {
