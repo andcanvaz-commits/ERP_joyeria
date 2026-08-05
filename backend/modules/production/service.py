@@ -88,8 +88,10 @@ def _populate_run_names(session, reads: list, runs: list) -> None:
     for read, run in zip(reads, runs):
         read.created_by_name = name_for(run.created_by_user_id)
         read.started_by_name = name_for(run.started_by_user_id)
-        read.materials_approved_by_name = name_for(run.materials_approved_by_user_id)
-        read.received_by_name = name_for(run.received_by_user_id)
+        read.materials_approved_by_name = (
+            name_for(run.materials_approved_by_user_id) or run.materials_approved_responsable_name
+        )
+        read.received_by_name = name_for(run.received_by_user_id) or run.received_responsable_name
         read.rejected_by_name = name_for(run.rejected_by_user_id)
         stages_by_id = {str(stage.id): stage for stage in run.stages}
         for stage_read in read.stages:
@@ -700,18 +702,48 @@ class ProductionService:
         if raw_material is None:
             raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
 
-        # Si falta materia prima, la orden se parte: la porcion que el stock
-        # alcanza a cubrir sigue su curso normal aqui mismo; el remanente
-        # queda como corrida hija ESPERANDO_MATERIAL bajo el mismo folio raiz
-        # (ver ProductionService.allocate_material para como se resuelve).
+        # Si falta materia prima O algun complemento pedido, la orden se
+        # parte: la porcion que el stock mas corto alcanza a cubrir (el
+        # minimo entre materia prima y cada complemento) sigue su curso aqui
+        # mismo; el remanente queda como corrida hija ESPERANDO_MATERIAL bajo
+        # el mismo folio raiz (ver ProductionService.allocate_material).
+        # Los insumos por etapa quedan afuera de este calculo: son cantidad
+        # fija por orden, no proporcional a las unidades fabricadas.
+        original_quantity = run.quantity
+        covered_qty = original_quantity
+        limiting_name = raw_material.name
+        limiting_available = raw_material.current_stock
+        limiting_unit = raw_material.unit_code
+        limiting_required_per_unit = run.raw_material_quantity_per_unit
+
         if raw_material.current_stock < run.total_required_material:
-            covered_qty = raw_material.current_stock // run.raw_material_quantity_per_unit
-            if covered_qty <= 0:
-                raise ProductionDomainError(
-                    f"Stock insuficiente de '{raw_material.name}': disponible "
-                    f"{raw_material.current_stock} {raw_material.unit_code}, se requieren "
-                    f"{run.raw_material_quantity_per_unit} {raw_material.unit_code} para 1 unidad."
-                )
+            candidate = raw_material.current_stock // run.raw_material_quantity_per_unit
+            if candidate < covered_qty:
+                covered_qty = candidate
+
+        for complement in run.complements:
+            if complement.status != ComplementRequestStatus.PENDING:
+                continue
+            item = self.repository.session.get(InventoryItem, complement.item_id)
+            if item is None:
+                raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
+            per_unit = complement.quantity / original_quantity if original_quantity > 0 else complement.quantity
+            if item.current_stock < complement.quantity:
+                candidate = item.current_stock // per_unit if per_unit > 0 else Decimal("0")
+                if candidate < covered_qty:
+                    covered_qty = candidate
+                    limiting_name = item.name
+                    limiting_available = item.current_stock
+                    limiting_unit = item.unit_code
+                    limiting_required_per_unit = per_unit
+
+        if covered_qty <= 0:
+            raise ProductionDomainError(
+                f"Stock insuficiente de '{limiting_name}': disponible "
+                f"{limiting_available} {limiting_unit}, se requieren "
+                f"{limiting_required_per_unit} {limiting_unit} para 1 unidad."
+            )
+        if covered_qty < original_quantity:
             self._split_run_for_partial_material(run, covered_qty)
 
         try:
@@ -1454,17 +1486,20 @@ class ProductionService:
             return AssemblyRecipeRead(model_key=model_key, items=[])
         complement_ids = list({item.complement_item_id for item in recipe.items})
         names: dict = {}
+        units: dict = {}
         if complement_ids:
             rows = self.repository.session.execute(
-                select(InventoryItem.id, InventoryItem.name).where(
+                select(InventoryItem.id, InventoryItem.name, InventoryItem.unit_code).where(
                     InventoryItem.id.in_(complement_ids)
                 )
             ).all()
             names = {row[0]: row[1] for row in rows}
+            units = {row[0]: row[2] for row in rows}
         items = [
             AssemblyRecipeItemRead(
                 complement_item_id=item.complement_item_id,
                 name=names.get(item.complement_item_id),
+                unit_code=units.get(item.complement_item_id),
                 quantity_per_unit=item.quantity_per_unit,
             )
             for item in recipe.items

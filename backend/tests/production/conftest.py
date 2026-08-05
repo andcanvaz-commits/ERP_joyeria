@@ -17,8 +17,21 @@ from backend.modules.production.service import ProductionService
 
 
 @pytest.fixture()
-def current_user() -> CurrentUser:
-    return CurrentUser(id=uuid.uuid4(), username="jefe_test", role="Jefe de producción", permissions=frozenset())
+def current_user(db_session) -> CurrentUser:
+    from backend.modules.auth.models import AuthUser
+
+    user_id = uuid.uuid4()
+    auth_user = AuthUser(
+        id=user_id,
+        username="jefe_test",
+        email="jefe@test.local",
+        password_hash="mock_hashed",
+        role="Jefe de producción",
+    )
+    db_session.add(auth_user)
+    db_session.flush()
+
+    return CurrentUser(id=user_id, username="jefe_test", role="Jefe de producción", permissions=frozenset())
 
 
 @pytest.fixture()
