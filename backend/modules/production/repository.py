@@ -43,7 +43,10 @@ class ProductionProcessRepository:
     def get_run(self, run_id: UUID) -> ProductionRun | None:
         statement = (
             select(ProductionRun)
-            .options(selectinload(ProductionRun.stages))
+            .options(
+                selectinload(ProductionRun.stages),
+                selectinload(ProductionRun.event_lines),
+            )
             .where(ProductionRun.id == run_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
@@ -59,7 +62,10 @@ class ProductionProcessRepository:
     def list_runs(self) -> list[ProductionRun]:
         statement = (
             select(ProductionRun)
-            .options(selectinload(ProductionRun.stages))
+            .options(
+                selectinload(ProductionRun.stages),
+                selectinload(ProductionRun.event_lines),
+            )
             .order_by(ProductionRun.requested_at.desc())
         )
         return list(self.session.execute(statement).scalars().all())
