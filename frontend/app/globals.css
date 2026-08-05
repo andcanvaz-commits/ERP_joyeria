@@ -897,6 +897,18 @@ textarea {
   display: grid;
   gap: 8px;
   min-height: 0;
+  max-width: 260px;
+}
+
+/* Mismo tope que .barChartList: sin esto la tabla se sale del alto fijo
+   de la tarjeta cuando hay muchas filas. */
+.rankedBarChart .tableWrap {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.dashboardVisualGridCompact .rankedBarChart .tableWrap {
+  max-height: 118px;
 }
 
 .chartTableToggle {
