@@ -199,3 +199,53 @@ def test_receive_rejects_waste_item_id_with_mismatched_unit_code(
         production_service.receive_finished_product(
             run.id, current_user, ReceiveFinishedProductPayload(waste_item_id=mismatched_waste.id)
         )
+
+
+def test_receive_rejects_auto_named_waste_item_with_mismatched_unit_code(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    """El camino de nombre automatico ("Merma <proceso>") pasa por
+    ensure_production_item, que reutiliza un item existente por nombre sin
+    mirar su unidad. La validacion de unidad debe cubrir tambien este camino,
+    no solo el de waste_item_id explicito."""
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    # Mismo nombre que resolveria el fallback automatico para este proceso,
+    # pero con una unidad incompatible con la orden (que pesa en "g").
+    preexisting_waste = InventoryItem(
+        item_type="WASTE", name="Merma Cadenas test", sku="ME-TEST-0003", unit_code="und",
+        current_stock=Decimal("0"),
+    )
+    db_session.add(preexisting_waste)
+    db_session.flush()
+
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+    )
+
+    with pytest.raises(ProductionDomainError, match="unidad distinta"):
+        production_service.receive_finished_product(run.id, current_user)
+
+
+def test_receive_rejects_named_waste_item_with_mismatched_unit_code(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    """Mismo caso que el anterior pero via waste_item_name explicito (el
+    texto que Inventario escribe a mano en el modal de recepcion)."""
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    preexisting_waste = InventoryItem(
+        item_type="WASTE", name="Merma escrita a mano", sku="ME-TEST-0004", unit_code="und",
+        current_stock=Decimal("0"),
+    )
+    db_session.add(preexisting_waste)
+    db_session.flush()
+
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+    )
+
+    with pytest.raises(ProductionDomainError, match="unidad distinta"):
+        production_service.receive_finished_product(
+            run.id, current_user, ReceiveFinishedProductPayload(waste_item_name="Merma escrita a mano")
+        )

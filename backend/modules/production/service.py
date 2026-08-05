@@ -1612,11 +1612,6 @@ class ProductionService:
                 waste_item = self.repository.session.get(InventoryItem, payload.waste_item_id)
                 if waste_item is None or waste_item.item_type != "WASTE":
                     raise ProductionDomainError("El item de destino de merma no es valido.")
-                if waste_item.unit_code != run.raw_material_unit_code:
-                    raise ProductionDomainError(
-                        f"El item de destino de merma usa una unidad distinta "
-                        f"({waste_item.unit_code} vs {run.raw_material_unit_code})."
-                    )
             elif payload and payload.waste_item_name and payload.waste_item_name.strip():
                 waste_item = self.inventory_service.ensure_production_item(
                     item_type="WASTE",
@@ -1626,6 +1621,16 @@ class ProductionService:
             else:
                 waste_item = self.inventory_service.ensure_production_item(
                     item_type="WASTE", name=f"Merma {run.process_name}", unit_code=run.raw_material_unit_code,
+                )
+            # ensure_production_item reutiliza un item existente por nombre
+            # (case-insensitive) sin validar su unidad: la unidad solo se usa
+            # al crear. Por eso la validacion vive aqui, cubriendo los tres
+            # caminos (id explicito, nombre explicito, nombre automatico) en
+            # un solo lugar en vez de repetirla por rama.
+            if waste_item.unit_code != run.raw_material_unit_code:
+                raise ProductionDomainError(
+                    f"El item de destino de merma usa una unidad distinta "
+                    f"({waste_item.unit_code} vs {run.raw_material_unit_code})."
                 )
             self.inventory_service.create_movement(
                 InventoryMovementCreate(

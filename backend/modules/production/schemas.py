@@ -180,7 +180,7 @@ class ReceiveFinishedProductPayload(BaseModel):
     # Nombre de un item WASTE a resolver-o-crear (usado cuando Inventario
     # escribe un nombre nuevo/existente en vez de elegir uno de la lista).
     # Ignorado si waste_item_id viene presente.
-    waste_item_name: str | None = None
+    waste_item_name: str | None = Field(default=None, max_length=180)
 
 
 class AllocateMaterialPayload(BaseModel):
