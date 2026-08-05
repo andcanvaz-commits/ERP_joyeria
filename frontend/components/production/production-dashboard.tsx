@@ -1902,15 +1902,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </section>
 
           {/* Ordenes que un split dejo esperando material: solo lectura aqui,
-              se resuelven desde inventario (ver modal "Destinar material"). */}
-          <section className="card panelBody" aria-label="Esperando material">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Esperando material</h2>
-                <p className="panelText">{countOrders(waitingMaterialRuns)} {countOrders(waitingMaterialRuns) === 1 ? "orden espera" : "ordenes esperan"} materia prima</p>
+              se resuelven desde inventario (ver modal "Destinar material").
+              Sin ordenes esperando, la seccion no se muestra (nada que revisar). */}
+          {waitingMaterialRuns.length > 0 ? (
+            <section className="card panelBody" aria-label="Esperando material">
+              <div className="panelHeader">
+                <div>
+                  <h2 className="panelTitle">Esperando material</h2>
+                  <p className="panelText">{countOrders(waitingMaterialRuns)} {countOrders(waitingMaterialRuns) === 1 ? "orden espera" : "ordenes esperan"} materia prima</p>
+                </div>
               </div>
-            </div>
-            {waitingMaterialRuns.length > 0 ? (
               <div className="productionRunsVertical">
                 {waitingMaterialRuns.map((run) => (
                   <div className="productionRunListRow" key={run.id}>
@@ -1930,10 +1931,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="emptyState">No hay ordenes esperando material.</div>
-            )}
-          </section>
+            </section>
+          ) : null}
 
           {/* Procesos: listos para iniciar, en curso y terminados, en un solo lugar. */}
           <section className="card panelBody" aria-label="Procesos">
