@@ -154,6 +154,13 @@ class InventoryMovementCreate(BaseModel):
     source_file_content: str | None = Field(default=None, max_length=2_000_000)
 
 
+class ReclassifyWastePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_item_id: UUID
+    quantity: Decimal | None = Field(default=None, gt=0)
+
+
 class WaitingProductionRunSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 

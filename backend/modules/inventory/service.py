@@ -212,6 +212,54 @@ class InventoryService(InventoryIntegrationPort):
         self.repository.flush()
         return InventoryItemRead.model_validate(item)
 
+    def reclassify_waste_movement(
+        self, movement_id: UUID, target_item_id: UUID, quantity: Decimal | None, user_id: UUID | None,
+    ) -> list[InventoryMovementRead]:
+        movement = self.repository.get_movement(movement_id)
+        if movement is None:
+            raise InventoryNotFoundError("Movimiento no encontrado.")
+        if movement.movement_type != "INGRESO_PRODUCCION" or movement.reference_type != "production_run":
+            raise InventoryDomainError("Solo se puede reclasificar un ingreso de merma de produccion.")
+        source_item = self._get_item_or_raise(movement.item_id)
+        if source_item.item_type != "WASTE":
+            raise InventoryDomainError("El movimiento no corresponde a un item de tipo merma.")
+        target_item = self._get_item_or_raise(target_item_id)
+        if target_item.item_type != "WASTE":
+            raise InventoryDomainError("El item destino debe ser de tipo merma.")
+        if target_item.id == source_item.id:
+            raise InventoryDomainError("El item destino debe ser distinto al origen.")
+
+        move_quantity = quantity if quantity is not None else movement.quantity
+        if move_quantity > source_item.current_stock:
+            raise InventoryDomainError(
+                f"Solo quedan {source_item.current_stock} {source_item.unit_code} de "
+                f'"{source_item.name}" para reclasificar.'
+            )
+
+        salida = self.create_movement(
+            InventoryMovementCreate(
+                item_id=source_item.id,
+                movement_type="RECLASIFICACION_SALIDA",
+                quantity=move_quantity,
+                reason=f"Reclasificado hacia {target_item.name}",
+                reference_type=movement.reference_type,
+                reference_id=movement.reference_id,
+            ),
+            user_id=user_id,
+        )
+        entrada = self.create_movement(
+            InventoryMovementCreate(
+                item_id=target_item.id,
+                movement_type="RECLASIFICACION_ENTRADA",
+                quantity=move_quantity,
+                reason=f"Reclasificado desde {source_item.name}",
+                reference_type=movement.reference_type,
+                reference_id=movement.reference_id,
+            ),
+            user_id=user_id,
+        )
+        return [salida, entrada]
+
     def list_items(self, item_type: str | None = None) -> list[InventoryItemRead]:
         return [InventoryItemRead.model_validate(item) for item in self.repository.list_items(item_type)]
 
