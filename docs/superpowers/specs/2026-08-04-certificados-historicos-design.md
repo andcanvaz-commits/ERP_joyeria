@@ -75,11 +75,15 @@ sigue la regla tal como está escrita arriba y es la fuente de verdad.)
    Recibido), igual que cualquier proceso configurado desde el
    administrador — respeta el principio de constructor genérico, nada
    quemado en código.
-6. **Materia prima**: el script busca en `inventory_items` un
-   `RAW_MATERIAL` cuyo nombre calce con "Plata" (todas las 37 órdenes son de
-   Plata) y lo usa como `raw_material_item_id`. Si hay más de una variante
-   (ej. "Plata 925" y otra pureza) o ninguna, el script no inserta nada y
-   pide al usuario elegir — no adivina.
+6. **Materia prima**: NO se vincula a ninguna materia prima real del
+   inventario (el real tiene 3 variantes — PLATA MIL, PLATA LIGADA, PLATA
+   VARIOS — y el usuario pidió explícitamente no atar lo histórico a
+   ninguna de ellas). Se crea un `InventoryItem` dedicado, "Plata
+   (histórico)", `is_active=False` y `archived_at` seteado (invisible en el
+   inventario normal, `current_stock=0` para siempre, nunca recibe
+   movimientos) y se usa su id como `raw_material_item_id`. El script
+   soporta `--raw-material-name` (match exacto, case-insensitive) para
+   apuntar a este item dedicado en vez de adivinar por substring.
 7. **Campo "Cantidad" del certificado**: se oculta para las corridas
    históricas (no existe ese dato en el papel — es un libro de gramos, no
    de piezas fabricadas). `quantity` interno se guarda en 1 solo para
