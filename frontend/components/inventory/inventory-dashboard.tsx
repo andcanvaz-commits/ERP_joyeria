@@ -473,6 +473,7 @@ export function InventoryDashboard() {
   } | null>(null);
   const [wasteItemNameInput, setWasteItemNameInput] = useState("");
   const [selectedWasteItemId, setSelectedWasteItemId] = useState<string | null>(null);
+  const [isConfirmingMerma, setIsConfirmingMerma] = useState(false);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -1127,34 +1128,39 @@ export function InventoryDashboard() {
   }
 
   async function handleConfirmReceiveMerma() {
-    if (!receiveMermaConfirm) return;
-    const { run, suggestedName } = receiveMermaConfirm;
-    let wasteItemId = selectedWasteItemId;
-    if (!wasteItemId) {
-      const typed = wasteItemNameInput.trim();
-      const exactMatch = items.find(
-        (it) => it.item_type === "WASTE" && it.name.trim().toLowerCase() === typed.toLowerCase(),
-      );
-      if (exactMatch) {
-        wasteItemId = exactMatch.id;
-      } else if (typed) {
-        try {
-          const created = await createInventoryItem({
-            item_type: "WASTE",
-            name: typed,
-            description: null,
-            unit_code: run.raw_material_unit_code,
-          });
-          wasteItemId = created.id;
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : "No se pudo crear el item de merma.");
-          return;
+    if (!receiveMermaConfirm || isConfirmingMerma) return;
+    setIsConfirmingMerma(true);
+    try {
+      const { run, suggestedName } = receiveMermaConfirm;
+      let wasteItemId = selectedWasteItemId;
+      if (!wasteItemId) {
+        const typed = wasteItemNameInput.trim();
+        const exactMatch = items.find(
+          (it) => it.item_type === "WASTE" && it.name.trim().toLowerCase() === typed.toLowerCase(),
+        );
+        if (exactMatch) {
+          wasteItemId = exactMatch.id;
+        } else if (typed) {
+          try {
+            const created = await createInventoryItem({
+              item_type: "WASTE",
+              name: typed,
+              description: null,
+              unit_code: run.raw_material_unit_code,
+            });
+            wasteItemId = created.id;
+          } catch (nextError) {
+            setError(nextError instanceof Error ? nextError.message : "No se pudo crear el item de merma.");
+            return;
+          }
         }
       }
+      setReceiveMermaConfirm(null);
+      void handleReceiveFinishedProduct(run, wasteItemId ?? undefined);
+      void suggestedName; // referenciado solo para claridad del closure, sin uso adicional
+    } finally {
+      setIsConfirmingMerma(false);
     }
-    setReceiveMermaConfirm(null);
-    void handleReceiveFinishedProduct(run, wasteItemId ?? undefined);
-    void suggestedName; // referenciado solo para claridad del closure, sin uso adicional
   }
 
   async function handleReceiveFinishedProduct(run: ProductionRun, wasteItemId?: string) {
@@ -5038,8 +5044,8 @@ export function InventoryDashboard() {
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            <label className="fieldLabel" style={{ marginTop: 8 }}>
-              Item de destino (existente o nuevo)
+            <label className="fieldGroup">
+              <span>Item de destino (existente o nuevo)</span>
               <input
                 className="field"
                 onChange={(event) => {
@@ -5077,7 +5083,12 @@ export function InventoryDashboard() {
               <button className="button" onClick={() => setReceiveMermaConfirm(null)} type="button">
                 Cancelar
               </button>
-              <button className="button buttonPrimary" onClick={() => void handleConfirmReceiveMerma()} type="button">
+              <button
+                className="button buttonPrimary"
+                disabled={isConfirmingMerma}
+                onClick={() => void handleConfirmReceiveMerma()}
+                type="button"
+              >
                 Confirmar y recibir
               </button>
             </div>
