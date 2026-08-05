@@ -44,7 +44,7 @@ export type ProductionProcess = {
 // Receta de ensamble por clave de modelo (categoria+modelo, cantidades por unidad).
 export type AssemblyRecipe = {
   model_key: string | null;
-  items: Array<{ complement_item_id: string; name?: string | null; quantity_per_unit: string }>;
+  items: Array<{ complement_item_id: string; name?: string | null; unit_code?: string | null; quantity_per_unit: string }>;
 };
 
 export type ProductionRunStage = {
@@ -141,6 +141,8 @@ export type ProductionRun = {
   }>;
   // Complementos de inventario solicitados para ensamblar.
   complements?: Array<{ id: string; item_id: string; name?: string | null; quantity: string; unit_code: string; status: string }>;
+  // Líneas de evento del acta de entrega/recepción para certificación histórica.
+  event_lines?: Array<{ side: "ENTREGA" | "RECEPCION"; gramos: string; unidad: string; detalle: string | null; line_order: number }>;
   // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
   assembly_mode: "ASIGNAR" | "ENSAMBLAR";
   // Indica si falta definir la combinacion de complementos del ensamble.
