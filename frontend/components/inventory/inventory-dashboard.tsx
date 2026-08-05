@@ -461,6 +461,18 @@ export function InventoryDashboard() {
     requiredQty: string;
     missingQty: string;
   } | null>(null);
+  // Confirmacion antes de recibir cuando la orden calculo merma: Inventario
+  // ve el item WASTE sugerido (por proceso) y puede cambiarlo antes de
+  // postear el INGRESO_PRODUCCION. Si waste_weight es 0/null, Recibir actua
+  // directo, sin este modal.
+  const [receiveMermaConfirm, setReceiveMermaConfirm] = useState<{
+    run: ProductionRun;
+    wasteWeight: string;
+    unit: string;
+    suggestedName: string;
+  } | null>(null);
+  const [wasteItemNameInput, setWasteItemNameInput] = useState("");
+  const [selectedWasteItemId, setSelectedWasteItemId] = useState<string | null>(null);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -1097,11 +1109,59 @@ export function InventoryDashboard() {
     }
   }
 
-  async function handleReceiveFinishedProduct(run: ProductionRun) {
+  function handleReceiveClick(run: ProductionRun) {
+    const wasteWeight = Number(run.waste_weight ?? "0");
+    if (!(wasteWeight > 0)) {
+      void handleReceiveFinishedProduct(run);
+      return;
+    }
+    const suggestedName = `Merma ${run.process_name}`;
+    setWasteItemNameInput(suggestedName);
+    setSelectedWasteItemId(null);
+    setReceiveMermaConfirm({
+      run,
+      wasteWeight: numericText(run.waste_weight),
+      unit: run.raw_material_unit_code,
+      suggestedName,
+    });
+  }
+
+  async function handleConfirmReceiveMerma() {
+    if (!receiveMermaConfirm) return;
+    const { run, suggestedName } = receiveMermaConfirm;
+    let wasteItemId = selectedWasteItemId;
+    if (!wasteItemId) {
+      const typed = wasteItemNameInput.trim();
+      const exactMatch = items.find(
+        (it) => it.item_type === "WASTE" && it.name.trim().toLowerCase() === typed.toLowerCase(),
+      );
+      if (exactMatch) {
+        wasteItemId = exactMatch.id;
+      } else if (typed) {
+        try {
+          const created = await createInventoryItem({
+            item_type: "WASTE",
+            name: typed,
+            description: null,
+            unit_code: run.raw_material_unit_code,
+          });
+          wasteItemId = created.id;
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : "No se pudo crear el item de merma.");
+          return;
+        }
+      }
+    }
+    setReceiveMermaConfirm(null);
+    void handleReceiveFinishedProduct(run, wasteItemId ?? undefined);
+    void suggestedName; // referenciado solo para claridad del closure, sin uso adicional
+  }
+
+  async function handleReceiveFinishedProduct(run: ProductionRun, wasteItemId?: string) {
     setError(null);
     setIsSavingProduction(true);
     try {
-      const updated = await receiveProductionRunFinishedProduct(run.id);
+      const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
@@ -4863,7 +4923,7 @@ export function InventoryDashboard() {
                         <button
                           className="button buttonPrimary"
                           disabled={isSavingProduction}
-                          onClick={() => void handleReceiveFinishedProduct(run)}
+                          onClick={() => handleReceiveClick(run)}
                           type="button"
                           style={{ flexShrink: 0 }}
                         >
@@ -4953,6 +5013,72 @@ export function InventoryDashboard() {
                 type="button"
               >
                 Aprobar parcial
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {receiveMermaConfirm ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Confirmar recepcion de merma">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Merma calculada{receiveMermaConfirm.run.production_code ? ` para ${receiveMermaConfirm.run.production_code}` : ""}</h2>
+                <p>
+                  {receiveMermaConfirm.wasteWeight} {receiveMermaConfirm.unit} de merma se sumaran a un item de
+                  inventario de tipo Merma.
+                </p>
+              </div>
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => setReceiveMermaConfirm(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldLabel" style={{ marginTop: 8 }}>
+              Item de destino (existente o nuevo)
+              <input
+                className="field"
+                onChange={(event) => {
+                  setWasteItemNameInput(event.target.value);
+                  setSelectedWasteItemId(null);
+                }}
+                value={wasteItemNameInput}
+              />
+            </label>
+            {(() => {
+              const term = wasteItemNameInput.trim().toLowerCase();
+              const matches = items.filter(
+                (it) => it.item_type === "WASTE" && (term === "" || it.name.toLowerCase().includes(term)),
+              );
+              if (matches.length === 0) return null;
+              return (
+                <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                  {matches.map((it) => (
+                    <button
+                      className={`processPicker${selectedWasteItemId === it.id ? " processPickerActive" : ""}`}
+                      key={it.id}
+                      onClick={() => {
+                        setSelectedWasteItemId(it.id);
+                        setWasteItemNameInput(it.name);
+                      }}
+                      type="button"
+                    >
+                      {it.name} · stock actual {numericText(it.current_stock)} {it.unit_code}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+            <div className="modalActions">
+              <button className="button" onClick={() => setReceiveMermaConfirm(null)} type="button">
+                Cancelar
+              </button>
+              <button className="button buttonPrimary" onClick={() => void handleConfirmReceiveMerma()} type="button">
+                Confirmar y recibir
               </button>
             </div>
           </section>
