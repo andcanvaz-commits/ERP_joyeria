@@ -10,6 +10,7 @@ import { listProcesses, listProductionRuns } from "@/lib/production-api";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { DonutGauge } from "@/components/shared/donut-gauge";
 import { RankedBarChart } from "@/components/shared/ranked-bar-chart";
+import { useCountUp } from "@/hooks/use-count-up";
 import type { InventoryItemType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
 
@@ -181,6 +182,16 @@ export function SystemDashboard() {
   const runProcessEntries = Object.entries(runsByProcess).slice(0, 6);
   const maxRunProcess = Math.max(1, ...runProcessEntries.map(([, total]) => total));
 
+  // Contadores animados de las tarjetas KPI: llamados siempre (nunca dentro
+  // de los "if" de rol) para no violar las reglas de hooks — cada rama solo
+  // usa el subconjunto que le corresponde.
+  const processesCount = useCountUp(processes.length);
+  const usersCount = useCountUp(users.length);
+  const inventoryItemsCount = useCountUp(totalInventoryItems);
+  const activeRunsCount = useCountUp(activeRuns.length);
+  const finishedRunsCount = useCountUp(finishedRuns.length);
+  const inventoryMovementsCount = useCountUp(inventoryMovements.length);
+
   // Dashboard del administrador (diseno original completo).
   if (isAdmin) {
     return (
@@ -191,17 +202,17 @@ export function SystemDashboard() {
           <article className="card metric kpiCard">
             <Factory aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Procesos creados</span>
-            <strong className="metricValue"><span className="kpiNum num">{processes.length}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{processesCount}</span></strong>
           </article>
           <article className="card metric kpiCard">
             <Users aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Usuarios</span>
-            <strong className="metricValue"><span className="kpiNum num">{users.length}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{usersCount}</span></strong>
           </article>
           <article className="card metric kpiCard">
             <Boxes aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Items de inventario</span>
-            <strong className="metricValue"><span className="kpiNum num">{totalInventoryItems}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{inventoryItemsCount}</span></strong>
           </article>
         </section>
 
@@ -361,17 +372,17 @@ export function SystemDashboard() {
           <article className="card metric kpiCard">
             <Factory aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Procesos creados</span>
-            <strong className="metricValue"><span className="kpiNum num">{processes.length}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{processesCount}</span></strong>
           </article>
           <article className="card metric kpiCard">
             <ListChecks aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Ordenes activas</span>
-            <strong className="metricValue"><span className="kpiNum num">{activeRuns.length}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{activeRunsCount}</span></strong>
           </article>
           <article className="card metric kpiCard">
             <CheckCircle2 aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Ordenes recibidas</span>
-            <strong className="metricValue"><span className="kpiNum num">{finishedRuns.length}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{finishedRunsCount}</span></strong>
           </article>
         </section>
 
@@ -537,12 +548,12 @@ export function SystemDashboard() {
           <article className="card metric kpiCard">
             <Boxes aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Items de inventario</span>
-            <strong className="metricValue"><span className="kpiNum num">{totalInventoryItems}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{inventoryItemsCount}</span></strong>
           </article>
           <article className="card metric kpiCard">
             <ListChecks aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Movimientos</span>
-            <strong className="metricValue"><span className="kpiNum num">{inventoryMovements.length}</span></strong>
+            <strong className="metricValue"><span className="kpiNum num">{inventoryMovementsCount}</span></strong>
           </article>
         </section>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type RankedBarItem = {
   id: string;
@@ -11,8 +11,9 @@ export type RankedBarItem = {
 
 /** Lista de barras horizontales rankeadas (todas el mismo color, escala
  * relativa al mayor valor): usado para "cantidad por categoria" en los
- * dashboards. Cada fila lleva su tooltip (foco y hover) y hay un toggle
- * "Ver tabla" para la vista accesible sin pasar el mouse. */
+ * dashboards. Cada fila lleva su tooltip (foco y hover), crece desde 0 al
+ * montar (en cascada, fila por fila), y hay un toggle "Ver tabla" para la
+ * vista accesible sin pasar el mouse. */
 export function RankedBarChart({
   items,
   emptyMessage,
@@ -27,7 +28,14 @@ export function RankedBarChart({
   isLoading?: boolean;
 }) {
   const [showTable, setShowTable] = useState(false);
+  const [animated, setAnimated] = useState(false);
   const max = Math.max(1, ...items.map((item) => item.value));
+
+  useEffect(() => {
+    setAnimated(false);
+    const id = requestAnimationFrame(() => setAnimated(true));
+    return () => cancelAnimationFrame(id);
+  }, [items.length]);
 
   if (items.length === 0) {
     return isLoading ? null : <div className="emptyState">{emptyMessage}</div>;
@@ -59,13 +67,19 @@ export function RankedBarChart({
         </div>
       ) : (
         <div className="barChartList">
-          {items.map((item) => {
+          {items.map((item, index) => {
             const width = Math.max(8, Math.round((item.value / max) * 100));
             return (
               <div className="barChartRow barMarkHit" key={item.id} tabIndex={0}>
                 <span>{item.label}</span>
                 <div className="barTrack">
-                  <div className="barFill" style={{ width: `${width}%` }} />
+                  <div
+                    className="barFill"
+                    style={{
+                      width: animated ? `${width}%` : "0%",
+                      transitionDelay: `${index * 45}ms`
+                    }}
+                  />
                 </div>
                 <small>{item.displayValue}</small>
                 <span className="barTooltip" aria-hidden="true">

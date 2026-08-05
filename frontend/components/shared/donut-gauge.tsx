@@ -1,10 +1,12 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 /** Dona de 2 segmentos (activo/inactivo, recibido/en curso, etc.) con
  * leyenda y tooltip en foco/hover. No es un grafico multi-categoria: es
- * un gauge de proporcion, un solo hue (var(--primary)) contra el track. */
+ * un gauge de proporcion, un solo hue (var(--primary)) contra el track.
+ * El anillo barre de 0 al valor real al montar; el numero central ya
+ * muestra el valor final desde el primer render. */
 export function DonutGauge({
   percent,
   centerLabel,
@@ -16,6 +18,13 @@ export function DonutGauge({
   primary: { label: string; value: number };
   secondary: { label: string; value: number };
 }) {
+  const [animatedPercent, setAnimatedPercent] = useState(0);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setAnimatedPercent(percent));
+    return () => cancelAnimationFrame(id);
+  }, [percent]);
+
   return (
     <div className="donutWrap">
       <div
@@ -23,7 +32,7 @@ export function DonutGauge({
         className="donutChart barMarkHit"
         role="img"
         tabIndex={0}
-        style={{ "--donut-value": `${percent}%` } as CSSProperties}
+        style={{ "--donut-value": `${animatedPercent}%` } as CSSProperties}
       >
         <strong>{percent}%</strong>
         <span>{centerLabel}</span>
