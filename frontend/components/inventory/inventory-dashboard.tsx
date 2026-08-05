@@ -482,6 +482,17 @@ export function InventoryDashboard() {
     waitingCode: string;
     waitingQuantity: string;
   } | null>(null);
+  // Pregunta previa al split: se muestra ANTES de aprobar cuando el stock no
+  // alcanza para toda la cantidad, para que Inventario decida si aprueba la
+  // parte cubierta (el resto queda esperando material) o cancela.
+  const [approveSplitConfirm, setApproveSplitConfirm] = useState<{
+    run: ProductionRun;
+    materialName: string;
+    unitCode: string;
+    coveredQty: string;
+    requiredQty: string;
+    missingQty: string;
+  } | null>(null);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -1019,6 +1030,48 @@ export function InventoryDashboard() {
     return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
+  function handleApproveClick(run: ProductionRun) {
+    // Mismo criterio que el backend: el split se decide por el stock mas
+    // corto entre materia prima Y cada complemento pedido, no solo materia
+    // prima (los insumos por etapa quedan afuera, son cantidad fija).
+    const requiredQty = Number(run.quantity);
+    let coveredQty = requiredQty;
+    let limitingItem = items.find((it) => it.id === run.raw_material_item_id) ?? null;
+    let limitingUnit = run.raw_material_unit_code;
+
+    const rawPerUnit = Number(run.raw_material_quantity_per_unit);
+    const rawStock = limitingItem ? Number(limitingItem.current_stock) : 0;
+    const rawCovered = rawPerUnit > 0 ? Math.floor(rawStock / rawPerUnit) : requiredQty;
+    if (rawCovered < coveredQty) coveredQty = rawCovered;
+
+    for (const complement of run.complements ?? []) {
+      if (complement.status !== "PENDIENTE") continue;
+      const complementItem = items.find((it) => it.id === complement.item_id);
+      if (!complementItem) continue;
+      const perUnit = requiredQty > 0 ? Number(complement.quantity) / requiredQty : Number(complement.quantity);
+      const stock = Number(complementItem.current_stock);
+      const complementCovered = perUnit > 0 ? Math.floor(stock / perUnit) : requiredQty;
+      if (complementCovered < coveredQty) {
+        coveredQty = complementCovered;
+        limitingItem = complementItem;
+        limitingUnit = complement.unit_code;
+      }
+    }
+
+    if (limitingItem && coveredQty > 0 && coveredQty < requiredQty) {
+      setApproveSplitConfirm({
+        run,
+        materialName: limitingItem.name,
+        unitCode: limitingUnit,
+        coveredQty: numericText(String(coveredQty)),
+        requiredQty: numericText(run.quantity),
+        missingQty: numericText(String(requiredQty - coveredQty)),
+      });
+      return;
+    }
+    void handleApproveMaterials(run);
+  }
+
   async function handleApproveMaterials(run: ProductionRun) {
     setError(null);
     setIsSavingProduction(true);
@@ -1026,17 +1079,11 @@ export function InventoryDashboard() {
       const updated = await approveProductionRunMaterials(run.id);
       const nextRuns = await listProductionRuns();
       const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === updated.id);
-      setSuccess("Salida de materia prima aprobada.");
-      if (splitChild) {
-        setSplitNotice({
-          processName: updated.process_name,
-          rootCode: updated.root_production_code ?? updated.production_code ?? "",
-          startedCode: updated.production_code ?? "",
-          startedQuantity: numericText(updated.quantity),
-          waitingCode: splitChild.production_code ?? "",
-          waitingQuantity: numericText(splitChild.quantity),
-        });
-      }
+      setSuccess(
+        splitChild
+          ? `Salida aprobada para ${updated.production_code}. ${splitChild.production_code} queda a la espera de más material.`
+          : "Salida de materia prima aprobada."
+      );
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
@@ -4761,7 +4808,7 @@ export function InventoryDashboard() {
                           <button
                             className="button buttonPrimary"
                             disabled={isSavingProduction}
-                            onClick={() => void handleApproveMaterials(run)}
+                            onClick={() => handleApproveClick(run)}
                             type="button"
                           >
                             Aprobar
@@ -4901,6 +4948,45 @@ export function InventoryDashboard() {
                 </div>
               </>
             ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {approveSplitConfirm ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Confirmar division de la orden">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Stock insuficiente{approveSplitConfirm.run.production_code ? ` para ${approveSplitConfirm.run.production_code}` : ""}</h2>
+                <p>
+                  Solo hay {approveSplitConfirm.coveredQty} de {approveSplitConfirm.requiredQty} unidades de{" "}
+                  {approveSplitConfirm.materialName} ({approveSplitConfirm.unitCode}).
+                </p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setApproveSplitConfirm(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <p style={{ margin: "8px 0 0" }}>
+              ¿Aprobar la parte cubierta? Las {approveSplitConfirm.missingQty} unidades restantes pasarán a una
+              nueva orden a la espera de más material.
+            </p>
+            <div className="modalActions">
+              <button className="button" onClick={() => setApproveSplitConfirm(null)} type="button">
+                Cancelar
+              </button>
+              <button
+                className="button buttonPrimary"
+                onClick={() => {
+                  const run = approveSplitConfirm.run;
+                  setApproveSplitConfirm(null);
+                  void handleApproveMaterials(run);
+                }}
+                type="button"
+              >
+                Aprobar parcial
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
