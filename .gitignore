@@ -31,6 +31,9 @@ postgres_data/
 backups/
 backups_local/
 
+# Exports de trabajo sueltos (no son fuente de datos del sistema)
+/*.xlsx
+
 # Artefactos de herramientas (Claude Code, Ruflo security audit, superpowers)
 # Se ignora todo .claude/ excepto skills del proyecto, que sí van al repo.
 .claude/*
