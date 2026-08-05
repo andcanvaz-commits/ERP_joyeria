@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WORK_IN_PROGRESS", "FINISHED_PRODUCT"]
+InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WORK_IN_PROGRESS", "FINISHED_PRODUCT", "WASTE"]
 InventoryMovementType = Literal[
     "ENTRADA",
     "SALIDA",
@@ -17,6 +17,8 @@ InventoryMovementType = Literal[
     "MERMA",
     "CONVERSION_SALIDA",
     "CONVERSION_ENTRADA",
+    "RECLASIFICACION_SALIDA",
+    "RECLASIFICACION_ENTRADA",
 ]
 
 
