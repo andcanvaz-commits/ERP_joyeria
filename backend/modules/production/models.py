@@ -195,6 +195,12 @@ class ProductionRun(Base):
     received_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     rejected_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Nombre de responsable en texto libre: se usa cuando no hay
+    # materials_approved_by_user_id/received_by_user_id (ordenes historicas
+    # migradas de papel, sin cuenta de usuario real). Si el user_id existe,
+    # el nombre resuelto por cuenta siempre gana (ver _populate_run_names).
+    materials_approved_responsable_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    received_responsable_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Producto objetivo declarado al crear la orden (opcional): intención, no
     # obligación — la clasificación real ocurre al convertir el lote.
@@ -223,6 +229,15 @@ class ProductionRun(Base):
     complements: Mapped[list["ProductionComplementRequest"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
+    )
+    # Lineas de detalle por evento de entrega/recepcion (solo ordenes
+    # historicas migradas: una corrida en vivo nunca las llena). Cuando
+    # existen para un lado, el certificado las usa en vez de la fila unica
+    # calculada de total_required_material — ver buildOrdenProduccion.
+    event_lines: Mapped[list["ProductionRunEventLine"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="ProductionRunEventLine.line_order",
     )
     # Combinación de complementos aplicada al ensamble (cantidades totales).
     assembly_items: Mapped[list["ProductionRunAssemblyItem"]] = relationship(
@@ -378,3 +393,24 @@ class ProductionRunAssemblyItem(Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
 
     run: Mapped["ProductionRun"] = relationship(back_populates="assembly_items")
+
+
+class ProductionRunEventLine(Base):
+    __tablename__ = "production_run_event_lines"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    side: Mapped[str] = mapped_column(String(20), nullable=False)
+    gramos: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unidad: Mapped[str] = mapped_column(String(20), nullable=False)
+    detalle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    line_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="event_lines")
+
+
+class ProductionRunEventSide:
+    ENTREGA = "ENTREGA"
+    RECEPCION = "RECEPCION"
