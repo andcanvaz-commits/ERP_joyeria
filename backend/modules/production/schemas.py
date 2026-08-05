@@ -236,6 +236,16 @@ class SupplyConsumptionRead(BaseModel):
     unit_code: str
 
 
+class ProductionRunEventLineRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    side: str
+    gramos: Decimal
+    unidad: str
+    detalle: str | None = None
+    line_order: int
+
+
 class RunProductRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -284,6 +294,7 @@ class AssemblyRecipeItemRead(BaseModel):
 
     complement_item_id: UUID
     name: str | None = None
+    unit_code: str | None = None
     quantity_per_unit: Decimal
 
 
@@ -346,6 +357,8 @@ class ProductionRunRead(BaseModel):
     # Insumos realmente consumidos al aprobar materiales (desde los movimientos
     # de inventario de la orden). Alimenta el acta de entrega.
     supply_consumptions: list[SupplyConsumptionRead] = Field(default_factory=list)
+    # Lineas de detalle por evento (solo ordenes historicas migradas).
+    event_lines: list[ProductionRunEventLineRead] = Field(default_factory=list)
     # Plan de resultantes (split) y complementos solicitados.
     products: list[RunProductRead] = Field(default_factory=list)
     complements: list[RunComplementRead] = Field(default_factory=list)
