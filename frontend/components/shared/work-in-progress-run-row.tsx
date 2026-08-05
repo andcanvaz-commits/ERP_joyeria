@@ -76,7 +76,7 @@ export function WorkInProgressRunRow({
         ) : null}
       </td>
       <td>{run.process_name}</td>
-      <td className="num">{numText(run.quantity)} und</td>
+      <td className="num">{numText(run.quantity)} {run.raw_material_unit_code}</td>
       <td className="num">{numText(runCurrentWeight(run))} {run.raw_material_unit_code}</td>
       <td className="num">
         {onWasteHistory ? (

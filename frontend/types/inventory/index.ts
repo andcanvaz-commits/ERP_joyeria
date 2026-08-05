@@ -48,6 +48,7 @@ export type WaitingProductionRunSummary = {
   root_production_code: string | null;
   process_name: string | null;
   missing_quantity: string;
+  unit_code: string;
 };
 
 export type InventoryMovement = {

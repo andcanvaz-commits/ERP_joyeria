@@ -169,6 +169,7 @@ class WaitingProductionRunSummary(BaseModel):
     root_production_code: str | None = None
     process_name: str | None = None
     missing_quantity: Decimal
+    unit_code: str
 
 
 class InventoryMovementRead(BaseModel):

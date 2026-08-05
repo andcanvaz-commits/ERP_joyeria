@@ -450,6 +450,7 @@ export function InventoryDashboard() {
     startedQuantity: string;
     waitingCode: string;
     waitingQuantity: string;
+    unit: string;
   } | null>(null);
   // Pregunta previa al split: se muestra ANTES de aprobar cuando el stock no
   // alcanza para toda la cantidad, para que Inventario decida si aprueba la
@@ -1173,6 +1174,7 @@ export function InventoryDashboard() {
           startedQuantity: numericText(started.quantity),
           waitingCode: splitChild.production_code ?? "",
           waitingQuantity: numericText(splitChild.quantity),
+          unit: started.raw_material_unit_code,
         });
       }
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -3398,7 +3400,7 @@ export function InventoryDashboard() {
                         ) : null}
                       </td>
                       <td>{run.process_name ?? "—"}</td>
-                      <td className="num">{numericText(run.missing_quantity)} und</td>
+                      <td className="num">{numericText(run.missing_quantity)} {run.unit_code}</td>
                       <td className="num">
                         <input
                           className="field"
@@ -3453,11 +3455,11 @@ export function InventoryDashboard() {
             <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
                 <span><span className="orderCodeTag">{splitNotice.startedCode}</span> ya en producción</span>
-                <strong>{splitNotice.startedQuantity} und</strong>
+                <strong>{splitNotice.startedQuantity} {splitNotice.unit}</strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
                 <span><span className="orderCodeTag">{splitNotice.waitingCode}</span> esperando material</span>
-                <strong>{splitNotice.waitingQuantity} und</strong>
+                <strong>{splitNotice.waitingQuantity} {splitNotice.unit}</strong>
               </div>
             </div>
             <div className="modalActions">
@@ -3496,7 +3498,7 @@ export function InventoryDashboard() {
                     <tr key={familyRun.id}>
                       <td><span className="orderCodeTag">{familyRun.production_code}</span></td>
                       <td>{familyRun.process_name}</td>
-                      <td className="num">{numericText(familyRun.quantity)} und</td>
+                      <td className="num">{numericText(familyRun.quantity)} {familyRun.raw_material_unit_code}</td>
                       <td>
                         <button
                           aria-label="Visualizar"
@@ -3741,7 +3743,7 @@ export function InventoryDashboard() {
             <div className="userPreviewGrid">
               <span><strong>Rechazada por</strong>{rejectionInfoRun.rejected_by_name ?? "—"}{rejectionInfoRun.rejected_at ? ` · ${productionTimeLabel(rejectionInfoRun.rejected_at)}` : ""}</span>
               <span><strong>Solicitada por</strong>{rejectionInfoRun.created_by_name ?? "—"}{rejectionInfoRun.requested_at ? ` · ${productionTimeLabel(rejectionInfoRun.requested_at)}` : ""}</span>
-              <span><strong>Cantidad</strong>{numericText(rejectionInfoRun.quantity)} und</span>
+              <span><strong>Cantidad</strong>{numericText(rejectionInfoRun.quantity)} {rejectionInfoRun.raw_material_unit_code}</span>
               <span>
                 <strong>Material solicitado</strong>
                 {items.find((item) => item.id === rejectionInfoRun.raw_material_item_id)?.name ?? "—"} ·{" "}
@@ -3768,7 +3770,7 @@ export function InventoryDashboard() {
             <div className="userPreviewGrid">
               <span><strong>Recibida por</strong>{receptionInfoRun.received_by_name ?? "—"}</span>
               <span><strong>Cuándo</strong>{productionTimeLabel(receptionInfoRun.received_at)}</span>
-              <span><strong>Cantidad</strong>{numericText(receptionInfoRun.quantity)} und</span>
+              <span><strong>Cantidad</strong>{numericText(receptionInfoRun.quantity)} {receptionInfoRun.raw_material_unit_code}</span>
               <span><strong>Peso final</strong>{(() => { const weight = runFinalWeight(receptionInfoRun); return weight ? `${numericText(String(weight))} g` : "—"; })()}</span>
             </div>
           </section>

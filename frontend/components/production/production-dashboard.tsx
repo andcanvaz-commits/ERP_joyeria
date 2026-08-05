@@ -1871,7 +1871,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <div className="productionRunListRowMeta">
                           {currentStage ? <span>{currentStage.stage_order}. {currentStage.stage_name}</span> : null}
                           {currentStage ? <span aria-hidden="true">·</span> : null}
-                          <span>{numericText(totalQuantity)} und</span>
+                          <span>{numericText(totalQuantity)} {root.raw_material_unit_code}</span>
                           {isSplit ? null : (
                             <>
                               <span aria-hidden="true">·</span>
@@ -1926,7 +1926,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <StatusPunch label={runStatusLabel(run.status)} tone={runStatusTone(run.status)} />
                     </div>
                     <div className="productionRunListRowMeta">
-                      <span>Faltan {numericText(run.quantity)} und</span>
+                      <span>Faltan {numericText(run.quantity)} {run.raw_material_unit_code}</span>
                     </div>
                   </div>
                 ))}
@@ -1978,7 +1978,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             )}
                           </td>
                           <td>{root.process_name}</td>
-                          <td className="num">{numericText(root.quantity)} und</td>
+                          <td className="num">{numericText(root.quantity)} {root.raw_material_unit_code}</td>
                           <td className="num">{numericText(runCurrentWeight(root))} {root.raw_material_unit_code}</td>
                           <td>{rootStage ? `${rootStage.stage_order}. ${rootStage.stage_name}` : "—"}</td>
                           <td><StatusPunch label={runStatusLabel(root.status)} tone={runStatusTone(root.status)} /></td>
@@ -2192,7 +2192,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div className="modalHeader">
                 <div>
                   <h2>Definir ensamble</h2>
-                  <p>{assemblyRun.production_code ?? ""} · fabrica {numericText(assemblyRun.quantity)} und</p>
+                  <p>{assemblyRun.production_code ?? ""} · fabrica {numericText(assemblyRun.quantity)} {assemblyRun.raw_material_unit_code}</p>
                 </div>
                 <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeAssemblyModal} type="button">
                   <X aria-hidden="true" size={18} />
@@ -2890,7 +2890,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     <tr key={familyRun.id}>
                       <td><span className="orderCodeTag">{familyRun.production_code}</span></td>
                       <td><StatusPunch label={runStatusLabel(familyRun.status)} tone={runStatusTone(familyRun.status)} /></td>
-                      <td className="num">{numericText(familyRun.quantity)} und</td>
+                      <td className="num">{numericText(familyRun.quantity)} {familyRun.raw_material_unit_code}</td>
                       <td>{familyRun.started_at ? hourLabel(familyRun.started_at) : "—"}</td>
                       <td>{processRowActions(familyRun)}</td>
                     </tr>
@@ -3060,7 +3060,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <div style={{ gridColumn: "1 / -2" }}>
                         <strong>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</strong>
                         <span>
-                          {numericText(run.quantity)} und · Merma: {numericText(run.waste_weight)} {run.raw_material_unit_code} ·{" "}
+                          {numericText(run.quantity)} {run.raw_material_unit_code} · Merma: {numericText(run.waste_weight)} {run.raw_material_unit_code} ·{" "}
                           {numericText(run.waste_percent)}% · {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}
                         </span>
                       </div>
