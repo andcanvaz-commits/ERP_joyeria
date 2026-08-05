@@ -120,7 +120,22 @@ export function DocumentosDashboard() {
 
         <div className="documentosLayout">
           <div className="documentosList">
-            <div style={{ display: "grid", gap: 8, marginBottom: 4 }}>
+            {/* Fijo (sticky) dentro de .documentosList: con 37+ familias
+                historicas la lista scrollea largo y estos controles se
+                perdian de vista. */}
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                marginBottom: 4,
+                position: "sticky",
+                top: 0,
+                zIndex: 1,
+                background: "var(--surface)",
+                paddingTop: 2,
+                paddingBottom: 8
+              }}
+            >
               <input
                 aria-label="Buscar por folio, proceso o responsable"
                 className="field"
