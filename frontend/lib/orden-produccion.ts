@@ -16,7 +16,7 @@ export type DocSide = {
 export type OrdenProduccionModel = {
   folio: string;
   procesoNombre: string;
-  cantidad: number;
+  cantidad: number | null;
   categoria: string;
   responsableProduccion: string;
   entrega: DocSide[];
@@ -82,20 +82,23 @@ export function buildOrdenProduccion(
 
   const entrega: DocSide[] = [];
   const recepcion: DocSide[] = [];
+  const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
 
   for (const run of family) {
+    const entregaLines = (run.event_lines ?? []).filter((line) => line.side === "ENTREGA");
     if (run.materials_approved_at !== null) {
-      const rows: DocRow[] = [
-        { gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }
-      ];
-      // Insumos que salieron de inventario junto con la materia prima, cada uno
-      // con su unidad real.
-      for (const supply of run.supply_consumptions ?? []) {
-        rows.push({
-          gramos: num(supply.quantity),
-          unidad: supply.unit_code || "g",
-          detalle: `Insumo: ${supply.name}`
-        });
+      const rows: DocRow[] =
+        entregaLines.length > 0
+          ? entregaLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
+          : [{ gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }];
+      if (entregaLines.length === 0) {
+        for (const supply of run.supply_consumptions ?? []) {
+          rows.push({
+            gramos: num(supply.quantity),
+            unidad: supply.unit_code || "g",
+            detalle: `Insumo: ${supply.name}`
+          });
+        }
       }
       entrega.push({
         fecha: run.materials_approved_at,
@@ -104,27 +107,28 @@ export function buildOrdenProduccion(
       });
     }
 
-    // Recepción: solo lo que realmente entra a inventario (el producto). La merma
-    // no se "recibe": queda registrada en el kardex y el resumen del proceso.
+    const recepcionLines = (run.event_lines ?? []).filter((line) => line.side === "RECEPCION");
     if (run.received_at !== null) {
-      const rows: DocRow[] = [];
-      if (run.actual_finished_weight !== null) {
-        rows.push({
-          gramos: num(run.actual_finished_weight),
-          unidad: materialUnit,
-          detalle: `Producto terminado: ${run.process_name}`
-        });
+      const rows: DocRow[] =
+        recepcionLines.length > 0
+          ? recepcionLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
+          : [];
+      if (recepcionLines.length === 0) {
+        if (run.actual_finished_weight !== null) {
+          rows.push({
+            gramos: num(run.actual_finished_weight),
+            unidad: materialUnit,
+            detalle: `Producto terminado: ${run.process_name}`
+          });
+        }
+        for (const product of run.products ?? []) {
+          rows.push({
+            gramos: num(product.quantity),
+            unidad: "und",
+            detalle: `Producto final: ${product.product_name ?? "—"}`
+          });
+        }
       }
-      // Productos finales creados al recibir (plan de resultantes de la orden).
-      for (const product of run.products ?? []) {
-        rows.push({
-          gramos: num(product.quantity),
-          unidad: "und",
-          detalle: `Producto final: ${product.product_name ?? "—"}`
-        });
-      }
-      // Los complementos del ensamble NO se listan en recepción: ya van dentro
-      // del producto final ensamblado (su entrega quedó en la mitad de ENTREGA).
       recepcion.push({
         fecha: run.received_at,
         responsable: run.received_by_name ?? DASH,
@@ -136,7 +140,7 @@ export function buildOrdenProduccion(
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
     procesoNombre: root.process_name,
-    cantidad: family.reduce((total, run) => total + num(run.quantity), 0),
+    cantidad: isHistorical ? null : family.reduce((total, run) => total + num(run.quantity), 0),
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entrega,
