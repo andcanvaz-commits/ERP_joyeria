@@ -209,7 +209,13 @@ export function SolicitudesView() {
 
   const myRuns = useMemo(() => runs.filter((run) => run.created_by_user_id === userId), [runs, userId]);
   const respondedRuns = useMemo(() => runs.filter((run) => run.status !== "PENDIENTE_INVENTARIO"), [runs]);
-  const pendingReception = useMemo(() => runs.filter((run) => run.status === "PENDIENTE_RECEPCION"), [runs]);
+  // Las corridas historicas migradas (con event_lines) no deben aparecer
+  // como pendientes de recepcion en vivo: esa recepcion nunca va a ocurrir
+  // y el backend la rechaza (ver ProductionService.receive_finished_product).
+  const pendingReception = useMemo(
+    () => runs.filter((run) => run.status === "PENDIENTE_RECEPCION" && (run.event_lines ?? []).length === 0),
+    [runs],
+  );
 
   if (role === null || isLoading) {
     return (

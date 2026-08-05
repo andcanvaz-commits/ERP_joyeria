@@ -1257,7 +1257,12 @@ export function InventoryDashboard() {
   }
 
   const pendingInventoryRuns = productionRuns.filter((run) => run.status === "PENDIENTE_INVENTARIO");
-  const pendingReceptionRuns = productionRuns.filter((run) => run.status === "PENDIENTE_RECEPCION");
+  // Las corridas historicas migradas (con event_lines) nunca deben caer en
+  // la cola EN VIVO de recepcion: recibirlas ahi dispararia un movimiento
+  // real de inventario que el certificado de papel nunca genero.
+  const pendingReceptionRuns = productionRuns.filter(
+    (run) => run.status === "PENDIENTE_RECEPCION" && (run.event_lines ?? []).length === 0,
+  );
   const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
   const inProcessRuns = productionRuns.filter((run) => run.status === "EN_PROCESO");
   // Órdenes tras aplicar los filtros de fecha y estado (pestañas de procesos).

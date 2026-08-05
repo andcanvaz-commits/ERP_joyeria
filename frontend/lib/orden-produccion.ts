@@ -173,10 +173,20 @@ export function canPrintEntrega(family: ProductionRun[]): boolean {
 }
 
 /** ¿Toda la familia ya fue recibida (o cancelada)? Solo ahi la recepcion
- * unificada esta completa. */
+ * unificada esta completa.
+ *
+ * Excepcion: una familia historica migrada (alguna corrida trae
+ * event_lines) puede quedar con miembros PENDIENTE_RECEPCION para siempre
+ * — el papel entrego mas veces de las que recibio y esa recepcion nunca
+ * va a ocurrir (no se inventa un cierre que el papel no tiene). Para esas
+ * familias basta con que algun miembro se haya recibido de verdad. */
 export function canPrintRecepcion(family: ProductionRun[]): boolean {
+  if (family.length === 0) return false;
+  const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
+  if (isHistorical) {
+    return family.some((run) => run.received_at !== null);
+  }
   return (
-    family.length > 0 &&
     family.some((run) => run.status === "RECIBIDA") &&
     family.every((run) => run.status === "RECIBIDA" || run.status === "CANCELADA")
   );
