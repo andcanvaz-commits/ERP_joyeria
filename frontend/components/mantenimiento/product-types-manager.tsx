@@ -128,7 +128,7 @@ export function ProductTypesManager({
       setNewTypeLabel("");
       setProdTypeCode(created.code);
       setSuccess(`Tipo #${created.code} ${created.label} creado.`);
-      await queryClient.invalidateQueries({ queryKey: ["catalog-segments"] });
+      void queryClient.invalidateQueries({ queryKey: ["catalog-segments"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el tipo.");
     } finally {
@@ -158,7 +158,7 @@ export function ProductTypesManager({
       setProdName("");
       setProdPrice("");
       setSuccess(`Producto ${created.name ?? ""} creado.`);
-      await queryClient.invalidateQueries({ queryKey: ["product-types"] });
+      void queryClient.invalidateQueries({ queryKey: ["product-types"] });
       onProductCreated?.(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el producto.");
@@ -174,7 +174,7 @@ export function ProductTypesManager({
     try {
       await deleteProductType(id);
       setSuccess("Producto eliminado.");
-      await queryClient.invalidateQueries({ queryKey: ["product-types"] });
+      void queryClient.invalidateQueries({ queryKey: ["product-types"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar el producto.");
     }

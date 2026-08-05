@@ -38,7 +38,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
       setLabel("");
       setCode("");
       setSuccess("Unidad creada.");
-      await queryClient.invalidateQueries({ queryKey: ["units"] });
+      void queryClient.invalidateQueries({ queryKey: ["units"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo agregar la unidad.");
     } finally {
@@ -53,7 +53,7 @@ export function UnitsManager({ mode, onClose }: { mode: "create" | "view"; onClo
     try {
       await deleteUnit(id);
       setSuccess("Unidad eliminada.");
-      await queryClient.invalidateQueries({ queryKey: ["units"] });
+      void queryClient.invalidateQueries({ queryKey: ["units"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar la unidad.");
     }
