@@ -6,6 +6,7 @@ import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, 
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
+import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
 import { buildItemNameMap, buildOrdenProduccion, canPrintEntrega, canPrintRecepcion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
@@ -98,7 +99,6 @@ function withinRevertWindow(createdAt: string) {
   const created = new Date(createdAt).getTime();
   return Number.isFinite(created) && Date.now() - created <= REVERT_WINDOW_HOURS * 60 * 60 * 1000;
 }
-const WEEK_DAYS = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"];
 
 const emptyItemForm = (): SaveInventoryItemPayload => ({
   item_type: "RAW_MATERIAL",
@@ -321,44 +321,9 @@ function stockStatus(item: InventoryItem): { level: "ok" | "out"; label: string 
   return { level: "ok", label: "OK" };
 }
 
-function dateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function monthKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
 function movementDateKey(movement: InventoryMovement) {
   const date = new Date(movement.created_at);
   return Number.isNaN(date.getTime()) ? null : dateKey(date);
-}
-
-function buildCalendarDays(selectedMonth: string) {
-  const [year, month] = selectedMonth.split("-").map(Number);
-  const firstDay = new Date(year, month - 1, 1);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const leadingEmptyDays = (firstDay.getDay() + 6) % 7;
-  const days: Array<{ key: string; label: string; isEmpty: boolean }> = [];
-
-  for (let index = 0; index < leadingEmptyDays; index += 1) {
-    days.push({ key: `empty-${index}`, label: "", isEmpty: true });
-  }
-
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    days.push({
-      key: dateKey(new Date(year, month - 1, day)),
-      label: String(day),
-      isEmpty: false,
-    });
-  }
-
-  return days;
 }
 
 function getXmlText(parent: Element | Document, selector: string) {
