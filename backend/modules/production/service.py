@@ -718,6 +718,11 @@ class ProductionService:
         limiting_available = raw_material.current_stock
         limiting_unit = raw_material.unit_code
         limiting_required_per_unit = run.raw_material_quantity_per_unit
+        # Distingue el origen del faltante en el mensaje: la materia prima
+        # viene del proceso, pero un complemento en ENSAMBLAR viene de la
+        # receta aprendida (quantity_per_unit x cantidad) y no es evidente
+        # para quien crea la orden de donde salio ese numero.
+        limiting_is_complement = False
 
         if raw_material.current_stock < run.total_required_material:
             candidate = raw_material.current_stock // run.raw_material_quantity_per_unit
@@ -739,10 +744,16 @@ class ProductionService:
                     limiting_available = item.current_stock
                     limiting_unit = item.unit_code
                     limiting_required_per_unit = per_unit
+                    limiting_is_complement = True
 
         if covered_qty <= 0:
+            origin = (
+                " (complemento pedido por la receta de ensamble del producto: cantidad por unidad x unidades a fabricar)"
+                if limiting_is_complement
+                else ""
+            )
             raise ProductionDomainError(
-                f"Stock insuficiente de '{limiting_name}': disponible "
+                f"Stock insuficiente de '{limiting_name}'{origin}: disponible "
                 f"{limiting_available} {limiting_unit}, se requieren "
                 f"{limiting_required_per_unit} {limiting_unit} para 1 unidad."
             )
