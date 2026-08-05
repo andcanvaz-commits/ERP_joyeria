@@ -1,6 +1,5 @@
 "use client";
 
-import type { CSSProperties } from "react";
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, CheckCircle2, Factory, ListChecks, Users } from "lucide-react";
@@ -9,6 +8,8 @@ import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import { listProcesses, listProductionRuns } from "@/lib/production-api";
 import { normalizeRole, type Role } from "@/lib/roles";
+import { DonutGauge } from "@/components/shared/donut-gauge";
+import { RankedBarChart } from "@/components/shared/ranked-bar-chart";
 import type { InventoryItemType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
 
@@ -128,7 +129,6 @@ export function SystemDashboard() {
     }, {});
   }, [runs]);
   const runStatusEntries = Object.entries(runsByStatus) as Array<[ProductionRun["status"], number]>;
-  const maxRunStatus = Math.max(1, ...runStatusEntries.map(([, total]) => total));
   const recentRuns = useMemo(
     () =>
       [...runs]
@@ -161,8 +161,6 @@ export function SystemDashboard() {
   }, [inventoryItems]);
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;
-  const maxInventoryTypeTotal = Math.max(1, ...inventoryTypeEntries.map(([, total]) => total));
-  const maxProcessStages = Math.max(1, ...recentProcesses.map((process) => process.stages.length));
   const maxRoleUsers = Math.max(1, ...Object.values(usersByRole));
 
   // Donut de avance de ordenes (produccion) y salud de stock (inventario).
@@ -174,7 +172,6 @@ export function SystemDashboard() {
     }, {});
   }, [inventoryMovements]);
   const movementTypeEntries = Object.entries(movementsByType);
-  const maxMovementType = Math.max(1, ...movementTypeEntries.map(([, total]) => total));
   const runsByProcess = useMemo(() => {
     return runs.reduce<Record<string, number>>((acc, run) => {
       acc[run.process_name] = (acc[run.process_name] ?? 0) + 1;
@@ -214,21 +211,12 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Estado de usuarios</h2>
               <p className="panelText">{activeUsers} activos de {users.length}</p>
             </div>
-            <div className="donutWrap">
-              <div
-                aria-label={`${activeUserPercent}% de usuarios activos`}
-                className="donutChart"
-                role="img"
-                style={{ "--donut-value": `${activeUserPercent}%` } as CSSProperties}
-              >
-                <strong>{activeUserPercent}%</strong>
-                <span>activos</span>
-              </div>
-              <div className="chartLegend">
-                <span><i className="legendActive" />Activos</span>
-                <span><i className="legendInactive" />Inactivos</span>
-              </div>
-            </div>
+            <DonutGauge
+              centerLabel="activos"
+              percent={activeUserPercent}
+              primary={{ label: "Activos", value: activeUsers }}
+              secondary={{ label: "Inactivos", value: inactiveUsers }}
+            />
           </article>
 
           <article className="card chartPanel">
@@ -236,21 +224,17 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Procesos por etapas</h2>
               <p className="panelText">Comparacion rapida de configuracion</p>
             </div>
-            <div className="barChartList">
-              {recentProcesses.map((process) => {
-                const width = Math.max(8, Math.round((process.stages.length / maxProcessStages) * 100));
-                return (
-                  <div className="barChartRow" key={process.id}>
-                    <span>{process.name}</span>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${width}%` }} />
-                    </div>
-                    <small>{process.stages.length}</small>
-                  </div>
-                );
-              })}
-              {!isLoading && recentProcesses.length === 0 ? <div className="emptyState">No hay procesos creados.</div> : null}
-            </div>
+            <RankedBarChart
+              emptyMessage="No hay procesos creados."
+              isLoading={isLoading}
+              items={recentProcesses.map((process) => ({
+                id: process.id,
+                label: process.name,
+                value: process.stages.length,
+                displayValue: String(process.stages.length),
+              }))}
+              valueHeader="Etapas"
+            />
           </article>
 
           <article className="card chartPanel">
@@ -258,21 +242,17 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Inventario por tipo</h2>
               <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
-            <div className="barChartList">
-              {inventoryTypeEntries.map(([type, total]) => {
-                const width = Math.max(8, Math.round((total / maxInventoryTypeTotal) * 100));
-                return (
-                  <div className="barChartRow" key={type}>
-                    <span>{INVENTORY_TYPE_LABELS[type]}</span>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${width}%` }} />
-                    </div>
-                    <small>{total}</small>
-                  </div>
-                );
-              })}
-              {!isLoading && inventoryItems.length === 0 ? <div className="emptyState">No hay inventario registrado.</div> : null}
-            </div>
+            <RankedBarChart
+              emptyMessage="No hay inventario registrado."
+              isLoading={isLoading}
+              items={inventoryTypeEntries.map(([type, total]) => ({
+                id: type,
+                label: INVENTORY_TYPE_LABELS[type],
+                value: total,
+                displayValue: String(total),
+              }))}
+              valueHeader="Items"
+            />
           </article>
         </section>
 
@@ -401,21 +381,17 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Procesos por etapas</h2>
               <p className="panelText">Comparacion rapida de configuracion</p>
             </div>
-            <div className="barChartList">
-              {recentProcesses.map((process) => {
-                const width = Math.max(8, Math.round((process.stages.length / maxProcessStages) * 100));
-                return (
-                  <div className="barChartRow" key={process.id}>
-                    <span>{process.name}</span>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${width}%` }} />
-                    </div>
-                    <small>{process.stages.length}</small>
-                  </div>
-                );
-              })}
-              {!isLoading && recentProcesses.length === 0 ? <div className="emptyState">No hay procesos creados.</div> : null}
-            </div>
+            <RankedBarChart
+              emptyMessage="No hay procesos creados."
+              isLoading={isLoading}
+              items={recentProcesses.map((process) => ({
+                id: process.id,
+                label: process.name,
+                value: process.stages.length,
+                displayValue: String(process.stages.length),
+              }))}
+              valueHeader="Etapas"
+            />
           </article>
 
           <article className="card chartPanel">
@@ -423,21 +399,17 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Ordenes por estado</h2>
               <p className="panelText">{pendingRuns.length} pendientes de inventario</p>
             </div>
-            <div className="barChartList">
-              {runStatusEntries.map(([statusKey, total]) => {
-                const width = Math.max(8, Math.round((total / maxRunStatus) * 100));
-                return (
-                  <div className="barChartRow" key={statusKey}>
-                    <span>{RUN_STATUS_LABELS[statusKey] ?? statusKey}</span>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${width}%` }} />
-                    </div>
-                    <small>{total}</small>
-                  </div>
-                );
-              })}
-              {!isLoading && runStatusEntries.length === 0 ? <div className="emptyState">No hay ordenes registradas.</div> : null}
-            </div>
+            <RankedBarChart
+              emptyMessage="No hay ordenes registradas."
+              isLoading={isLoading}
+              items={runStatusEntries.map(([statusKey, total]) => ({
+                id: statusKey,
+                label: RUN_STATUS_LABELS[statusKey] ?? statusKey,
+                value: total,
+                displayValue: String(total),
+              }))}
+              valueHeader="Ordenes"
+            />
           </article>
 
           <article className="card chartPanel">
@@ -445,21 +417,12 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Avance de ordenes</h2>
               <p className="panelText">{finishedRuns.length} recibidas de {runs.length}</p>
             </div>
-            <div className="donutWrap">
-              <div
-                aria-label={`${receivedPercent}% de ordenes recibidas`}
-                className="donutChart"
-                role="img"
-                style={{ "--donut-value": `${receivedPercent}%` } as CSSProperties}
-              >
-                <strong>{receivedPercent}%</strong>
-                <span>recibidas</span>
-              </div>
-              <div className="chartLegend">
-                <span><i className="legendActive" />Recibidas</span>
-                <span><i className="legendInactive" />En proceso</span>
-              </div>
-            </div>
+            <DonutGauge
+              centerLabel="recibidas"
+              percent={receivedPercent}
+              primary={{ label: "Recibidas", value: finishedRuns.length }}
+              secondary={{ label: "En proceso", value: runs.length - finishedRuns.length }}
+            />
           </article>
         </section>
 
@@ -589,21 +552,17 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Inventario por tipo</h2>
               <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
-            <div className="barChartList">
-              {inventoryTypeEntries.map(([type, total]) => {
-                const width = Math.max(8, Math.round((total / maxInventoryTypeTotal) * 100));
-                return (
-                  <div className="barChartRow" key={type}>
-                    <span>{INVENTORY_TYPE_LABELS[type]}</span>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${width}%` }} />
-                    </div>
-                    <small>{total}</small>
-                  </div>
-                );
-              })}
-              {!isLoading && inventoryItems.length === 0 ? <div className="emptyState">No hay inventario registrado.</div> : null}
-            </div>
+            <RankedBarChart
+              emptyMessage="No hay inventario registrado."
+              isLoading={isLoading}
+              items={inventoryTypeEntries.map(([type, total]) => ({
+                id: type,
+                label: INVENTORY_TYPE_LABELS[type],
+                value: total,
+                displayValue: String(total),
+              }))}
+              valueHeader="Items"
+            />
           </article>
 
           <article className="card chartPanel">
@@ -611,21 +570,17 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Movimientos por tipo</h2>
               <p className="panelText">{inventoryMovements.length} movimientos totales</p>
             </div>
-            <div className="barChartList">
-              {movementTypeEntries.map(([type, total]) => {
-                const width = Math.max(8, Math.round((total / maxMovementType) * 100));
-                return (
-                  <div className="barChartRow" key={type}>
-                    <span>{MOVEMENT_TYPE_LABELS[type] ?? type}</span>
-                    <div className="barTrack">
-                      <div className="barFill" style={{ width: `${width}%` }} />
-                    </div>
-                    <small>{total}</small>
-                  </div>
-                );
-              })}
-              {!isLoading && movementTypeEntries.length === 0 ? <div className="emptyState">No hay movimientos.</div> : null}
-            </div>
+            <RankedBarChart
+              emptyMessage="No hay movimientos."
+              isLoading={isLoading}
+              items={movementTypeEntries.map(([type, total]) => ({
+                id: type,
+                label: MOVEMENT_TYPE_LABELS[type] ?? type,
+                value: total,
+                displayValue: String(total),
+              }))}
+              valueHeader="Movimientos"
+            />
           </article>
         </section>
 

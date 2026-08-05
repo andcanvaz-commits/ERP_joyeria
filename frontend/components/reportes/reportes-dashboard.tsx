@@ -108,13 +108,27 @@ function aggregate(runs: ProductionRun[]): Aggregate {
   };
 }
 
-function Delta({ current, previous, suffix = "" }: { current: number; previous: number | null; suffix?: string }) {
+// goodDirection: hacia donde subir es una buena noticia. Ordenes/unidades
+// suben=bien (default); merma sube=mal, hay que invertir el color sin
+// mentir la flecha (la flecha siempre muestra la direccion real).
+function Delta({
+  current,
+  previous,
+  suffix = "",
+  goodDirection = "up"
+}: {
+  current: number;
+  previous: number | null;
+  suffix?: string;
+  goodDirection?: "up" | "down";
+}) {
   if (previous === null) return null;
   const diff = current - previous;
   if (Math.abs(diff) < 0.005) return <span className="reportDelta reportDeltaFlat">Sin cambio</span>;
   const up = diff > 0;
+  const isGood = goodDirection === "up" ? up : !up;
   return (
-    <span className={`reportDelta ${up ? "reportDeltaUp" : "reportDeltaDown"}`}>
+    <span className={`reportDelta ${isGood ? "reportDeltaUp" : "reportDeltaDown"}`}>
       {up ? "▲" : "▼"} {fmt(Math.abs(diff))}{suffix} vs mes anterior
     </span>
   );
@@ -185,12 +199,12 @@ export function ReportesDashboard() {
               <div className="reportFigure">
                 <span>Merma total</span>
                 <strong>{fmt(current.waste)}{current.unit ? ` ${current.unit}` : ""}</strong>
-                <Delta current={current.waste} previous={previous ? previous.waste : null} suffix={current.unit ? ` ${current.unit}` : ""} />
+                <Delta current={current.waste} previous={previous ? previous.waste : null} suffix={current.unit ? ` ${current.unit}` : ""} goodDirection="down" />
               </div>
               <div className="reportFigure">
                 <span>Merma promedio</span>
                 <strong>{fmt(current.avgWaste)}%</strong>
-                <Delta current={current.avgWaste} previous={previous ? previous.avgWaste : null} suffix="%" />
+                <Delta current={current.avgWaste} previous={previous ? previous.avgWaste : null} suffix="%" goodDirection="down" />
               </div>
             </div>
           </section>

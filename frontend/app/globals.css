@@ -725,6 +725,7 @@ textarea {
 }
 
 .donutChart {
+  position: relative;
   display: grid;
   width: 116px;
   height: 116px;
@@ -733,6 +734,12 @@ textarea {
   background:
     radial-gradient(circle at center, #ffffff 0 54%, transparent 55%),
     conic-gradient(var(--primary) var(--donut-value), #e7dfd2 0);
+  cursor: default;
+  outline: none;
+}
+
+.donutChart:focus-visible {
+  box-shadow: 0 0 0 3px var(--primary-strong);
 }
 
 .donutChart strong {
@@ -787,10 +794,21 @@ textarea {
 }
 
 .barChartRow {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(82px, 142px) minmax(80px, 1fr) 28px;
   align-items: center;
   gap: 10px;
+  border-radius: 6px;
+}
+
+.barChartRow.barMarkHit {
+  cursor: default;
+  outline: none;
+}
+
+.barChartRow.barMarkHit:focus-visible {
+  box-shadow: 0 0 0 2px var(--primary-strong);
 }
 
 .barChartRow span {
@@ -810,7 +828,7 @@ textarea {
 .barTrack,
 .miniBarTrack {
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: 4px;
   background: #ece4d6;
 }
 
@@ -821,8 +839,81 @@ textarea {
 .barFill,
 .miniBarFill {
   height: 100%;
-  border-radius: inherit;
+  /* Nace de la base (izquierda, cuadrada) y crece hacia la punta del dato
+     (derecha, redondeada) — la esquina redondeada es la unica que carga
+     dato, la base es el eje. */
+  border-radius: 0 4px 4px 0;
   background: linear-gradient(90deg, var(--primary-strong), #d8ad5e);
+  transition: filter 0.12s ease;
+}
+
+.barMarkHit:hover .barFill,
+.barMarkHit:focus-visible .barFill {
+  filter: brightness(1.1);
+}
+
+/* Tooltip de valor exacto al pasar el mouse o llegar por teclado: la
+   info ya esta de texto al lado (<small>), esto solo la resalta al foco. */
+.barTooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 5;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--text);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+}
+
+.barTooltip strong {
+  font-weight: 800;
+}
+
+.barMarkHit:hover .barTooltip,
+.barMarkHit:focus-visible .barTooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.donutTooltip {
+  left: 50%;
+  transform: translate(-50%, 2px);
+}
+
+.donutChart.barMarkHit:hover .donutTooltip,
+.donutChart.barMarkHit:focus-visible .donutTooltip {
+  transform: translate(-50%, 0);
+}
+
+.rankedBarChart {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
+.chartTableToggle {
+  justify-self: end;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.chartTableToggle:hover,
+.chartTableToggle:focus-visible {
+  color: var(--primary-strong);
 }
 
 .dashboardList {
