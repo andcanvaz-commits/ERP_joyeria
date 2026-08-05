@@ -114,12 +114,37 @@ export function buildOrdenProduccion(
           ? recepcionLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
           : [];
       if (recepcionLines.length === 0) {
-        if (run.actual_finished_weight !== null) {
+        const products = run.products ?? [];
+        // Producto unico medido en peso (no "und"): el peso final que
+        // sobrevivio la merma ES el producto — product.quantity es un conteo
+        // de piezas declarado al crear la orden, no gramos, y no coincide con
+        // el peso real. Mostrarlo aparte de la materia prima duplicaba el
+        // mismo numero con dos nombres distintos (materia prima vs producto).
+        const singleWeightProduct =
+          products.length === 1 && products[0].unit_code && products[0].unit_code !== "und"
+            ? products[0]
+            : null;
+        if (singleWeightProduct && run.actual_finished_weight !== null) {
           rows.push({
             gramos: num(run.actual_finished_weight),
-            unidad: materialUnit,
-            detalle: run.process_name
+            unidad: singleWeightProduct.unit_code || materialUnit,
+            detalle: `Producto final: ${singleWeightProduct.product_name ?? "—"}`
           });
+        } else {
+          if (run.actual_finished_weight !== null) {
+            rows.push({
+              gramos: num(run.actual_finished_weight),
+              unidad: materialUnit,
+              detalle: run.process_name
+            });
+          }
+          for (const product of products) {
+            rows.push({
+              gramos: num(product.quantity),
+              unidad: product.unit_code || "und",
+              detalle: `Producto final: ${product.product_name ?? "—"}`
+            });
+          }
         }
         // Merma del proceso (perdida entre etapas pesadas, ya calculada y
         // sumada en run.waste_weight): sin esta fila el certificado mostraba
@@ -129,13 +154,6 @@ export function buildOrdenProduccion(
             gramos: num(run.waste_weight),
             unidad: materialUnit,
             detalle: "Merma"
-          });
-        }
-        for (const product of run.products ?? []) {
-          rows.push({
-            gramos: num(product.quantity),
-            unidad: product.unit_code || "und",
-            detalle: `Producto final: ${product.product_name ?? "—"}`
           });
         }
       }
