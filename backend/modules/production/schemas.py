@@ -171,6 +171,18 @@ class MaterialRejectPayload(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class ReceiveFinishedProductPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Item WASTE elegido por Inventario para recibir la merma; si falta y
+    # run.waste_weight > 0, el servicio resuelve/crea "Merma <proceso>".
+    waste_item_id: UUID | None = None
+    # Nombre de un item WASTE a resolver-o-crear (usado cuando Inventario
+    # escribe un nombre nuevo/existente en vez de elegir uno de la lista).
+    # Ignorado si waste_item_id viene presente.
+    waste_item_name: str | None = Field(default=None, max_length=180)
+
+
 class AllocateMaterialPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

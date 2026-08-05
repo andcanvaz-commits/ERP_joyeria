@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WORK_IN_PROGRESS", "FINISHED_PRODUCT"]
+InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WORK_IN_PROGRESS", "FINISHED_PRODUCT", "WASTE"]
 InventoryMovementType = Literal[
     "ENTRADA",
     "SALIDA",
@@ -17,6 +17,8 @@ InventoryMovementType = Literal[
     "MERMA",
     "CONVERSION_SALIDA",
     "CONVERSION_ENTRADA",
+    "RECLASIFICACION_SALIDA",
+    "RECLASIFICACION_ENTRADA",
 ]
 
 
@@ -150,6 +152,13 @@ class InventoryMovementCreate(BaseModel):
     source_file_name: str | None = Field(default=None, max_length=240)
     source_file_mime: str | None = Field(default=None, max_length=120)
     source_file_content: str | None = Field(default=None, max_length=2_000_000)
+
+
+class ReclassifyWastePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_item_id: UUID
+    quantity: Decimal | None = Field(default=None, gt=0)
 
 
 class WaitingProductionRunSummary(BaseModel):

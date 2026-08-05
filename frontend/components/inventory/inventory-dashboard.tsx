@@ -31,6 +31,7 @@ import {
   listComplementTypes,
   listInventoryItems,
   listInventoryMovements,
+  reclassifyWasteMovement,
   revertLastEntry,
   unarchiveInventoryItem,
   updateInventoryItem,
@@ -58,6 +59,7 @@ const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINAD
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
   { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Productos terminados" },
+  { value: "WASTE", label: "Merma" },
 ];
 
 const UNIT_OPTIONS = [
@@ -80,6 +82,8 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "MERMA", label: "Merma" },
   { value: "CONVERSION_SALIDA", label: "Conversion salida" },
   { value: "CONVERSION_ENTRADA", label: "Conversion entrada" },
+  { value: "RECLASIFICACION_SALIDA", label: "Reclasificacion salida" },
+  { value: "RECLASIFICACION_ENTRADA", label: "Reclasificacion entrada" },
 ];
 
 // Estados de orden de produccion para el filtro de las pestañas de procesos.
@@ -273,7 +277,7 @@ function kardexDetail(movement: InventoryMovement) {
 // Signo del movimiento sobre el stock: suma entradas/ingresos/ajustes+ y resta
 // salidas/consumos/merma/ajustes-. Base del saldo corrido del kardex.
 function movementSign(type: InventoryMovementType) {
-  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" ? 1 : -1;
+  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" || type === "RECLASIFICACION_ENTRADA" ? 1 : -1;
 }
 
 function unitLabel(value: string) {
@@ -458,6 +462,24 @@ export function InventoryDashboard() {
     requiredQty: string;
     missingQty: string;
   } | null>(null);
+  // Confirmacion antes de recibir cuando la orden calculo merma: Inventario
+  // ve el item WASTE sugerido (por proceso) y puede cambiarlo antes de
+  // postear el INGRESO_PRODUCCION. Si waste_weight es 0/null, Recibir actua
+  // directo, sin este modal.
+  const [receiveMermaConfirm, setReceiveMermaConfirm] = useState<{
+    run: ProductionRun;
+    wasteWeight: string;
+    unit: string;
+  } | null>(null);
+  const [wasteItemNameInput, setWasteItemNameInput] = useState("");
+  const [selectedWasteItemId, setSelectedWasteItemId] = useState<string | null>(null);
+  const [isConfirmingMerma, setIsConfirmingMerma] = useState(false);
+  // Reclasificar merma ya recibida: mueve cantidad de un movimiento
+  // INGRESO_PRODUCCION de item WASTE hacia otro item WASTE.
+  const [reclassifyConfirm, setReclassifyConfirm] = useState<{ movement: InventoryMovement } | null>(null);
+  const [reclassifyTargetId, setReclassifyTargetId] = useState<string | null>(null);
+  const [reclassifyQuantity, setReclassifyQuantity] = useState("");
+  const [isReclassifying, setIsReclassifying] = useState(false);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -1094,11 +1116,64 @@ export function InventoryDashboard() {
     }
   }
 
-  async function handleReceiveFinishedProduct(run: ProductionRun) {
+  function handleReceiveClick(run: ProductionRun) {
+    const wasteWeight = Number(run.waste_weight ?? "0");
+    if (!(wasteWeight > 0)) {
+      void handleReceiveFinishedProduct(run);
+      return;
+    }
+    const suggestedName = `Merma ${run.process_name}`;
+    setWasteItemNameInput(suggestedName);
+    setSelectedWasteItemId(null);
+    setReceiveMermaConfirm({
+      run,
+      wasteWeight: numericText(run.waste_weight),
+      unit: run.raw_material_unit_code,
+    });
+  }
+
+  async function handleConfirmReceiveMerma() {
+    if (!receiveMermaConfirm || isConfirmingMerma) return;
+    setIsConfirmingMerma(true);
+    try {
+      const { run } = receiveMermaConfirm;
+      const wasteItemId = selectedWasteItemId;
+      const wasteItemName = wasteItemId ? undefined : wasteItemNameInput.trim() || undefined;
+      setReceiveMermaConfirm(null);
+      // Sin item elegido de la lista: se manda el nombre tal cual y el
+      // backend resuelve-o-crea el item WASTE (ensure_production_item),
+      // el unico camino permitido para crear items de tipo merma.
+      await handleReceiveFinishedProduct(run, wasteItemId ?? undefined, wasteItemName);
+    } finally {
+      setIsConfirmingMerma(false);
+    }
+  }
+
+  async function handleConfirmReclassify() {
+    if (!reclassifyConfirm || !reclassifyTargetId || isReclassifying) return;
+    setIsReclassifying(true);
+    setError(null);
+    try {
+      await reclassifyWasteMovement(
+        reclassifyConfirm.movement.id,
+        reclassifyTargetId,
+        reclassifyQuantity.trim() ? reclassifyQuantity.trim() : undefined,
+      );
+      setSuccess("Merma reclasificada.");
+      setReclassifyConfirm(null);
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo reclasificar la merma.");
+    } finally {
+      setIsReclassifying(false);
+    }
+  }
+
+  async function handleReceiveFinishedProduct(run: ProductionRun, wasteItemId?: string, wasteItemName?: string) {
     setError(null);
     setIsSavingProduction(true);
     try {
-      const updated = await receiveProductionRunFinishedProduct(run.id);
+      const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId, wasteItemName);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
       const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
@@ -2023,7 +2098,9 @@ export function InventoryDashboard() {
                         ? "Salidas comerciales de productos terminados"
                         : itemFilter === "ORDENES_TERMINADAS"
                           ? "Ordenes de produccion recibidas en inventario"
-                          : "Seguimiento de productos en proceso"}
+                          : itemFilter === "WASTE"
+                            ? "Merma recuperada de produccion, reclasificable entre items"
+                            : "Seguimiento de productos en proceso"}
               </p>
             </div>
             <div className="rowActions">
@@ -2703,6 +2780,47 @@ export function InventoryDashboard() {
               </table>
               <Pager {...receivedRunsPager} />
             </div>
+          ) : itemFilter === "WASTE" ? (
+            <div className="tableWrap">
+              <table className="table inventoryItemsTable">
+                <thead>
+                  <tr>
+                    <th className="num" style={{ width: 40 }}>#</th>
+                    <th>Merma</th>
+                    <th className="num">Stock</th>
+                    <th>Estado</th>
+                    <th aria-label="Acciones" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawItemsPager.pageItems.map((item, index) => {
+                    const status = stockStatus(item);
+                    return (
+                      <tr key={item.id}>
+                        <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
+                        <td>{item.name}</td>
+                        <td className="num">{itemStockText(item)}</td>
+                        <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
+                        <td>
+                          <div className="rowActions">
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => setViewingItem(item)} title="Visualizar" type="button">
+                              <Eye aria-hidden="true" size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!isLoading && displayItems.length === 0 ? (
+                    <tr><td colSpan={5}><div className="emptyState">Sin merma registrada.</div></td></tr>
+                  ) : null}
+                  {isLoading ? (
+                    <tr><td colSpan={5}><div className="emptyState">Cargando inventario...</div></td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+              <Pager {...rawItemsPager} />
+            </div>
           ) : (
           <div className="tableWrap">
             <table className="table inventoryItemsTable">
@@ -2871,6 +2989,20 @@ export function InventoryDashboard() {
                     <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
                       <RotateCcw aria-hidden="true" size={15} />
                       Revertir
+                    </button>
+                  ) : null}
+                  {movement.movement_type === "INGRESO_PRODUCCION" && movement.item.item_type === "WASTE" ? (
+                    <button
+                      className="iconTextButton"
+                      onClick={() => {
+                        setReclassifyTargetId(null);
+                        setReclassifyQuantity("");
+                        setReclassifyConfirm({ movement });
+                      }}
+                      type="button"
+                    >
+                      <Repeat aria-hidden="true" size={15} />
+                      Reclasificar
                     </button>
                   ) : null}
                 </span>
@@ -4626,12 +4758,30 @@ export function InventoryDashboard() {
               {viewingMovement.source_file_name ? <span><strong>Archivo</strong>{viewingMovement.source_file_name}</span> : null}
             </div>
             <p className="panelText">{viewingMovement.reason || "Sin motivo registrado"}</p>
-            {viewingMovement.source_file_name ? (
+            {viewingMovement.source_file_name || (viewingMovement.movement_type === "INGRESO_PRODUCCION" && viewingMovement.item.item_type === "WASTE") ? (
               <div className="modalActions">
-                <button className="button" onClick={() => void handleDownloadMovementSourceFile(viewingMovement)} type="button">
-                  <Download aria-hidden="true" size={16} />
-                  Descargar XML
-                </button>
+                {viewingMovement.source_file_name ? (
+                  <button className="button" onClick={() => void handleDownloadMovementSourceFile(viewingMovement)} type="button">
+                    <Download aria-hidden="true" size={16} />
+                    Descargar XML
+                  </button>
+                ) : null}
+                {viewingMovement.movement_type === "INGRESO_PRODUCCION" && viewingMovement.item.item_type === "WASTE" ? (
+                  <button
+                    className="button buttonPrimary"
+                    onClick={() => {
+                      const movement = viewingMovement;
+                      setViewingMovement(null);
+                      setReclassifyTargetId(null);
+                      setReclassifyQuantity("");
+                      setReclassifyConfirm({ movement });
+                    }}
+                    type="button"
+                  >
+                    <Repeat aria-hidden="true" size={16} />
+                    Reclasificar
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -4860,7 +5010,7 @@ export function InventoryDashboard() {
                         <button
                           className="button buttonPrimary"
                           disabled={isSavingProduction}
-                          onClick={() => void handleReceiveFinishedProduct(run)}
+                          onClick={() => handleReceiveClick(run)}
                           type="button"
                           style={{ flexShrink: 0 }}
                         >
@@ -4950,6 +5100,137 @@ export function InventoryDashboard() {
                 type="button"
               >
                 Aprobar parcial
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {receiveMermaConfirm ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Confirmar recepcion de merma">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Merma calculada{receiveMermaConfirm.run.production_code ? ` para ${receiveMermaConfirm.run.production_code}` : ""}</h2>
+                <p>
+                  {receiveMermaConfirm.wasteWeight} {receiveMermaConfirm.unit} de merma se sumaran a un item de
+                  inventario de tipo Merma.
+                </p>
+              </div>
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => setReceiveMermaConfirm(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Item de destino (existente o nuevo)</span>
+              <input
+                className="field"
+                onChange={(event) => {
+                  setWasteItemNameInput(event.target.value);
+                  setSelectedWasteItemId(null);
+                }}
+                value={wasteItemNameInput}
+              />
+            </label>
+            {(() => {
+              const term = wasteItemNameInput.trim().toLowerCase();
+              const matches = items.filter(
+                (it) => it.item_type === "WASTE" && (term === "" || it.name.toLowerCase().includes(term)),
+              );
+              if (matches.length === 0) return null;
+              return (
+                <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                  {matches.map((it) => (
+                    <button
+                      className={`processPicker${selectedWasteItemId === it.id ? " processPickerActive" : ""}`}
+                      key={it.id}
+                      onClick={() => {
+                        setSelectedWasteItemId(it.id);
+                        setWasteItemNameInput(it.name);
+                      }}
+                      type="button"
+                    >
+                      {it.name} · stock actual {numericText(it.current_stock)} {it.unit_code}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
+            <div className="modalActions">
+              <button className="button" onClick={() => setReceiveMermaConfirm(null)} type="button">
+                Cancelar
+              </button>
+              <button
+                className="button buttonPrimary"
+                disabled={isConfirmingMerma}
+                onClick={() => void handleConfirmReceiveMerma()}
+                type="button"
+              >
+                Confirmar y recibir
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {reclassifyConfirm ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Reclasificar merma">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Reclasificar merma</h2>
+                <p>
+                  {numericText(reclassifyConfirm.movement.quantity)} {reclassifyConfirm.movement.unit_code} en{" "}
+                  {reclassifyConfirm.movement.item.name}
+                </p>
+              </div>
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => setReclassifyConfirm(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Cantidad a reclasificar (vacio = toda la cantidad del movimiento)</span>
+              <input
+                className="field"
+                onChange={(event) => setReclassifyQuantity(event.target.value)}
+                placeholder={numericText(reclassifyConfirm.movement.quantity)}
+                type="number"
+                value={reclassifyQuantity}
+              />
+            </label>
+            <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+              {items
+                .filter((it) => it.item_type === "WASTE" && it.id !== reclassifyConfirm.movement.item_id)
+                .map((it) => (
+                  <button
+                    className={`processPicker${reclassifyTargetId === it.id ? " processPickerActive" : ""}`}
+                    key={it.id}
+                    onClick={() => setReclassifyTargetId(it.id)}
+                    type="button"
+                  >
+                    {it.name} · stock actual {numericText(it.current_stock)} {it.unit_code}
+                  </button>
+                ))}
+            </div>
+            <div className="modalActions">
+              <button className="button" onClick={() => setReclassifyConfirm(null)} type="button">
+                Cancelar
+              </button>
+              <button
+                className="button buttonPrimary"
+                disabled={!reclassifyTargetId || isReclassifying}
+                onClick={() => void handleConfirmReclassify()}
+                type="button"
+              >
+                Reclasificar
               </button>
             </div>
           </section>

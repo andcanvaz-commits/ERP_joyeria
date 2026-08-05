@@ -78,6 +78,13 @@ export function revertLastEntry(itemId: string) {
   });
 }
 
+export function reclassifyWasteMovement(movementId: string, targetItemId: string, quantity?: string) {
+  return apiRequest<InventoryMovement[]>(`/api/inventory/movements/${movementId}/reclassify-waste`, {
+    method: "POST",
+    body: JSON.stringify({ target_item_id: targetItemId, quantity: quantity ?? null }),
+  });
+}
+
 export type ConvertLotPayload = {
   // Segmento del material; si falta, el backend lo resuelve del material del lote.
   material_code?: string;

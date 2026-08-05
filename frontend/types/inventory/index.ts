@@ -1,4 +1,4 @@
-export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "COMPLEMENT" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT";
+export type InventoryItemType = "RAW_MATERIAL" | "SUPPLY" | "COMPLEMENT" | "WORK_IN_PROGRESS" | "FINISHED_PRODUCT" | "WASTE";
 
 export type InventoryMovementType =
   | "ENTRADA"
@@ -9,7 +9,9 @@ export type InventoryMovementType =
   | "INGRESO_PRODUCCION"
   | "MERMA"
   | "CONVERSION_SALIDA"
-  | "CONVERSION_ENTRADA";
+  | "CONVERSION_ENTRADA"
+  | "RECLASIFICACION_SALIDA"
+  | "RECLASIFICACION_ENTRADA";
 
 export type InventoryItem = {
   id: string;

@@ -18,6 +18,7 @@ const INVENTORY_TYPE_LABELS: Record<InventoryItemType, string> = {
   COMPLEMENT: "Complementos",
   WORK_IN_PROGRESS: "En proceso",
   FINISHED_PRODUCT: "Terminados",
+  WASTE: "Merma",
 };
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
@@ -30,6 +31,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   MERMA: "Merma",
   CONVERSION_SALIDA: "Conversion salida",
   CONVERSION_ENTRADA: "Conversion entrada",
+  RECLASIFICACION_SALIDA: "Reclasificacion salida",
+  RECLASIFICACION_ENTRADA: "Reclasificacion entrada",
 };
 
 const RUN_STATUS_LABELS: Record<ProductionRun["status"], string> = {
@@ -154,7 +157,7 @@ export function SystemDashboard() {
     return inventoryItems.reduce<Record<InventoryItemType, number>>((acc, item) => {
       acc[item.item_type] = (acc[item.item_type] ?? 0) + 1;
       return acc;
-    }, { RAW_MATERIAL: 0, SUPPLY: 0, COMPLEMENT: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0 });
+    }, { RAW_MATERIAL: 0, SUPPLY: 0, COMPLEMENT: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0, WASTE: 0 });
   }, [inventoryItems]);
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;

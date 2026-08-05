@@ -18,6 +18,7 @@ from backend.modules.inventory.schemas import (
     InventorySummary,
     LotConversionCreate,
     ProductCombineCreate,
+    ReclassifyWastePayload,
 )
 from backend.modules.inventory.service import InventoryDomainError, InventoryNotFoundError, InventoryService
 from backend.modules.security.permissions import require_permission
@@ -231,6 +232,24 @@ def revert_last_entry(
     ensure_permission(current_user, "inventory.items.update")
     try:
         return service.revert_last_entry(item_id)
+    except InventoryNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except InventoryDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/movements/{movement_id}/reclassify-waste", response_model=list[InventoryMovementRead])
+def reclassify_waste_movement(
+    movement_id: UUID,
+    payload: ReclassifyWastePayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
+) -> list[InventoryMovementRead]:
+    ensure_permission(current_user, "inventory.movements.create")
+    try:
+        return service.reclassify_waste_movement(
+            movement_id, payload.target_item_id, payload.quantity, user_id=current_user.id
+        )
     except InventoryNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except InventoryDomainError as exc:

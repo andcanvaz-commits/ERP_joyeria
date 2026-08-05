@@ -139,9 +139,10 @@ export function finishProductionRunStage(
   });
 }
 
-export function receiveProductionRunFinishedProduct(runId: string) {
+export function receiveProductionRunFinishedProduct(runId: string, wasteItemId?: string, wasteItemName?: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/receive-finished`, {
     method: "POST",
+    body: JSON.stringify({ waste_item_id: wasteItemId ?? null, waste_item_name: wasteItemName ?? null }),
   });
 }
 
