@@ -698,6 +698,8 @@ class ProductionService:
 
         from backend.modules.inventory.models import InventoryItem
 
+        if run.raw_material_item_id is None:
+            raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
         raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
         if raw_material is None:
             raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
@@ -846,6 +848,8 @@ class ProductionService:
 
         from backend.modules.inventory.models import InventoryItem
 
+        if run.raw_material_item_id is None:
+            raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
         raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
         if raw_material is None:
             raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")

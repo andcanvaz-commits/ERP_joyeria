@@ -327,7 +327,7 @@ class ProductionRunRead(BaseModel):
     # ENSAMBLAR sin receta aplicable: produccion debe definir la combinacion
     # antes de que inventario pueda recibir.
     assembly_pending: bool
-    raw_material_item_id: UUID
+    raw_material_item_id: UUID | None
     raw_material_quantity_per_unit: Decimal
     raw_material_unit_code: str
     total_required_material: Decimal

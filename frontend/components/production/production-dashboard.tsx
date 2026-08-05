@@ -187,8 +187,9 @@ async function fetchProductionBundle(variant: "production" | "maintenance") {
     processes: nextProcesses,
     users: nextUsers,
     runs: nextRuns,
-    // Materiales elegibles para procesos: materia prima + insumos.
-    rawMaterials: [...nextRawMaterials, ...nextSupplies],
+    // Materiales elegibles para procesos: materia prima + insumos, sin archivados
+    // (un item archivado no debe poder elegirse para una orden nueva en vivo).
+    rawMaterials: [...nextRawMaterials, ...nextSupplies].filter((item) => !item.archived_at),
     complements: nextComplements,
     finishedItems: nextFinishedItems,
   };

@@ -172,7 +172,9 @@ class ProductionRun(Base):
     # ENSAMBLAR sin receta aplicable: producción debe definir la combinación
     # antes de que inventario pueda recibir.
     assembly_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    raw_material_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Nulo en ordenes historicas migradas (import de certificados de papel):
+    # esas actas nunca referencian una materia prima real del inventario.
+    raw_material_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     raw_material_quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     raw_material_unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     total_required_material: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)

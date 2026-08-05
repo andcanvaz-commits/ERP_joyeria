@@ -102,7 +102,7 @@ export type ProductionRun = {
     | "RECIBIDA"
     | "CANCELADA"
     | "ESPERANDO_MATERIAL";
-  raw_material_item_id: string;
+  raw_material_item_id: string | null;
   raw_material_quantity_per_unit: string;
   raw_material_unit_code: string;
   total_required_material: string;

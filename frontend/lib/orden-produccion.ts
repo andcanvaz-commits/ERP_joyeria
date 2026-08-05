@@ -77,7 +77,7 @@ export function buildOrdenProduccion(
   itemNames: Map<string, string>
 ): OrdenProduccionModel {
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
-  const materialName = itemNames.get(root.raw_material_item_id) ?? root.process_name;
+  const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name;
   const materialUnit = root.raw_material_unit_code || "g";
 
   const entrega: DocSide[] = [];
