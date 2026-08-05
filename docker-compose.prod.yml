@@ -105,6 +105,17 @@ services:
       - api
       - web
 
+  # Solo invocado bajo demanda (deploy/init-tls.sh y deploy/renew-tls.sh),
+  # nunca con "up -d": emite/renueva el certificado TLS y lo copia a
+  # ./nginx/certs/, que es lo que nginx realmente lee.
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_webroot:/var/www/certbot
+      - certbot_letsencrypt:/etc/letsencrypt
+      - ./nginx/certs:/nginx-certs
+
 volumes:
   postgres_data:
   certbot_webroot:
+  certbot_letsencrypt:
