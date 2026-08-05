@@ -290,6 +290,13 @@ function numericText(value: string | null) {
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
 }
 
+// Porcentajes: 2 decimales, no los 4 de los gramos (16,6667% es ilegible).
+function percentText(value: string | null) {
+  if (!value) return "0";
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 2 }) : value;
+}
+
 function moneyText(value: number) {
   return value.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -1502,7 +1509,7 @@ export function InventoryDashboard() {
             type="button"
           >
             {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
-            {run.waste_percent ? ` · ${numericText(run.waste_percent)}%` : ""}
+            {run.waste_percent ? ` · ${percentText(run.waste_percent)}%` : ""}
           </button>
         </td>
         <td>
@@ -2698,7 +2705,7 @@ export function InventoryDashboard() {
                         })()}</td>
                         <td className="num">
                           {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
-                          {root.waste_percent ? ` · ${numericText(root.waste_percent)}%` : ""}
+                          {root.waste_percent ? ` · ${percentText(root.waste_percent)}%` : ""}
                         </td>
                         <td>{root.received_at ? new Date(root.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
                         <td>
@@ -4988,11 +4995,11 @@ export function InventoryDashboard() {
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Merma</strong>
-                            <span>{run.waste_weight ? `${numericText(run.waste_weight)} (${numericText(run.waste_percent)}%)` : `${numericText(run.waste_percent)}%`}</span>
+                            <span>{run.waste_weight ? `${numericText(run.waste_weight)} (${percentText(run.waste_percent)}%)` : `${percentText(run.waste_percent)}%`}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Limite de merma</strong>
-                            <span>{numericText(run.waste_limit_percent)}%</span>
+                            <span>{percentText(run.waste_limit_percent)}%</span>
                           </div>
                         </div>
                       ) : null}

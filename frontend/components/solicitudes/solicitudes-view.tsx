@@ -38,6 +38,13 @@ function num(value: string | null) {
   return Number.isFinite(n) ? n.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
 }
 
+// Porcentajes: 2 decimales, no los 4 de los gramos (16,6667% es ilegible).
+function percentText(value: string | null) {
+  if (!value) return "0";
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString("es-EC", { maximumFractionDigits: 2 }) : value;
+}
+
 function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }) {
   const timeline: Array<[string, string | null]> = [
     ["Solicitada", run.requested_at],
@@ -84,8 +91,8 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
           <span><strong>Material por unidad</strong>{num(run.raw_material_quantity_per_unit)} {run.raw_material_unit_code}</span>
           <span><strong>Peso esperado</strong>{num(run.expected_finished_weight)}</span>
           <span><strong>Peso real</strong>{run.actual_finished_weight ? num(run.actual_finished_weight) : "-"}</span>
-          <span><strong>Merma</strong>{run.waste_weight ? `${num(run.waste_weight)} (${num(run.waste_percent)}%)` : "-"}</span>
-          <span><strong>Limite de merma</strong>{num(run.waste_limit_percent)}%</span>
+          <span><strong>Merma</strong>{run.waste_weight ? `${num(run.waste_weight)} (${percentText(run.waste_percent)}%)` : "-"}</span>
+          <span><strong>Limite de merma</strong>{percentText(run.waste_limit_percent)}%</span>
           <span><strong>Creada por</strong>{run.created_by_name ?? "-"}</span>
           <span><strong>Aprobada por</strong>{run.materials_approved_by_name ?? "-"}</span>
           <span><strong>Recibida por</strong>{run.received_by_name ?? "-"}</span>

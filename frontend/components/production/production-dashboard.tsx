@@ -563,6 +563,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
   }
 
+  // Porcentajes: 2 decimales, no los 4 de los gramos (16,6667% es ilegible).
+  function percentText(value: string | number | null | undefined) {
+    if (value === null || value === undefined || value === "") return "0";
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 2 }) : String(value);
+  }
+
   function timeLabel(value: string | null) {
     if (!value) return "Pendiente";
     const date = new Date(value);
@@ -623,7 +630,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (!run.waste_weight && !run.waste_percent) return "—";
     const parts: string[] = [];
     if (run.waste_weight) parts.push(`${numericText(run.waste_weight)} g`);
-    if (run.waste_percent) parts.push(`${numericText(run.waste_percent)}%`);
+    if (run.waste_percent) parts.push(`${percentText(run.waste_percent)}%`);
     return parts.join(" · ");
   }
 
@@ -2036,7 +2043,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           )}
                           {root.process_name}
                         </strong>
-                        <span>{numericText(root.quantity)} unidades · Merma: {numericText(root.waste_percent)}% · Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}</span>
+                        <span>{numericText(root.quantity)} unidades · Merma: {percentText(root.waste_percent)}% · Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}</span>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
                         {isSplit ? (
@@ -2738,7 +2745,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         }}
                       >
                         <strong>Merma de esta fase</strong>
-                        {numericText(stage.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {numericText(stage.waste_percent)}%
+                        {numericText(stage.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {percentText(stage.waste_percent)}%
                       </div>
                     ) : null}
 
@@ -2848,9 +2855,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </span>
                       <span>
                         <strong>Merma acumulada</strong>
-                        {numericText(selectedRunForStages.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {numericText(selectedRunForStages.waste_percent)}%
+                        {numericText(selectedRunForStages.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {percentText(selectedRunForStages.waste_percent)}%
                         {Number(selectedRunForStages.waste_percent ?? 0) > Number(selectedRunForStages.waste_limit_percent)
-                          ? ` · ⚠ supera el ${numericText(selectedRunForStages.waste_limit_percent)}%`
+                          ? ` · ⚠ supera el ${percentText(selectedRunForStages.waste_limit_percent)}%`
                           : ""}
                       </span>
                     </div>
@@ -3061,7 +3068,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <strong>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</strong>
                         <span>
                           {numericText(run.quantity)} {run.raw_material_unit_code} · Merma: {numericText(run.waste_weight)} {run.raw_material_unit_code} ·{" "}
-                          {numericText(run.waste_percent)}% · {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}
+                          {percentText(run.waste_percent)}% · {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}
                         </span>
                       </div>
                       <button
@@ -3514,7 +3521,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </div>
               <div className="processFlowMeta">
                 <strong>Limite de merma</strong>
-                <span>{viewingProcess.waste_limit_percent ? `${viewingProcess.waste_limit_percent}%` : "Sin configurar"}</span>
+                <span>{viewingProcess.waste_limit_percent ? `${percentText(viewingProcess.waste_limit_percent)}%` : "Sin configurar"}</span>
               </div>
             </div>
 

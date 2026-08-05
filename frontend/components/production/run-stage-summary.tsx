@@ -9,6 +9,13 @@ function num(value: string | number | null | undefined) {
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
 }
 
+// Porcentajes: 2 decimales, no los 4 de los gramos (16,6667% es ilegible).
+function percentText(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return "0";
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 2 }) : String(value);
+}
+
 // Tarjetas de merma de una orden: total, promedio por etapa con merma y etapa
 // con mayor merma. Compartidas entre el resumen de producción y "Merma por
 // fase" de inventario.
@@ -27,7 +34,7 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
     <>
       <span>
         <strong>Merma total</strong>
-        {num(totalWaste)} {unit}{run.waste_percent ? ` · ${num(run.waste_percent)}%` : ""}
+        {num(totalWaste)} {unit}{run.waste_percent ? ` · ${percentText(run.waste_percent)}%` : ""}
       </span>
       <span>
         <strong>Promedio por etapa</strong>
@@ -98,7 +105,7 @@ export function RunStageSummaryTable({ run, pageSize = 5, print = false }: { run
               </td>
               <td className="num" style={hasInitial ? oneLine : { ...oneLine, ...muted }}>{pending ? "—" : `${num(initial)} ${unit}`}</td>
               <td className="num" style={hasFinal ? oneLine : { ...oneLine, ...muted }}>{pending ? "—" : `${num(final)} ${unit}`}</td>
-              <td className="num" style={oneLine}>{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit} · ${num(stage.waste_percent ?? 0)}%`}</td>
+              <td className="num" style={oneLine}>{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit} · ${percentText(stage.waste_percent ?? 0)}%`}</td>
               <td style={oneLine}>
                 {decision ? (
                   <span title={`${decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}${decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}${decision.justification ? ` — ${decision.justification}` : ""}`}>
