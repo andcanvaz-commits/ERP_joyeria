@@ -101,7 +101,7 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
               {(run.products ?? []).map((product) => (
                 <div className="dashboardRow" key={product.id}>
                   <div><strong>{product.product_name ?? "—"}</strong></div>
-                  <small>{num(product.quantity)} und</small>
+                  <small>{num(product.quantity)} {product.unit_code || "und"}</small>
                 </div>
               ))}
             </div>

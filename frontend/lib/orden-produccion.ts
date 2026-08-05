@@ -121,10 +121,20 @@ export function buildOrdenProduccion(
             detalle: run.process_name
           });
         }
+        // Merma del proceso (perdida entre etapas pesadas, ya calculada y
+        // sumada en run.waste_weight): sin esta fila el certificado mostraba
+        // el peso final y las piezas resultantes sin explicar la diferencia.
+        if (num(run.waste_weight) > 0) {
+          rows.push({
+            gramos: num(run.waste_weight),
+            unidad: materialUnit,
+            detalle: "Merma"
+          });
+        }
         for (const product of run.products ?? []) {
           rows.push({
             gramos: num(product.quantity),
-            unidad: "und",
+            unidad: product.unit_code || "und",
             detalle: `Producto final: ${product.product_name ?? "—"}`
           });
         }

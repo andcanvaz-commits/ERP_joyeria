@@ -138,6 +138,7 @@ export type ProductionRun = {
     product_name?: string | null;
     quantity: string;
     target_item_id?: string | null;
+    unit_code?: string | null;
   }>;
   // Complementos de inventario solicitados para ensamblar.
   complements?: Array<{ id: string; item_id: string; name?: string | null; quantity: string; unit_code: string; status: string }>;

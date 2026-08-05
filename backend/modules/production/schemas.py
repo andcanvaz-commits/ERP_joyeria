@@ -266,6 +266,9 @@ class RunProductRead(BaseModel):
     target_item_id: UUID | None = None
     product_name: str | None = None
     quantity: Decimal
+    # Unidad real del item destino (g, und, ...); None si el plan es por
+    # product_type_id (categoria sin pieza de catalogo elegida todavia).
+    unit_code: str | None = None
 
 
 class RunComplementRead(BaseModel):

@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
-import { buildItemNameMap, buildOrdenProduccion, canPrintEntrega, canPrintRecepcion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildItemNameMap, buildOrdenProduccion, canPrintRecepcion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
@@ -54,12 +54,12 @@ import { runCurrentStage, runCurrentWaste, runCurrentWeight } from "@/lib/produc
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
+  { value: "WASTE", label: "Merma" },
   { value: "SUPPLY", label: "Insumos" },
   { value: "COMPLEMENT", label: "Complementos" },
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
   { value: "ORDENES_TERMINADAS", label: "Procesos terminados" },
   { value: "FINISHED_PRODUCT", label: "Productos terminados" },
-  { value: "WASTE", label: "Merma" },
 ];
 
 const UNIT_OPTIONS = [
@@ -1071,17 +1071,19 @@ export function InventoryDashboard() {
           ? `Salida aprobada para ${updated.production_code}. ${splitChild.production_code} queda a la espera de más material.`
           : "Salida de materia prima aprobada."
       );
-      const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
+      // Corridas historicas migradas pueden quedar varadas en PENDIENTE_RECEPCION
+      // para siempre (ver pendingReceptionRuns mas abajo) — sin excluirlas aqui
+      // "remaining" nunca llega a 0 y la ventana de Solicitudes no se cierra
+      // aunque ya no quede nada visible en la lista.
+      const remaining = nextRuns.filter(
+        (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
+      ).length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
-      const family = getRunFamily(nextRuns, updated);
-      if (canPrintEntrega(family)) {
-        setPrintPreview({ family, mode: "entrega" });
-      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
     } finally {
@@ -1102,7 +1104,9 @@ export function InventoryDashboard() {
       setRejectRun(null);
       setSuccess("Solicitud rechazada. La orden fue cancelada.");
       const nextRuns = await listProductionRuns();
-      const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
+      const remaining = nextRuns.filter(
+        (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
+      ).length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
       }
@@ -1176,7 +1180,9 @@ export function InventoryDashboard() {
       const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId, wasteItemName);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
-      const remaining = nextRuns.filter((r) => r.status === "PENDIENTE_INVENTARIO" || r.status === "PENDIENTE_RECEPCION").length;
+      const remaining = nextRuns.filter(
+        (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
+      ).length;
       if (remaining === 0) {
         setIsSolicitudesOpen(false);
       }
@@ -1216,10 +1222,6 @@ export function InventoryDashboard() {
       }
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
       await queryClient.invalidateQueries({ queryKey: ["production"] });
-      const family = getRunFamily(nextRuns, started);
-      if (!splitChild && canPrintEntrega(family)) {
-        setPrintPreview({ family, mode: "entrega" });
-      }
     } catch (nextError) {
       setAllocateErrors((current) => ({
         ...current,
