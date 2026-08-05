@@ -1,7 +1,9 @@
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
+from backend.modules.inventory.models import InventoryItem, InventoryMovement
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.service import InventoryDomainError, InventoryNotFoundError, InventoryService
 
@@ -12,8 +14,9 @@ def inventory_service(db_session) -> InventoryService:
 
 
 def test_ensure_production_item_creates_waste_item_with_me_prefix(db_session, inventory_service):
+    unique_name = f"Merma Cadenas {uuid4().hex[:8]}"
     item = inventory_service.ensure_production_item(
-        item_type="WASTE", name="Merma Cadenas", unit_code="g"
+        item_type="WASTE", name=unique_name, unit_code="g"
     )
 
     assert item.item_type == "WASTE"
@@ -22,19 +25,15 @@ def test_ensure_production_item_creates_waste_item_with_me_prefix(db_session, in
 
 
 def test_ensure_production_item_reuses_existing_waste_item_by_exact_name(db_session, inventory_service):
+    unique_name = f"Merma Cadenas {uuid4().hex[:8]}"
     first = inventory_service.ensure_production_item(
-        item_type="WASTE", name="Merma Cadenas", unit_code="g"
+        item_type="WASTE", name=unique_name, unit_code="g"
     )
     second = inventory_service.ensure_production_item(
-        item_type="WASTE", name="Merma Cadenas", unit_code="g"
+        item_type="WASTE", name=unique_name, unit_code="g"
     )
 
     assert first.id == second.id
-
-
-from uuid import uuid4
-
-from backend.modules.inventory.models import InventoryItem, InventoryMovement
 
 
 def _make_waste_item(db_session, name, stock):
@@ -136,4 +135,20 @@ def test_reclassify_waste_rejects_target_that_is_not_waste_type(db_session, inve
     with pytest.raises(InventoryDomainError, match="tipo merma"):
         inventory_service.reclassify_waste_movement(
             movement.id, target_item_id=not_waste.id, quantity=None, user_id=None
+        )
+
+
+def test_reclassify_waste_rejects_target_with_mismatched_unit_code(db_session, inventory_service):
+    source = _make_waste_item(db_session, "Merma Cadenas", 10)
+    target = InventoryItem(
+        item_type="WASTE", name="Merma Medallas und", sku=f"ME-TEST-{uuid4().hex[:8]}", unit_code="und",
+        current_stock=Decimal("0"),
+    )
+    db_session.add(target)
+    db_session.flush()
+    movement = _make_ingreso_produccion_movement(db_session, source, 10, uuid4())
+
+    with pytest.raises(InventoryDomainError, match="unidades distintas"):
+        inventory_service.reclassify_waste_movement(
+            movement.id, target_item_id=target.id, quantity=None, user_id=None
         )

@@ -130,7 +130,12 @@ def test_receive_with_zero_waste_creates_no_waste_item(
 
     production_service.receive_finished_product(run.id, current_user)
 
-    assert db_session.query(InventoryItem).filter(InventoryItem.item_type == "WASTE").count() == 0
+    assert (
+        db_session.query(InventoryItem)
+        .filter(InventoryItem.item_type == "WASTE", InventoryItem.name == "Merma Cadenas test")
+        .count()
+        == 0
+    )
 
 
 def test_receive_with_explicit_waste_item_id_overrides_default(
@@ -169,4 +174,28 @@ def test_receive_rejects_waste_item_id_that_is_not_waste_type(
     with pytest.raises(ProductionDomainError, match="destino de merma"):
         production_service.receive_finished_product(
             run.id, current_user, ReceiveFinishedProductPayload(waste_item_id=target_complement.id)
+        )
+
+
+def test_receive_rejects_waste_item_id_with_mismatched_unit_code(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    # La orden pesa en "g" (materiales del weighed_process); este item de
+    # merma esta en "und", una unidad incompatible.
+    mismatched_waste = InventoryItem(
+        item_type="WASTE", name="Merma unidades distintas", sku="ME-TEST-0002", unit_code="und",
+        current_stock=Decimal("0"),
+    )
+    db_session.add(mismatched_waste)
+    db_session.flush()
+
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+    )
+
+    with pytest.raises(ProductionDomainError, match="unidad distinta"):
+        production_service.receive_finished_product(
+            run.id, current_user, ReceiveFinishedProductPayload(waste_item_id=mismatched_waste.id)
         )
