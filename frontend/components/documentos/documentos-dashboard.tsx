@@ -43,10 +43,52 @@ export function DocumentosDashboard() {
   const items = data?.items ?? [];
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState<DocMode | null>(null);
+  const [search, setSearch] = useState("");
+  const [kindFilter, setKindFilter] = useState<"ALL" | "LIVE" | "HISTORICAL">("ALL");
+
+  function isHistoricalFamily(family: ProductionRun[]): boolean {
+    return family.some((run) => (run.event_lines ?? []).length > 0);
+  }
+
+  function familyMonthKey(family: ProductionRun[]): string {
+    const root = family.find((run) => !run.parent_run_id) ?? family[0];
+    const date = new Date(root.requested_at);
+    if (Number.isNaN(date.getTime())) return "Sin fecha";
+    return date.toLocaleDateString("es-EC", { month: "long", year: "numeric" });
+  }
 
   const itemNames = useMemo(() => buildItemNameMap(items), [items]);
   const families = useMemo(() => groupRunFamilies(runs), [runs]);
-  const familyList = useMemo(() => Array.from(families.entries()), [families]);
+  const familyList = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return Array.from(families.entries()).filter(([key, family]) => {
+      const historical = isHistoricalFamily(family);
+      if (kindFilter === "LIVE" && historical) return false;
+      if (kindFilter === "HISTORICAL" && !historical) return false;
+      if (!term) return true;
+      const root = family.find((run) => !run.parent_run_id) ?? family[0];
+      const haystack = [
+        key,
+        root.process_name,
+        root.created_by_name ?? "",
+        root.materials_approved_by_name ?? "",
+        root.received_by_name ?? ""
+      ].join(" ").toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [families, search, kindFilter]);
+
+  const familyGroups = useMemo(() => {
+    const groups = new Map<string, Array<[string, ProductionRun[]]>>();
+    for (const entry of familyList) {
+      const monthKey = familyMonthKey(entry[1]);
+      const list = groups.get(monthKey) ?? [];
+      list.push(entry);
+      groups.set(monthKey, list);
+    }
+    return Array.from(groups.entries());
+  }, [familyList]);
+
   const selectedFamily = selectedKey ? families.get(selectedKey) ?? null : null;
   const model = useMemo(
     () => (selectedFamily ? buildOrdenProduccion(selectedFamily, itemNames) : null),
@@ -78,34 +120,66 @@ export function DocumentosDashboard() {
 
         <div className="documentosLayout">
           <div className="documentosList">
+            <div style={{ display: "grid", gap: 8, marginBottom: 4 }}>
+              <input
+                aria-label="Buscar por folio, proceso o responsable"
+                className="field"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar folio, proceso, responsable..."
+                type="text"
+                value={search}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                {(["ALL", "LIVE", "HISTORICAL"] as const).map((option) => (
+                  <button
+                    className={`button${kindFilter === option ? " buttonPrimary" : ""}`}
+                    key={option}
+                    onClick={() => setKindFilter(option)}
+                    type="button"
+                  >
+                    {option === "ALL" ? "Todas" : option === "LIVE" ? "En vivo" : "Históricas"}
+                  </button>
+                ))}
+              </div>
+            </div>
             {isLoading ? <div className="emptyState">Cargando órdenes...</div> : null}
             {!isLoading && runs.length === 0 ? (
               <div className="emptyState">No hay órdenes registradas.</div>
             ) : null}
-            {familyList.map(([key, family]) => {
-              const isSel = key === selectedKey;
-              const root = family.find((run) => !run.parent_run_id) ?? family[0];
-              const receivedCount = family.filter((run) => run.status === "RECIBIDA").length;
-              const statusText =
-                family.length === 1
-                  ? STATUS_LABEL[family[0].status]
-                  : `${receivedCount}/${family.length} recibidas`;
-              return (
-                <button
-                  className={`processPicker${isSel ? " processPickerActive" : ""}`}
-                  key={key}
-                  onClick={() => setSelectedKey(key)}
-                  type="button"
-                >
-                  <span style={{ display: "grid", gap: 2, textAlign: "left" }}>
-                    <strong style={{ color: "var(--text)", fontSize: 14 }}>
-                      {key} · {root.process_name}
-                    </strong>
-                    <span>{statusText}</span>
-                  </span>
-                </button>
-              );
-            })}
+            {!isLoading && runs.length > 0 && familyList.length === 0 ? (
+              <div className="emptyState">Ninguna orden coincide con la búsqueda/filtro.</div>
+            ) : null}
+            {familyGroups.map(([monthLabel, entries]) => (
+              <div key={monthLabel} style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--muted)", textTransform: "uppercase", marginTop: 6 }}>
+                  {monthLabel}
+                </span>
+                {entries.map(([key, family]) => {
+                  const isSel = key === selectedKey;
+                  const root = family.find((run) => !run.parent_run_id) ?? family[0];
+                  const receivedCount = family.filter((run) => run.status === "RECIBIDA").length;
+                  const statusText =
+                    family.length === 1
+                      ? STATUS_LABEL[family[0].status]
+                      : `${receivedCount}/${family.length} recibidas`;
+                  return (
+                    <button
+                      className={`processPicker${isSel ? " processPickerActive" : ""}`}
+                      key={key}
+                      onClick={() => setSelectedKey(key)}
+                      type="button"
+                    >
+                      <span style={{ display: "grid", gap: 2, textAlign: "left" }}>
+                        <strong style={{ color: "var(--text)", fontSize: 14 }}>
+                          {key} · {root.process_name}
+                        </strong>
+                        <span>{statusText}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
           <div className="documentosPreview">
