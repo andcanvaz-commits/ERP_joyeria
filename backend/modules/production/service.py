@@ -1680,7 +1680,7 @@ class ProductionService:
                 raise ProductionDomainError(
                     "Una materia prima seleccionada no existe en el inventario."
                 )
-            if item_type not in ("RAW_MATERIAL", "SUPPLY"):
+            if item_type not in ("RAW_MATERIAL", "COMPLEMENT", "WASTE"):
                 raise ProductionDomainError(
-                    "Solo se pueden usar materias primas o insumos del inventario."
+                    "Solo se pueden usar materia prima, complementos o merma del inventario."
                 )
