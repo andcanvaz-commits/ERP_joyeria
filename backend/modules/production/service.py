@@ -1520,7 +1520,7 @@ class ProductionService:
             # en vivo. Recibirla aqui generaria un movimiento de inventario
             # real que el papel nunca respaldo. Ver Addendum en
             # docs/superpowers/specs/2026-08-04-certificados-historicos-design.md.
-            raise ProductionDomainError("Esta es una orden histórica migrada; no se puede recibir por este flujo.")
+            raise ProductionDomainError("Esta es una orden historica migrada; no se puede recibir por este flujo.")
         if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_pending:
             raise ProductionDomainError("Producción debe definir el ensamble antes de recibir.")
 

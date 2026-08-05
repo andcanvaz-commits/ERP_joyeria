@@ -201,26 +201,31 @@ def _next_folio_numbers(count: int) -> list[str]:
     return [f"OP-2026-{n:04d}" for n in range(1, count + 1)]
 
 
-FOLIO_PREFIX = "OP-2026-"
-
-
 def _abort_if_already_imported(session) -> None:
     """production_code/root_production_code no tienen constraint UNIQUE en
     la base (solo index=True), asi que nada evita que un segundo --commit
     duplique las 58 corridas con los mismos folios OP-2026-0001..0037. Este
     chequeo corre tanto en dry-run como en --commit para que el dry-run
-    tambien reporte correctamente "esto ya se importo"."""
+    tambien reporte correctamente "esto ya se importo".
+
+    No se puede usar el prefijo de folio OP-2026-% como senal: las ordenes
+    en vivo usan el mismo esquema de folio, y cuando una orden en vivo se
+    parte (ver _split_run_for_partial_material en
+    backend/modules/production/service.py) su root_production_code queda en
+    su propio OP-2026-NNNN. Eso daria un falso positivo y bloquearia el
+    import aunque nunca se haya corrido. En cambio, production_run_event_lines
+    solo se llena desde build_runs_for_order (mas abajo); ninguna orden en
+    vivo escribe ahi, asi que su existencia es la senal correcta de "este
+    import ya se corrio"."""
     from sqlalchemy import select
 
     existing = session.execute(
-        select(ProductionRun.id)
-        .where(ProductionRun.root_production_code.like(f"{FOLIO_PREFIX}%"))
-        .limit(1)
+        select(ProductionRunEventLine.id).limit(1)
     ).first()
     if existing is not None:
         raise SystemExit(
-            "Ya existen ordenes con folio OP-2026-*, este import ya se corrio. "
-            "Abortando para no duplicar."
+            "Ya existen lineas de evento en production_run_event_lines, este "
+            "import ya se corrio. Abortando para no duplicar."
         )
 
 
