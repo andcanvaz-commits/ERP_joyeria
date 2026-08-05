@@ -31,6 +31,7 @@ import {
   listComplementTypes,
   listInventoryItems,
   listInventoryMovements,
+  reclassifyWasteMovement,
   revertLastEntry,
   unarchiveInventoryItem,
   updateInventoryItem,
@@ -474,6 +475,12 @@ export function InventoryDashboard() {
   const [wasteItemNameInput, setWasteItemNameInput] = useState("");
   const [selectedWasteItemId, setSelectedWasteItemId] = useState<string | null>(null);
   const [isConfirmingMerma, setIsConfirmingMerma] = useState(false);
+  // Reclasificar merma ya recibida: mueve cantidad de un movimiento
+  // INGRESO_PRODUCCION de item WASTE hacia otro item WASTE.
+  const [reclassifyConfirm, setReclassifyConfirm] = useState<{ movement: InventoryMovement } | null>(null);
+  const [reclassifyTargetId, setReclassifyTargetId] = useState<string | null>(null);
+  const [reclassifyQuantity, setReclassifyQuantity] = useState("");
+  const [isReclassifying, setIsReclassifying] = useState(false);
   const [printingMode, setPrintingMode] = useState<DocMode | null>(null);
   const [itemForm, setItemForm] = useState<SaveInventoryItemPayload>(emptyItemForm);
   const [movementForm, setMovementForm] = useState<CreateInventoryMovementPayload>(emptyMovementForm);
@@ -1160,6 +1167,26 @@ export function InventoryDashboard() {
       void suggestedName; // referenciado solo para claridad del closure, sin uso adicional
     } finally {
       setIsConfirmingMerma(false);
+    }
+  }
+
+  async function handleConfirmReclassify() {
+    if (!reclassifyConfirm || !reclassifyTargetId || isReclassifying) return;
+    setIsReclassifying(true);
+    setError(null);
+    try {
+      await reclassifyWasteMovement(
+        reclassifyConfirm.movement.id,
+        reclassifyTargetId,
+        reclassifyQuantity.trim() ? reclassifyQuantity.trim() : undefined,
+      );
+      setSuccess("Merma reclasificada.");
+      setReclassifyConfirm(null);
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo reclasificar la merma.");
+    } finally {
+      setIsReclassifying(false);
     }
   }
 
@@ -2940,6 +2967,20 @@ export function InventoryDashboard() {
                     <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
                       <RotateCcw aria-hidden="true" size={15} />
                       Revertir
+                    </button>
+                  ) : null}
+                  {movement.movement_type === "INGRESO_PRODUCCION" && movement.item.item_type === "WASTE" ? (
+                    <button
+                      className="iconTextButton"
+                      onClick={() => {
+                        setReclassifyTargetId(null);
+                        setReclassifyQuantity("");
+                        setReclassifyConfirm({ movement });
+                      }}
+                      type="button"
+                    >
+                      <Repeat aria-hidden="true" size={15} />
+                      Reclasificar
                     </button>
                   ) : null}
                 </span>
@@ -5090,6 +5131,66 @@ export function InventoryDashboard() {
                 type="button"
               >
                 Confirmar y recibir
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {reclassifyConfirm ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Reclasificar merma">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Reclasificar merma</h2>
+                <p>
+                  {numericText(reclassifyConfirm.movement.quantity)} {reclassifyConfirm.movement.unit_code} en{" "}
+                  {reclassifyConfirm.movement.item.name}
+                </p>
+              </div>
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => setReclassifyConfirm(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Cantidad a reclasificar (vacio = toda la cantidad del movimiento)</span>
+              <input
+                className="field"
+                onChange={(event) => setReclassifyQuantity(event.target.value)}
+                placeholder={numericText(reclassifyConfirm.movement.quantity)}
+                type="number"
+                value={reclassifyQuantity}
+              />
+            </label>
+            <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+              {items
+                .filter((it) => it.item_type === "WASTE" && it.id !== reclassifyConfirm.movement.item_id)
+                .map((it) => (
+                  <button
+                    className={`processPicker${reclassifyTargetId === it.id ? " processPickerActive" : ""}`}
+                    key={it.id}
+                    onClick={() => setReclassifyTargetId(it.id)}
+                    type="button"
+                  >
+                    {it.name} · stock actual {numericText(it.current_stock)} {it.unit_code}
+                  </button>
+                ))}
+            </div>
+            <div className="modalActions">
+              <button className="button" onClick={() => setReclassifyConfirm(null)} type="button">
+                Cancelar
+              </button>
+              <button
+                className="button buttonPrimary"
+                disabled={!reclassifyTargetId || isReclassifying}
+                onClick={() => void handleConfirmReclassify()}
+                type="button"
+              >
+                Reclasificar
               </button>
             </div>
           </section>
