@@ -208,6 +208,115 @@ const EMPTY_RECIPE_MODEL_KEYS: string[] = [];
 const EMPTY_ASSEMBLY_RECIPES: AssemblyRecipe[] = [];
 const EMPTY_CATALOG_SEGMENTS: CatalogSegment[] = [];
 
+// Indicador de receta en el picker de "Elegir producto" (modo ENSAMBLAR): sin
+// receta muestra el icono apagado; con receta, además de marcarlo, permite
+// ver los complementos al pasar el mouse o al hacer clic (queda fijo hasta
+// volver a hacer clic). Componente a nivel de módulo para no perder el
+// estado de apertura en cada render del picker.
+function RecipeBadgeIcon({ recipe }: { recipe: AssemblyRecipe | null }) {
+  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  if (!recipe) {
+    return (
+      <span
+        title="Sin receta"
+        style={{
+          display: "grid",
+          placeItems: "center",
+          width: 22,
+          height: 22,
+          borderRadius: 999,
+          border: "1px solid var(--muted)",
+        }}
+      >
+        <ScrollText aria-hidden="true" color="var(--muted)" size={13} />
+      </span>
+    );
+  }
+
+  function showPreview() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 6, left: Math.max(8, rect.right - 220) });
+    setOpen(true);
+  }
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <button
+        ref={buttonRef}
+        type="button"
+        title="Con receta · clic para ver vista previa"
+        onMouseEnter={showPreview}
+        onMouseLeave={() => !pinned && setOpen(false)}
+        onClick={(event) => {
+          stopClick(event);
+          setPinned((current) => {
+            const next = !current;
+            if (next) showPreview();
+            else setOpen(false);
+            return next;
+          });
+        }}
+        style={{
+          display: "grid",
+          placeItems: "center",
+          width: 22,
+          height: 22,
+          borderRadius: 999,
+          background: "var(--primary-strong, #b3261e)",
+          border: "none",
+          cursor: "pointer",
+          padding: 0,
+        }}
+      >
+        <ScrollText aria-hidden="true" color="#ffffff" size={13} />
+      </button>
+      {open && coords
+        ? createPortal(
+            <div
+              onClick={stopClick}
+              onMouseEnter={() => setOpen(true)}
+              onMouseLeave={() => !pinned && setOpen(false)}
+              style={{
+                position: "fixed",
+                top: coords.top,
+                left: coords.left,
+                zIndex: 1000,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "10px 12px",
+                minWidth: 200,
+                maxWidth: 260,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: 6, fontSize: 12 }}>Receta de ensamble</strong>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                {recipe.items.map((item) => (
+                  <li
+                    key={item.complement_item_id}
+                    style={{ fontSize: 12, display: "flex", justifyContent: "space-between", gap: 10 }}
+                  >
+                    <span>{item.name ?? "—"}</span>
+                    <span style={{ color: "var(--muted)" }}>
+                      {item.quantity_per_unit}
+                      {item.unit_code ? ` ${item.unit_code}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>,
+            document.body,
+          )
+        : null}
+    </span>
+  );
+}
+
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
   const queryClient = useQueryClient();
 
@@ -2369,23 +2478,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               itemPickerFor === "create" && assemblyMode === "ENSAMBLAR"
                 ? (item) => {
                     const key = `${orderMaterialCode ?? ""}${pieceModelKey(item) ?? ""}`;
-                    const hasRecipe = recipeModelKeys.includes(key);
-                    return (
-                      <span
-                        title={hasRecipe ? "Con receta" : "Sin receta"}
-                        style={{
-                          display: "grid",
-                          placeItems: "center",
-                          width: 22,
-                          height: 22,
-                          borderRadius: 999,
-                          background: hasRecipe ? "var(--primary-strong, #b3261e)" : "transparent",
-                          border: hasRecipe ? "none" : "1px solid var(--muted)",
-                        }}
-                      >
-                        <ScrollText aria-hidden="true" color={hasRecipe ? "#ffffff" : "var(--muted)"} size={13} />
-                      </span>
-                    );
+                    const recipe = assemblyRecipes.find((candidate) => candidate.model_key === key) ?? null;
+                    return <RecipeBadgeIcon recipe={recipe} />;
                   }
                 : undefined
             }
