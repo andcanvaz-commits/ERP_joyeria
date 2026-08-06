@@ -70,6 +70,12 @@ export function CategoryDonut({
   const circumference = 2 * Math.PI * radius;
   let cumulative = 0;
 
+  // El numero central encoge segun sus digitos -- sin esto, un total
+  // grande (ej. "42.026,3" en gramos) se salia del circulo interno del
+  // anillo, que un conteo chico ("12") nunca necesito.
+  const totalText = formatValue(total);
+  const totalFontSize = Math.max(14, Math.min(30, 190 / totalText.length));
+
   return (
     <div className="categoryDonut">
       <svg className="categoryDonutRing" height={size} viewBox={`0 0 ${size} ${size}`} width={size}>
@@ -106,8 +112,8 @@ export function CategoryDonut({
             </circle>
           );
         })}
-        <text className="categoryDonutTotal" textAnchor="middle" x={size / 2} y={size / 2 - 3}>
-          {formatValue(total)}
+        <text className="categoryDonutTotal" style={{ fontSize: totalFontSize }} textAnchor="middle" x={size / 2} y={size / 2 - 3}>
+          {totalText}
         </text>
         <text className="categoryDonutCenterLabel" textAnchor="middle" x={size / 2} y={size / 2 + 14}>
           {centerLabel}
