@@ -682,10 +682,16 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
-/* Fila fija de 3 -- a diferencia del auto-fit de arriba, nunca deja un
-   elemento suelto solo en su propia fila. */
+/* 2 arriba (mismo tamano, holgados) + 1 ancho abajo -- 3 iguales en fila
+   los dejaba apretados (dona + leyenda necesitan ancho real). El de abajo
+   es intencionalmente el que puede tener mas categorias (procesos), asi
+   que se queda con el ancho completo en vez de compartir columna. */
 .dashboardVisualGridSymmetric {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chartPanelWide {
+  grid-column: 1 / -1;
 }
 
 .dashboardVisualGridCompact .chartPanel,
@@ -693,6 +699,17 @@ textarea {
   grid-template-columns: 1fr;
   align-content: start;
   gap: 14px;
+}
+
+/* Con todo el ancho de la fila disponible, vuelve al layout lado a lado
+   (titulo | dona+leyenda) en vez del apilado que usan sus vecinos. */
+.dashboardVisualGridSymmetric .chartPanelWide {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: center;
+}
+
+.chartPanelWide .categoryDonutLegend {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dashboardGridCompact .panelBody {

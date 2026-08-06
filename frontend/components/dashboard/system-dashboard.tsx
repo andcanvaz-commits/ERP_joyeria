@@ -295,7 +295,7 @@ export function SystemDashboard() {
             />
           </article>
 
-          <article className="card chartPanel">
+          <article className="card chartPanel chartPanelWide">
             <div>
               <h2 className="panelTitle">Procesos por etapas</h2>
               <p className="panelText">{processes.length} procesos creados</p>
