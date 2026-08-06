@@ -631,6 +631,9 @@ export function InventoryDashboard() {
   const workInProgressCount = useCountUp(summary?.work_in_progress ?? 0);
   const finishedProductsCount = useCountUp(summary?.finished_products ?? 0);
   const items = data?.items ?? [];
+  // El resumen del backend no trae merma -- se cuenta del lado del cliente,
+  // igual que el resto de tipos ya derivados de `items` en este archivo.
+  const wasteCount = useCountUp(items.filter((item) => item.item_type === "WASTE").length);
   const movements = data?.movements ?? [];
   const users = data?.users ?? [];
   const productionRuns = data?.runs ?? [];
@@ -2023,6 +2026,14 @@ export function InventoryDashboard() {
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">Terminados</span>
           <strong className="metricValue">{finishedProductsCount}</strong>
+        </article>
+        <article
+          className="card metric kpiCard"
+          {...openableProps(() => setItemFilter("WASTE"), "Ver merma")}
+        >
+          <Trash2 aria-hidden="true" size={22} />
+          <span className="metricLabel">Merma</span>
+          <strong className="metricValue">{wasteCount}</strong>
         </article>
       </section>
 

@@ -46,15 +46,6 @@ const RUN_STATUS_LABELS: Record<ProductionRun["status"], string> = {
   ESPERANDO_MATERIAL: "Esperando material",
 };
 
-// Mismos tonos oro/plata de la paleta categorica de los graficos, para que
-// una tarjeta de usuario se identifique por rol de un vistazo.
-const ROLE_COLORS: Record<string, string> = {
-  "Admin": "#A67C34",
-  "Jefe de producción": "#64707D",
-  "Jefe de inventario": "#7A5A22",
-};
-const ROLE_COLOR_FALLBACK = "#8F97A3";
-
 function numericText(value: string | null) {
   if (!value) return "0";
   const number = Number(value);
@@ -155,18 +146,22 @@ export function SystemDashboard() {
     }, {});
   }, [users]);
   const recentProcesses = processes.slice(0, 5);
-  const recentUsers = users.slice(0, 5);
   // Activos/inactivos: a diferencia de una porcion por proceso individual,
   // esto no depende de cuantos procesos existan -- siempre son 2 categorias.
   const activeProcesses = processes.filter((process) => process.is_active).length;
   const inactiveProcesses = processes.length - activeProcesses;
-  const maxProcessStages = Math.max(1, ...recentProcesses.map((process) => process.stages.length));
+  // Lista completa (no solo los 5 recientes) ordenada por etapas -- escala
+  // con scroll en vez de una dona con muchas porciones finas.
+  const processesByStages = useMemo(
+    () => [...processes].sort((left, right) => right.stages.length - left.stages.length),
+    [processes],
+  );
+  const maxProcessStages = Math.max(1, ...processes.map((process) => process.stages.length));
   const sortedInventoryMovements = useMemo(
     () => [...inventoryMovements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [inventoryMovements],
   );
   const recentInventoryMovements = sortedInventoryMovements.slice(0, 4);
-  const maxRecentMovementQty = Math.max(1, ...recentInventoryMovements.map((movement) => Number(movement.quantity) || 0));
   const inventoryByType = useMemo(() => {
     return inventoryItems.reduce<Record<InventoryItemType, number>>((acc, item) => {
       acc[item.item_type] = (acc[item.item_type] ?? 0) + 1;
@@ -175,7 +170,6 @@ export function SystemDashboard() {
   }, [inventoryItems]);
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;
-  const maxRoleUsers = Math.max(1, ...Object.values(usersByRole));
 
   const movementsByType = useMemo(() => {
     return inventoryMovements.reduce<Record<string, number>>((acc, movement) => {
@@ -295,16 +289,16 @@ export function SystemDashboard() {
           </article>
         </section>
 
-        <section className="dashboardGrid dashboardGridCompact" aria-label="Detalle del dashboard">
+        <section className="dashboardVisualGrid dashboardVisualGridCompact" aria-label="Detalle del dashboard">
           <article className="card panelBody">
             <div className="panelHeader">
               <div>
-                <h2 className="panelTitle">Procesos</h2>
-                <p className="panelText">{totalStages} etapas configuradas</p>
+                <h2 className="panelTitle">Procesos por etapas</h2>
+                <p className="panelText">{totalStages} etapas configuradas en total</p>
               </div>
             </div>
             <div className="dashboardList">
-              {recentProcesses.slice(0, 4).map((process) => (
+              {processesByStages.map((process) => (
                 <div className="dashboardRow dashboardRoleRow" key={process.id}>
                   <div>
                     <strong>{process.name}</strong>
@@ -315,79 +309,45 @@ export function SystemDashboard() {
                   </div>
                 </div>
               ))}
-              {!isLoading && recentProcesses.length === 0 ? (
+              {!isLoading && processesByStages.length === 0 ? (
                 <div className="emptyState">No hay procesos creados.</div>
               ) : null}
               {isLoading ? <div className="emptyState">Cargando procesos...</div> : null}
             </div>
           </article>
 
-          <article className="card panelBody">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Usuarios</h2>
-                <p className="panelText">{inactiveUsers} usuarios inactivos</p>
-              </div>
+          <article className="card chartPanel">
+            <div>
+              <h2 className="panelTitle">Usuarios por rol</h2>
+              <p className="panelText">{inactiveUsers} usuarios inactivos</p>
             </div>
-            <div className="dashboardList">
-              {recentUsers.slice(0, 4).map((user) => (
-                <div className={`dashboardRow ${!user.is_active ? "dashboardRowMuted" : ""}`} key={user.id}>
-                  <div>
-                    <strong>{user.first_name} {user.last_name}</strong>
-                    <span>{user.email}</span>
-                  </div>
-                  <span className="rolePill" style={{ background: ROLE_COLORS[user.role] ?? ROLE_COLOR_FALLBACK }}>{user.role}</span>
-                </div>
-              ))}
-              {!isLoading && recentUsers.length === 0 ? <div className="emptyState">No hay usuarios creados.</div> : null}
-              {isLoading ? <div className="emptyState">Cargando usuarios...</div> : null}
-            </div>
+            <CategoryDonut
+              centerLabel="usuarios"
+              emptyMessage="No hay usuarios creados."
+              isLoading={isLoading}
+              items={Object.entries(usersByRole).map(([roleName, total]) => ({
+                id: roleName,
+                label: roleName,
+                value: total,
+              }))}
+            />
           </article>
 
-          <article className="card panelBody">
-            <h2 className="panelTitle">Roles</h2>
-            <div className="dashboardList">
-              {Object.entries(usersByRole).slice(0, 4).map(([roleName, total]) => (
-                <div className="dashboardRow dashboardRoleRow" key={roleName}>
-                  <div>
-                    <strong>{roleName}</strong>
-                    <span>{total} usuarios</span>
-                  </div>
-                  <div className="miniBarTrack">
-                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round((total / maxRoleUsers) * 100))}%` }} />
-                  </div>
-                </div>
-              ))}
-              {!isLoading && Object.keys(usersByRole).length === 0 ? (
-                <div className="emptyState">Sin roles asignados.</div>
-              ) : null}
+          <article className="card chartPanel">
+            <div>
+              <h2 className="panelTitle">Movimientos por tipo</h2>
+              <p className="panelText">{inventoryMovements.length} movimientos totales</p>
             </div>
-          </article>
-
-          <article className="card panelBody">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Inventario</h2>
-                <p className="panelText">Movimientos recientes</p>
-              </div>
-            </div>
-            <div className="dashboardList">
-              {recentInventoryMovements.map((movement) => (
-                <div className="dashboardRow dashboardRoleRow" key={movement.id}>
-                  <div>
-                    <strong>{movement.item.name}</strong>
-                    <span>{MOVEMENT_TYPE_LABELS[movement.movement_type] ?? movement.movement_type} - {movementDateLabel(movement.created_at)} · {numericText(movement.quantity)} {movement.unit_code}</span>
-                  </div>
-                  <div className="miniBarTrack">
-                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round(((Number(movement.quantity) || 0) / maxRecentMovementQty) * 100))}%` }} />
-                  </div>
-                </div>
-              ))}
-              {!isLoading && recentInventoryMovements.length === 0 ? (
-                <div className="emptyState">No hay movimientos de inventario.</div>
-              ) : null}
-              {isLoading ? <div className="emptyState">Cargando inventario...</div> : null}
-            </div>
+            <CategoryDonut
+              centerLabel="movs."
+              emptyMessage="No hay movimientos de inventario."
+              isLoading={isLoading}
+              items={movementTypeEntries.map(([type, total]) => ({
+                id: type,
+                label: MOVEMENT_TYPE_LABELS[type] ?? type,
+                value: total,
+              }))}
+            />
           </article>
         </section>
       </div>

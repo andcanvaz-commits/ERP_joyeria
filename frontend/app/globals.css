@@ -2873,7 +2873,7 @@ textarea {
   display: grid;
   gap: 4px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 4px;
   background: #ffffff;
   padding: 16px 18px;
   box-shadow: var(--shadow);
