@@ -9,6 +9,7 @@ import { getInventorySummary, listInventoryItems, listInventoryMovements } from 
 import { listProcesses, listProductionRuns } from "@/lib/production-api";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { CategoryDonut } from "@/components/shared/category-donut";
+import { RankedBarChart } from "@/components/shared/ranked-bar-chart";
 import { useCountUp } from "@/hooks/use-count-up";
 import type { InventoryItem, InventoryItemType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
@@ -81,9 +82,11 @@ async function fetchDashboardBundle(role: Role) {
   const showProcesses = isAdmin || role === "produccion";
   const showInventory = isAdmin || role === "inventario";
 
+  const showRuns = isAdmin || role === "produccion";
+
   const [processes, runs, users, inventorySummary, inventoryItems, inventoryMovements] = await Promise.all([
     showProcesses ? listProcesses() : Promise.resolve([]),
-    role === "produccion" ? listProductionRuns() : Promise.resolve([]),
+    showRuns ? listProductionRuns() : Promise.resolve([]),
     isAdmin ? listUsers() : Promise.resolve([]),
     showInventory ? getInventorySummary() : Promise.resolve(null),
     showInventory ? listInventoryItems() : Promise.resolve([]),
@@ -197,15 +200,13 @@ export function SystemDashboard() {
   const totalInventoryGrams = inventoryGramsByType.reduce((sum, [, grams]) => sum + grams, 0);
   // Insumos no comparten unidad de medida (g, ml, und...) -- sumarlos
   // todos como gramos mentiria. Se usa para el icono de info + desglose
-  // real por unidad en la leyenda, en vez del numero+"g" que si aplica
-  // al resto de categorias.
+  // real por insumo (nombre + cantidad + su propia unidad) en la leyenda,
+  // en vez del numero+"g" que si aplica al resto de categorias.
   const suppliesByUnit = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const item of inventoryItems) {
-      if (item.item_type !== "SUPPLY") continue;
-      map[item.unit_code] = (map[item.unit_code] ?? 0) + (Number(item.current_stock) || 0);
-    }
-    return Object.entries(map).map(([unitCode, value]) => ({ label: unitCode, value, unit: unitCode }));
+    return inventoryItems
+      .filter((item) => item.item_type === "SUPPLY")
+      .map((item) => ({ label: item.name, value: Number(item.current_stock) || 0, unit: item.unit_code }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [inventoryItems]);
 
   const movementsByType = useMemo(() => {
@@ -223,6 +224,42 @@ export function SystemDashboard() {
   }, [runs]);
   const runProcessEntries = Object.entries(runsByProcess).slice(0, 6);
   const maxRunProcess = Math.max(1, ...runProcessEntries.map(([, total]) => total));
+
+  // "Mas fabricado": suma cantidades por producto resultante declarado en la
+  // orden (run.products) -- si la orden no declaro productos (formato viejo
+  // o aun sin definir), cae a cantidad por proceso como aproximacion.
+  const productionByProduct = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const run of runs) {
+      if (run.status === "CANCELADA") continue;
+      if (run.products && run.products.length > 0) {
+        for (const product of run.products) {
+          const name = product.product_name ?? run.process_name;
+          map[name] = (map[name] ?? 0) + (Number(product.quantity) || 0);
+        }
+      } else {
+        map[run.process_name] = (map[run.process_name] ?? 0) + (Number(run.quantity) || 0);
+      }
+    }
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6);
+  }, [runs]);
+
+  // Merma total (gramos) acumulada por proceso, solo ordenes con peso de
+  // merma ya registrado (etapa/orden finalizada).
+  const wasteByProcess = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const run of runs) {
+      const waste = Number(run.waste_weight) || 0;
+      if (waste <= 0) continue;
+      map[run.process_name] = (map[run.process_name] ?? 0) + waste;
+    }
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6);
+  }, [runs]);
+  const maxWaste = Math.max(1, ...wasteByProcess.map(([, total]) => total));
 
   // Contadores animados de las tarjetas KPI: llamados siempre (nunca dentro
   // de los "if" de rol) para no violar las reglas de hooks — cada rama solo
@@ -315,21 +352,46 @@ export function SystemDashboard() {
             />
           </article>
 
-          <article className="card chartPanel chartPanelWide">
-            <div>
-              <h2 className="panelTitle">Procesos por etapas</h2>
-              <p className="panelText">{processes.length} procesos creados</p>
+        </section>
+
+        <section className="dashboardVisualGrid dashboardVisualGridSymmetric" aria-label="Produccion y merma">
+          <article className="card panelBody">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Mas fabricado</h2>
+                <p className="panelText">Top productos por cantidad</p>
+              </div>
             </div>
-            <CategoryDonut
-              centerLabel="etapas"
-              emptyMessage="No hay procesos creados."
+            <RankedBarChart
+              emptyMessage="No hay produccion registrada."
               isLoading={isLoading}
-              items={processes.map((process) => ({
-                id: process.id,
-                label: process.name,
-                value: process.stages.length,
-              }))}
+              items={productionByProduct.map(([name, total]) => ({ id: name, label: name, value: total }))}
             />
+          </article>
+
+          <article className="card panelBody">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Merma por proceso</h2>
+                <p className="panelText">Gramos de merma acumulados</p>
+              </div>
+            </div>
+            <div className="dashboardList">
+              {wasteByProcess.map(([name, total]) => (
+                <div className="dashboardRow dashboardRoleRow" key={name}>
+                  <div>
+                    <strong>{name}</strong>
+                    <span>{gramsText(total)} g</span>
+                  </div>
+                  <div className="miniBarTrack">
+                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round((total / maxWaste) * 100))}%` }} />
+                  </div>
+                </div>
+              ))}
+              {!isLoading && wasteByProcess.length === 0 ? (
+                <div className="emptyState">No hay merma registrada.</div>
+              ) : null}
+            </div>
           </article>
         </section>
       </div>

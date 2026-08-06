@@ -744,6 +744,56 @@ textarea {
   transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1), filter 0.12s ease;
 }
 
+/* Ranking de una sola serie -- fila = etiqueta + barra + valor en la punta.
+   Una sola tonalidad (la identidad la da la etiqueta, no el color) y barra
+   con techo de 20px para que nunca se sienta un bloque solido. */
+.rankedBarChart {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rankedBarRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.rankedBarLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.rankedBarTrack {
+  height: 20px;
+  border-radius: 4px;
+  background: #ece4d6;
+  overflow: hidden;
+}
+
+.rankedBarFill {
+  height: 100%;
+  /* Base cuadrada (izquierda, el eje) -- punta redondeada (derecha, el dato). */
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(90deg, var(--primary-strong), #d8ad5e);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rankedBarValue {
+  min-width: 48px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 /* Anillo multi-categoria (reemplaza el grafico de columnas: sus etiquetas
    se truncaban a ~2 caracteres y eran ilegibles). Nombre completo siempre
    visible en la leyenda -- nunca solo en un tooltip flotante. */

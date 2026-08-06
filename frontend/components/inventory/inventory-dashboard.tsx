@@ -73,6 +73,21 @@ const UNIT_OPTIONS = [
   { value: "und", label: "Unidad (und)" },
 ];
 
+// Forma singular de cada unidad para el label "Costo por <unidad>" del
+// ingreso manual -- antes decia "Costo por gramo" quemado sin importar la
+// unidad real del item seleccionado (insumos/complementos en ml, und, etc.).
+const UNIT_SINGULAR_LABELS: Record<string, string> = {
+  g: "gramo",
+  kg: "kilogramo",
+  mg: "miligramo",
+  oz_t: "onza troy",
+  dwt: "pennyweight",
+  ct: "quilate",
+  und: "unidad",
+  ml: "mililitro",
+  l: "litro",
+};
+
 const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "ENTRADA", label: "Entrada" },
   { value: "SALIDA", label: "Salida" },
@@ -628,12 +643,12 @@ export function InventoryDashboard() {
   const summary = data?.summary ?? null;
   const rawMaterialsCount = useCountUp(summary?.raw_materials ?? 0);
   const suppliesCount = useCountUp(summary?.supplies ?? 0);
-  const workInProgressCount = useCountUp(summary?.work_in_progress ?? 0);
   const finishedProductsCount = useCountUp(summary?.finished_products ?? 0);
   const items = data?.items ?? [];
-  // El resumen del backend no trae merma -- se cuenta del lado del cliente,
-  // igual que el resto de tipos ya derivados de `items` en este archivo.
+  // El resumen del backend no trae merma ni complementos -- se cuentan del
+  // lado del cliente, igual que el resto de tipos ya derivados de `items`.
   const wasteCount = useCountUp(items.filter((item) => item.item_type === "WASTE").length);
+  const complementsCount = useCountUp(items.filter((item) => item.item_type === "COMPLEMENT").length);
   const movements = data?.movements ?? [];
   const users = data?.users ?? [];
   const productionRuns = data?.runs ?? [];
@@ -2005,6 +2020,14 @@ export function InventoryDashboard() {
         </article>
         <article
           className="card metric kpiCard"
+          {...openableProps(() => setItemFilter("WASTE"), "Ver merma")}
+        >
+          <Trash2 aria-hidden="true" size={22} />
+          <span className="metricLabel">Merma</span>
+          <strong className="metricValue">{wasteCount}</strong>
+        </article>
+        <article
+          className="card metric kpiCard"
           {...openableProps(() => setItemFilter("SUPPLY"), "Ver insumos")}
         >
           <FlaskConical aria-hidden="true" size={22} />
@@ -2013,11 +2036,11 @@ export function InventoryDashboard() {
         </article>
         <article
           className="card metric kpiCard"
-          {...openableProps(() => setItemFilter("WORK_IN_PROGRESS"), "Ver productos en proceso")}
+          {...openableProps(() => setItemFilter("COMPLEMENT"), "Ver complementos")}
         >
           <Boxes aria-hidden="true" size={22} />
-          <span className="metricLabel">En proceso</span>
-          <strong className="metricValue">{workInProgressCount}</strong>
+          <span className="metricLabel">Complementos</span>
+          <strong className="metricValue">{complementsCount}</strong>
         </article>
         <article
           className="card metric kpiCard"
@@ -2026,14 +2049,6 @@ export function InventoryDashboard() {
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">Terminados</span>
           <strong className="metricValue">{finishedProductsCount}</strong>
-        </article>
-        <article
-          className="card metric kpiCard"
-          {...openableProps(() => setItemFilter("WASTE"), "Ver merma")}
-        >
-          <Trash2 aria-hidden="true" size={22} />
-          <span className="metricLabel">Merma</span>
-          <strong className="metricValue">{wasteCount}</strong>
         </article>
       </section>
 
@@ -3274,7 +3289,9 @@ export function InventoryDashboard() {
             {movementForm.movement_type === "ENTRADA" ? (
               <>
                 <label className="fieldGroup">
-                  <span>Costo por gramo</span>
+                  <span>
+                    Costo por {movementSelectedItem ? UNIT_SINGULAR_LABELS[movementSelectedItem.unit_code] ?? movementSelectedItem.unit_code : "unidad de medida"}
+                  </span>
                   <input
                     className="field"
                     min="0"

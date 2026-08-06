@@ -24,11 +24,11 @@ const MAX_SEGMENTS = 6;
 // Mas de MAX_SEGMENTS categorias colapsan en "Otros" -- evita anillos
 // ilegibles con muchas porciones finas y mantiene la leyenda siempre
 // completa (nunca truncada), a diferencia del grafico de columnas anterior.
-function buildSegments(items: DonutSegment[]): DonutSegment[] {
+function buildSegments(items: DonutSegment[], maxSegments: number): DonutSegment[] {
   const sorted = [...items].filter((item) => item.value > 0).sort((a, b) => b.value - a.value);
-  if (sorted.length <= MAX_SEGMENTS) return sorted;
-  const head = sorted.slice(0, MAX_SEGMENTS - 1);
-  const restTotal = sorted.slice(MAX_SEGMENTS - 1).reduce((sum, item) => sum + item.value, 0);
+  if (sorted.length <= maxSegments) return sorted;
+  const head = sorted.slice(0, maxSegments - 1);
+  const restTotal = sorted.slice(maxSegments - 1).reduce((sum, item) => sum + item.value, 0);
   return [...head, { id: "__other__", label: "Otros", value: restTotal }];
 }
 
@@ -50,6 +50,7 @@ export function CategoryDonut({
   isLoading = false,
   centerLabel = "total",
   unit = "",
+  maxSegments = MAX_SEGMENTS,
 }: {
   items: DonutSegment[];
   emptyMessage: string;
@@ -58,8 +59,12 @@ export function CategoryDonut({
   // Sufijo agregado a cada valor de la leyenda (ej. "g"). El total del
   // centro no lo lleva -- ya tiene su propio centerLabel como unidad.
   unit?: string;
+  // Umbral de colapso a "Otros". Por defecto MAX_SEGMENTS, pero graficos
+  // con leyenda mas ancha (ej. chartPanelWide) pueden pedir mostrar todas
+  // las categorias sin colapsar.
+  maxSegments?: number;
 }) {
-  const segments = buildSegments(items);
+  const segments = buildSegments(items, maxSegments);
   const total = segments.reduce((sum, item) => sum + item.value, 0);
   const [animated, setAnimated] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
