@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Info } from "lucide-react";
 
-export type DonutSegment = { id: string; label: string; value: number };
+export type DonutSegment = {
+  id: string;
+  label: string;
+  value: number;
+  // Cuando la categoria mezcla unidades de medida distintas (ej. insumos
+  // en g/ml/und), sumarlas todas como si fueran una sola unidad miente.
+  // Si viene, la leyenda muestra un icono de info con este desglose real
+  // en vez del valor+unidad formateado.
+  breakdown?: { label: string; value: number; unit: string }[];
+};
 
 // Paleta categorica dentro de la familia oro/grafito ya establecida (nunca
 // colores geenericos de la skill de dataviz): alterna tonos de oro y plata
@@ -135,7 +145,21 @@ export function CategoryDonut({
             >
               <span aria-hidden="true" className="categoryDonutSwatch" style={{ background: color }} />
               <span className="categoryDonutLegendLabel">{segment.label}</span>
-              <span className="categoryDonutLegendValue">{formatValue(segment.value)}{unit ? ` ${unit}` : ""}</span>
+              {segment.breakdown ? (
+                <span className="categoryDonutInfo" tabIndex={0}>
+                  <Info aria-hidden="true" size={14} />
+                  <span className="kpiPopover categoryDonutInfoPopover" role="tooltip">
+                    {segment.breakdown.map((line) => (
+                      <span className="kpiPopoverRow" key={line.label}>
+                        <span>{line.label}</span>
+                        <span>{formatValue(line.value)} {line.unit}</span>
+                      </span>
+                    ))}
+                  </span>
+                </span>
+              ) : (
+                <span className="categoryDonutLegendValue">{formatValue(segment.value)}{unit ? ` ${unit}` : ""}</span>
+              )}
               <span className="categoryDonutLegendPercent">{percent}%</span>
             </li>
           );

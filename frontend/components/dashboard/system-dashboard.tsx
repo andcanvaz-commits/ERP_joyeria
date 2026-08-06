@@ -195,6 +195,18 @@ export function SystemDashboard() {
     return Object.entries(acc) as Array<[InventoryItemType, number]>;
   }, [inventoryItems]);
   const totalInventoryGrams = inventoryGramsByType.reduce((sum, [, grams]) => sum + grams, 0);
+  // Insumos no comparten unidad de medida (g, ml, und...) -- sumarlos
+  // todos como gramos mentiria. Se usa para el icono de info + desglose
+  // real por unidad en la leyenda, en vez del numero+"g" que si aplica
+  // al resto de categorias.
+  const suppliesByUnit = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const item of inventoryItems) {
+      if (item.item_type !== "SUPPLY") continue;
+      map[item.unit_code] = (map[item.unit_code] ?? 0) + (Number(item.current_stock) || 0);
+    }
+    return Object.entries(map).map(([unitCode, value]) => ({ label: unitCode, value, unit: unitCode }));
+  }, [inventoryItems]);
 
   const movementsByType = useMemo(() => {
     return inventoryMovements.reduce<Record<string, number>>((acc, movement) => {
@@ -297,6 +309,7 @@ export function SystemDashboard() {
                 id: type,
                 label: INVENTORY_TYPE_LABELS[type],
                 value: grams,
+                breakdown: type === "SUPPLY" ? suppliesByUnit : undefined,
               }))}
               unit="g"
             />

@@ -881,6 +881,36 @@ textarea {
   gap: 12px;
 }
 
+/* Fila de leyenda con unidades mixtas (ej. insumos en g/ml/und): un solo
+   numero mentiria, asi que se cambia por un icono con el desglose real
+   por unidad al pasar el mouse o enfocar -- mismo patron de popover que
+   el de la tarjeta KPI, anclado al icono en vez de a toda la tarjeta. */
+.categoryDonutInfo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  outline: none;
+}
+
+.categoryDonutInfo:hover,
+.categoryDonutInfo:focus-visible {
+  color: var(--gold-deep);
+}
+
+.categoryDonutInfo:hover .categoryDonutInfoPopover,
+.categoryDonutInfo:focus .categoryDonutInfoPopover,
+.categoryDonutInfo:focus-visible .categoryDonutInfoPopover {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+
+.categoryDonutInfoPopover {
+  min-width: 140px;
+}
+
 .dashboardList {
   display: grid;
   gap: 10px;
