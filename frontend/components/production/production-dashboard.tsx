@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -57,6 +57,7 @@ import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
 import { groupRunFamilies } from "@/lib/orden-produccion";
 import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
+import { useCountUp } from "@/hooks/use-count-up";
 
 type StageForm = {
   name: string;
@@ -1644,6 +1645,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       : editPlanRun?.allowed_product_type_ids ?? [];
   }
 
+  // Contadores animados de la barra de metricas de produccion.
+  const pendingInventoryCount = useCountUp(countOrders(runs.filter((r) => r.status === "PENDIENTE_INVENTARIO")));
+  const waitingMaterialCount = useCountUp(countOrders(waitingMaterialRuns));
+  const approvedMaterialCount = useCountUp(countOrders(approvedMaterialRuns));
+  const inProgressCount = useCountUp(countOrders(inProgressRuns));
+  const finishedCount = useCountUp(countOrders(finishedRuns));
+
   return (
     <div className="content">
       {error || success ? (
@@ -1793,23 +1801,28 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           {/* Stats bar */}
           <section className="productionStatsRow" aria-label="Metricas de produccion">
             <div className="productionStatCard">
-              <strong>{countOrders(runs.filter((r) => r.status === "PENDIENTE_INVENTARIO"))}</strong>
+              <Clock aria-hidden="true" size={20} />
+              <strong>{pendingInventoryCount}</strong>
               <span>Esperando inventario</span>
             </div>
             <div className="productionStatCard">
-              <strong>{countOrders(waitingMaterialRuns)}</strong>
+              <Hourglass aria-hidden="true" size={20} />
+              <strong>{waitingMaterialCount}</strong>
               <span>Esperando material</span>
             </div>
             <div className="productionStatCard">
-              <strong>{countOrders(approvedMaterialRuns)}</strong>
+              <CheckCircle2 aria-hidden="true" size={20} />
+              <strong>{approvedMaterialCount}</strong>
               <span>Listas para iniciar</span>
             </div>
             <div className="productionStatCard">
-              <strong>{countOrders(inProgressRuns)}</strong>
+              <Play aria-hidden="true" size={20} />
+              <strong>{inProgressCount}</strong>
               <span>En proceso</span>
             </div>
             <div className="productionStatCard">
-              <strong>{countOrders(finishedRuns)}</strong>
+              <CheckCheck aria-hidden="true" size={20} />
+              <strong>{finishedCount}</strong>
               <span>Finalizadas</span>
             </div>
           </section>

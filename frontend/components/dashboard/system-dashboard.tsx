@@ -1,16 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, CheckCircle2, Factory, ListChecks, Users, X } from "lucide-react";
+import { Boxes, CheckCircle2, Factory, ListChecks, Users } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
-import { openableProps } from "@/lib/a11y";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import { listProcesses, listProductionRuns } from "@/lib/production-api";
 import { normalizeRole, type Role } from "@/lib/roles";
-import { DonutGauge } from "@/components/shared/donut-gauge";
-import { RankedBarChart } from "@/components/shared/ranked-bar-chart";
+import { CategoryDonut } from "@/components/shared/category-donut";
 import { useCountUp } from "@/hooks/use-count-up";
 import type { InventoryItemType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
@@ -48,6 +46,15 @@ const RUN_STATUS_LABELS: Record<ProductionRun["status"], string> = {
   ESPERANDO_MATERIAL: "Esperando material",
 };
 
+// Mismos tonos oro/plata de la paleta categorica de los graficos, para que
+// una tarjeta de usuario se identifique por rol de un vistazo.
+const ROLE_COLORS: Record<string, string> = {
+  "Admin": "#A67C34",
+  "Jefe de producción": "#64707D",
+  "Jefe de inventario": "#7A5A22",
+};
+const ROLE_COLOR_FALLBACK = "#8F97A3";
+
 function numericText(value: string | null) {
   if (!value) return "0";
   const number = Number(value);
@@ -83,8 +90,6 @@ export function SystemDashboard() {
       window.location.href = "/login";
     }
   }, []);
-
-  const [isInventoryBreakdownOpen, setIsInventoryBreakdownOpen] = useState(false);
 
   const { data: me, error: meError } = useQuery({
     queryKey: ["me"],
@@ -143,7 +148,6 @@ export function SystemDashboard() {
 
   const activeUsers = users.filter((user) => user.is_active).length;
   const inactiveUsers = users.length - activeUsers;
-  const activeUserPercent = users.length > 0 ? Math.round((activeUsers / users.length) * 100) : 0;
   const usersByRole = useMemo(() => {
     return users.reduce<Record<string, number>>((acc, user) => {
       acc[user.role] = (acc[user.role] ?? 0) + 1;
@@ -152,11 +156,17 @@ export function SystemDashboard() {
   }, [users]);
   const recentProcesses = processes.slice(0, 5);
   const recentUsers = users.slice(0, 5);
+  // Activos/inactivos: a diferencia de una porcion por proceso individual,
+  // esto no depende de cuantos procesos existan -- siempre son 2 categorias.
+  const activeProcesses = processes.filter((process) => process.is_active).length;
+  const inactiveProcesses = processes.length - activeProcesses;
+  const maxProcessStages = Math.max(1, ...recentProcesses.map((process) => process.stages.length));
   const sortedInventoryMovements = useMemo(
     () => [...inventoryMovements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [inventoryMovements],
   );
   const recentInventoryMovements = sortedInventoryMovements.slice(0, 4);
+  const maxRecentMovementQty = Math.max(1, ...recentInventoryMovements.map((movement) => Number(movement.quantity) || 0));
   const inventoryByType = useMemo(() => {
     return inventoryItems.reduce<Record<InventoryItemType, number>>((acc, item) => {
       acc[item.item_type] = (acc[item.item_type] ?? 0) + 1;
@@ -167,8 +177,6 @@ export function SystemDashboard() {
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;
   const maxRoleUsers = Math.max(1, ...Object.values(usersByRole));
 
-  // Donut de avance de ordenes (produccion) y salud de stock (inventario).
-  const receivedPercent = runs.length ? Math.round((finishedRuns.length / runs.length) * 100) : 0;
   const movementsByType = useMemo(() => {
     return inventoryMovements.reduce<Record<string, number>>((acc, movement) => {
       acc[movement.movement_type] = (acc[movement.movement_type] ?? 0) + 1;
@@ -195,32 +203,21 @@ export function SystemDashboard() {
   const finishedRunsCount = useCountUp(finishedRuns.length);
   const inventoryMovementsCount = useCountUp(inventoryMovements.length);
 
-  // "Items de inventario" es un total sin desgloce -- se abre en un modal
-  // al hacer click en la tarjeta (misma data que ya alimenta el grafico
-  // "Inventario por tipo"), en vez de mandar a otra pantalla.
-  const inventoryBreakdownModal = isInventoryBreakdownOpen ? (
-    <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Desglose de inventario por tipo">
-      <section className="modalWindow">
-        <div className="modalHeader">
-          <div>
-            <h2>Items de inventario</h2>
-            <p className="panelText">{totalInventoryItems} items registrados, por tipo</p>
-          </div>
-          <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsInventoryBreakdownOpen(false)} type="button">
-            <X aria-hidden="true" size={18} />
-          </button>
+  // "Items de inventario" es un total sin desgloce -- en vez de abrir un
+  // modal al hacer click, la tarjeta muestra este desglose por tipo al
+  // pasar el mouse o enfocarla (mismo patron que el resto de tooltips del
+  // dashboard: sin JS, solo CSS :hover/:focus-within sobre el contenedor).
+  const inventoryBreakdownPopover = (
+    <div aria-hidden="true" className="kpiPopover">
+      <strong className="kpiPopoverTitle">Items por tipo</strong>
+      {inventoryTypeEntries.map(([type, total]) => (
+        <div className="kpiPopoverRow" key={type}>
+          <span>{INVENTORY_TYPE_LABELS[type]}</span>
+          <span>{total}</span>
         </div>
-        <div className="dashboardList">
-          {inventoryTypeEntries.map(([type, total]) => (
-            <div className="dashboardRow" key={type}>
-              <div><strong>{INVENTORY_TYPE_LABELS[type]}</strong></div>
-              <small>{total}</small>
-            </div>
-          ))}
-        </div>
-      </section>
+      ))}
     </div>
-  ) : null;
+  );
 
   // Dashboard del administrador (diseno original completo).
   if (isAdmin) {
@@ -239,13 +236,11 @@ export function SystemDashboard() {
             <span className="metricLabel kpiLabel">Usuarios</span>
             <strong className="metricValue"><span className="kpiNum num">{usersCount}</span></strong>
           </article>
-          <article
-            className="card metric kpiCard"
-            {...openableProps(() => setIsInventoryBreakdownOpen(true), "Ver desglose de inventario por tipo")}
-          >
+          <article className="card metric kpiCard kpiCardHoverable" tabIndex={0}>
             <Boxes aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Items de inventario</span>
             <strong className="metricValue"><span className="kpiNum num">{inventoryItemsCount}</span></strong>
+            {inventoryBreakdownPopover}
           </article>
         </section>
 
@@ -255,30 +250,30 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Estado de usuarios</h2>
               <p className="panelText">{activeUsers} activos de {users.length}</p>
             </div>
-            <DonutGauge
-              centerLabel="activos"
-              percent={activeUserPercent}
-              primary={{ label: "Activos", value: activeUsers }}
-              secondary={{ label: "Inactivos", value: inactiveUsers }}
+            <CategoryDonut
+              centerLabel="usuarios"
+              emptyMessage="No hay usuarios creados."
+              isLoading={isLoading}
+              items={[
+                { id: "active", label: "Activos", value: activeUsers },
+                { id: "inactive", label: "Inactivos", value: inactiveUsers },
+              ]}
             />
           </article>
 
           <article className="card chartPanel">
             <div>
-              <h2 className="panelTitle">Procesos por etapas</h2>
-              <p className="panelText">Comparacion rapida de configuracion</p>
+              <h2 className="panelTitle">Estado de procesos</h2>
+              <p className="panelText">{processes.length} procesos creados</p>
             </div>
-            <RankedBarChart
-              title="Procesos por etapas"
+            <CategoryDonut
+              centerLabel="procesos"
               emptyMessage="No hay procesos creados."
               isLoading={isLoading}
-              items={recentProcesses.map((process) => ({
-                id: process.id,
-                label: process.name,
-                value: process.stages.length,
-                displayValue: String(process.stages.length),
-              }))}
-              valueHeader="Etapas"
+              items={[
+                { id: "active", label: "Activos", value: activeProcesses },
+                { id: "inactive", label: "Inactivos", value: inactiveProcesses },
+              ]}
             />
           </article>
 
@@ -287,17 +282,15 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Inventario por tipo</h2>
               <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
-            <RankedBarChart
+            <CategoryDonut
+              centerLabel="items"
               emptyMessage="No hay inventario registrado."
-              title="Inventario por tipo"
               isLoading={isLoading}
               items={inventoryTypeEntries.map(([type, total]) => ({
                 id: type,
                 label: INVENTORY_TYPE_LABELS[type],
                 value: total,
-                displayValue: String(total),
               }))}
-              valueHeader="Items"
             />
           </article>
         </section>
@@ -312,12 +305,14 @@ export function SystemDashboard() {
             </div>
             <div className="dashboardList">
               {recentProcesses.slice(0, 4).map((process) => (
-                <div className="dashboardRow" key={process.id}>
+                <div className="dashboardRow dashboardRoleRow" key={process.id}>
                   <div>
                     <strong>{process.name}</strong>
-                    <span>{process.stages.length} etapas</span>
+                    <span>{process.stages.length} etapas · {process.is_active ? "Activo" : "Inactivo"}</span>
                   </div>
-                  <small>{process.is_active ? "Activo" : "Inactivo"}</small>
+                  <div className="miniBarTrack">
+                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round((process.stages.length / maxProcessStages) * 100))}%` }} />
+                  </div>
                 </div>
               ))}
               {!isLoading && recentProcesses.length === 0 ? (
@@ -341,7 +336,7 @@ export function SystemDashboard() {
                     <strong>{user.first_name} {user.last_name}</strong>
                     <span>{user.email}</span>
                   </div>
-                  <small>{user.role}</small>
+                  <span className="rolePill" style={{ background: ROLE_COLORS[user.role] ?? ROLE_COLOR_FALLBACK }}>{user.role}</span>
                 </div>
               ))}
               {!isLoading && recentUsers.length === 0 ? <div className="emptyState">No hay usuarios creados.</div> : null}
@@ -378,12 +373,14 @@ export function SystemDashboard() {
             </div>
             <div className="dashboardList">
               {recentInventoryMovements.map((movement) => (
-                <div className="dashboardRow" key={movement.id}>
+                <div className="dashboardRow dashboardRoleRow" key={movement.id}>
                   <div>
                     <strong>{movement.item.name}</strong>
-                    <span>{MOVEMENT_TYPE_LABELS[movement.movement_type] ?? movement.movement_type} - {movementDateLabel(movement.created_at)}</span>
+                    <span>{MOVEMENT_TYPE_LABELS[movement.movement_type] ?? movement.movement_type} - {movementDateLabel(movement.created_at)} · {numericText(movement.quantity)} {movement.unit_code}</span>
                   </div>
-                  <small>{numericText(movement.quantity)} {movement.unit_code}</small>
+                  <div className="miniBarTrack">
+                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round(((Number(movement.quantity) || 0) / maxRecentMovementQty) * 100))}%` }} />
+                  </div>
                 </div>
               ))}
               {!isLoading && recentInventoryMovements.length === 0 ? (
@@ -393,7 +390,6 @@ export function SystemDashboard() {
             </div>
           </article>
         </section>
-        {inventoryBreakdownModal}
       </div>
     );
   }
@@ -425,20 +421,17 @@ export function SystemDashboard() {
         <section className="dashboardVisualGrid dashboardVisualGridCompact" aria-label="Graficos de produccion">
           <article className="card chartPanel">
             <div>
-              <h2 className="panelTitle">Procesos por etapas</h2>
-              <p className="panelText">Comparacion rapida de configuracion</p>
+              <h2 className="panelTitle">Estado de procesos</h2>
+              <p className="panelText">{processes.length} procesos creados</p>
             </div>
-            <RankedBarChart
-              title="Procesos por etapas"
+            <CategoryDonut
+              centerLabel="procesos"
               emptyMessage="No hay procesos creados."
               isLoading={isLoading}
-              items={recentProcesses.map((process) => ({
-                id: process.id,
-                label: process.name,
-                value: process.stages.length,
-                displayValue: String(process.stages.length),
-              }))}
-              valueHeader="Etapas"
+              items={[
+                { id: "active", label: "Activos", value: activeProcesses },
+                { id: "inactive", label: "Inactivos", value: inactiveProcesses },
+              ]}
             />
           </article>
 
@@ -447,17 +440,15 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Ordenes por estado</h2>
               <p className="panelText">{pendingRuns.length} pendientes de inventario</p>
             </div>
-            <RankedBarChart
-              title="Ordenes por estado"
+            <CategoryDonut
+              centerLabel="ordenes"
               emptyMessage="No hay ordenes registradas."
               isLoading={isLoading}
               items={runStatusEntries.map(([statusKey, total]) => ({
                 id: statusKey,
                 label: RUN_STATUS_LABELS[statusKey] ?? statusKey,
                 value: total,
-                displayValue: String(total),
               }))}
-              valueHeader="Ordenes"
             />
           </article>
 
@@ -466,11 +457,14 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Avance de ordenes</h2>
               <p className="panelText">{finishedRuns.length} recibidas de {runs.length}</p>
             </div>
-            <DonutGauge
-              centerLabel="recibidas"
-              percent={receivedPercent}
-              primary={{ label: "Recibidas", value: finishedRuns.length }}
-              secondary={{ label: "En proceso", value: runs.length - finishedRuns.length }}
+            <CategoryDonut
+              centerLabel="ordenes"
+              emptyMessage="No hay ordenes registradas."
+              isLoading={isLoading}
+              items={[
+                { id: "received", label: "Recibidas", value: finishedRuns.length },
+                { id: "pending", label: "En proceso", value: runs.length - finishedRuns.length },
+              ]}
             />
           </article>
         </section>
@@ -583,13 +577,11 @@ export function SystemDashboard() {
         {error ? <div className="alert alertError">{error}</div> : null}
 
         <section className="summaryGrid" aria-label="Resumen de inventario">
-          <article
-            className="card metric kpiCard"
-            {...openableProps(() => setIsInventoryBreakdownOpen(true), "Ver desglose de inventario por tipo")}
-          >
+          <article className="card metric kpiCard kpiCardHoverable" tabIndex={0}>
             <Boxes aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Items de inventario</span>
             <strong className="metricValue"><span className="kpiNum num">{inventoryItemsCount}</span></strong>
+            {inventoryBreakdownPopover}
           </article>
           <article className="card metric kpiCard">
             <ListChecks aria-hidden="true" size={22} />
@@ -604,17 +596,15 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Inventario por tipo</h2>
               <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
-            <RankedBarChart
-              title="Inventario por tipo"
+            <CategoryDonut
+              centerLabel="items"
               emptyMessage="No hay inventario registrado."
               isLoading={isLoading}
               items={inventoryTypeEntries.map(([type, total]) => ({
                 id: type,
                 label: INVENTORY_TYPE_LABELS[type],
                 value: total,
-                displayValue: String(total),
               }))}
-              valueHeader="Items"
             />
           </article>
 
@@ -623,17 +613,15 @@ export function SystemDashboard() {
               <h2 className="panelTitle">Movimientos por tipo</h2>
               <p className="panelText">{inventoryMovements.length} movimientos totales</p>
             </div>
-            <RankedBarChart
-              title="Movimientos por tipo"
+            <CategoryDonut
+              centerLabel="movs."
               emptyMessage="No hay movimientos."
               isLoading={isLoading}
               items={movementTypeEntries.map(([type, total]) => ({
                 id: type,
                 label: MOVEMENT_TYPE_LABELS[type] ?? type,
                 value: total,
-                displayValue: String(total),
               }))}
-              valueHeader="Movimientos"
             />
           </article>
         </section>
@@ -663,7 +651,6 @@ export function SystemDashboard() {
             </div>
           </article>
         </section>
-        {inventoryBreakdownModal}
       </div>
     );
   }
