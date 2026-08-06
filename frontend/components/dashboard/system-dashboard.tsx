@@ -52,6 +52,12 @@ function numericText(value: string | null) {
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
 }
 
+// 2 decimales fijos, no 4 -- para gramos, mas precision solo agrega ruido
+// de punto flotante (42026.299999999996) sin aportar informacion util.
+function gramsText(value: number) {
+  return value.toLocaleString("es-EC", { maximumFractionDigits: 2 });
+}
+
 // Equivalente en gramos de un item: directo si su unidad ya es "g", o
 // stock * peso_por_unidad para piezas con peso conocido. Sin esa info
 // (insumos/complementos en "und" sin peso) no aporta gramos -- no todo el
@@ -281,7 +287,7 @@ export function SystemDashboard() {
           <article className="card chartPanel">
             <div>
               <h2 className="panelTitle">Inventario por tipo</h2>
-              <p className="panelText">{numericText(String(totalInventoryGrams))} g en total</p>
+              <p className="panelText">{gramsText(totalInventoryGrams)} g en total</p>
             </div>
             <CategoryDonut
               centerLabel="g"
@@ -292,6 +298,7 @@ export function SystemDashboard() {
                 label: INVENTORY_TYPE_LABELS[type],
                 value: grams,
               }))}
+              unit="g"
             />
           </article>
 

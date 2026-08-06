@@ -22,6 +22,13 @@ function buildSegments(items: DonutSegment[]): DonutSegment[] {
   return [...head, { id: "__other__", label: "Otros", value: restTotal }];
 }
 
+// Maximo 2 decimales -- sin esto, valores derivados de multiplicaciones
+// (ej. stock * peso_por_unidad) salen con ruido de punto flotante
+// (42026.299999999996 en vez de 42.026,30).
+function formatValue(value: number): string {
+  return value.toLocaleString("es-EC", { maximumFractionDigits: 2 });
+}
+
 /** Anillo multi-categoria con leyenda siempre visible (nombre completo,
  * valor y porcentaje) -- reemplaza el grafico de columnas, cuyas etiquetas
  * se truncaban a unos pocos caracteres. Barre desde 0 al montar; el hover
@@ -32,11 +39,15 @@ export function CategoryDonut({
   emptyMessage,
   isLoading = false,
   centerLabel = "total",
+  unit = "",
 }: {
   items: DonutSegment[];
   emptyMessage: string;
   isLoading?: boolean;
   centerLabel?: string;
+  // Sufijo agregado a cada valor de la leyenda (ej. "g"). El total del
+  // centro no lo lleva -- ya tiene su propio centerLabel como unidad.
+  unit?: string;
 }) {
   const segments = buildSegments(items);
   const total = segments.reduce((sum, item) => sum + item.value, 0);
@@ -91,12 +102,12 @@ export function CategoryDonut({
               tabIndex={0}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
             >
-              <title>{`${segment.label}: ${segment.value}`}</title>
+              <title>{`${segment.label}: ${formatValue(segment.value)}${unit ? ` ${unit}` : ""}`}</title>
             </circle>
           );
         })}
         <text className="categoryDonutTotal" textAnchor="middle" x={size / 2} y={size / 2 - 3}>
-          {total}
+          {formatValue(total)}
         </text>
         <text className="categoryDonutCenterLabel" textAnchor="middle" x={size / 2} y={size / 2 + 14}>
           {centerLabel}
@@ -118,7 +129,7 @@ export function CategoryDonut({
             >
               <span aria-hidden="true" className="categoryDonutSwatch" style={{ background: color }} />
               <span className="categoryDonutLegendLabel">{segment.label}</span>
-              <span className="categoryDonutLegendValue">{segment.value}</span>
+              <span className="categoryDonutLegendValue">{formatValue(segment.value)}{unit ? ` ${unit}` : ""}</span>
               <span className="categoryDonutLegendPercent">{percent}%</span>
             </li>
           );
