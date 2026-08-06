@@ -238,7 +238,7 @@ export function SystemDashboard() {
           </article>
         </section>
 
-        <section className="dashboardVisualGrid dashboardVisualGridCompact" aria-label="Graficos del dashboard">
+        <section className="dashboardVisualGrid dashboardVisualGridSymmetric" aria-label="Graficos del dashboard">
           <article className="card chartPanel">
             <div>
               <h2 className="panelTitle">Estado de usuarios</h2>
@@ -253,67 +253,6 @@ export function SystemDashboard() {
                 { id: "inactive", label: "Inactivos", value: inactiveUsers },
               ]}
             />
-          </article>
-
-          <article className="card chartPanel">
-            <div>
-              <h2 className="panelTitle">Estado de procesos</h2>
-              <p className="panelText">{processes.length} procesos creados</p>
-            </div>
-            <CategoryDonut
-              centerLabel="procesos"
-              emptyMessage="No hay procesos creados."
-              isLoading={isLoading}
-              items={[
-                { id: "active", label: "Activos", value: activeProcesses },
-                { id: "inactive", label: "Inactivos", value: inactiveProcesses },
-              ]}
-            />
-          </article>
-
-          <article className="card chartPanel">
-            <div>
-              <h2 className="panelTitle">Inventario por tipo</h2>
-              <p className="panelText">{totalInventoryItems} items registrados</p>
-            </div>
-            <CategoryDonut
-              centerLabel="items"
-              emptyMessage="No hay inventario registrado."
-              isLoading={isLoading}
-              items={inventoryTypeEntries.map(([type, total]) => ({
-                id: type,
-                label: INVENTORY_TYPE_LABELS[type],
-                value: total,
-              }))}
-            />
-          </article>
-        </section>
-
-        <section className="dashboardVisualGrid dashboardVisualGridCompact" aria-label="Detalle del dashboard">
-          <article className="card panelBody">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Procesos por etapas</h2>
-                <p className="panelText">{totalStages} etapas configuradas en total</p>
-              </div>
-            </div>
-            <div className="dashboardList">
-              {processesByStages.map((process) => (
-                <div className="dashboardRow dashboardRoleRow" key={process.id}>
-                  <div>
-                    <strong>{process.name}</strong>
-                    <span>{process.stages.length} etapas · {process.is_active ? "Activo" : "Inactivo"}</span>
-                  </div>
-                  <div className="miniBarTrack">
-                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round((process.stages.length / maxProcessStages) * 100))}%` }} />
-                  </div>
-                </div>
-              ))}
-              {!isLoading && processesByStages.length === 0 ? (
-                <div className="emptyState">No hay procesos creados.</div>
-              ) : null}
-              {isLoading ? <div className="emptyState">Cargando procesos...</div> : null}
-            </div>
           </article>
 
           <article className="card chartPanel">
@@ -335,19 +274,44 @@ export function SystemDashboard() {
 
           <article className="card chartPanel">
             <div>
-              <h2 className="panelTitle">Movimientos por tipo</h2>
-              <p className="panelText">{inventoryMovements.length} movimientos totales</p>
+              <h2 className="panelTitle">Inventario por tipo</h2>
+              <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
             <CategoryDonut
-              centerLabel="movs."
-              emptyMessage="No hay movimientos de inventario."
+              centerLabel="items"
+              emptyMessage="No hay inventario registrado."
               isLoading={isLoading}
-              items={movementTypeEntries.map(([type, total]) => ({
+              items={inventoryTypeEntries.map(([type, total]) => ({
                 id: type,
-                label: MOVEMENT_TYPE_LABELS[type] ?? type,
+                label: INVENTORY_TYPE_LABELS[type],
                 value: total,
               }))}
             />
+          </article>
+
+          <article className="card panelBody">
+            <div className="panelHeader">
+              <div>
+                <h2 className="panelTitle">Procesos por etapas</h2>
+              </div>
+            </div>
+            <div className="dashboardList">
+              {processesByStages.map((process) => (
+                <div className="dashboardRow dashboardRoleRow" key={process.id}>
+                  <div>
+                    <strong>{process.name}</strong>
+                    <span>{process.stages.length} etapas</span>
+                  </div>
+                  <div className="miniBarTrack">
+                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round((process.stages.length / maxProcessStages) * 100))}%` }} />
+                  </div>
+                </div>
+              ))}
+              {!isLoading && processesByStages.length === 0 ? (
+                <div className="emptyState">No hay procesos creados.</div>
+              ) : null}
+              {isLoading ? <div className="emptyState">Cargando procesos...</div> : null}
+            </div>
           </article>
         </section>
       </div>

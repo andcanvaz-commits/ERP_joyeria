@@ -682,7 +682,15 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
-.dashboardVisualGridCompact .chartPanel {
+/* Siempre 2x2 -- a diferencia del auto-fit de arriba, nunca deja un
+   quinto/cuarto elemento suelto solo en su propia fila. */
+.dashboardVisualGridSymmetric {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboardVisualGridCompact .chartPanel,
+.dashboardVisualGridSymmetric .chartPanel,
+.dashboardVisualGridSymmetric .panelBody {
   grid-template-columns: 1fr;
   align-content: start;
   gap: 14px;
