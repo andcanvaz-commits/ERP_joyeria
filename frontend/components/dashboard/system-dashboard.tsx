@@ -10,7 +10,7 @@ import { listProcesses, listProductionRuns } from "@/lib/production-api";
 import { normalizeRole, type Role } from "@/lib/roles";
 import { CategoryDonut } from "@/components/shared/category-donut";
 import { useCountUp } from "@/hooks/use-count-up";
-import type { InventoryItemType } from "@/types/inventory";
+import type { InventoryItem, InventoryItemType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
 
 const INVENTORY_TYPE_LABELS: Record<InventoryItemType, string> = {
@@ -50,6 +50,18 @@ function numericText(value: string | null) {
   if (!value) return "0";
   const number = Number(value);
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
+}
+
+// Equivalente en gramos de un item: directo si su unidad ya es "g", o
+// stock * peso_por_unidad para piezas con peso conocido. Sin esa info
+// (insumos/complementos en "und" sin peso) no aporta gramos -- no todo el
+// inventario tiene un equivalente real, y sumarlo como si lo tuviera
+// falsearia el desglose.
+function itemGrams(item: InventoryItem): number {
+  const stock = Number(item.current_stock) || 0;
+  if (item.unit_code === "g") return stock;
+  const weightPerUnit = Number(item.weight_per_unit) || 0;
+  return weightPerUnit > 0 ? stock * weightPerUnit : 0;
 }
 
 function movementDateLabel(value: string) {
@@ -139,8 +151,11 @@ export function SystemDashboard() {
 
   const activeUsers = users.filter((user) => user.is_active).length;
   const inactiveUsers = users.length - activeUsers;
-  const usersByRole = useMemo(() => {
+  // Solo activos, por rol -- el segmento "Inactivos" (abajo) cubre el resto,
+  // asi el mismo grafico responde "activos" y "por rol" a la vez.
+  const usersByRoleActive = useMemo(() => {
     return users.reduce<Record<string, number>>((acc, user) => {
+      if (!user.is_active) return acc;
       acc[user.role] = (acc[user.role] ?? 0) + 1;
       return acc;
     }, {});
@@ -150,13 +165,6 @@ export function SystemDashboard() {
   // esto no depende de cuantos procesos existan -- siempre son 2 categorias.
   const activeProcesses = processes.filter((process) => process.is_active).length;
   const inactiveProcesses = processes.length - activeProcesses;
-  // Lista completa (no solo los 5 recientes) ordenada por etapas -- escala
-  // con scroll en vez de una dona con muchas porciones finas.
-  const processesByStages = useMemo(
-    () => [...processes].sort((left, right) => right.stages.length - left.stages.length),
-    [processes],
-  );
-  const maxProcessStages = Math.max(1, ...processes.map((process) => process.stages.length));
   const sortedInventoryMovements = useMemo(
     () => [...inventoryMovements].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime()),
     [inventoryMovements],
@@ -170,6 +178,17 @@ export function SystemDashboard() {
   }, [inventoryItems]);
   const totalInventoryItems = inventorySummary?.total_items ?? inventoryItems.length;
   const inventoryTypeEntries = Object.entries(inventoryByType) as Array<[InventoryItemType, number]>;
+  // Desglose por peso real (gramos), no por cantidad de items -- para el
+  // grafico "Inventario por tipo" del admin (el resto del sistema sigue
+  // contando items, es informacion distinta).
+  const inventoryGramsByType = useMemo(() => {
+    const acc: Record<InventoryItemType, number> = { RAW_MATERIAL: 0, SUPPLY: 0, COMPLEMENT: 0, WORK_IN_PROGRESS: 0, FINISHED_PRODUCT: 0, WASTE: 0 };
+    for (const item of inventoryItems) {
+      acc[item.item_type] += itemGrams(item);
+    }
+    return Object.entries(acc) as Array<[InventoryItemType, number]>;
+  }, [inventoryItems]);
+  const totalInventoryGrams = inventoryGramsByType.reduce((sum, [, grams]) => sum + grams, 0);
 
   const movementsByType = useMemo(() => {
     return inventoryMovements.reduce<Record<string, number>>((acc, movement) => {
@@ -241,7 +260,7 @@ export function SystemDashboard() {
         <section className="dashboardVisualGrid dashboardVisualGridSymmetric" aria-label="Graficos del dashboard">
           <article className="card chartPanel">
             <div>
-              <h2 className="panelTitle">Estado de usuarios</h2>
+              <h2 className="panelTitle">Usuarios</h2>
               <p className="panelText">{activeUsers} activos de {users.length}</p>
             </div>
             <CategoryDonut
@@ -249,7 +268,11 @@ export function SystemDashboard() {
               emptyMessage="No hay usuarios creados."
               isLoading={isLoading}
               items={[
-                { id: "active", label: "Activos", value: activeUsers },
+                ...Object.entries(usersByRoleActive).map(([roleName, total]) => ({
+                  id: roleName,
+                  label: roleName,
+                  value: total,
+                })),
                 { id: "inactive", label: "Inactivos", value: inactiveUsers },
               ]}
             />
@@ -257,61 +280,36 @@ export function SystemDashboard() {
 
           <article className="card chartPanel">
             <div>
-              <h2 className="panelTitle">Usuarios por rol</h2>
-              <p className="panelText">{inactiveUsers} usuarios inactivos</p>
+              <h2 className="panelTitle">Inventario por tipo</h2>
+              <p className="panelText">{numericText(String(totalInventoryGrams))} g en total</p>
             </div>
             <CategoryDonut
-              centerLabel="usuarios"
-              emptyMessage="No hay usuarios creados."
+              centerLabel="g"
+              emptyMessage="No hay inventario registrado."
               isLoading={isLoading}
-              items={Object.entries(usersByRole).map(([roleName, total]) => ({
-                id: roleName,
-                label: roleName,
-                value: total,
+              items={inventoryGramsByType.map(([type, grams]) => ({
+                id: type,
+                label: INVENTORY_TYPE_LABELS[type],
+                value: grams,
               }))}
             />
           </article>
 
           <article className="card chartPanel">
             <div>
-              <h2 className="panelTitle">Inventario por tipo</h2>
-              <p className="panelText">{totalInventoryItems} items registrados</p>
+              <h2 className="panelTitle">Procesos por etapas</h2>
+              <p className="panelText">{processes.length} procesos creados</p>
             </div>
             <CategoryDonut
-              centerLabel="items"
-              emptyMessage="No hay inventario registrado."
+              centerLabel="etapas"
+              emptyMessage="No hay procesos creados."
               isLoading={isLoading}
-              items={inventoryTypeEntries.map(([type, total]) => ({
-                id: type,
-                label: INVENTORY_TYPE_LABELS[type],
-                value: total,
+              items={processes.map((process) => ({
+                id: process.id,
+                label: process.name,
+                value: process.stages.length,
               }))}
             />
-          </article>
-
-          <article className="card panelBody">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Procesos por etapas</h2>
-              </div>
-            </div>
-            <div className="dashboardList">
-              {processesByStages.map((process) => (
-                <div className="dashboardRow dashboardRoleRow" key={process.id}>
-                  <div>
-                    <strong>{process.name}</strong>
-                    <span>{process.stages.length} etapas</span>
-                  </div>
-                  <div className="miniBarTrack">
-                    <div className="miniBarFill" style={{ width: `${Math.max(8, Math.round((process.stages.length / maxProcessStages) * 100))}%` }} />
-                  </div>
-                </div>
-              ))}
-              {!isLoading && processesByStages.length === 0 ? (
-                <div className="emptyState">No hay procesos creados.</div>
-              ) : null}
-              {isLoading ? <div className="emptyState">Cargando procesos...</div> : null}
-            </div>
           </article>
         </section>
       </div>
