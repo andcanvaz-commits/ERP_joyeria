@@ -236,6 +236,7 @@ export function SystemDashboard() {
               <p className="panelText">Comparacion rapida de configuracion</p>
             </div>
             <RankedBarChart
+              title="Procesos por etapas"
               emptyMessage="No hay procesos creados."
               isLoading={isLoading}
               items={recentProcesses.map((process) => ({
@@ -255,6 +256,7 @@ export function SystemDashboard() {
             </div>
             <RankedBarChart
               emptyMessage="No hay inventario registrado."
+              title="Inventario por tipo"
               isLoading={isLoading}
               items={inventoryTypeEntries.map(([type, total]) => ({
                 id: type,
@@ -393,6 +395,7 @@ export function SystemDashboard() {
               <p className="panelText">Comparacion rapida de configuracion</p>
             </div>
             <RankedBarChart
+              title="Procesos por etapas"
               emptyMessage="No hay procesos creados."
               isLoading={isLoading}
               items={recentProcesses.map((process) => ({
@@ -411,6 +414,7 @@ export function SystemDashboard() {
               <p className="panelText">{pendingRuns.length} pendientes de inventario</p>
             </div>
             <RankedBarChart
+              title="Ordenes por estado"
               emptyMessage="No hay ordenes registradas."
               isLoading={isLoading}
               items={runStatusEntries.map(([statusKey, total]) => ({
@@ -564,6 +568,7 @@ export function SystemDashboard() {
               <p className="panelText">{totalInventoryItems} items registrados</p>
             </div>
             <RankedBarChart
+              title="Inventario por tipo"
               emptyMessage="No hay inventario registrado."
               isLoading={isLoading}
               items={inventoryTypeEntries.map(([type, total]) => ({
@@ -582,6 +587,7 @@ export function SystemDashboard() {
               <p className="panelText">{inventoryMovements.length} movimientos totales</p>
             </div>
             <RankedBarChart
+              title="Movimientos por tipo"
               emptyMessage="No hay movimientos."
               isLoading={isLoading}
               items={movementTypeEntries.map(([type, total]) => ({

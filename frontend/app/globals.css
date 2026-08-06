@@ -903,18 +903,94 @@ textarea {
   transform: translate(-50%, 0);
 }
 
-.rankedBarChart {
+/* Columnas verticales (base comun con la dona: gradiente dorado, misma
+   familia visual de "instrumento de precision"). Sin scroll horizontal:
+   el componente ya recorta a MAX_COLUMNS y manda el resto a "Ver tabla",
+   asi que el tooltip (posicionado sobre cada columna) nunca queda
+   clipeado por un overflow del contenedor. */
+.columnChart {
   display: grid;
-  gap: 8px;
-  min-height: 0;
+  gap: 4px;
+  width: 100%;
   max-width: 260px;
+  justify-items: end;
 }
 
-/* Mismo tope que .barChartList: sin esto la tabla se sale del alto fijo
-   de la tarjeta cuando hay muchas filas. */
-.rankedBarChart .tableWrap {
-  max-height: 150px;
-  overflow-y: auto;
+.columnChartPlot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 120px;
+  padding: 0 2px;
+  border-bottom: 2px solid var(--gold);
+}
+
+.columnChartBar {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 14px;
+  max-width: 30px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  cursor: default;
+  outline: none;
+}
+
+.columnChartBar:focus-visible {
+  box-shadow: 0 0 0 2px var(--primary-strong);
+  border-radius: 4px 4px 0 0;
+}
+
+.columnChartFill {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, #d8ad5e, var(--primary-strong));
+  transition: height 0.6s cubic-bezier(0.22, 1, 0.36, 1), filter 0.12s ease;
+}
+
+.columnChartBar:hover .columnChartFill,
+.columnChartBar:focus-visible .columnChartFill {
+  filter: brightness(1.1);
+}
+
+.columnChartAxis {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 2px;
+}
+
+.columnChartLabel {
+  flex: 1 1 0;
+  min-width: 14px;
+  max-width: 30px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnChartMore {
+  justify-self: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.columnTooltip {
+  left: 50%;
+  transform: translate(-50%, 2px);
+}
+
+.columnChartBar:hover .columnTooltip,
+.columnChartBar:focus-visible .columnTooltip {
+  transform: translate(-50%, 0);
 }
 
 .dashboardVisualGridCompact .rankedBarChart .tableWrap {
