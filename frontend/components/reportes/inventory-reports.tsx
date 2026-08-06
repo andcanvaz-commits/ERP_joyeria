@@ -6,6 +6,7 @@ import { Boxes, ListChecks, Package } from "lucide-react";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import type { InventoryItem, InventoryMovement } from "@/types/inventory";
 import { Pager, usePagination } from "@/components/shared/pager";
+import { useCountUp } from "@/hooks/use-count-up";
 
 const REPORT_PAGE_SIZE = 12;
 
@@ -131,6 +132,12 @@ export function InventoryReports() {
     [finishedIn],
   );
 
+  // Solo se anima lo que es un conteo entero; "Producido (g)" es un peso
+  // decimal y useCountUp redondea, asi que queda sin animar (num() ya lo
+  // formatea con su precision real).
+  const productsInCount = useCountUp(new Set(finishedIn.map((m) => m.item_id)).size);
+  const monthMovementsCount = useCountUp(monthMovements.length);
+
   const byCategoryPager = usePagination(byCategory, REPORT_PAGE_SIZE, activeMonth);
   const byLeyPager = usePagination(byLey, REPORT_PAGE_SIZE, activeMonth);
   const kardexPager = usePagination(monthMovements, REPORT_PAGE_SIZE, activeMonth);
@@ -157,20 +164,20 @@ export function InventoryReports() {
       </div>
 
       <section className="summaryGrid" aria-label="Resumen del mes">
-        <article className="card metric">
+        <article className="card metric kpiCard">
           <Package aria-hidden="true" size={22} />
           <span className="metricLabel">Productos con ingreso</span>
-          <strong className="metricValue">{new Set(finishedIn.map((m) => m.item_id)).size}</strong>
+          <strong className="metricValue">{productsInCount}</strong>
         </article>
-        <article className="card metric">
+        <article className="card metric kpiCard">
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">Producido (g)</span>
           <strong className="metricValue">{num(totalProducido)}</strong>
         </article>
-        <article className="card metric">
+        <article className="card metric kpiCard">
           <ListChecks aria-hidden="true" size={22} />
           <span className="metricLabel">Movimientos del mes</span>
-          <strong className="metricValue">{monthMovements.length}</strong>
+          <strong className="metricValue">{monthMovementsCount}</strong>
         </article>
       </section>
 

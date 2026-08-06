@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, CheckCircle2, Factory, ListChecks, Users } from "lucide-react";
+import { Boxes, CheckCircle2, Factory, ListChecks, Users, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
+import { openableProps } from "@/lib/a11y";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { getInventorySummary, listInventoryItems, listInventoryMovements } from "@/lib/inventory-api";
 import { listProcesses, listProductionRuns } from "@/lib/production-api";
@@ -82,6 +83,8 @@ export function SystemDashboard() {
       window.location.href = "/login";
     }
   }, []);
+
+  const [isInventoryBreakdownOpen, setIsInventoryBreakdownOpen] = useState(false);
 
   const { data: me, error: meError } = useQuery({
     queryKey: ["me"],
@@ -192,6 +195,33 @@ export function SystemDashboard() {
   const finishedRunsCount = useCountUp(finishedRuns.length);
   const inventoryMovementsCount = useCountUp(inventoryMovements.length);
 
+  // "Items de inventario" es un total sin desgloce -- se abre en un modal
+  // al hacer click en la tarjeta (misma data que ya alimenta el grafico
+  // "Inventario por tipo"), en vez de mandar a otra pantalla.
+  const inventoryBreakdownModal = isInventoryBreakdownOpen ? (
+    <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Desglose de inventario por tipo">
+      <section className="modalWindow">
+        <div className="modalHeader">
+          <div>
+            <h2>Items de inventario</h2>
+            <p className="panelText">{totalInventoryItems} items registrados, por tipo</p>
+          </div>
+          <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsInventoryBreakdownOpen(false)} type="button">
+            <X aria-hidden="true" size={18} />
+          </button>
+        </div>
+        <div className="dashboardList">
+          {inventoryTypeEntries.map(([type, total]) => (
+            <div className="dashboardRow" key={type}>
+              <div><strong>{INVENTORY_TYPE_LABELS[type]}</strong></div>
+              <small>{total}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  ) : null;
+
   // Dashboard del administrador (diseno original completo).
   if (isAdmin) {
     return (
@@ -209,7 +239,10 @@ export function SystemDashboard() {
             <span className="metricLabel kpiLabel">Usuarios</span>
             <strong className="metricValue"><span className="kpiNum num">{usersCount}</span></strong>
           </article>
-          <article className="card metric kpiCard">
+          <article
+            className="card metric kpiCard"
+            {...openableProps(() => setIsInventoryBreakdownOpen(true), "Ver desglose de inventario por tipo")}
+          >
             <Boxes aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Items de inventario</span>
             <strong className="metricValue"><span className="kpiNum num">{inventoryItemsCount}</span></strong>
@@ -360,6 +393,7 @@ export function SystemDashboard() {
             </div>
           </article>
         </section>
+        {inventoryBreakdownModal}
       </div>
     );
   }
@@ -549,7 +583,10 @@ export function SystemDashboard() {
         {error ? <div className="alert alertError">{error}</div> : null}
 
         <section className="summaryGrid" aria-label="Resumen de inventario">
-          <article className="card metric kpiCard">
+          <article
+            className="card metric kpiCard"
+            {...openableProps(() => setIsInventoryBreakdownOpen(true), "Ver desglose de inventario por tipo")}
+          >
             <Boxes aria-hidden="true" size={22} />
             <span className="metricLabel kpiLabel">Items de inventario</span>
             <strong className="metricValue"><span className="kpiNum num">{inventoryItemsCount}</span></strong>
@@ -626,6 +663,7 @@ export function SystemDashboard() {
             </div>
           </article>
         </section>
+        {inventoryBreakdownModal}
       </div>
     );
   }

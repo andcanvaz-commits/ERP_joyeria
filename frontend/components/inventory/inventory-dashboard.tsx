@@ -19,6 +19,7 @@ import { listProductTypes } from "@/lib/product-types-api";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
+import { useCountUp } from "@/hooks/use-count-up";
 import {
   archiveInventoryItem,
   combineProducts,
@@ -625,6 +626,10 @@ export function InventoryDashboard() {
   });
 
   const summary = data?.summary ?? null;
+  const rawMaterialsCount = useCountUp(summary?.raw_materials ?? 0);
+  const suppliesCount = useCountUp(summary?.supplies ?? 0);
+  const workInProgressCount = useCountUp(summary?.work_in_progress ?? 0);
+  const finishedProductsCount = useCountUp(summary?.finished_products ?? 0);
   const items = data?.items ?? [];
   const movements = data?.movements ?? [];
   const users = data?.users ?? [];
@@ -1987,25 +1992,37 @@ export function InventoryDashboard() {
       ) : null}
 
       <section className="summaryGrid" aria-label="Resumen de inventario">
-        <article className="card metric">
+        <article
+          className="card metric kpiCard"
+          {...openableProps(() => setItemFilter("RAW_MATERIAL"), "Ver materia prima")}
+        >
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">Materia prima</span>
-          <strong className="metricValue">{summary?.raw_materials ?? 0}</strong>
+          <strong className="metricValue">{rawMaterialsCount}</strong>
         </article>
-        <article className="card metric">
+        <article
+          className="card metric kpiCard"
+          {...openableProps(() => setItemFilter("SUPPLY"), "Ver insumos")}
+        >
           <FlaskConical aria-hidden="true" size={22} />
           <span className="metricLabel">Insumos</span>
-          <strong className="metricValue">{summary?.supplies ?? 0}</strong>
+          <strong className="metricValue">{suppliesCount}</strong>
         </article>
-        <article className="card metric">
+        <article
+          className="card metric kpiCard"
+          {...openableProps(() => setItemFilter("WORK_IN_PROGRESS"), "Ver productos en proceso")}
+        >
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">En proceso</span>
-          <strong className="metricValue">{summary?.work_in_progress ?? 0}</strong>
+          <strong className="metricValue">{workInProgressCount}</strong>
         </article>
-        <article className="card metric">
+        <article
+          className="card metric kpiCard"
+          {...openableProps(() => setItemFilter("FINISHED_PRODUCT"), "Ver productos terminados")}
+        >
           <Boxes aria-hidden="true" size={22} />
           <span className="metricLabel">Terminados</span>
-          <strong className="metricValue">{summary?.finished_products ?? 0}</strong>
+          <strong className="metricValue">{finishedProductsCount}</strong>
         </article>
       </section>
 
