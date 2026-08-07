@@ -953,12 +953,19 @@ textarea {
 .categoryDonutInfo:focus .categoryDonutInfoPopover,
 .categoryDonutInfo:focus-visible .categoryDonutInfoPopover {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translate(0, 0);
   pointer-events: auto;
 }
 
+/* Ancla a la derecha del icono en vez de centrado: centrado con este ancho
+   se salia del margen derecho de la pagina cuando el icono esta cerca del
+   borde (la tarjeta de insumos suele quedar en la ultima columna). */
 .categoryDonutInfoPopover {
-  min-width: 140px;
+  left: auto;
+  right: 0;
+  transform: translate(0, 4px);
+  min-width: 260px;
+  max-width: 340px;
 }
 
 .dashboardList {

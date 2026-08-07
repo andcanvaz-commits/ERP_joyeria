@@ -163,7 +163,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="brandMark">Au</div>
           <div className="brandText">
             <span className="brandName">Fenix Global</span>
-            <span className="brandMeta">Joyeria</span>
           </div>
         </div>
         <nav className="nav" aria-label="Navegacion principal">

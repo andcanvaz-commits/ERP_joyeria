@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { listCatalogSegments } from "@/lib/catalog-api";
@@ -24,6 +24,8 @@ export function CatalogProductPicker({
   excludeTypeIds,
   onSelect,
   onClose,
+  rowBadge,
+  tabs,
 }: {
   title: string;
   subtitle?: string;
@@ -37,6 +39,11 @@ export function CatalogProductPicker({
   excludeTypeIds?: string[];
   onSelect: (type: ProductType) => void;
   onClose: () => void;
+  // Marca opcional por fila de producto (ej. indicador de receta de ensamble
+  // para el material de la orden actual).
+  rowBadge?: (type: ProductType) => ReactNode;
+  // Slot opcional debajo del header (ej. pestañas Productos | Complementos).
+  tabs?: ReactNode;
 }) {
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const { data: types = [] } = useQuery({ queryKey: ["product-types"], queryFn: listProductTypes });
@@ -46,25 +53,35 @@ export function CatalogProductPicker({
   const allowed = allowedTypeIds ?? [];
   const canCreate = allowed.length === 0;
   const excluded = excludeTypeIds ?? [];
+  // Categoria: solo activo + permitido, SIN excluir (ej. tipos con receta ya
+  // ensamblada) — si la categoria tiene otros tipos ademas del excluido,
+  // deben seguir viendose; ocultar toda la categoria por un solo tipo
+  // ocultado seria confuso ("desaparecio toda la seccion").
+  const allowedActive = useMemo(
+    () => types.filter((type) => type.is_active && (allowed.length === 0 || allowed.includes(type.id))),
+    [types, allowed],
+  );
+  // Productos dentro de una categoria ya drilleada: aqui si aplica la
+  // exclusion (oculta el tipo puntual, no la categoria completa).
   const active = useMemo(
-    () =>
-      types.filter(
-        (type) =>
-          type.is_active &&
-          (allowed.length === 0 || allowed.includes(type.id)) &&
-          (excluded.length === 0 || !excluded.includes(type.id)),
-      ),
-    [types, allowed, excluded],
+    () => allowedActive.filter((type) => excluded.length === 0 || !excluded.includes(type.id)),
+    [allowedActive, excluded],
   );
 
   // Drill-down tipos → productos, igual que el mantenimiento.
   const typeGroups = useMemo(() => {
     const catLabel = (code: string) => segments.find((s) => s.kind === "CATEGORY" && s.code === code)?.label ?? code;
+    // hiddenCount: cuantos tipos de la categoria quedaron fuera solo por la
+    // exclusion (ej. ya tienen receta de ensamble) — para avisar "estan en
+    // ensamblar" en vez de "no hay nada", cuando aplique.
+    const totalByCategory = new Map<string, number>();
+    for (const type of allowedActive) {
+      totalByCategory.set(type.category_code, (totalByCategory.get(type.category_code) ?? 0) + 1);
+    }
     const byType = new Map<string, ProductType[]>();
+    for (const code of totalByCategory.keys()) byType.set(code, []);
     for (const type of active) {
-      const list = byType.get(type.category_code);
-      if (list) list.push(type);
-      else byType.set(type.category_code, [type]);
+      byType.get(type.category_code)?.push(type);
     }
     return [...byType.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -75,8 +92,9 @@ export function CatalogProductPicker({
           (x, y) => x.model_code.localeCompare(y.model_code) || (x.name ?? "").localeCompare(y.name ?? ""),
         ),
         productCount: products.length,
+        hiddenCount: (totalByCategory.get(code) ?? 0) - products.length,
       }));
-  }, [active, segments]);
+  }, [allowedActive, active, segments]);
 
   const drilledType = typeGroups.find((g) => g.code === drillType) ?? null;
 
@@ -109,6 +127,8 @@ export function CatalogProductPicker({
           </button>
         </div>
 
+        {tabs}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14, minHeight: typeGroups.length >= DRILL_PAGE_SIZE ? 460 : undefined }}>
           {drilledType ? (
             <div className="drillBar">
@@ -123,6 +143,14 @@ export function CatalogProductPicker({
             </div>
           ) : null}
 
+          {drilledType && drilledType.hiddenCount > 0 && drilledType.products.length > 0 ? (
+            <p className="panelText" style={{ margin: 0 }}>
+              +{drilledType.hiddenCount} {drilledType.hiddenCount === 1 ? "producto" : "productos"} de este tipo{" "}
+              {drilledType.hiddenCount === 1 ? "se fabrica" : "se fabrican"} por ensamblar (ya tiene
+              {drilledType.hiddenCount === 1 ? "" : "n"} receta) — no {drilledType.hiddenCount === 1 ? "se muestra" : "se muestran"} aquí.
+            </p>
+          ) : null}
+
           {drilledType ? (
             <div className="tableWrap pagedListFloor" style={{ flex: "1 1 auto" }}>
               <table className="table tableAuto">
@@ -131,6 +159,7 @@ export function CatalogProductPicker({
                     <th style={{ width: 110 }}>Código</th>
                     <th>Producto</th>
                     <th className="num">Precio</th>
+                    {rowBadge ? <th aria-label="Receta" style={{ width: 28 }} /> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -143,10 +172,19 @@ export function CatalogProductPicker({
                       <td><span className="orderCodeTag">#{type.category_code}{type.model_code}</span></td>
                       <td>{type.name ?? "—"}</td>
                       <td className="num">{type.price ? `$ ${Number(type.price).toLocaleString("es-EC", { minimumFractionDigits: 2 })}` : "—"}</td>
+                      {rowBadge ? <td onClick={(event) => event.stopPropagation()}>{rowBadge(type)}</td> : null}
                     </tr>
                   ))}
                   {drilledType.products.length === 0 ? (
-                    <tr><td colSpan={3}><div className="emptyState">Sin productos en este tipo.</div></td></tr>
+                    <tr>
+                      <td colSpan={rowBadge ? 4 : 3}>
+                        <div className="emptyState">
+                          {drilledType.hiddenCount > 0
+                            ? `${drilledType.hiddenCount} ${drilledType.hiddenCount === 1 ? "producto" : "productos"} de este tipo, pero ${drilledType.hiddenCount === 1 ? "se fabrica" : "se fabrican"} por ensamblar (ya tiene${drilledType.hiddenCount === 1 ? "" : "n"} receta).`
+                            : "Sin productos en este tipo."}
+                        </div>
+                      </td>
+                    </tr>
                   ) : null}
                 </tbody>
               </table>

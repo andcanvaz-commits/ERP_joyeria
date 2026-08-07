@@ -576,7 +576,7 @@ class InventoryService(InventoryIntegrationPort):
         product_code = f"{material_code}{product_type.category_code}{product_type.model_code}"
         return product_code, product_type
 
-    def _match_material_code(self, text: str | None) -> str | None:
+    def match_material_code(self, text: str | None) -> str | None:
         """Empata el texto de material de un lote con un segmento MATERIAL del
         catálogo: exacto primero; si no, el segmento cuya etiqueta esté
         contenida en el texto (ej. "ORO 18K" → ORO), la más larga que calce.
@@ -645,7 +645,7 @@ class InventoryService(InventoryIntegrationPort):
         # material no arranca producción). Si no empata con un segmento del
         # catálogo, se crea uno nuevo con el siguiente código libre.
         lot_material = (payload.material_type or lot.material_type or "").strip()
-        material_code = payload.material_code or self._match_material_code(lot_material)
+        material_code = payload.material_code or self.match_material_code(lot_material)
         if not material_code:
             raise InventoryDomainError("El lote no tiene material registrado.")
 

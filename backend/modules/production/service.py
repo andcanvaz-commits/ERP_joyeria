@@ -843,9 +843,14 @@ class ProductionService:
     def allocate_material(
         self, run_id: UUID, quantity_units: Decimal, current_user: CurrentUser
     ) -> ProductionRunRead:
-        """Inventario destina un ingreso nuevo a una corrida ESPERANDO_MATERIAL:
-        aprueba materiales e inicia la corrida automaticamente. Si el ingreso no
-        alcanza para toda la corrida, la parte de nuevo (mismo folio raiz)."""
+        """Inventario destina un ingreso nuevo (materia prima o complemento) a
+        una corrida ESPERANDO_MATERIAL: aprueba materiales e inicia la corrida
+        automaticamente. La cobertura real (cuanto alcanza) la calcula
+        approve_materials considerando AMBOS recursos -- materia prima y cada
+        complemento pendiente -- y toma el minimo; si alguno de los dos sigue
+        corto, esta funcion no debe adelantarse a bloquear solo por materia
+        prima: approve_materials es quien decide, parte de nuevo si hace falta
+        y solo arranca lo que de verdad esta cubierto por completo."""
         run = self.repository.get_run(run_id)
         if run is None:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
@@ -857,22 +862,8 @@ class ProductionService:
             raise ProductionDomainError("La cantidad a destinar debe ser mayor a cero.")
         if quantity_units > run.quantity:
             raise ProductionDomainError("No puedes destinar mas unidades de las que la orden necesita.")
-
-        from backend.modules.inventory.models import InventoryItem
-
         if run.raw_material_item_id is None:
             raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
-        raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
-        if raw_material is None:
-            raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
-
-        required_material = run.raw_material_quantity_per_unit * quantity_units
-        if raw_material.current_stock < required_material:
-            raise ProductionDomainError(
-                f"Stock insuficiente de '{raw_material.name}': disponible "
-                f"{raw_material.current_stock} {raw_material.unit_code}, se requieren "
-                f"{required_material} {raw_material.unit_code}."
-            )
 
         if quantity_units < run.quantity:
             self._split_run_for_partial_material(run, quantity_units)
@@ -1217,14 +1208,14 @@ class ProductionService:
 
     def _material_code_for_item(self, item_id: UUID | None) -> str | None:
         """Codigo de material (1 digito) de la materia prima de la orden,
-        empatando su texto de material contra el catalogo. NO crea el
-        segmento si no existe: esto es una consulta (GET), y un GET no debe
-        escribir en el catalogo (a diferencia de la conversion de recepcion,
-        que sí puede crear un material nuevo)."""
+        empatando su texto de material contra el catalogo. Los tipos de
+        producto se comparten entre materiales, pero la receta de ensamble es
+        propia de cada material; si la materia prima es nueva y no empata con
+        ningun segmento MATERIAL, se crea uno (mismo criterio que la
+        conversion de recepcion): sin esto, una materia prima recien creada
+        nunca podria tener receta hasta despues de su primera conversion."""
         if item_id is None:
             return None
-        from sqlalchemy import select
-        from backend.modules.catalog.models import CatalogSegment
         from backend.modules.inventory.models import InventoryItem
 
         item = self.repository.session.get(InventoryItem, item_id)
@@ -1233,8 +1224,13 @@ class ProductionService:
         text = (item.material_type or item.name or "").strip()
         if not text:
             return None
-        clean = text.upper()
+        if self.inventory_service is not None:
+            return self.inventory_service.match_material_code(text)
 
+        from sqlalchemy import select
+        from backend.modules.catalog.models import CatalogSegment
+
+        clean = text.upper()
         segments = self.repository.session.execute(
             select(CatalogSegment).where(
                 CatalogSegment.kind == "MATERIAL",
@@ -1494,6 +1490,18 @@ class ProductionService:
         self.repository.flush()
         return self._recipe_read_for_key(model_key)
 
+    def delete_assembly_recipe(self, model_key: str) -> None:
+        """Elimina la receta de ensamble de una clave de modelo."""
+        from sqlalchemy import select
+
+        recipe = self.repository.session.execute(
+            select(AssemblyRecipe).where(AssemblyRecipe.model_key == model_key)
+        ).scalars().first()
+        if recipe is None:
+            raise ProductionNotFoundError("Receta no encontrada.")
+        self.repository.session.delete(recipe)
+        self.repository.flush()
+
     def _recipe_read_for_key(self, model_key: str) -> AssemblyRecipeRead:
         from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
@@ -1506,19 +1514,22 @@ class ProductionService:
         complement_ids = list({item.complement_item_id for item in recipe.items})
         names: dict = {}
         units: dict = {}
+        materials: dict = {}
         if complement_ids:
             rows = self.repository.session.execute(
-                select(InventoryItem.id, InventoryItem.name, InventoryItem.unit_code).where(
+                select(InventoryItem.id, InventoryItem.name, InventoryItem.unit_code, InventoryItem.material_type).where(
                     InventoryItem.id.in_(complement_ids)
                 )
             ).all()
             names = {row[0]: row[1] for row in rows}
             units = {row[0]: row[2] for row in rows}
+            materials = {row[0]: row[3] for row in rows}
         items = [
             AssemblyRecipeItemRead(
                 complement_item_id=item.complement_item_id,
                 name=names.get(item.complement_item_id),
                 unit_code=units.get(item.complement_item_id),
+                material_type=materials.get(item.complement_item_id),
                 quantity_per_unit=item.quantity_per_unit,
             )
             for item in recipe.items

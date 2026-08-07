@@ -35,6 +35,7 @@ import {
   createProcess,
   createProductionRun,
   defineRunAssembly,
+  deleteAssemblyRecipe,
   deleteProcess,
   finishProductionRunStage,
   getAssemblyRecipe,
@@ -301,7 +302,10 @@ function RecipeBadgeIcon({ recipe }: { recipe: AssemblyRecipe | null }) {
                     key={item.complement_item_id}
                     style={{ fontSize: 12, display: "flex", justifyContent: "space-between", gap: 10 }}
                   >
-                    <span>{item.name ?? "—"}</span>
+                    <span>
+                      {item.name ?? "—"}
+                      {item.material_type ? <span style={{ color: "var(--muted)" }}> · {item.material_type}</span> : null}
+                    </span>
                     <span style={{ color: "var(--muted)" }}>
                       {item.quantity_per_unit}
                       {item.unit_code ? ` ${item.unit_code}` : ""}
@@ -1560,17 +1564,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     );
   }
 
-  // Parte de modelo de una pieza terminada: categoría(2)+modelo(4) de su
-  // código de 7 dígitos, SIN el dígito de material. Esto es solo la mitad de
-  // la clave de receta: hay que anteponerle el código de material de la
-  // orden (orderMaterialCode) para tener la clave completa de 7 dígitos.
-  // undefined si la pieza no tiene código de catálogo de 7 dígitos.
-  function pieceModelKey(item: InventoryItem): string | undefined {
-    const code = item.product_code;
-    if (!code || code.length !== 7) return undefined;
-    return code.slice(1);
-  }
-
   // Tras elegir producto en modo ENSAMBLAR: consulta su receta. La clave de
   // receta ahora incluye el material de la orden, así que sin material
   // elegido no se puede resolver: se avisa y se limpia la selección. Sin
@@ -1722,6 +1715,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError(nextError instanceof Error ? nextError.message : "No se pudo guardar la receta.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteRecipe(modelKey: string) {
+    setError(null);
+    setSuccess(null);
+    try {
+      await deleteAssemblyRecipe(modelKey);
+      setSuccess("Receta eliminada.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] }),
+        queryClient.invalidateQueries({ queryKey: ["assembly-recipes"] }),
+      ]);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo eliminar la receta.");
     }
   }
 
@@ -1914,11 +1922,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <strong>{pendingInventoryCount}</strong>
               <span>Esperando inventario</span>
             </div>
-            <div className="productionStatCard">
-              <Hourglass aria-hidden="true" size={20} />
-              <strong>{waitingMaterialCount}</strong>
-              <span>Esperando material</span>
-            </div>
+            {waitingMaterialCount > 0 ? (
+              <div className="productionStatCard">
+                <Hourglass aria-hidden="true" size={20} />
+                <strong>{waitingMaterialCount}</strong>
+                <span>Esperando material</span>
+              </div>
+            ) : null}
             <div className="productionStatCard">
               <CheckCircle2 aria-hidden="true" size={20} />
               <strong>{approvedMaterialCount}</strong>
@@ -2278,8 +2288,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <label className="fieldGroup">
               <span>{assemblyMode === "ENSAMBLAR" ? "Producto final" : "Producto"}</span>
               {renderProductChooser(orderProduct, () => {
-                setAssignPickerTab("PRODUCTOS");
-                setItemPickerFor("create");
+                if (assemblyMode === "ENSAMBLAR") {
+                  // ENSAMBLAR elige el TIPO de producto (compartido entre
+                  // materiales): la receta depende del material de la orden,
+                  // no de una pieza existente con su propio material y stock.
+                  setTypePickerFor("create");
+                } else {
+                  setAssignPickerTab("PRODUCTOS");
+                  setItemPickerFor("create");
+                }
               })}
             </label>
 
@@ -2450,17 +2467,35 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           );
         }
 
+        if (isAssignContext) {
+          // ASIGNAR elige el mismo TIPO de producto que ENSAMBLAR (lista
+          // compartida): el material lo pone la orden, no la pieza puntual.
+          return (
+            <CatalogProductPicker
+              allowedTypeIds={allowedTypeIdsForPicker(itemPickerFor)}
+              excludeTypeIds={
+                itemPickerFor === "create" && orderMaterialCode
+                  ? productTypesList
+                      .filter((type) => recipeModelKeys.includes(`${orderMaterialCode}${type.category_code}${type.model_code}`))
+                      .map((type) => type.id)
+                  : undefined
+              }
+              onClose={() => setItemPickerFor(null)}
+              onSelect={(type) => {
+                const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
+                applyProductChoice(itemPickerFor, { productTypeId: type.id, label });
+                setItemPickerFor(null);
+              }}
+              subtitle="Tipos de producto terminado · elige uno"
+              tabs={tabsBar}
+              title="Elegir producto"
+            />
+          );
+        }
+
         return (
           <FinishedItemPicker
-            items={
-              itemPickerFor === "create" && assemblyMode === "ASIGNAR"
-                ? finishedItems.filter((item) => {
-                    if (!orderMaterialCode) return true;
-                    const modelPart = pieceModelKey(item);
-                    return !modelPart || !recipeModelKeys.includes(`${orderMaterialCode}${modelPart}`);
-                  })
-                : finishedItems
-            }
+            items={finishedItems}
             onClose={() => setItemPickerFor(null)}
             onCreate={() => {
               setTypePickerFor(itemPickerFor);
@@ -2472,17 +2507,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               setItemPickerFor(null);
             }}
             requireStock={false}
-            // Solo en ENSAMBLAR (crear orden): marca qué piezas ya tienen
-            // receta de ensamble definida, para no tener que abrirlas a ciegas.
-            rowBadge={
-              itemPickerFor === "create" && assemblyMode === "ENSAMBLAR"
-                ? (item) => {
-                    const key = `${orderMaterialCode ?? ""}${pieceModelKey(item) ?? ""}`;
-                    const recipe = assemblyRecipes.find((candidate) => candidate.model_key === key) ?? null;
-                    return <RecipeBadgeIcon recipe={recipe} />;
-                  }
-                : undefined
-            }
             tabs={tabsBar}
             title="Elegir producto"
           />
@@ -2505,6 +2529,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             applyProductChoice(typePickerFor, { productTypeId: type.id, label });
             setTypePickerFor(null);
           }}
+          rowBadge={
+            assemblyMode === "ENSAMBLAR" && typePickerFor === "create"
+              ? (type) => {
+                  const key = `${orderMaterialCode ?? ""}${type.category_code}${type.model_code}`;
+                  const recipe = assemblyRecipes.find((candidate) => candidate.model_key === key) ?? null;
+                  return <RecipeBadgeIcon recipe={recipe} />;
+                }
+              : undefined
+          }
           title="Elegir tipo de producto"
         />
       ) : null}
@@ -2536,7 +2569,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <th>Producto</th>
                       <th>Material</th>
                       <th>Complementos</th>
-                      <th aria-label="Editar" />
+                      <th aria-label="Acciones" />
                     </tr>
                   </thead>
                   <tbody>
@@ -2553,31 +2586,51 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             {recipe.items.map((item) => (
                               <div key={item.complement_item_id}>
                                 {numericText(item.quantity_per_unit)} {item.unit_code ?? ""} × {item.name ?? "Complemento"}
+                                {item.material_type ? ` (${item.material_type})` : ""}
                               </div>
                             ))}
                           </td>
                           <td>
-                            <button
-                              aria-label={`Editar receta ${modelKey}`}
-                              className="iconOnlyButton"
-                              onClick={() => {
-                                setIsRecipesViewOpen(false);
-                                setRecipeModalContext("maintenance");
-                                setRecipeLines(
-                                  recipe.items.map((item) => ({
-                                    itemId: item.complement_item_id,
-                                    label: item.name ?? "Complemento",
-                                    unitCode: item.unit_code ?? "",
-                                    perUnit: String(Number(item.quantity_per_unit)),
-                                  })),
-                                );
-                                setRecipeModalModelKey(modelKey);
-                              }}
-                              title="Editar receta"
-                              type="button"
-                            >
-                              <Pencil aria-hidden="true" size={16} />
-                            </button>
+                            <div style={{ display: "flex", gap: 4 }}>
+                              <button
+                                aria-label={`Editar receta ${modelKey}`}
+                                className="iconOnlyButton"
+                                onClick={() => {
+                                  setIsRecipesViewOpen(false);
+                                  setRecipeModalContext("maintenance");
+                                  setRecipeLines(
+                                    recipe.items.map((item) => ({
+                                      itemId: item.complement_item_id,
+                                      label: item.name ?? "Complemento",
+                                      unitCode: item.unit_code ?? "",
+                                      perUnit: String(Number(item.quantity_per_unit)),
+                                    })),
+                                  );
+                                  setRecipeModalModelKey(modelKey);
+                                }}
+                                title="Editar receta"
+                                type="button"
+                              >
+                                <Pencil aria-hidden="true" size={16} />
+                              </button>
+                              <button
+                                aria-label={`Eliminar receta ${modelKey}`}
+                                className="iconOnlyButton"
+                                onClick={() =>
+                                  showConfirm(
+                                    "Eliminar receta",
+                                    `¿Eliminar la receta de ${product} (${material})? Esta acción no se puede deshacer.`,
+                                    () => void handleDeleteRecipe(modelKey),
+                                    true,
+                                    "Eliminar",
+                                  )
+                                }
+                                title="Eliminar receta"
+                                type="button"
+                              >
+                                <Trash2 aria-hidden="true" size={16} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2622,7 +2675,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>Definir receta</h2>
-                <p>Complementos y cantidad por unidad para ensamblar este producto</p>
+                <p>
+                  {(() => {
+                    const { product, material } = describeRecipeKey(recipeModalModelKey);
+                    return `${product} · ${material} — complementos y cantidad por unidad`;
+                  })()}
+                </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => closeRecipeModal(true)} type="button">
                 <X aria-hidden="true" size={18} />

@@ -3,8 +3,7 @@
 import { FormEvent, Fragment, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
-import { createCatalogSegment, listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
-import { listInventoryItems } from "@/lib/inventory-api";
+import { createCatalogSegment, listCatalogSegments } from "@/lib/catalog-api";
 import { createProductType, deleteProductType, listProductTypes, type ProductType } from "@/lib/product-types-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { ToastNotice } from "@/components/ui/toast-notice";
@@ -26,11 +25,6 @@ export function ProductTypesManager({
   const queryClient = useQueryClient();
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const { data: types = [], isLoading } = useQuery({ queryKey: ["product-types"], queryFn: listProductTypes });
-  const { data: finishedItems = [] } = useQuery({
-    queryKey: ["finished-products"],
-    queryFn: () => listInventoryItems("FINISHED_PRODUCT"),
-    enabled: mode === "view",
-  });
 
   const categories = segments.filter((s) => s.kind === "CATEGORY" && s.is_active);
   // Opcion 1: nuevo tipo. Opcion 2: producto (nombre) dentro de un tipo; el
@@ -44,70 +38,37 @@ export function ProductTypesManager({
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
 
-  // Productos ya presentes en inventario, agrupados por codigo + nombre (description
-  // de la pieza). Se omiten los que ya estan definidos aqui con ese tipo+categoria+nombre.
-  const inventoryProducts = useMemo(() => {
-    const grouped = new Map<string, { code: string; name: string }>();
-    for (const item of finishedItems) {
-      if (!item.product_code || item.product_code.length !== 7) continue;
-      // Piezas nacidas por conversión/ensamble no traen descripción: su
-      // nombre de producto vive en `name` (el del tipo del catálogo).
-      const name = (item.description ?? "").trim().toUpperCase() || item.name.trim().toUpperCase() || "SIN NOMBRE";
-      grouped.set(`${item.product_code}|${name}`, { code: item.product_code, name });
-    }
-    const defined = new Set(types.map((t) => `${t.category_code}${t.model_code}|${t.name ?? ""}`));
-    return [...grouped.values()]
-      .filter((p) => !defined.has(`${p.code.slice(1)}|${p.name}`))
-      .map((p) => ({ ...p, categoryCode: p.code.slice(1, 3), modelCode: p.code.slice(3) }))
-      .sort((a, b) => a.code.localeCompare(b.code) || a.name.localeCompare(b.name));
-  }, [finishedItems, types]);
-
-  // Drill-down de la vista: tipos → productos (el código de modelo vive en el
-  // producto; ya no hay nivel intermedio de categorías).
+  // Drill-down de la vista: tipos → productos. product_types es la unica
+  // fuente (un tipo = categoria+modelo+nombre, compartido entre materiales;
+  // el material no aplica aqui).
   const [drillType, setDrillType] = useState<string | null>(null);
   const typeGroups = useMemo(() => {
     const catLabel = (code: string) => segments.find((s) => s.kind === "CATEGORY" && s.code === code)?.label ?? code;
-    const byType = new Map<string, { defined: typeof types; inventory: { code: string; name: string }[] }>();
-    const ensure = (cat: string) => {
-      let entry = byType.get(cat);
-      if (!entry) {
-        entry = { defined: [], inventory: [] };
-        byType.set(cat, entry);
-      }
-      return entry;
-    };
+    const byType = new Map<string, typeof types>();
+    // Todos los tipos entran, activos o no: el mantenimiento es el lugar
+    // para verlos y gestionarlos a todos, no solo a los activos.
     for (const t of types) {
-      if (t.is_active) ensure(t.category_code).defined.push(t);
+      const list = byType.get(t.category_code);
+      if (list) list.push(t);
+      else byType.set(t.category_code, [t]);
     }
-    for (const p of inventoryProducts) ensure(p.categoryCode).inventory.push({ code: p.code, name: p.name });
     return [...byType.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([code, entry]) => ({
+      .map(([code, products]) => ({
         code,
         label: catLabel(code),
-        defined: [...entry.defined].sort(
+        products: [...products].sort(
           (x, y) => x.model_code.localeCompare(y.model_code) || (x.name ?? "").localeCompare(y.name ?? ""),
         ),
-        inventory: [...entry.inventory].sort((x, y) => x.code.localeCompare(y.code) || x.name.localeCompare(y.name)),
-        productCount: entry.defined.length + entry.inventory.length,
+        productCount: products.length,
       }));
-  }, [types, inventoryProducts, segments]);
+  }, [types, segments]);
 
   const drilledType = typeGroups.find((g) => g.code === drillType) ?? null;
 
   // Paginación por nivel del drill-down; cada nivel vuelve a la página 1 al entrar.
   const typesPager = usePagination(typeGroups, DRILL_PAGE_SIZE);
-  const productRows = useMemo(
-    () =>
-      drilledType
-        ? [
-            ...drilledType.defined.map((t) => ({ kind: "defined" as const, defined: t, inventory: null })),
-            ...drilledType.inventory.map((p) => ({ kind: "inventory" as const, defined: null, inventory: p })),
-          ]
-        : [],
-    [drilledType],
-  );
-  const productsPager = usePagination(productRows, DRILL_PAGE_SIZE, drillType ?? "");
+  const productsPager = usePagination(drilledType?.products ?? [], DRILL_PAGE_SIZE, drillType ?? "");
 
   useEffect(() => {
     if (!success) return;
@@ -274,45 +235,28 @@ export function ProductTypesManager({
                   <tr>
                     <th style={{ width: 110 }}>Código</th>
                     <th>Producto</th>
-                    <th className="num">Precio</th>
                     <th aria-label="Acciones" />
                   </tr>
                 </thead>
                 <tbody>
-                  {productsPager.pageItems.map((row) => {
-                    if (row.kind === "defined" && row.defined) {
-                      const t = row.defined;
-                      return (
-                        <tr key={t.id}>
-                          <td><span className="orderCodeTag">#{t.category_code}{t.model_code}</span></td>
-                          <td>{t.name ?? "—"}</td>
-                          <td className="num">{t.price ? `$ ${Number(t.price).toLocaleString("es-EC", { minimumFractionDigits: 2 })}` : "—"}</td>
-                          <td style={{ textAlign: "right" }}>
-                            <button
-                              aria-label={`Eliminar ${t.name ?? t.model_label}`}
-                              className="iconOnlyButton dangerIconButton"
-                              onClick={() => void handleDelete(t.id, t.name ?? `${t.category_label} / ${t.model_label}`)}
-                              type="button"
-                            >
-                              <Trash2 aria-hidden="true" size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    }
-                    if (!row.inventory) return null;
-                    const p = row.inventory;
-                    return (
-                      <tr key={`${p.code}-${p.name}`}>
-                        <td><span className={`orderCodeTag${metalTagClass(p.code)}`}>#{p.code}</span></td>
-                        <td>{p.name}</td>
-                        <td className="num">—</td>
-                        <td />
-                      </tr>
-                    );
-                  })}
+                  {productsPager.pageItems.map((t) => (
+                    <tr key={t.id}>
+                      <td><span className="orderCodeTag">#{t.category_code}{t.model_code}</span></td>
+                      <td>{t.name ?? "—"}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <button
+                          aria-label={`Eliminar ${t.name ?? t.model_label}`}
+                          className="iconOnlyButton dangerIconButton"
+                          onClick={() => void handleDelete(t.id, t.name ?? `${t.category_label} / ${t.model_label}`)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                   {drilledType.productCount === 0 ? (
-                    <tr><td colSpan={4}><div className="emptyState">Sin productos en este tipo.</div></td></tr>
+                    <tr><td colSpan={3}><div className="emptyState">Sin productos en este tipo.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>

@@ -171,3 +171,9 @@ export function listAssemblyRecipeModelKeys() {
 export function listAssemblyRecipes() {
   return apiRequest<AssemblyRecipe[]>("/api/production/assembly-recipes/all");
 }
+
+export function deleteAssemblyRecipe(modelKey: string) {
+  return apiRequest<void>(`/api/production/assembly-recipes/${modelKey}`, {
+    method: "DELETE",
+  });
+}

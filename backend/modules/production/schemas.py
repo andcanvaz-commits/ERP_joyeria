@@ -310,6 +310,7 @@ class AssemblyRecipeItemRead(BaseModel):
     complement_item_id: UUID
     name: str | None = None
     unit_code: str | None = None
+    material_type: str | None = None
     quantity_per_unit: Decimal
 
 

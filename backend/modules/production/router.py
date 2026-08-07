@@ -302,6 +302,21 @@ def upsert_assembly_recipe(
         return service.upsert_assembly_recipe(model_key, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.delete("/assembly-recipes/{model_key}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_assembly_recipe(
+    model_key: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> None:
+    if current_user.role == "Jefe de inventario":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        service.delete_assembly_recipe(model_key)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 

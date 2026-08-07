@@ -44,7 +44,7 @@ export type ProductionProcess = {
 // Receta de ensamble por clave de modelo (categoria+modelo, cantidades por unidad).
 export type AssemblyRecipe = {
   model_key: string | null;
-  items: Array<{ complement_item_id: string; name?: string | null; unit_code?: string | null; quantity_per_unit: string }>;
+  items: Array<{ complement_item_id: string; name?: string | null; unit_code?: string | null; material_type?: string | null; quantity_per_unit: string }>;
 };
 
 export type ProductionRunStage = {

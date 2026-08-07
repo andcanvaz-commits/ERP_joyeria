@@ -11,6 +11,10 @@ class ProductTypeError(ValueError):
     pass
 
 
+class ProductTypeInUseError(ProductTypeError):
+    """El tipo tiene piezas de inventario y no se puede eliminar."""
+
+
 class ProductTypeService:
     def __init__(self, session) -> None:
         self.session = session
@@ -101,4 +105,24 @@ class ProductTypeService:
         row = self.session.get(ProductType, type_id)
         if row is None:
             raise ProductTypeError("Tipo de producto no encontrado.")
+        # El tipo se comparte entre materiales: solo se puede eliminar si NO
+        # queda ninguna pieza de ese tipo en inventario, de ningun material
+        # (oro, plata, etc. — el digito de material es el primero del codigo
+        # de 7, el resto categoria+modelo es el tipo).
+        from sqlalchemy import func
+
+        from backend.modules.inventory.models import InventoryItem
+
+        count = self.session.execute(
+            select(func.count()).select_from(InventoryItem).where(
+                InventoryItem.item_type == "FINISHED_PRODUCT",
+                func.length(InventoryItem.product_code) == 7,
+                func.substring(InventoryItem.product_code, 2) == f"{row.category_code}{row.model_code}",
+            )
+        ).scalar_one()
+        if count > 0:
+            raise ProductTypeInUseError(
+                f"No se puede eliminar: hay {count} producto(s) de este tipo en inventario "
+                f"(de algun material). Elimina primero esas piezas."
+            )
         self.session.delete(row)

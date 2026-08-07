@@ -225,21 +225,18 @@ export function SystemDashboard() {
   const runProcessEntries = Object.entries(runsByProcess).slice(0, 6);
   const maxRunProcess = Math.max(1, ...runProcessEntries.map(([, total]) => total));
 
-  // "Mas fabricado": suma cantidades por producto resultante declarado en la
-  // orden (run.products) -- si la orden no declaro productos (formato viejo
-  // o aun sin definir), cae a cantidad por proceso como aproximacion.
+  // "Mas fabricado": gramos en inventario de productos terminados, por
+  // producto (description de la pieza). Sale de inventario real, no de las
+  // ordenes -- las ordenes migradas de papel no tienen producto declarado
+  // (ver "Máquinas"/"Soldar": nombres de proceso, no productos, ni existen
+  // en inventario), asi que basarse ahi mentia. current_stock si es fiable:
+  // todo producto terminado se pesa en gramos.
   const productionByProduct = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const run of runs) {
-      if (run.status === "CANCELADA") continue;
-      if (run.products && run.products.length > 0) {
-        for (const product of run.products) {
-          const name = product.product_name ?? run.process_name;
-          map[name] = (map[name] ?? 0) + (Number(product.quantity) || 0);
-        }
-      } else {
-        map[run.process_name] = (map[run.process_name] ?? 0) + (Number(run.quantity) || 0);
-      }
+    for (const item of inventoryItems) {
+      if (item.item_type !== "FINISHED_PRODUCT") continue;
+      const label = (item.description ?? "").trim() || item.name;
+      map[label] = (map[label] ?? 0) + (Number(item.current_stock) || 0);
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
@@ -359,13 +356,14 @@ export function SystemDashboard() {
             <div className="panelHeader">
               <div>
                 <h2 className="panelTitle">Mas fabricado</h2>
-                <p className="panelText">Top productos por cantidad</p>
+                <p className="panelText">Top productos por gramos en inventario</p>
               </div>
             </div>
             <RankedBarChart
               emptyMessage="No hay produccion registrada."
               isLoading={isLoading}
               items={productionByProduct.map(([name, total]) => ({ id: name, label: name, value: total }))}
+              unit="g"
             />
           </article>
 

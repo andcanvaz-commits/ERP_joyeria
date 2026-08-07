@@ -45,19 +45,36 @@ INVENTORY_ADMIN_ONLY = {"inventory.items.update", "inventory.items.delete"}
 
 
 def _find_waiting_production_runs(session, item_id):
-    """Ordenes ESPERANDO_MATERIAL que necesitan este item de materia prima:
-    candidatas para el aviso de 'destinar' al registrar un ingreso."""
+    """Ordenes ESPERANDO_MATERIAL que necesitan este item -- de materia prima
+    O de complemento pendiente (receta de ensamble): candidatas para el aviso
+    de 'destinar' al registrar un ingreso. allocate_material ya revalida
+    ambos recursos (materia prima y complementos) al aprobar, asi que basta
+    con encontrar la orden aqui; la cobertura real la decide el backend."""
     from sqlalchemy import select
-    from backend.modules.production.models import ProductionRun, ProductionRunStatus
-
-    return list(
-        session.execute(
-            select(ProductionRun).where(
-                ProductionRun.raw_material_item_id == item_id,
-                ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
-            )
-        ).scalars().all()
+    from backend.modules.production.models import (
+        ComplementRequestStatus,
+        ProductionComplementRequest,
+        ProductionRun,
+        ProductionRunStatus,
     )
+
+    by_material = select(ProductionRun).where(
+        ProductionRun.raw_material_item_id == item_id,
+        ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
+    )
+    by_complement = (
+        select(ProductionRun)
+        .join(ProductionComplementRequest, ProductionComplementRequest.run_id == ProductionRun.id)
+        .where(
+            ProductionComplementRequest.item_id == item_id,
+            ProductionComplementRequest.status == ComplementRequestStatus.PENDING,
+            ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
+        )
+    )
+    runs = {run.id: run for run in session.execute(by_material).scalars().all()}
+    for run in session.execute(by_complement).scalars().all():
+        runs.setdefault(run.id, run)
+    return list(runs.values())
 
 
 def ensure_permission(current_user: CurrentUser, permission: str) -> None:
@@ -317,7 +334,7 @@ def create_movement(
     except InventoryDomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-    if payload.movement_type == "ENTRADA" and result.item.item_type == "RAW_MATERIAL":
+    if payload.movement_type == "ENTRADA" and result.item.item_type in ("RAW_MATERIAL", "COMPLEMENT"):
         from backend.modules.inventory.schemas import WaitingProductionRunSummary
 
         waiting_runs = _find_waiting_production_runs(service.repository.session, payload.item_id)
