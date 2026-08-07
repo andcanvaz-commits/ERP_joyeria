@@ -1,4 +1,7 @@
+import os
 from pathlib import Path
+
+import pytest
 
 from backend.scripts.import_historical_orders import parse_orders
 
@@ -9,7 +12,26 @@ from backend.scripts.import_historical_orders import parse_orders
 # se usa la copia del archivo en /tmp/ordenes.xlsx (ver docker cp en el
 # reporte de la Tarea 6). Ajustar de vuelta a la ruta de host si estos tests
 # se corren fuera de Docker.
-XLSX_PATH = Path("/tmp/ordenes.xlsx")
+#
+# El Excel NO esta en el repo (son datos reales de la empresa) y se copiaba a
+# mano al contenedor. Al recrear el contenedor se pierde, y estos tests
+# quedaban en rojo permanente por una dependencia de entorno, no por un bug:
+# una suite siempre roja entrena a ignorar el rojo y esconde las fallas de
+# verdad. Con el skipif quedan como "skipped": el hueco de cobertura sigue a
+# la vista, pero deja de contaminar la señal.
+#
+# Para correrlos de verdad, copia el Excel al contenedor:
+#   docker cp "ruta\Ordenes de Produccion.xlsx" erp_joyeria-api-1:/tmp/ordenes.xlsx
+# o apunta a otra ruta con HISTORICAL_ORDERS_XLSX.
+XLSX_PATH = Path(os.environ.get("HISTORICAL_ORDERS_XLSX", "/tmp/ordenes.xlsx"))
+
+pytestmark = pytest.mark.skipif(
+    not XLSX_PATH.exists(),
+    reason=(
+        f"Requiere el Excel de ordenes historicas en {XLSX_PATH} "
+        "(no esta en el repo; ver la nota de este archivo)."
+    ),
+)
 
 
 def test_parses_37_orders():
