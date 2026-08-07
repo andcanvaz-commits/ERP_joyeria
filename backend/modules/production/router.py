@@ -9,6 +9,7 @@ from backend.modules.inventory.service import InventoryService
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
     AllocateMaterialPayload,
+    AllocationPreviewRead,
     AssemblyRecipeRead,
     AssemblyRecipeUpsert,
     ProductionProcessCreate,
@@ -201,6 +202,83 @@ def allocate_run_material(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.allocate_material(run_id, payload.quantity_units, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/allocation-preview", response_model=AllocationPreviewRead)
+def preview_run_allocation(
+    run_id: UUID,
+    payload: AllocateMaterialPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> AllocationPreviewRead:
+    """Dry-run: cuanto cubriria destinar esta cantidad. NO consume ni cambia
+    estado -- alimenta la confirmacion previa del modal 'Destinar'."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        coverage = service.preview_allocation(run_id, payload.quantity_units)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return AllocationPreviewRead(
+        covered_qty=coverage.covered_qty,
+        target_qty=coverage.target_qty,
+        is_partial=coverage.is_partial,
+        limiting_name=coverage.limiting_name,
+        limiting_available=coverage.limiting_available,
+        limiting_unit=coverage.limiting_unit,
+        limiting_required_per_unit=coverage.limiting_required_per_unit,
+        limiting_is_complement=coverage.limiting_is_complement,
+    )
+
+
+@router.post("/runs/{run_id}/reserve-material", response_model=ProductionRunRead)
+def reserve_run_material(
+    run_id: UUID,
+    payload: AllocateMaterialPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Guarda el stock para esta orden sin consumirlo ni arrancarla."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.reserve_material(run_id, payload.quantity_units, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/release-reservation", response_model=ProductionRunRead)
+def release_run_reservation(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Devuelve al disponible todo lo reservado por esta orden."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.release_material_reservation(run_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/start-reserved", response_model=ProductionRunRead)
+def start_run_with_reserved(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Reserva completa: recien aqui se consume de verdad y arranca."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.start_with_reserved_material(run_id, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

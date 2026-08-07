@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -135,6 +136,52 @@ def _generate_production_code(repository: "ProductionProcessRepository", year: i
 def _stage_code_for(stage_name: str, run_seq: int, stage_order: int) -> str:
     prefix = "".join(c for c in stage_name.upper() if c.isalpha())[:3] or "ETB"
     return f"{prefix}-OP{run_seq:04d}-{stage_order:02d}"
+
+
+@dataclass
+class _MaterialCoverage:
+    """Resultado del calculo de cobertura: cuantas unidades alcanza a cubrir
+    el stock disponible y cual es el recurso que manda (el mas corto)."""
+
+    covered_qty: Decimal
+    target_qty: Decimal
+    limiting_name: str
+    limiting_available: Decimal
+    limiting_unit: str
+    limiting_required_per_unit: Decimal
+    limiting_is_complement: bool
+
+    @property
+    def is_partial(self) -> bool:
+        return self.covered_qty < self.target_qty
+
+    def shortage_message(self) -> str:
+        # Distingue el origen del faltante: la materia prima viene del proceso,
+        # pero un complemento en ENSAMBLAR viene de la receta aprendida
+        # (quantity_per_unit x unidades) y no es evidente de donde salio.
+        origin = (
+            " (complemento pedido por la receta de ensamble del producto: cantidad por unidad x unidades a fabricar)"
+            if self.limiting_is_complement
+            else ""
+        )
+        return (
+            f"Stock insuficiente de '{self.limiting_name}'{origin}: disponible "
+            f"{self.limiting_available} {self.limiting_unit}, se requieren "
+            f"{self.limiting_required_per_unit} {self.limiting_unit} para 1 unidad."
+        )
+
+
+def _reservation_is_complete(run: ProductionRun) -> bool:
+    """True si la corrida tiene reservado el 100% de lo que necesita:
+    materia prima Y cada complemento pendiente."""
+    if run.reserved_material_quantity < run.total_required_material:
+        return False
+    for complement in run.complements:
+        if complement.status != ComplementRequestStatus.PENDING:
+            continue
+        if complement.reserved_quantity < complement.quantity:
+            return False
+    return True
 
 
 class ProductionDomainError(ValueError):
@@ -343,10 +390,22 @@ class ProductionService:
             new_stages.append(stage)
 
         process.stages = new_stages
-        process.product_types = [
-            ProductionProcessProductType(product_type_id=type_id)
-            for type_id in payload.product_type_ids
-        ]
+        # Reconciliar, NO reemplazar la coleccion entera. Con
+        # `process.product_types = [...]` SQLAlchemy emite el INSERT de la fila
+        # nueva antes del DELETE de la vieja en el mismo flush, y el unique
+        # (process_id, product_type_id) lo rechaza: guardar un proceso sin
+        # cambiarle los tipos daba 500. Tocando solo lo que cambio, un tipo que
+        # sigue igual nunca se re-inserta.
+        desired = list(payload.product_type_ids)
+        current = {link.product_type_id: link for link in process.product_types}
+        for type_id, link in current.items():
+            if type_id not in desired:
+                process.product_types.remove(link)
+        for type_id in desired:
+            if type_id not in current:
+                process.product_types.append(
+                    ProductionProcessProductType(product_type_id=type_id)
+                )
         self.repository.flush()
         return self._process_read(process)
 
@@ -669,11 +728,17 @@ class ProductionService:
         for complement in list(run.complements):
             child_qty = complement.quantity * ratio_missing
             complement.quantity = complement.quantity - child_qty
+            # La reserva viaja con la cantidad: lo reservado que corresponde a
+            # las unidades que se van a la hija sigue reservado alla, no se
+            # libera ni se duplica.
+            child_reserved = min(complement.reserved_quantity, child_qty)
+            complement.reserved_quantity = complement.reserved_quantity - child_reserved
             if child_qty > 0:
                 child.complements.append(
                     ProductionComplementRequest(
                         item_id=complement.item_id,
                         quantity=child_qty,
+                        reserved_quantity=child_reserved,
                         unit_code=complement.unit_code,
                         status=ComplementRequestStatus.PENDING,
                     )
@@ -683,10 +748,234 @@ class ProductionService:
         run.total_required_material = run.raw_material_quantity_per_unit * covered_qty
         run.expected_finished_weight = run.total_required_material
         run.root_production_code = root_code
+        # Idem materia prima: la reserva se reparte segun lo que cada corrida
+        # necesita, sin crear ni perder gramos reservados.
+        child_material_reserved = min(
+            run.reserved_material_quantity, child.total_required_material
+        )
+        run.reserved_material_quantity = run.reserved_material_quantity - child_material_reserved
+        child.reserved_material_quantity = child_material_reserved
 
         self.repository.add_run(child)
         self.repository.flush()
         return child
+
+    def _compute_coverage(self, run: ProductionRun, target_qty: Decimal) -> "_MaterialCoverage":
+        """Cuantas de `target_qty` unidades cubre HOY el stock disponible.
+
+        Fuente unica del calculo: la usan tanto el preview (dry-run, no toca
+        nada) como approve_materials (consume de verdad). Si divergieran, el
+        aviso de "esto va a quedar parcial" mentiria.
+
+        Disponible = fisico - reservas de OTRAS corridas. La reserva propia de
+        esta corrida es el stock que le guardamos, asi que cuenta como
+        disponible para ella (exclude_run_id).
+
+        Los insumos por etapa quedan afuera: son cantidad fija por orden, no
+        proporcional a las unidades fabricadas.
+        """
+        from backend.modules.inventory.models import InventoryItem
+
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible.")
+        raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
+        if raw_material is None:
+            raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
+
+        reserved_by_others = self.inventory_service.reserved_by_item(exclude_run_id=run.id)
+
+        def available_of(item) -> Decimal:
+            return item.current_stock - reserved_by_others.get(item.id, Decimal("0"))
+
+        # La cantidad por unidad de cada complemento se deriva del total pedido
+        # sobre las unidades de la orden, no de `target_qty`.
+        run_quantity = run.quantity or Decimal("0")
+        covered = target_qty
+        coverage = _MaterialCoverage(
+            covered_qty=target_qty,
+            target_qty=target_qty,
+            limiting_name=raw_material.name,
+            limiting_available=available_of(raw_material),
+            limiting_unit=raw_material.unit_code,
+            limiting_required_per_unit=run.raw_material_quantity_per_unit,
+            limiting_is_complement=False,
+        )
+
+        raw_needed = run.raw_material_quantity_per_unit * target_qty
+        raw_available = available_of(raw_material)
+        if raw_available < raw_needed and run.raw_material_quantity_per_unit > 0:
+            covered = raw_available // run.raw_material_quantity_per_unit
+
+        for complement in run.complements:
+            if complement.status != ComplementRequestStatus.PENDING:
+                continue
+            item = self.repository.session.get(InventoryItem, complement.item_id)
+            if item is None:
+                raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
+            per_unit = complement.quantity / run_quantity if run_quantity > 0 else complement.quantity
+            needed = per_unit * target_qty
+            item_available = available_of(item)
+            if item_available < needed:
+                candidate = item_available // per_unit if per_unit > 0 else Decimal("0")
+                if candidate < covered:
+                    covered = candidate
+                    coverage.limiting_name = item.name
+                    coverage.limiting_available = item_available
+                    coverage.limiting_unit = item.unit_code
+                    coverage.limiting_required_per_unit = per_unit
+                    coverage.limiting_is_complement = True
+
+        coverage.covered_qty = max(Decimal("0"), min(covered, target_qty))
+        return coverage
+
+    def preview_allocation(self, run_id: UUID, quantity_units: Decimal) -> "_MaterialCoverage":
+        """Dry-run de `allocate_material`: NO consume, NO parte, NO cambia estado."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.WAITING_MATERIAL:
+            raise ProductionDomainError(
+                "Solo se puede destinar material a ordenes en estado ESPERANDO_MATERIAL."
+            )
+        if quantity_units <= 0:
+            raise ProductionDomainError("La cantidad a destinar debe ser mayor a cero.")
+        if quantity_units > run.quantity:
+            raise ProductionDomainError("No puedes destinar mas unidades de las que la orden necesita.")
+        if run.raw_material_item_id is None:
+            raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
+        return self._compute_coverage(run, quantity_units)
+
+    def reserve_material(
+        self, run_id: UUID, quantity_units: Decimal, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        """Guarda stock para esta corrida SIN consumirlo ni arrancarla.
+
+        No hay movimiento de inventario: el material sigue fisicamente en su
+        item. Lo unico que cambia es que deja de estar disponible para otras
+        ordenes (ver InventoryService.available_stock). La corrida se queda en
+        ESPERANDO_MATERIAL hasta que quede reservada al 100%.
+        """
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.WAITING_MATERIAL:
+            raise ProductionDomainError(
+                "Solo se puede reservar material para ordenes en estado ESPERANDO_MATERIAL."
+            )
+        if quantity_units <= 0:
+            raise ProductionDomainError("La cantidad a reservar debe ser mayor a cero.")
+        if quantity_units > run.quantity:
+            raise ProductionDomainError("No puedes reservar mas unidades de las que la orden necesita.")
+
+        # Reserva RECURSO POR RECURSO, independiente. El minimo entre recursos
+        # (_compute_coverage) responde "cuantas unidades puedo ARRANCAR"; aqui
+        # la pregunta es otra: "que guardo de lo que acaba de llegar". Si llego
+        # materia prima pero el complemento sigue en cero, la materia prima
+        # igual se guarda y la orden espera el resto -- que es justamente el
+        # punto de "reservar y esperar". Atarlo al minimo hacia que un recurso
+        # en cero impidiera reservar el que si llego.
+        from backend.modules.inventory.models import InventoryItem
+
+        reserved_by_others = self.inventory_service.reserved_by_item(exclude_run_id=run.id)
+
+        def free_for_this_run(item, already_mine: Decimal) -> Decimal:
+            """Stock que esta corrida todavia puede tomar: el fisico menos lo
+            que retienen otras corridas menos lo que ella ya tiene reservado."""
+            free = item.current_stock - reserved_by_others.get(item.id, Decimal("0")) - already_mine
+            return max(Decimal("0"), free)
+
+        raw_material = self.repository.session.get(InventoryItem, run.raw_material_item_id)
+        if raw_material is None:
+            raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
+
+        added = Decimal("0")
+        short_names: list[str] = []
+
+        wanted = run.raw_material_quantity_per_unit * quantity_units
+        pending = run.total_required_material - run.reserved_material_quantity
+        take = min(wanted, pending, free_for_this_run(raw_material, run.reserved_material_quantity))
+        if take > 0:
+            run.reserved_material_quantity += take
+            added += take
+        elif pending > 0:
+            short_names.append(raw_material.name)
+
+        run_quantity = run.quantity or Decimal("0")
+        for complement in run.complements:
+            if complement.status != ComplementRequestStatus.PENDING:
+                continue
+            item = self.repository.session.get(InventoryItem, complement.item_id)
+            if item is None:
+                raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
+            per_unit = complement.quantity / run_quantity if run_quantity > 0 else complement.quantity
+            wanted = per_unit * quantity_units
+            pending = complement.quantity - complement.reserved_quantity
+            take = min(wanted, pending, free_for_this_run(item, complement.reserved_quantity))
+            if take > 0:
+                complement.reserved_quantity += take
+                added += take
+            elif pending > 0:
+                short_names.append(item.name)
+
+        # Reservar es idempotente: si la corrida ya tiene guardado todo lo que
+        # habia libre, volver a pedirlo no es un error, es un no-op. Solo falla
+        # cuando no se logro reservar nada Y la corrida tampoco tenia nada
+        # guardado de antes -- ahi si no hay de donde sacar y hay que avisar.
+        already_held = run.reserved_material_quantity + sum(
+            (
+                complement.reserved_quantity
+                for complement in run.complements
+                if complement.status == ComplementRequestStatus.PENDING
+            ),
+            Decimal("0"),
+        )
+        if added <= 0 and already_held <= 0:
+            faltantes = ", ".join(f"'{name}'" for name in short_names) or "los materiales de la orden"
+            raise ProductionDomainError(
+                f"No hay stock libre para reservar: {faltantes} sin disponible. "
+                "El stock que existe ya esta reservado para otra orden o consumido."
+            )
+
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def release_material_reservation(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
+        """Devuelve al disponible todo lo reservado por esta corrida."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.WAITING_MATERIAL:
+            raise ProductionDomainError(
+                "Solo se puede liberar la reserva de ordenes en estado ESPERANDO_MATERIAL."
+            )
+        run.reserved_material_quantity = Decimal("0")
+        for complement in run.complements:
+            complement.reserved_quantity = Decimal("0")
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def start_with_reserved_material(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
+        """Consume de verdad las reservas y arranca la corrida.
+
+        Solo procede con la reserva COMPLETA: es la accion explicita del 5.5
+        del handoff -- el usuario espero a juntar todo y recien ahora arranca.
+        """
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.WAITING_MATERIAL:
+            raise ProductionDomainError(
+                "Solo se puede iniciar con reserva una orden en estado ESPERANDO_MATERIAL."
+            )
+        if not _reservation_is_complete(run):
+            raise ProductionDomainError(
+                "La reserva todavia no cubre el 100% de la orden. Destina el material "
+                "que falta o arranca con lo que alcanza."
+            )
+        run.status = ProductionRunStatus.PENDING_INVENTORY
+        self.repository.flush()
+        self.approve_materials(run.id, current_user)
+        return self.start_run(run.id, current_user)
 
     def approve_materials(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:
@@ -705,60 +994,23 @@ class ProductionService:
         if raw_material is None:
             raise ProductionDomainError("La materia prima de la orden ya no existe en inventario.")
 
-        # Si falta materia prima O algun complemento pedido, la orden se
-        # parte: la porcion que el stock mas corto alcanza a cubrir (el
-        # minimo entre materia prima y cada complemento) sigue su curso aqui
-        # mismo; el remanente queda como corrida hija ESPERANDO_MATERIAL bajo
-        # el mismo folio raiz (ver ProductionService.allocate_material).
-        # Los insumos por etapa quedan afuera de este calculo: son cantidad
-        # fija por orden, no proporcional a las unidades fabricadas.
         original_quantity = run.quantity
-        covered_qty = original_quantity
-        limiting_name = raw_material.name
-        limiting_available = raw_material.current_stock
-        limiting_unit = raw_material.unit_code
-        limiting_required_per_unit = run.raw_material_quantity_per_unit
-        # Distingue el origen del faltante en el mensaje: la materia prima
-        # viene del proceso, pero un complemento en ENSAMBLAR viene de la
-        # receta aprendida (quantity_per_unit x cantidad) y no es evidente
-        # para quien crea la orden de donde salio ese numero.
-        limiting_is_complement = False
-
-        if raw_material.current_stock < run.total_required_material:
-            candidate = raw_material.current_stock // run.raw_material_quantity_per_unit
-            if candidate < covered_qty:
-                covered_qty = candidate
-
-        for complement in run.complements:
-            if complement.status != ComplementRequestStatus.PENDING:
-                continue
-            item = self.repository.session.get(InventoryItem, complement.item_id)
-            if item is None:
-                raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
-            per_unit = complement.quantity / original_quantity if original_quantity > 0 else complement.quantity
-            if item.current_stock < complement.quantity:
-                candidate = item.current_stock // per_unit if per_unit > 0 else Decimal("0")
-                if candidate < covered_qty:
-                    covered_qty = candidate
-                    limiting_name = item.name
-                    limiting_available = item.current_stock
-                    limiting_unit = item.unit_code
-                    limiting_required_per_unit = per_unit
-                    limiting_is_complement = True
+        coverage = self._compute_coverage(run, original_quantity)
+        covered_qty = coverage.covered_qty
 
         if covered_qty <= 0:
-            origin = (
-                " (complemento pedido por la receta de ensamble del producto: cantidad por unidad x unidades a fabricar)"
-                if limiting_is_complement
-                else ""
-            )
-            raise ProductionDomainError(
-                f"Stock insuficiente de '{limiting_name}'{origin}: disponible "
-                f"{limiting_available} {limiting_unit}, se requieren "
-                f"{limiting_required_per_unit} {limiting_unit} para 1 unidad."
-            )
+            raise ProductionDomainError(coverage.shortage_message())
         if covered_qty < original_quantity:
             self._split_run_for_partial_material(run, covered_qty)
+
+        # La reserva de esta corrida se vuelve consumo real ahora mismo: se
+        # libera ANTES de mover stock para que el tope por reservado de
+        # create_movement no se cuente a si mismo. Lo que quedo en la corrida
+        # hija (si hubo split) conserva su parte y sigue reservado.
+        run.reserved_material_quantity = Decimal("0")
+        for complement in run.complements:
+            complement.reserved_quantity = Decimal("0")
+        self.repository.flush()
 
         try:
             self.inventory_service.consume_material_for_production(
@@ -1000,6 +1252,7 @@ class ProductionService:
         self._attach_allowed_types([read], [run])
         self._attach_supply_consumptions([read], [run])
         self._attach_plan_names([read], [run])
+        read.reservation_is_complete = _reservation_is_complete(run)
         return read
 
     def list_runs(self) -> list[ProductionRunRead]:
@@ -1009,6 +1262,8 @@ class ProductionService:
         self._attach_allowed_types(reads, runs)
         self._attach_supply_consumptions(reads, runs)
         self._attach_plan_names(reads, runs)
+        for read, run in zip(reads, runs):
+            read.reservation_is_complete = _reservation_is_complete(run)
         return reads
 
     def finish_stage(self, stage_id: UUID, payload: ProductionRunStageFinish, current_user: CurrentUser) -> ProductionRunRead:

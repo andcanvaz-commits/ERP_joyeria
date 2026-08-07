@@ -42,12 +42,14 @@ import {
 import {
   allocateProductionRunMaterial,
   approveProductionRunMaterials,
+  previewProductionRunAllocation,
   rejectProductionRunMaterials,
+  reserveProductionRunMaterial,
   listProductionRuns,
   receiveProductionRunFinishedProduct,
 } from "@/lib/production-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType, WaitingProductionRunSummary } from "@/types/inventory";
-import type { ProductionRun, ProductionRunStage } from "@/types/production";
+import type { AllocationPreview, ProductionRun, ProductionRunStage } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { WorkInProgressRunRow, WorkInProgressTableHead, WORK_IN_PROGRESS_COLUMN_COUNT } from "@/components/shared/work-in-progress-run-row";
@@ -248,6 +250,14 @@ function groupMovementEntries(
 // tiene configurado.
 function itemStockText(item: InventoryItem) {
   return `${numericText(item.current_stock)} ${item.unit_code}`;
+}
+
+// Parte del stock guardada para ordenes en ESPERANDO_MATERIAL: sigue en
+// bodega pero ninguna otra orden puede tomarla. Solo se muestra cuando existe.
+function itemReservedText(item: InventoryItem) {
+  const reserved = Number(item.reserved_stock ?? 0);
+  if (!(reserved > 0)) return null;
+  return `${numericText(item.reserved_stock ?? "0")} ${item.unit_code} reservado`;
 }
 
 // Cantidad de un movimiento en su unidad de medida real, sin conversion
@@ -484,6 +494,11 @@ export function InventoryDashboard() {
   const [allocateQuantities, setAllocateQuantities] = useState<Record<string, string>>({});
   const [allocateErrors, setAllocateErrors] = useState<Record<string, string>>({});
   const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
+  // Confirmacion previa cuando destinar va a quedar PARCIAL: se pregunta antes
+  // de tocar stock (preview dry-run), no despues con un deshacer.
+  const [partialConfirm, setPartialConfirm] = useState<
+    { run: WaitingProductionRunSummary; quantity: string; preview: AllocationPreview } | null
+  >(null);
   // Ventana con los movimientos individuales de un mismo lote/orden.
   const [movementGroupWindow, setMovementGroupWindow] = useState<{ lotCode: string; movements: InventoryMovement[] } | null>(null);
   // Dentro de la ventana de movimientos de la orden: null = resumen por
@@ -1165,12 +1180,64 @@ export function InventoryDashboard() {
     }
   }
 
+  /**
+   * Paso 1 de destinar: pregunta al backend cuanto se alcanza a cubrir SIN
+   * tocar nada. Si cubre todo, procede directo; si va a quedar parcial, abre
+   * la confirmacion para que el usuario elija arrancar o reservar y esperar.
+   */
   async function handleAllocateRun(run: WaitingProductionRunSummary) {
     const quantity = allocateQuantities[run.run_id] ?? String(Number(run.missing_quantity));
     setAllocateErrors((current) => ({ ...current, [run.run_id]: "" }));
     setAllocatingRunId(run.run_id);
     try {
+      const preview = await previewProductionRunAllocation(run.run_id, quantity);
+      if (preview.is_partial) {
+        setPartialConfirm({ run, quantity, preview });
+        return;
+      }
+      await runAllocation(run, quantity);
+    } catch (nextError) {
+      setAllocateErrors((current) => ({
+        ...current,
+        [run.run_id]: nextError instanceof Error ? nextError.message : "No se pudo destinar el material.",
+      }));
+    } finally {
+      setAllocatingRunId(null);
+    }
+  }
+
+  /** Reserva sin consumir: el stock queda guardado para esta orden puntual. */
+  async function handleReserveForRun(run: WaitingProductionRunSummary, quantity: string) {
+    setAllocateErrors((current) => ({ ...current, [run.run_id]: "" }));
+    setAllocatingRunId(run.run_id);
+    try {
+      const reserved = await reserveProductionRunMaterial(run.run_id, quantity);
+      setPartialConfirm(null);
+      setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
+      setSuccess(
+        `Material reservado para la orden ${run.production_code ?? run.run_id}. ` +
+          (reserved.reservation_is_complete
+            ? "Ya esta completa: puedes iniciarla desde Produccion."
+            : "La orden sigue esperando el resto para poder iniciar."),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
+    } catch (nextError) {
+      setAllocateErrors((current) => ({
+        ...current,
+        [run.run_id]: nextError instanceof Error ? nextError.message : "No se pudo reservar el material.",
+      }));
+    } finally {
+      setAllocatingRunId(null);
+    }
+  }
+
+  /** Paso 2: destinar de verdad (consume, parte lo que no alcanza y arranca). */
+  async function runAllocation(run: WaitingProductionRunSummary, quantity: string) {
+    setAllocatingRunId(run.run_id);
+    try {
       const started = await allocateProductionRunMaterial(run.run_id, quantity);
+      setPartialConfirm(null);
       const nextRuns = await listProductionRuns();
       const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === started.id);
       setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
@@ -2370,7 +2437,14 @@ export function InventoryDashboard() {
                         <td>{item.material_type ?? item.name}</td>
                         <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
                         <td>{item.purity ?? "—"}</td>
-                        <td className="num">{itemStockText(item)}</td>
+                        <td className="num">
+                          {itemStockText(item)}
+                          {itemReservedText(item) ? (
+                            <div>
+                              <small style={{ color: "var(--muted)" }}>{itemReservedText(item)}</small>
+                            </div>
+                          ) : null}
+                        </td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
                         <td className="num">$ {numericText(String(totalValue))}</td>
@@ -2448,7 +2522,14 @@ export function InventoryDashboard() {
                         <td className="num">{rawItemsPager.page * rawItemsPager.pageSize + index + 1}</td>
                         <td>{item.name}</td>
                         <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={item.description ?? undefined}>{item.description ?? "—"}</td>
-                        <td className="num">{itemStockText(item)}</td>
+                        <td className="num">
+                          {itemStockText(item)}
+                          {itemReservedText(item) ? (
+                            <div>
+                              <small style={{ color: "var(--muted)" }}>{itemReservedText(item)}</small>
+                            </div>
+                          ) : null}
+                        </td>
                         <td><span className={`stockBadge stockBadge--${status.level}`}>{status.label}</span></td>
                         <td className="num">$ {numericText(averageCost)}</td>
                         <td className="num">$ {numericText(String(totalValue))}</td>
@@ -3466,6 +3547,94 @@ export function InventoryDashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {partialConfirm ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Esta orden quedaria parcial">
+          <section className="modalWindow" style={{ maxWidth: 560 }}>
+            <div className="modalHeader">
+              <div>
+                <h2>Esto no alcanza para la orden completa</h2>
+                <p>
+                  {Number(partialConfirm.preview.covered_qty) > 0 ? (
+                    <>
+                      Solo cubre {numericText(partialConfirm.preview.covered_qty)} de{" "}
+                      {numericText(partialConfirm.preview.target_qty)} unidades de la orden{" "}
+                      {partialConfirm.run.production_code ?? partialConfirm.run.run_id}.
+                    </>
+                  ) : (
+                    <>
+                      No alcanza para producir ni una unidad de la orden{" "}
+                      {partialConfirm.run.production_code ?? partialConfirm.run.run_id}: falta
+                      otro material. Puedes guardar lo que llego y esperar el resto.
+                    </>
+                  )}
+                </p>
+              </div>
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => setPartialConfirm(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
+              <div style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
+                <span style={{ color: "var(--muted)" }}>
+                  Lo que limita es <strong>{partialConfirm.preview.limiting_name}</strong>
+                  {partialConfirm.preview.limiting_is_complement ? " (complemento de la receta)" : ""}:
+                  quedan {numericText(partialConfirm.preview.limiting_available)}{" "}
+                  {partialConfirm.preview.limiting_unit} disponibles y cada unidad necesita{" "}
+                  {numericText(partialConfirm.preview.limiting_required_per_unit)}{" "}
+                  {partialConfirm.preview.limiting_unit}.
+                </span>
+              </div>
+
+              {/* Con cobertura 0 no se ofrece arrancar: el backend lo
+                  rechazaria (no hay ni una unidad completa que producir) y
+                  seria un boton que solo sabe fallar. */}
+              {Number(partialConfirm.preview.covered_qty) > 0 ? (
+                <div style={{ display: "grid", gap: 4 }}>
+                  <button
+                    className="button buttonPrimary"
+                    disabled={allocatingRunId === partialConfirm.run.run_id}
+                    onClick={() => void runAllocation(partialConfirm.run, partialConfirm.quantity)}
+                    type="button"
+                  >
+                    Arrancar con lo que alcanza
+                  </button>
+                  <small style={{ color: "var(--muted)" }}>
+                    Consume el material ahora, arranca {numericText(partialConfirm.preview.covered_qty)} unidades
+                    y el resto queda como una orden nueva esperando material.
+                  </small>
+                </div>
+              ) : null}
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <button
+                  className={Number(partialConfirm.preview.covered_qty) > 0 ? "button" : "button buttonPrimary"}
+                  disabled={allocatingRunId === partialConfirm.run.run_id}
+                  onClick={() => void handleReserveForRun(partialConfirm.run, partialConfirm.quantity)}
+                  type="button"
+                >
+                  Reservar y esperar a completar
+                </button>
+                <small style={{ color: "var(--muted)" }}>
+                  No consume ni arranca nada: el material queda guardado para esta orden, deja de estar
+                  disponible para otras y la orden no se parte.
+                </small>
+              </div>
+
+              {allocateErrors[partialConfirm.run.run_id] ? (
+                <small style={{ color: "var(--danger, #c0392b)" }}>
+                  {allocateErrors[partialConfirm.run.run_id]}
+                </small>
+              ) : null}
             </div>
           </section>
         </div>

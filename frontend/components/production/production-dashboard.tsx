@@ -43,7 +43,9 @@ import {
   listAssemblyRecipes,
   listProcesses,
   listProductionRuns,
+  releaseProductionRunReservation,
   startProductionRun,
+  startProductionRunWithReserved,
   updateProcess,
   updateProductionRunProducts,
   upsertAssemblyRecipe,
@@ -450,6 +452,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Corrida cuya reserva se esta iniciando o liberando (bloquea sus botones).
+  const [reservationRunId, setReservationRunId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
@@ -1298,6 +1302,38 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
+  /** Reserva completa: recien aqui se consume de verdad y arranca la orden. */
+  async function handleStartReserved(run: ProductionRun) {
+    setError(null);
+    setSuccess(null);
+    setReservationRunId(run.id);
+    try {
+      await startProductionRunWithReserved(run.id);
+      setSuccess(`Produccion iniciada con el material reservado (${run.production_code ?? ""}).`);
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar con lo reservado.");
+    } finally {
+      setReservationRunId(null);
+    }
+  }
+
+  /** Devuelve el material reservado al stock disponible del inventario. */
+  async function handleReleaseReservation(run: ProductionRun) {
+    setError(null);
+    setSuccess(null);
+    setReservationRunId(run.id);
+    try {
+      await releaseProductionRunReservation(run.id);
+      setSuccess("Reserva liberada: el material vuelve a estar disponible.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo liberar la reserva.");
+    } finally {
+      setReservationRunId(null);
+    }
+  }
+
   async function handleFinishStage(
     stage: ProductionRunStage,
     options: { decision?: "APPROVED" | "REJECTED"; justification?: string } = {}
@@ -2066,7 +2102,39 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     </div>
                     <div className="productionRunListRowMeta">
                       <span>Faltan {numericText(run.quantity)} {run.raw_material_unit_code}</span>
+                      {/* Reserva: inventario destino stock pero eligio esperar a
+                          completar todo antes de arrancar (5.5/5.6 del handoff). */}
+                      {Number(run.reserved_material_quantity ?? 0) > 0 ? (
+                        <span>
+                          Reservado {numericText(run.reserved_material_quantity ?? "0")} de{" "}
+                          {numericText(run.total_required_material)} {run.raw_material_unit_code}
+                        </span>
+                      ) : null}
                     </div>
+                    {Number(run.reserved_material_quantity ?? 0) > 0 ? (
+                      <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                        {run.reservation_is_complete ? (
+                          <button
+                            className="button buttonPrimary"
+                            disabled={reservationRunId === run.id}
+                            onClick={() => void handleStartReserved(run)}
+                            type="button"
+                          >
+                            {reservationRunId === run.id ? "Iniciando" : "Iniciar con lo reservado"}
+                          </button>
+                        ) : (
+                          <span className="panelText">Reserva incompleta: falta material para iniciar.</span>
+                        )}
+                        <button
+                          className="button"
+                          disabled={reservationRunId === run.id}
+                          onClick={() => void handleReleaseReservation(run)}
+                          type="button"
+                        >
+                          Liberar reserva
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -3102,10 +3170,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <span>
                 <strong>Estado</strong>
                 <StatusPunch label={runStatusLabel(selectedStatsRun.status)} tone={runStatusTone(selectedStatsRun.status)} />
-              </span>
-              <span>
-                <strong>Resultado</strong>
-                {Number(selectedStatsRun.waste_percent ?? 0) <= Number(selectedStatsRun.waste_limit_percent) ? "Dentro del limite" : "Fuera del limite"}
               </span>
               <RunWasteHero run={selectedStatsRun} />
               <span>

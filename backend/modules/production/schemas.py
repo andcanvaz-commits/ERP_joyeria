@@ -183,6 +183,21 @@ class ReceiveFinishedProductPayload(BaseModel):
     waste_item_name: str | None = Field(default=None, max_length=180)
 
 
+class AllocationPreviewRead(BaseModel):
+    """Dry-run de destinar: cuanto se alcanza a cubrir, sin tocar nada."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    covered_qty: Decimal
+    target_qty: Decimal
+    is_partial: bool
+    limiting_name: str
+    limiting_available: Decimal
+    limiting_unit: str
+    limiting_required_per_unit: Decimal
+    limiting_is_complement: bool
+
+
 class AllocateMaterialPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -278,6 +293,8 @@ class RunComplementRead(BaseModel):
     item_id: UUID
     name: str | None = None
     quantity: Decimal
+    # Guardado para esta orden pero todavia no consumido (no hay movimiento).
+    reserved_quantity: Decimal = Decimal("0")
     unit_code: str
     status: str
 
@@ -347,6 +364,10 @@ class ProductionRunRead(BaseModel):
     raw_material_quantity_per_unit: Decimal
     raw_material_unit_code: str
     total_required_material: Decimal
+    # Materia prima guardada para esta orden sin consumir todavia. Junto con
+    # reservation_is_complete gobierna el boton "Iniciar con lo reservado".
+    reserved_material_quantity: Decimal = Decimal("0")
+    reservation_is_complete: bool = False
     waste_limit_percent: Decimal
     expected_finished_weight: Decimal
     actual_finished_weight: Decimal | None = None

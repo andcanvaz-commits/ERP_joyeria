@@ -265,6 +265,8 @@ def upgrade_production_tables() -> None:
         "decided_by_user_id UUID, "
         "decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), "
         "attempt_no INTEGER NOT NULL DEFAULT 1)",
+        "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS reserved_material_quantity NUMERIC(14,4) NOT NULL DEFAULT 0",
+        "ALTER TABLE production_complement_requests ADD COLUMN IF NOT EXISTS reserved_quantity NUMERIC(14,4) NOT NULL DEFAULT 0",
     )
     with engine.begin() as connection:
         for statement in statements:

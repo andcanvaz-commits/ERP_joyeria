@@ -61,6 +61,10 @@ class InventoryNotFoundError(LookupError):
 
 POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION", "CONVERSION_ENTRADA", "RECLASIFICACION_ENTRADA"}
 NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA", "CONVERSION_SALIDA", "RECLASIFICACION_SALIDA"}
+# Salidas que nacen del propio flujo de produccion: no se les aplica el tope
+# por stock reservado porque approve_materials ya libero la reserva de la
+# corrida antes de consumir (ver ProductionService.approve_materials).
+PRODUCTION_MOVEMENTS = {"CONSUMO_PRODUCCION"}
 ITEM_TYPE_PREFIXES = {
     "RAW_MATERIAL": "MP",
     "SUPPLY": "IN",
@@ -264,8 +268,86 @@ class InventoryService(InventoryIntegrationPort):
         )
         return [salida, entrada]
 
+    # ------------------------------------------------------------------
+    # Stock disponible = fisico - reservado
+    #
+    # FUENTE UNICA DE VERDAD para "¿alcanza?". `current_stock` es lo que hay
+    # fisicamente en la bodega; `available_stock` es lo que se puede
+    # comprometer. Todo lugar que decida disponibilidad debe usar estos
+    # helpers -- si alguno lee `current_stock` a secas, dos ordenes pueden
+    # comprometer el mismo gramo de oro.
+    # ------------------------------------------------------------------
+
+    def reserved_by_item(self, exclude_run_id: UUID | None = None) -> dict[UUID, Decimal]:
+        """Cuanto stock esta reservado por corridas ESPERANDO_MATERIAL, por item.
+
+        `exclude_run_id` deja fuera las reservas de una corrida puntual: al
+        aprobarle materiales a esa corrida, su propia reserva SI esta
+        disponible para ella (es justamente el stock que le guardamos).
+        """
+        from backend.modules.production.models import (
+            ComplementRequestStatus,
+            ProductionComplementRequest,
+            ProductionRun,
+            ProductionRunStatus,
+        )
+
+        totals: dict[UUID, Decimal] = {}
+
+        material_query = select(
+            ProductionRun.raw_material_item_id,
+            func.sum(ProductionRun.reserved_material_quantity),
+        ).where(
+            ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
+            ProductionRun.reserved_material_quantity > 0,
+            ProductionRun.raw_material_item_id.is_not(None),
+        )
+        if exclude_run_id is not None:
+            material_query = material_query.where(ProductionRun.id != exclude_run_id)
+        for item_id, total in self.repository.session.execute(
+            material_query.group_by(ProductionRun.raw_material_item_id)
+        ).all():
+            totals[item_id] = totals.get(item_id, Decimal("0")) + (total or Decimal("0"))
+
+        complement_query = (
+            select(
+                ProductionComplementRequest.item_id,
+                func.sum(ProductionComplementRequest.reserved_quantity),
+            )
+            .join(ProductionRun, ProductionRun.id == ProductionComplementRequest.run_id)
+            .where(
+                ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
+                ProductionComplementRequest.status == ComplementRequestStatus.PENDING,
+                ProductionComplementRequest.reserved_quantity > 0,
+            )
+        )
+        if exclude_run_id is not None:
+            complement_query = complement_query.where(ProductionRun.id != exclude_run_id)
+        for item_id, total in self.repository.session.execute(
+            complement_query.group_by(ProductionComplementRequest.item_id)
+        ).all():
+            totals[item_id] = totals.get(item_id, Decimal("0")) + (total or Decimal("0"))
+
+        return totals
+
+    def reserved_stock(self, item_id: UUID, exclude_run_id: UUID | None = None) -> Decimal:
+        return self.reserved_by_item(exclude_run_id).get(item_id, Decimal("0"))
+
+    def available_stock(self, item: InventoryItem, exclude_run_id: UUID | None = None) -> Decimal:
+        """Lo que realmente se puede comprometer de este item."""
+        reserved = self.reserved_stock(item.id, exclude_run_id)
+        return item.current_stock - reserved
+
     def list_items(self, item_type: str | None = None) -> list[InventoryItemRead]:
-        return [InventoryItemRead.model_validate(item) for item in self.repository.list_items(item_type)]
+        # Una sola agregacion para toda la lista (sin N+1 por item).
+        reserved = self.reserved_by_item()
+        reads = []
+        for item in self.repository.list_items(item_type):
+            read = InventoryItemRead.model_validate(item)
+            read.reserved_stock = reserved.get(item.id, Decimal("0"))
+            read.available_stock = item.current_stock - read.reserved_stock
+            reads.append(read)
+        return reads
 
     def create_movement(
         self, payload: InventoryMovementCreate, user_id: UUID | None, lot_code: str | None = None
@@ -276,6 +358,19 @@ class InventoryService(InventoryIntegrationPort):
         next_stock = item.current_stock + delta
         if next_stock < 0:
             raise InventoryDomainError("El movimiento dejaria el stock en negativo.")
+        # Una salida no puede llevarse stock reservado para una orden: la
+        # reserva existe justamente para que ese material siga ahi cuando la
+        # orden arranque. El consumo de la propia produccion pasa por
+        # consume_material_for_production, que libera la reserva antes.
+        if delta < 0 and payload.movement_type not in PRODUCTION_MOVEMENTS:
+            reserved = self.reserved_stock(item.id)
+            if reserved > 0 and next_stock < reserved:
+                raise InventoryDomainError(
+                    f"Hay {reserved} {item.unit_code} de '{item.name}' reservados para "
+                    f"ordenes de produccion en espera. Disponible para esta salida: "
+                    f"{item.current_stock - reserved} {item.unit_code}. "
+                    "Libera la reserva desde la orden si necesitas usar ese stock."
+                )
 
         # Un movimiento sobre un item archivado lo reactiva: archivar nunca
         # bloquea entradas futuras (ej. reaparece en una factura XML).
@@ -392,10 +487,14 @@ class InventoryService(InventoryIntegrationPort):
 
     def get_summary(self) -> InventorySummary:
         items = self.repository.list_items()
+        # Stock bajo se mide contra lo DISPONIBLE: material reservado para una
+        # orden en espera no sirve para cubrir el minimo.
+        reserved = self.reserved_by_item()
         low_stock_items = sum(
             1
             for item in items
-            if item.minimum_stock is not None and item.current_stock <= item.minimum_stock
+            if item.minimum_stock is not None
+            and item.current_stock - reserved.get(item.id, Decimal("0")) <= item.minimum_stock
         )
         return InventorySummary(
             raw_materials=sum(1 for item in items if item.item_type == "RAW_MATERIAL"),
@@ -475,9 +574,14 @@ class InventoryService(InventoryIntegrationPort):
         requirements: tuple[ProductionMaterialRequirement, ...],
     ) -> InventoryAvailabilityResult:
         lines = []
+        reserved = self.reserved_by_item()
         for requirement in requirements:
             item = self.repository.get_item(requirement.item_id)
-            available = item.current_stock if item is not None else Decimal("0")
+            available = (
+                item.current_stock - reserved.get(item.id, Decimal("0"))
+                if item is not None
+                else Decimal("0")
+            )
             missing = max(Decimal("0"), requirement.quantity - available)
             lines.append(
                 InventoryAvailabilityLine(

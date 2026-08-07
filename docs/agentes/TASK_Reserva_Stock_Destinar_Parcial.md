@@ -1,5 +1,8 @@
 # Reserva de stock al destinar parcial (materia prima + complementos)
 
+> **ESTADO: implementado** (2026-08-06). Ver sección 8 al final para qué quedó
+> dónde y las decisiones que se tomaron sobre los puntos abiertos.
+
 Documento de handoff para implementar en otra sesión. Contiene todo el contexto necesario para arrancar sin haber estado en la conversación original.
 
 ## 1. Contexto del sistema (por si no lo conocés)
@@ -108,3 +111,92 @@ Debe poder verse qué está reservado y para qué orden (probablemente en la vis
 7. Botón "Iniciar" cuando reserva completa (5.5).
 8. Vista de reservas (5.6).
 9. Antes de dar por terminado: probar en vivo con `docker exec` contra la DB real (como se hizo en la sesión anterior) simulando una orden con materia prima Y complemento faltantes a la vez, para confirmar que el mínimo se calcula bien y que NINGÚN otro lugar del sistema deja pasar el stock reservado como si estuviera libre.
+
+## 8. Implementación (2026-08-06)
+
+### Modelo y migración
+
+- `ProductionRun.reserved_material_quantity` y `ProductionComplementRequest.reserved_quantity`,
+  ambos `NUMERIC(14,4) NOT NULL DEFAULT 0`.
+- Migración `d0e1f2a3b4c5_reserva_de_stock_destinar_parcial.py`, aditiva: `server_default='0'`
+  significa "nada reservado", que es el comportamiento previo. Las filas existentes no
+  cambian de valor ni de significado.
+- Espejo idempotente en `upgrade_production_tables()` de `main.py` (bases de dev viejas).
+
+**Decisión sobre el punto abierto del 5.1:** reserva **parcial** por complemento
+(`reserved_quantity`), no un status `RESERVADO` de todo-o-nada. El caso de uso es juntar
+el faltante en varias entradas; un status binario lo impediría.
+
+### Stock disponible (5.2 — el punto de mayor riesgo)
+
+Fuente única en `InventoryService`:
+
+- `reserved_by_item(exclude_run_id=None)` — una sola agregación SQL, sin N+1.
+- `reserved_stock(item_id, ...)` y `available_stock(item, ...)`.
+
+`exclude_run_id` existe porque la reserva **propia** de una corrida sí está disponible
+para ella: es justamente el stock que se le guardó.
+
+Callers migrados de `current_stock` a disponible:
+
+| dónde | qué decide |
+|---|---|
+| `ProductionService._compute_coverage` | cuánto alcanza a cubrir (aprobar y preview) |
+| `InventoryService.get_summary` | alerta de stock bajo |
+| `InventoryService.check_material_availability` | contrato con producción |
+| `InventoryService.create_movement` | **bloquea** una SALIDA que se lleve stock reservado |
+| `InventoryService.list_items` | expone `reserved_stock` / `available_stock` a la UI |
+
+`CONSUMO_PRODUCCION` queda exento del tope (`PRODUCTION_MOVEMENTS`) porque
+`approve_materials` libera la reserva de la corrida **antes** de consumir.
+
+Los `current_stock` que quedan son de lotes `FINISHED_PRODUCT`/`WASTE` (conversión,
+combinación, reclasificación) y de `delete_item`/`archive_item`: ninguno decide
+disponibilidad de materia prima o complementos, que son los únicos tipos reservables.
+
+### Cobertura: una sola fuente
+
+`_compute_coverage(run, target_qty)` la usan **tanto** el preview (dry-run) como
+`approve_materials` (consumo real). Si divergieran, el aviso de "esto va a quedar
+parcial" mentiría.
+
+### Endpoints nuevos (`/api/production/runs/{id}/...`)
+
+- `POST allocation-preview` → `{covered_qty, target_qty, is_partial, limiting_*}`. No muta.
+- `POST reserve-material` → guarda sin consumir, sin arrancar y **sin partir** la orden.
+- `POST release-reservation` → devuelve todo al disponible.
+- `POST start-reserved` → solo con reserva al 100%: consume de verdad y arranca.
+
+`reserve-material` reserva lo que **de verdad alcanza** (`covered_qty`), no lo que se
+pidió: reservar stock inexistente dejaría el disponible en negativo.
+
+### Frontend
+
+- `inventory-dashboard.tsx`: "Destinar" ahora llama al preview primero. Si cubre todo,
+  procede igual que antes; si va a quedar parcial, abre confirmación con
+  **"Arrancar con lo que alcanza"** vs **"Reservar y esperar a completar"**, indicando
+  qué recurso limita y cuánto queda.
+- Tablas de materia prima y complementos: muestran "X reservado" bajo el stock.
+- `production-dashboard.tsx`, panel "Esperando material": muestra reservado/requerido,
+  con **"Iniciar con lo reservado"** (solo si `reservation_is_complete`) y
+  **"Liberar reserva"**.
+
+### Verificación
+
+- `pytest`: 53 pasan. 12 tests nuevos en `test_material_reservation.py`.
+  Los 3 fallos restantes (`test_historical_import_parser`) son **preexistentes**:
+  buscan `/tmp/ordenes.xlsx`, que no está en el repo.
+- `test_allocate_material_rejects_insufficient_stock` estaba **rojo desde antes** de este
+  cambio: quedó desactualizado por el fix #3 de la sección 3 (ya no lanza error, ahora
+  parte y arranca lo cubierto). Se reemplazó por dos tests que cubren el comportamiento real.
+- `npm run build`: limpio. `tsc --noEmit`: limpio.
+- Prueba en vivo contra la API con una orden a la que le faltan materia prima **y**
+  complemento a la vez: el mínimo sale del complemento (4 de 10 unidades), y el stock
+  reservado queda invisible para `available_stock`, `list_items`,
+  `check_material_availability`, una SALIDA manual y el `approve_materials` de otra orden.
+
+### Pendiente / a criterio
+
+- `npm run lint` está roto de antes: `next lint` ya no existe en Next 16.
+- La reserva no expira sola. Si una orden queda reservada y olvidada, ese stock queda
+  fuera del disponible hasta que alguien la libere a mano.

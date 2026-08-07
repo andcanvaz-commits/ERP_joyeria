@@ -106,6 +106,10 @@ export type ProductionRun = {
   raw_material_quantity_per_unit: string;
   raw_material_unit_code: string;
   total_required_material: string;
+  // Materia prima guardada para esta orden sin consumir todavía. Con
+  // reservation_is_complete gobierna el botón "Iniciar con lo reservado".
+  reserved_material_quantity?: string;
+  reservation_is_complete?: boolean;
   waste_limit_percent: string;
   expected_finished_weight: string;
   actual_finished_weight: string | null;
@@ -141,7 +145,16 @@ export type ProductionRun = {
     unit_code?: string | null;
   }>;
   // Complementos de inventario solicitados para ensamblar.
-  complements?: Array<{ id: string; item_id: string; name?: string | null; quantity: string; unit_code: string; status: string }>;
+  complements?: Array<{
+    id: string;
+    item_id: string;
+    name?: string | null;
+    quantity: string;
+    // Guardado para esta orden pero todavía no consumido.
+    reserved_quantity?: string;
+    unit_code: string;
+    status: string;
+  }>;
   // Líneas de evento del acta de entrega/recepción para certificación histórica.
   event_lines?: Array<{ side: "ENTREGA" | "RECEPCION"; gramos: string; unidad: string; detalle: string | null; line_order: number }>;
   // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
@@ -150,4 +163,16 @@ export type ProductionRun = {
   assembly_pending: boolean;
   // Combinacion de complementos aplicada al ensamble (totales).
   assembly_items?: Array<{ id: string; complement_item_id: string; name?: string | null; quantity: string }>;
+};
+
+/** Dry-run de "destinar": cuánto alcanza a cubrir el stock disponible hoy. */
+export type AllocationPreview = {
+  covered_qty: string;
+  target_qty: string;
+  is_partial: boolean;
+  limiting_name: string;
+  limiting_available: string;
+  limiting_unit: string;
+  limiting_required_per_unit: string;
+  limiting_is_complement: boolean;
 };

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 InventoryItemType = Literal["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WORK_IN_PROGRESS", "FINISHED_PRODUCT", "WASTE"]
@@ -95,9 +95,23 @@ class InventoryItemRead(BaseModel):
     unit_code: str
     minimum_stock: Decimal | None = None
     current_stock: Decimal
+    # Fisico vs comprometible: `current_stock` es lo que hay en bodega;
+    # `reserved_stock` esta guardado para ordenes en ESPERANDO_MATERIAL y
+    # `available_stock` es lo unico que otra orden puede tomar.
+    reserved_stock: Decimal = Decimal("0")
+    available_stock: Decimal = Decimal("0")
     average_cost: Decimal = Decimal("0")
     archived_at: datetime | None = None
     complement_type_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _derive_available_stock(self) -> "InventoryItemRead":
+        """`available_stock` siempre se deriva; nadie puede setearlo mal.
+        Quien conoce las reservas (InventoryService.list_items) llena
+        `reserved_stock` y el disponible sale solo. En cualquier otra ruta
+        de lectura reserved=0 y disponible == fisico, que es lo correcto."""
+        object.__setattr__(self, "available_stock", self.current_stock - self.reserved_stock)
+        return self
 
 
 class LotConversionCreate(BaseModel):

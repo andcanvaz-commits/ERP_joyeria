@@ -178,6 +178,13 @@ class ProductionRun(Base):
     raw_material_quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     raw_material_unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     total_required_material: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    # Materia prima RESERVADA pero aun no consumida: inventario destino stock a
+    # esta corrida y eligio esperar a completar todo antes de arrancar. No es un
+    # movimiento -- el stock sigue fisicamente en el item, pero deja de estar
+    # disponible para otras ordenes (ver InventoryService.available_stock).
+    reserved_material_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
+    )
     waste_limit_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
     expected_finished_weight: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     actual_finished_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
@@ -342,6 +349,13 @@ class ProductionComplementRequest(Base):
     )
     item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    # Parcial a proposito: el stock llega de a poco y la reserva se acumula
+    # ingreso tras ingreso hasta cubrir `quantity`. Un status "RESERVADO" de
+    # todo-o-nada impediria juntar el faltante en varias entradas, que es
+    # justo el caso de uso.
+    reserved_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
+    )
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=ComplementRequestStatus.PENDING

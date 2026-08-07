@@ -67,11 +67,34 @@ def test_allocate_material_rejects_more_than_needed(
         production_service.allocate_material(child.id, Decimal("999"), current_user)
 
 
-def test_allocate_material_rejects_insufficient_stock(
+def test_allocate_material_starts_what_is_covered_and_splits_the_rest(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Destinar mas de lo que el stock cubre NO es un error: approve_materials
+    es la unica fuente de verdad, arranca lo que alcanza y deja el remanente
+    esperando. (Antes esto lanzaba 'Stock insuficiente' por una validacion
+    prematura que solo miraba materia prima; ver seccion 3 del handoff.)"""
+    _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
+    raw_material.current_stock = Decimal("100")  # solo cubre 10 de las 40 pedidas
+    db_session.flush()
+
+    result = production_service.allocate_material(child.id, Decimal("40"), current_user)
+
+    assert result.status == "EN_PROCESO"
+    assert result.quantity == Decimal("10")
+    grandchildren = [
+        r for r in production_service.repository.list_runs() if r.parent_run_id == child.id
+    ]
+    assert len(grandchildren) == 1
+    assert grandchildren[0].quantity == Decimal("30")
+    assert grandchildren[0].status == "ESPERANDO_MATERIAL"
+
+
+def test_allocate_material_rejects_when_nothing_is_covered(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
-    raw_material.current_stock = Decimal("100")  # solo cubre 10 de las 40 pedidas
+    raw_material.current_stock = Decimal("0")
     db_session.flush()
 
     with pytest.raises(ProductionDomainError, match="Stock insuficiente"):

@@ -24,6 +24,11 @@ export type InventoryItem = {
   unit_code: string;
   minimum_stock: string | null;
   current_stock: string;
+  // Físico vs comprometible: current_stock es lo que hay en bodega,
+  // reserved_stock está guardado para órdenes en ESPERANDO_MATERIAL y
+  // available_stock es lo único que otra orden puede tomar.
+  reserved_stock?: string;
+  available_stock?: string;
   material_type?: string | null;
   purity?: string | null;
   average_cost?: string;

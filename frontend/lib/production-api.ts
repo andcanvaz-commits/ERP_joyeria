@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/api";
-import type { AssemblyRecipe, ProductionProcess, ProductionRun } from "@/types/production";
+import type { AllocationPreview, AssemblyRecipe, ProductionProcess, ProductionRun } from "@/types/production";
 
 export type CreateProductionProcessPayload = {
   name: string;
@@ -115,6 +115,35 @@ export function allocateProductionRunMaterial(runId: string, quantityUnits: stri
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/allocate-material`, {
     method: "POST",
     body: JSON.stringify({ quantity_units: quantityUnits }),
+  });
+}
+
+/** Dry-run: cuánto cubriría destinar esta cantidad. No consume ni cambia estado. */
+export function previewProductionRunAllocation(runId: string, quantityUnits: string) {
+  return apiRequest<AllocationPreview>(`/api/production/runs/${runId}/allocation-preview`, {
+    method: "POST",
+    body: JSON.stringify({ quantity_units: quantityUnits }),
+  });
+}
+
+/** Guarda el stock para la orden sin consumirlo ni arrancarla. */
+export function reserveProductionRunMaterial(runId: string, quantityUnits: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/reserve-material`, {
+    method: "POST",
+    body: JSON.stringify({ quantity_units: quantityUnits }),
+  });
+}
+
+export function releaseProductionRunReservation(runId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/release-reservation`, {
+    method: "POST",
+  });
+}
+
+/** Reserva completa: recién aquí se consume de verdad y arranca. */
+export function startProductionRunWithReserved(runId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/start-reserved`, {
+    method: "POST",
   });
 }
 
