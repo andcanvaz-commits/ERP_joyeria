@@ -8,6 +8,13 @@ services:
       # reenvia al backend. Asi la cookie HttpOnly funciona sin cross-site.
       NEXT_PUBLIC_API_URL: ""
       API_PROXY_TARGET: http://api:8000
+      # OJO (dev en Windows): el bind mount no propaga eventos de filesystem al
+      # contenedor y el watcher de Turbopack no los ve. Editar frontend NO
+      # recarga solo: el dev server sigue sirviendo los chunks viejos hasta que
+      # se reinicia el contenedor. Tras tocar frontend, corre:
+      #   docker-compose restart web
+      # WATCHPACK_POLLING/CHOKIDAR_USEPOLLING no sirven aqui: son de webpack y
+      # chokidar, y Next 16 compila con Turbopack.
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
