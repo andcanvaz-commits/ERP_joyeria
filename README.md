@@ -1,7 +1,8 @@
 # ERP_joyeria
 
 Sistema ERP web para joyería: producción, inventario, merma, reportes y seguridad.
-Las reglas de negocio y arquitectura del proyecto están en `CLAUDE.md`.
+La arquitectura real y las reglas operativas están en `CLAUDE.md`.
+La especificación funcional original está en `docs/ESPECIFICACION_FUNCIONAL.md`.
 
 ## Estructura del repositorio
 
@@ -15,7 +16,7 @@ docker-compose.yml  Stack de desarrollo (API, web, PostgreSQL)
 Dockerfile          Imagen de la API (el contexto de build es la raíz del repo)
 requirements.txt    Dependencias Python de la API
 alembic.ini         Configuración de migraciones
-CLAUDE.md           Especificación funcional y reglas técnicas del sistema
+CLAUDE.md           Arquitectura real, comandos y reglas de dominio vigentes
 ```
 
 ## Desarrollo con Docker

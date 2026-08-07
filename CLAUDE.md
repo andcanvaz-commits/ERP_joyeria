@@ -1,916 +1,251 @@
 # CLAUDE.md
 
-# Sistema ERP Web para Joyería
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 1. Contexto del Proyecto
+ERP web para una joyería: producción, inventario, merma, documentos, reportes y
+seguridad. UI y dominio son **español-first** (labels, mensajes de error y
+nombres de estado en español); el código es inglés salvo los valores de enum del
+dominio, que son español (`EN_PROCESO`, `CONSUMO_PRODUCCION`, …).
 
-Este proyecto consiste en desarrollar un sistema ERP web para una joyería. El sistema permitirá controlar de forma centralizada los procesos de producción, inventario, materia prima, productos en proceso, productos terminados, merma, reportes, usuarios, seguridad y trazabilidad de operaciones.
+La especificación funcional original (alcance deseado, no estado actual) está en
+[docs/ESPECIFICACION_FUNCIONAL.md](docs/ESPECIFICACION_FUNCIONAL.md).
 
-El sistema debe ser accesible desde cualquier lugar mediante Internet, utilizando un navegador web y autenticación segura con usuario y contraseña.
+## Comandos
 
-El flujo fue ajustado: ya no existe un empleado responsable dentro del proceso. El único usuario operativo que registra la producción es el jefe de producción. Por lo tanto, no se debe quemar en código ningún campo obligatorio de empleado responsable para la orden de producción.
+Todo corre en Docker; no hay entorno Python/Node local esperado.
 
----
+```powershell
+copy .env.example .env      # una vez; define POSTGRES_PASSWORD y ambos secretos JWT
+docker-compose up --build   # web :3000, api :8001 (host) -> :8000 (contenedor), db :5435
+docker-compose logs -f api
+```
 
-## 2. Objetivo General
+```powershell
+# Backend
+docker-compose exec api pytest                                   # suite completa
+docker-compose exec api pytest backend/tests/production           # un directorio
+docker-compose exec api pytest backend/tests/production/test_material_split.py::test_nombre
+docker-compose exec api python -m compileall backend              # chequeo rápido de sintaxis
+docker-compose exec api alembic revision -m "descripcion"         # nueva migración
+docker-compose exec api alembic upgrade head                      # el arranque ya lo hace
 
-Desarrollar una aplicación web tipo ERP para joyería que permita gestionar de manera segura y escalable:
+# Frontend
+docker-compose exec web npm run lint
+docker-compose exec web npm run build
+```
 
-- Materias primas como oro, plata, piedras, insumos y materiales auxiliares.
-- Productos terminados como anillos, cadenas, aretes, pulseras, dijes u otros artículos.
-- Producción mediante procesos configurables.
-- Etapas de fabricación totalmente dinámicas.
-- Control de inventario.
-- Control de merma.
-- Registro de pesos esperados y reales.
-- Trazabilidad completa de cada orden de producción.
-- Reportes administrativos y operativos.
-- Seguridad, auditoría y control de acceso.
+Los tests **necesitan la base PostgreSQL viva**: la fixture `db_session`
+([backend/tests/conftest.py](backend/tests/conftest.py)) abre una transacción
+real contra `settings.database_url` y hace rollback al final, así que nunca deja
+datos. No hay SQLite ni base en memoria.
 
----
+## Arquitectura
 
-## 3. Principio Fundamental del Sistema
+```text
+Navegador → Next.js (rewrite /api/*) → FastAPI (/api/...) → PostgreSQL
+```
 
-El sistema debe construirse con un constructor genérico de procesos.
+En dev el navegador habla solo con Next (mismo origen) y
+[frontend/next.config.mjs](frontend/next.config.mjs) reenvía `/api/*` al backend;
+en producción nginx hace ese ruteo. Por eso la cookie HttpOnly funciona sin
+cross-site y `NEXT_PUBLIC_API_URL` va vacío.
 
-No se deben quemar procesos en código como:
+### Backend — módulos verticales
 
-- Fundición
-- Laminado
-- Corte
-- Pulido
-- Engaste
-- Baño
-- Empaque
+La estructura real es `backend/modules/<modulo>/` (no la de `app/api/v1/` que
+sugiere la especificación). Cada módulo trae hasta cinco archivos con
+responsabilidad fija:
 
-Estos nombres pueden existir como datos en la base de datos, pero nunca como lógica fija dentro del backend o frontend.
+| archivo | responsabilidad |
+|---|---|
+| `models.py` | SQLAlchemy 2.0 `Mapped[...]`, UUID PK, `Numeric(14,4)` para pesos/cantidades |
+| `schemas.py` | Pydantic v2 de entrada/salida |
+| `service.py` | **toda** la lógica de negocio y las validaciones de dominio |
+| `repository.py` | acceso a datos (solo `inventory` y `production`) |
+| `router.py` | endpoints; traduce excepciones de dominio a HTTP |
 
-El administrador debe poder crear, editar y ordenar los procesos desde el sistema. De esta forma, si en el futuro la joyería agrega nuevos procesos, cambia el orden de fabricación o maneja otro tipo de producto, el sistema seguirá funcionando sin modificar el código fuente.
+Módulos: `auth`, `catalog`, `config`, `database`, `inventory`, `product_types`,
+`production`, `security`, `shared`, `units`. Los routers se montan en
+[backend/app/main.py](backend/app/main.py) bajo `/api/auth`, `/api/production`,
+`/api/inventory`, `/api/catalog`, `/api/product-types`, `/api/units`.
 
----
+Convenciones que se repiten en todos los routers y hay que respetar:
 
-## 4. Stack Tecnológico Recomendado
+- El `get_*_service()` de cada router **es** la unidad transaccional: abre
+  `SessionLocal()`, hace `yield`, `commit()` al terminar bien y `rollback()` ante
+  cualquier excepción. Los services usan `flush()`, no `commit()`.
+- Cada endpoint llama `ensure_permission(current_user, "modulo.recurso.accion")`
+  antes de tocar el service.
+- Los services levantan `<Modulo>DomainError` (→ 409) y `<Modulo>NotFoundError`
+  (→ 404); el router los mapea. Nunca lanzar `HTTPException` desde un service.
+- `production` habla con `inventory` por inyección de `InventoryService`; el
+  contrato está en
+  [backend/modules/shared/contracts/inventory.py](backend/modules/shared/contracts/inventory.py).
+  No importar modelos de otro módulo al nivel de módulo — se hace import local
+  dentro de la función para evitar ciclos (patrón ya usado en todo el código).
 
 ### Frontend
 
-- Next.js
-- React
-- TypeScript
-- TailwindCSS
-- React Hook Form
-- Zod
-- TanStack Query
-- Axios
-- Recharts
+Next.js 16 App Router, React 18, TypeScript. **No hay Tailwind, ni Zod, ni React
+Hook Form, ni TanStack Table, ni Recharts**, pese a lo que diga la
+especificación: las únicas dependencias son `@tanstack/react-query`,
+`lucide-react` y Next/React. Los gráficos son SVG propios
+([category-donut.tsx](frontend/components/shared/category-donut.tsx),
+[ranked-bar-chart.tsx](frontend/components/shared/ranked-bar-chart.tsx)). No
+agregues dependencias sin pedirlo.
 
-### Backend
+El estilo vive **entero** en [frontend/app/globals.css](frontend/app/globals.css)
+(~4.8k líneas) con tokens CSS: paleta papel+oro (`--paper`, `--gold-deep`,
+`--silver`), escala `--space-1..8`, `--shadow`/`-2`/`-3`. Usa clases y tokens
+existentes antes de escribir CSS nuevo.
 
-- Python 3.12
-- FastAPI
-- SQLAlchemy 2.0
-- Alembic
-- Pydantic v2
-- JWT para autenticación
-- Bcrypt para contraseñas
-- Redis para control de solicitudes y caché opcional
-- APScheduler o Celery para tareas programadas
+Cada ruta de `frontend/app/(app)/<modulo>/page.tsx` es un cascarón que monta un
+dashboard de `frontend/components/<modulo>/`. Los dos grandes
+([inventory-dashboard.tsx](frontend/components/inventory/inventory-dashboard.tsx)
+~5.1k líneas y
+[production-dashboard.tsx](frontend/components/production/production-dashboard.tsx)
+~4k) concentran casi toda la UI operativa.
 
-### Base de Datos
+Las llamadas HTTP pasan siempre por `apiRequest()` de
+[frontend/lib/api.ts](frontend/lib/api.ts), que adjunta el token CSRF, traduce
+errores de FastAPI a mensajes en español y redirige a `/login` ante 401. Los
+módulos exponen su propio `lib/*-api.ts`; los componentes no llaman `fetch`
+directo.
 
-- PostgreSQL
+La navegación por rol se decide en [frontend/lib/roles.ts](frontend/lib/roles.ts)
+(solo cosmética — el permiso real lo impone el backend).
 
-### Infraestructura
+Antes de tocar frontend, lee la skill del proyecto
+[.claude/skills/erp-jewelry-web-design/SKILL.md](.claude/skills/erp-jewelry-web-design/SKILL.md).
 
-- VPS Ubuntu Server
-- Docker
-- Docker Compose
-- Nginx
-- Certificado SSL con HTTPS
-- Backups automáticos
-- Firewall del servidor
+## Reglas de dominio innegociables
 
----
+1. **Nada de procesos ni etapas quemados en código.** Los procesos, sus etapas,
+   el orden, los tipos de etapa y las materias primas asociadas son datos en
+   PostgreSQL, editables por el admin. `EXAMPLE_PROCESSES` en
+   [production/service.py](backend/modules/production/service.py) es solo semilla
+   de desarrollo. Lo mismo aplica a nombres de material, categorías y modelos:
+   viven en `catalog_segments` y `product_types`.
+2. **El stock jamás se edita a mano.** Todo cambio de `current_stock` nace de un
+   `InventoryMovement`. `create_movement()` es el único lugar que aplica el
+   delta; `POSITIVE_MOVEMENTS` / `NEGATIVE_MOVEMENTS` definen el signo. Las
+   conversiones y reclasificaciones se hacen como par SALIDA+ENTRADA, nunca
+   moviendo un número.
+3. **No existe "empleado responsable"** en la orden. El responsable es el usuario
+   autenticado que ejecuta cada transición (`created_by_user_id`,
+   `materials_approved_by_user_id`, `received_by_user_id`, …). Los campos
+   `*_responsable_name` son texto libre y existen **solo** para órdenes
+   históricas importadas de papel, sin cuenta de usuario.
+4. **Los permisos se validan en el backend.** El frontend solo oculta.
+5. **Esquema por Alembic.** Toda columna nueva necesita su migración en
+   `backend/alembic/versions/`.
 
-## 5. Arquitectura General
+## Flujo de producción (máquina de estados real)
 
-La arquitectura será de tres capas:
+`ProductionRunStatus` en
+[production/models.py](backend/modules/production/models.py):
 
 ```text
-Usuario / Navegador
-        ↓
-Frontend Web Next.js
-        ↓
-API REST FastAPI
-        ↓
-Base de Datos PostgreSQL
+PENDIENTE_INVENTARIO ──approve_materials──> MATERIALES_APROBADOS ──start_run──> EN_PROCESO
+        │                                                                          │
+        │ reject_materials → CANCELADA                                   finish_stage (última)
+        │                                                                          ↓
+        └─ split por falta de stock → ESPERANDO_MATERIAL                  PENDIENTE_RECEPCION
+                       │                                                           │
+                       └── allocate_material (inventario destina un ingreso) ───────┘
+                           → aprueba + inicia automáticamente        receive_finished_product
+                                                                                   ↓
+                                                                               RECIBIDA
 ```
 
-El frontend no debe conectarse directamente a la base de datos. Toda operación debe pasar obligatoriamente por la API del backend.
-
----
-
-## 6. Roles del Sistema
-
-### 6.1 Administrador
-
-Tiene acceso completo al sistema.
-
-Permisos principales:
-
-- Crear usuarios.
-- Editar usuarios.
-- Activar o desactivar usuarios.
-- Crear roles.
-- Asignar permisos.
-- Configurar materias primas.
-- Configurar productos.
-- Configurar unidades de medida.
-- Configurar recetas o composiciones.
-- Configurar procesos genéricos.
-- Configurar etapas por proceso.
-- Configurar límites de merma.
-- Gestionar inventario.
-- Ver reportes.
-- Ver auditoría.
-
----
-
-### 6.2 Jefe de Producción
-
-Usuario encargado de registrar todo el flujo productivo.
-
-Permisos principales:
-
-- Crear órdenes de producción.
-- Seleccionar producto a fabricar.
-- Ingresar cantidad a fabricar.
-- Iniciar producción.
-- Avanzar etapas.
-- Registrar pesos esperados y reales.
-- Registrar merma.
-- Finalizar producción.
-- Consultar inventario.
-- Consultar reportes de producción.
-
-Restricciones:
-
-- No gestiona usuarios.
-- No elimina movimientos de inventario.
-- No modifica configuraciones generales.
-- No modifica roles ni permisos.
-
----
-
-### 6.3 Jefe de Inventario
-
-Usuario encargado del control de entradas, salidas y ajustes de inventario.
-
-Permisos principales:
-
-- Registrar entradas de materia prima.
-- Registrar salidas de productos terminados.
-- Registrar ajustes autorizados.
-- Consultar stock.
-- Ver movimientos de inventario.
-- Importar documentos o facturas XML si aplica.
-- Generar reportes de inventario.
-
-Restricciones:
-
-- No crea órdenes de producción.
-- No modifica procesos.
-- No gestiona usuarios.
-
----
-
-## 7. Módulos del Sistema
-
-## 7.1 Módulo de Autenticación
-
-Funcionalidades:
-
-- Inicio de sesión.
-- Cierre de sesión.
-- Refresh token.
-- Recuperación de contraseña.
-- Cambio de contraseña.
-- Bloqueo temporal por intentos fallidos.
-- Control de sesiones activas.
-
-Seguridad:
-
-- Autenticación mediante JWT.
-- Access token de corta duración.
-- Refresh token de mayor duración, almacenado de forma segura.
-- Contraseñas cifradas con bcrypt o Argon2.
-- Cookies HttpOnly y Secure si se usa autenticación basada en cookies.
-- Protección CSRF si se usan cookies.
-- Revocación de tokens al cerrar sesión.
-
----
-
-## 7.2 Módulo de Usuarios, Roles y Permisos
-
-Debe permitir administrar el acceso al sistema mediante RBAC.
-
-RBAC significa Role Based Access Control, es decir, control de acceso basado en roles.
-
-Entidades principales:
-
-- Usuarios.
-- Roles.
-- Permisos.
-- Relación usuario-rol.
-- Relación rol-permiso.
-
-Ejemplos de permisos:
-
-- users.create
-- users.update
-- users.disable
-- products.read
-- products.create
-- products.update
-- inventory.read
-- inventory.adjust
-- production.create
-- production.start
-- production.finish
-- reports.read
-- audit.read
-
----
-
-## 7.3 Módulo de Materias Primas
-
-Este módulo administra materiales usados en la joyería.
-
-Ejemplos:
-
-- Oro 18K.
-- Oro 14K.
-- Plata 925.
-- Piedras preciosas.
-- Piedras semipreciosas.
-- Broches.
-- Cadenas base.
-- Soldadura.
-- Químicos.
-- Empaques.
-
-Campos principales:
-
-- Código.
-- Nombre.
-- Tipo de material.
-- Unidad de medida.
-- Stock actual.
-- Stock mínimo.
-- Costo unitario.
-- Estado.
-
-El stock no debe actualizarse manualmente editando el campo stock_actual directamente. Debe actualizarse mediante movimientos de inventario para mantener trazabilidad.
-
----
-
-## 7.4 Módulo de Productos Terminados
-
-Este módulo administra los artículos finales de la joyería.
-
-Ejemplos:
-
-- Anillo modelo A.
-- Pulsera modelo B.
-- Cadena modelo C.
-- Aretes modelo D.
-- Dije modelo E.
-
-Campos principales:
-
-- Código.
-- Nombre.
-- Descripción.
-- Categoría.
-- Unidad de medida.
-- Estado.
-- Precio referencial opcional.
-
-El stock de productos terminados debe actualizarse automáticamente cuando una orden de producción se finaliza.
-
----
-
-## 7.5 Módulo de Composición o Receta del Producto
-
-Cada producto puede tener una composición base.
-
-Ejemplo genérico:
-
-Producto: Anillo Modelo A
-
-Composición:
-
-- Oro 18K: 5 gramos.
-- Piedra principal: 1 unidad.
-- Piedra secundaria: 2 unidades.
-- Soldadura: 0.10 gramos.
-
-La composición debe ser configurable y versionable.
-
-No se debe asumir que todos los productos usan los mismos materiales.
-
-Cada producto puede tener:
-
-- Una composición activa.
-- Versiones históricas.
-- Materiales variables.
-- Cantidades esperadas por unidad.
-
----
-
-## 7.6 Constructor Genérico de Procesos
-
-Este es uno de los módulos más importantes.
-
-El sistema debe permitir crear procesos dinámicos desde la interfaz administrativa.
-
-Un proceso es una plantilla de fabricación.
-
-Ejemplo:
-
-Proceso: Fabricación de anillo con piedra
-
-Etapas:
-
-1. Preparación de material.
-2. Fundición.
-3. Moldeado.
-4. Limado.
-5. Engaste.
-6. Pulido.
-7. Control de calidad.
-8. Empaque.
-
-Estas etapas no deben estar quemadas en código.
-
-Campos de un proceso:
-
-- Nombre.
-- Descripción.
-- Producto asociado opcional.
-- Estado.
-- Versión.
-
-Campos de una etapa:
-
-- Nombre.
-- Descripción.
-- Orden.
-- Tiempo estimado en minutos.
-- Requiere peso inicial.
-- Requiere peso final.
-- Permite registrar merma.
-- Requiere observación.
-- Es obligatoria.
-- Estado.
-
-La lógica debe leer las etapas desde la base de datos.
-
----
-
-## 7.7 Módulo de Producción
-
-El jefe de producción crea una orden de producción.
-
-Datos de entrada:
-
-- Producto a fabricar.
-- Cantidad a fabricar.
-- Proceso a utilizar.
-- Observación opcional.
-
-El sistema debe calcular automáticamente:
-
-- Materiales requeridos.
-- Stock disponible.
-- Stock faltante.
-- Peso esperado.
-- Etapas del proceso.
-
-Estados de una orden de producción:
-
-- BORRADOR.
-- PENDIENTE.
-- EN_PROCESO.
-- PAUSADA.
-- FINALIZADA.
-- CANCELADA.
-
-La orden de producción no debe tener empleado responsable obligatorio. El usuario creador y operador será el jefe de producción autenticado.
-
----
-
-## 7.8 Flujo de Producción
-
-### Paso 1: Crear orden
-
-El jefe de producción selecciona:
-
-- Producto.
-- Cantidad.
-- Proceso.
-
-### Paso 2: Calcular materiales
-
-El sistema consulta la composición del producto y calcula los materiales requeridos.
-
-### Paso 3: Validar inventario
-
-El sistema valida si existe stock suficiente.
-
-Si no hay stock suficiente, el sistema debe mostrar alerta y puede bloquear el inicio según configuración.
-
-### Paso 4: Generar etapas
-
-El sistema copia las etapas del proceso hacia la orden de producción.
-
-Esto es importante porque, aunque el proceso se edite en el futuro, la orden histórica debe conservar las etapas con las que fue creada.
-
-### Paso 5: Iniciar producción
-
-El jefe de producción inicia la orden.
-
-Se registra:
-
-- Fecha de inicio.
-- Hora de inicio.
-- Usuario que inició.
-
-### Paso 6: Ejecutar etapas
-
-Cada etapa puede registrar:
-
-- Fecha de inicio.
-- Fecha de finalización.
-- Peso inicial.
-- Peso final.
-- Merma.
-- Observaciones.
-- Estado.
-
-### Paso 7: Controlar tiempos
-
-El sistema compara tiempo real contra tiempo estimado.
-
-Si una etapa excede el tiempo esperado:
-
-- Se marca como retrasada.
-- Se registra evento.
-- Se puede enviar notificación.
-
-### Paso 8: Finalizar producción
-
-Al finalizar:
-
-- Se descuenta la materia prima consumida.
-- Se registra la merma.
-- Se incrementa el inventario de producto terminado.
-- Se genera resumen de producción.
-- Se bloquea edición crítica de la orden.
-
----
-
-## 7.9 Módulo de Merma
-
-La merma es la diferencia entre el peso esperado y el peso real obtenido.
-
-Fórmula:
-
-```text
-merma = peso_esperado - peso_real
-```
-
-Porcentaje:
-
-```text
-porcentaje_merma = (merma / peso_esperado) * 100
-```
-
-El sistema debe registrar:
-
-- Merma por etapa.
-- Merma total por orden.
-- Porcentaje de merma.
-- Material relacionado.
-- Observaciones.
-- Usuario que registró.
-
-Debe existir un límite de merma configurable.
-
-Si la merma supera el límite permitido:
-
-- Se muestra alerta.
-- Se registra incidencia.
-- Se marca para revisión.
-
----
-
-## 7.10 Módulo de Inventario
-
-El inventario se divide en:
-
-- Materia prima.
-- Productos en proceso.
-- Productos terminados.
-
-Todo cambio de inventario debe realizarse por movimientos, no por actualización directa manual del stock.
-
-Tipos de movimiento:
-
-- ENTRADA.
-- SALIDA.
-- AJUSTE_POSITIVO.
-- AJUSTE_NEGATIVO.
-- CONSUMO_PRODUCCION.
-- INGRESO_PRODUCCION.
-- MERMA.
-
-Cada movimiento debe guardar:
-
-- Tipo.
-- Material o producto.
-- Cantidad.
-- Unidad de medida.
-- Costo unitario opcional.
-- Motivo.
-- Usuario.
-- Fecha.
-- Referencia a orden de producción si aplica.
-
----
-
-## 7.11 Módulo de Reportes
-
-Reportes mínimos:
-
-- Producción diaria.
-- Producción mensual.
-- Producción por producto.
-- Producciones en proceso.
-- Producciones retrasadas.
-- Merma por etapa.
-- Merma por producto.
-- Merma histórica.
-- Inventario actual.
-- Kardex de materia prima.
-- Kardex de producto terminado.
-- Stock mínimo.
-- Movimientos por fecha.
-
-Exportación:
-
-- PDF.
-- Excel.
-- CSV.
-
----
-
-## 7.12 Dashboard
-
-Indicadores principales:
-
-- Órdenes activas.
-- Órdenes finalizadas del mes.
-- Producciones retrasadas.
-- Merma total del mes.
-- Productos terminados disponibles.
-- Materias primas con stock bajo.
-- Material más consumido.
-- Producto más fabricado.
-
----
-
-## 8. Seguridad del Sistema
-
-La seguridad debe ser parte central del desarrollo.
-
-## 8.1 Autenticación con JWT
-
-- Usar JWT para autenticar solicitudes.
-- Access token con duración corta, por ejemplo 15 a 30 minutos.
-- Refresh token con duración mayor, por ejemplo 7 a 30 días.
-- Guardar refresh tokens de forma segura.
-- Permitir revocar refresh tokens.
-- Incluir expiración en todos los tokens.
-- Validar firma, expiración y tipo de token.
-
-## 8.2 Contraseñas
-
-- Nunca guardar contraseñas en texto plano.
-- Usar bcrypt o Argon2.
-- Exigir contraseñas seguras.
-- Bloquear temporalmente tras varios intentos fallidos.
-- Registrar intentos de inicio de sesión sospechosos.
-
-## 8.3 Validación contra SQL Injection
-
-- No construir consultas SQL concatenando strings del usuario.
-- Usar ORM SQLAlchemy con parámetros seguros.
-- Usar consultas parametrizadas cuando se use SQL manual.
-- Validar todos los datos de entrada con Pydantic.
-- Validar tipos, rangos, longitudes y formatos.
-- Rechazar campos inesperados.
-- Escapar salidas cuando corresponda.
-
-## 8.4 Rate Limiting
-
-Implementar límite de solicitudes para proteger la API.
-
-Ejemplos:
-
-- Login: máximo 5 intentos por minuto por IP.
-- Recuperación de contraseña: máximo 3 solicitudes por hora.
-- API general: máximo 100 solicitudes por minuto por usuario.
-- Endpoints sensibles: límites más estrictos.
-
-Se recomienda usar Redis para guardar contadores temporales.
-
-## 8.5 Control de Acceso
-
-- Implementar RBAC.
-- Validar permisos en backend, no solo en frontend.
-- Cada endpoint debe verificar rol y permiso.
-- El frontend solo oculta opciones, pero la seguridad real vive en el backend.
-
-## 8.6 Protección de API
-
-- HTTPS obligatorio.
-- CORS configurado únicamente para dominios permitidos.
-- Headers de seguridad con Nginx.
-- Tamaño máximo de payload.
-- Validación de archivos subidos.
-- Restricción de tipos MIME.
-- Escaneo básico o validación de XML.
-
-## 8.7 Auditoría
-
-Registrar en logs de auditoría:
-
-- Inicio de sesión.
-- Cierre de sesión.
-- Creación de usuarios.
-- Cambios de permisos.
-- Creación de órdenes.
-- Inicio y finalización de producción.
-- Movimientos de inventario.
-- Ajustes manuales.
-- Cambios de configuración.
-- Errores críticos.
-
-Cada log debe guardar:
-
-- Usuario.
-- Acción.
-- Tabla afectada.
-- ID afectado.
-- Fecha y hora.
-- IP.
-- User agent.
-- Datos anteriores opcionales.
-- Datos nuevos opcionales.
-
-## 8.8 Backups
-
-- Backup automático diario de PostgreSQL.
-- Retención mínima de 7 a 30 días.
-- Backup antes de despliegues importantes.
-- Pruebas periódicas de restauración.
-
-## 8.9 Variables de Entorno
-
-No guardar secretos en el código.
-
-Usar variables como:
-
-- DATABASE_URL
-- JWT_SECRET_KEY
-- JWT_REFRESH_SECRET_KEY
-- CORS_ORIGINS
-- SMTP_HOST
-- SMTP_USER
-- SMTP_PASSWORD
-- REDIS_URL
-
----
-
-## 9. API REST Principal
-
-Endpoints sugeridos:
-
-```text
-/api/auth/login
-/api/auth/refresh
-/api/auth/logout
-/api/auth/me
-
-/api/users
-/api/roles
-/api/permissions
-
-/api/raw-materials
-/api/products
-/api/product-compositions
-/api/process-templates
-/api/process-stages
-
-/api/production-orders
-/api/production-orders/{id}/start
-/api/production-orders/{id}/pause
-/api/production-orders/{id}/finish
-/api/production-orders/{id}/cancel
-/api/production-order-stages/{id}/start
-/api/production-order-stages/{id}/finish
-
-/api/inventory/movements
-/api/inventory/raw-materials
-/api/inventory/products
-
-/api/waste
-/api/reports
-/api/dashboard
-/api/audit-logs
-```
-
----
-
-## 10. Reglas Técnicas para Claude Code
-
-Claude debe respetar estas reglas durante el desarrollo:
-
-1. No quemar nombres de procesos en código.
-2. No quemar etapas de joyería en código.
-3. Todo proceso debe salir desde la base de datos.
-4. Toda etapa debe ser configurable.
-5. No crear un campo obligatorio de empleado responsable en producción.
-6. La producción debe asociarse al usuario autenticado que la crea e inicia.
-7. Todo cambio de inventario debe generar movimiento.
-8. No actualizar stock sin movimiento histórico.
-9. Todos los endpoints deben validar JWT.
-10. Todos los endpoints sensibles deben validar permisos.
-11. No concatenar SQL con datos del usuario.
-12. Usar validaciones Pydantic.
-13. Usar migraciones Alembic.
-14. Usar transacciones para producción e inventario.
-15. Registrar auditoría en acciones críticas.
-16. Mantener separación entre frontend, backend y base de datos.
-17. Crear código modular.
-18. Crear servicios para lógica de negocio.
-19. Crear repositorios o capa de acceso a datos.
-20. Crear pruebas para reglas críticas.
-
----
-
-## 11. Estructura Recomendada del Backend
-
-```text
-backend/
-  app/
-    main.py
-    core/
-      config.py
-      security.py
-      rate_limit.py
-      permissions.py
-    db/
-      session.py
-      base.py
-    models/
-      user.py
-      role.py
-      product.py
-      raw_material.py
-      process.py
-      production.py
-      inventory.py
-      audit.py
-    schemas/
-      auth.py
-      user.py
-      product.py
-      raw_material.py
-      process.py
-      production.py
-      inventory.py
-    api/
-      v1/
-        auth.py
-        users.py
-        products.py
-        raw_materials.py
-        processes.py
-        production.py
-        inventory.py
-        reports.py
-    services/
-      auth_service.py
-      production_service.py
-      inventory_service.py
-      waste_service.py
-      report_service.py
-    repositories/
-      user_repository.py
-      production_repository.py
-      inventory_repository.py
-    utils/
-      audit.py
-      dates.py
-      exceptions.py
-```
-
----
-
-## 12. Estructura Recomendada del Frontend
-
-```text
-frontend/
-  app/
-    login/
-    dashboard/
-    usuarios/
-    inventario/
-    materias-primas/
-    productos/
-    procesos/
-    produccion/
-    reportes/
-  components/
-    ui/
-    forms/
-    tables/
-    layout/
-  lib/
-    api.ts
-    auth.ts
-    validators.ts
-  hooks/
-  stores/
-  types/
-```
-
----
-
-## 13. Consideraciones de Desarrollo
-
-- Primero construir autenticación y roles.
-- Luego construir catálogo de materias primas y productos.
-- Después construir el constructor genérico de procesos.
-- Luego construir producción.
-- Después conectar producción con inventario.
-- Luego agregar merma.
-- Finalmente reportes, dashboard y auditoría.
-
----
-
-## 14. Orden Recomendado de Implementación
-
-1. Configuración inicial del proyecto.
-2. Base de datos PostgreSQL.
-3. Autenticación JWT.
-4. Roles y permisos.
-5. Usuarios.
-6. Materias primas.
-7. Productos.
-8. Composición de productos.
-9. Constructor genérico de procesos.
-10. Órdenes de producción.
-11. Etapas dinámicas de producción.
-12. Inventario y movimientos.
-13. Control de merma.
-14. Reportes.
-15. Dashboard.
-16. Auditoría.
-17. Seguridad avanzada.
-18. Pruebas.
-19. Despliegue.
-20. Capacitación.
-
----
-
-## 15. Criterios de Aceptación
-
-El sistema se considera completo cuando:
-
-- El administrador puede configurar productos, materiales y procesos.
-- El jefe de producción puede crear una orden sin seleccionar empleado responsable.
-- Las etapas se generan dinámicamente desde el proceso configurado.
-- El sistema calcula materiales requeridos.
-- El sistema valida stock disponible.
-- El sistema registra inicio y fin de cada etapa.
-- El sistema calcula merma.
-- El sistema actualiza inventario mediante movimientos.
-- El sistema genera reportes.
-- El sistema tiene autenticación JWT.
-- El sistema controla permisos por rol.
-- El sistema valida entradas contra SQL Injection.
-- El sistema limita solicitudes abusivas.
-- El sistema registra auditoría.
-- El sistema funciona en producción mediante HTTPS.
+Puntos que sorprenden si no se leen antes:
+
+- **Split por material parcial.** `approve_materials` calcula cuántas unidades
+  cubre el recurso más corto (materia prima *y* cada complemento pedido, el
+  mínimo de ambos). La porción cubierta sigue su curso; el remanente se parte en
+  una corrida hija en `ESPERANDO_MATERIAL`, bajo el mismo `root_production_code`
+  y con sufijo (`OP-2026-0001-B`, `-C`). Las corridas hijas **no** entran en la
+  cola normal de aprobación: solo despiertan por `allocate_material`.
+- La merma se registra **por etapa** (`ProductionRunStage.waste_weight`) y la
+  merma total de la orden es su suma; el porcentaje se calcula sobre
+  `total_required_material`.
+- Las etapas se **copian** del proceso a la corrida al crearla, para que editar
+  el proceso no altere el historial.
+- Las etapas `CONTROL`/`DECISION` generan `ProductionRunStageDecision` y pueden
+  devolver el flujo a una etapa anterior (`rework_target_order`).
+- **Ensamble.** Modo `ASIGNAR` (split directo) o `ENSAMBLAR` (con complementos).
+  Al terminar, si hay una `AssemblyRecipe` para el `model_key` y los complementos
+  aprobados alcanzan, se aplica sola; si no, `assembly_pending=True` y producción
+  debe definirla antes de que inventario pueda recibir.
+- **Recepción.** `receive_finished_product` crea un lote `FINISHED_PRODUCT` cuyo
+  SKU es el código OP, y —si la orden declaró productos resultantes— lo convierte
+  ahí mismo a productos del catálogo. Las corridas con `event_lines` (importadas
+  de actas de papel) rechazan este flujo: recibirlas generaría movimientos de
+  inventario que el papel nunca respaldó.
+
+## Códigos y numeración
+
+| qué | formato | dónde |
+|---|---|---|
+| Orden de producción | `OP-2026-0001`, hijas `-B`/`-C` | `_generate_production_code` |
+| Etapa de corrida | `FUN-OP0001-01` (3 letras + corrida + orden) | `_stage_code_for` |
+| Proceso | `2000`, `2001`, … | `_next_process_code` |
+| Item de inventario | prefijo por tipo: `MP` materia prima, `IN` insumo, `CO` complemento, `PP` en proceso, `PT` terminado, `ME` merma | `ITEM_TYPE_PREFIXES` |
+| Producto de catálogo | 7 dígitos = material(1) + categoría(2) + modelo(4) | `catalog_segments` + `product_types` |
+| Receta de ensamble | `model_key` = ese código de 7 dígitos completo | `AssemblyRecipe.model_key` |
+
+El `model_key` incluye el dígito de material a propósito: oro y plata del mismo
+modelo tienen recetas distintas.
+
+## Inventario
+
+- `item_type`: `RAW_MATERIAL`, `SUPPLY`, `COMPLEMENT`, `WORK_IN_PROGRESS`,
+  `FINISHED_PRODUCT`, `WASTE`. Solo los cuatro de `MANUALLY_MANAGED_TYPES` los
+  crea el usuario; el resto los administra producción.
+- `average_cost` es costo promedio ponderado, recalculado en cada ENTRADA.
+- `revert_last_entry` solo funciona dentro de `INVENTORY_REVERT_WINDOW_HOURS`
+  (24 por defecto); pasada la ventana el movimiento es inmutable y solo procede
+  un ajuste.
+- `archived_at` oculta items agotados sin perder historial; una entrada nueva los
+  desarchiva.
+- Los items de producto terminado se consolidan por código + nombre +
+  descripción + material: la trazabilidad por lote vive en los movimientos
+  (`lot_code`, `source_lot_sku`), no en filas separadas.
+
+## Auth y seguridad
+
+- JWT en **cookie HttpOnly** `access_token`; el header `Authorization` es solo
+  fallback para clientes no-web. `localStorage` guarda únicamente una bandera no
+  sensible de "sesión iniciada".
+- **CSRF double-submit**: middleware en `main.py` exige `X-CSRF-Token` igual a la
+  cookie `csrf_token` en todo método que muta bajo `/api` (excepto el login, que
+  es quien siembra la cookie). `apiRequest()` ya lo adjunta.
+- Los permisos **derivan del rol** en cada login: `ROLE_PERMISSIONS` en
+  [auth/service.py](backend/modules/auth/service.py) es la fuente de verdad y
+  reescribe los permisos del usuario si cambiaron. Roles del sistema: `Admin`,
+  `Jefe de producción`, `Jefe de inventario` (ojo con la tilde y las variantes
+  que ya tolera `ensure_permission`).
+- `Settings._enforce_production_hardening` **rompe el arranque** en
+  `APP_ENV=production` si los secretos son débiles o iguales entre sí, si faltan
+  `CORS_ORIGINS`/`ALLOWED_HOSTS`/`SEED_ADMIN_PASSWORD`, o si `ENABLE_DOCS=true`.
+
+## Migraciones y arranque
+
+`docker-compose` corre `alembic upgrade head` antes de uvicorn. Además el startup
+de `main.py` ejecuta `upgrade_*_table()`: una tanda de
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` **solo en desarrollo**, para curar
+bases viejas creadas con `create_all` y luego selladas por Alembic. No es un
+sustituto de las migraciones: si agregas una columna, escribe la migración; el
+bloque de `main.py` es deuda técnica de compatibilidad, no el mecanismo oficial.
+
+Semillas en el arranque: el admin y las unidades de medida **siempre**
+(idempotentes); los procesos de ejemplo y el catálogo solo si
+`SEED_ON_STARTUP=true` (dev).
+
+## Al terminar un cambio
+
+- Backend tocado → `docker-compose exec api pytest` y, si aplica, la migración.
+- Frontend tocado → `docker-compose exec web npm run build`.
+- Si el cambio afecta dependencias, puertos, scripts o variables de entorno,
+  actualiza `Dockerfile`/`docker-compose*.yml`/`.env.example`/`README.md` en la
+  misma sesión.
