@@ -51,6 +51,7 @@ export function CategoryDonut({
   centerLabel = "total",
   unit = "",
   maxSegments = MAX_SEGMENTS,
+  showEmpty = false,
 }: {
   items: DonutSegment[];
   emptyMessage: string;
@@ -63,9 +64,20 @@ export function CategoryDonut({
   // con leyenda mas ancha (ej. chartPanelWide) pueden pedir mostrar todas
   // las categorias sin colapsar.
   maxSegments?: number;
+  // Lista en la leyenda tambien las categorias en cero. El anillo no puede
+  // dibujarlas (una porcion de 0% no existe), pero en un catalogo cerrado de
+  // categorias --los 6 tipos de inventario-- saber que "Insumos" esta en cero
+  // es informacion, y ocultarlo hace parecer que el tipo no existe.
+  showEmpty?: boolean;
 }) {
   const segments = buildSegments(items, maxSegments);
   const total = segments.reduce((sum, item) => sum + item.value, 0);
+  // Categorias en cero: van al final de la leyenda y nunca al anillo. Si hubo
+  // colapso a "Otros" no se agregan (la leyenda ya esta saturada).
+  const emptyItems =
+    showEmpty && !segments.some((segment) => segment.id === "__other__")
+      ? items.filter((item) => !(item.value > 0))
+      : [];
   const [animated, setAnimated] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -169,6 +181,16 @@ export function CategoryDonut({
             </li>
           );
         })}
+        {/* Categorias sin datos: sin color de segmento (no tienen arco) y
+            atenuadas, para que se lean como "existe pero esta en cero". */}
+        {emptyItems.map((segment) => (
+          <li className="categoryDonutLegendRow categoryDonutLegendRowEmpty" key={segment.id}>
+            <span aria-hidden="true" className="categoryDonutSwatch" style={{ background: "var(--border)" }} />
+            <span className="categoryDonutLegendLabel">{segment.label}</span>
+            <span className="categoryDonutLegendValue">0{unit ? ` ${unit}` : ""}</span>
+            <span className="categoryDonutLegendPercent">0%</span>
+          </li>
+        ))}
       </ul>
     </div>
   );

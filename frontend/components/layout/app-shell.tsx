@@ -196,7 +196,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <UserCircle aria-hidden="true" size={26} />
             <div className="profileText">
-              <strong>{currentUser?.email ?? currentUser?.username ?? ""}</strong>
+              {/* Se trunca con puntos suspensivos si no cabe; el title deja
+                  consultar el correo completo al pasar el mouse. */}
+              <strong title={currentUser?.email ?? currentUser?.username ?? undefined}>
+                {currentUser?.email ?? currentUser?.username ?? ""}
+              </strong>
               <span>({currentUser?.role ?? ""})</span>
             </div>
             <ChevronDown aria-hidden="true" size={16} />

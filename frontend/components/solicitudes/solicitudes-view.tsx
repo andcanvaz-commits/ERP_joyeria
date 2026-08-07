@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, X } from "lucide-react";
+import { Eye, Printer, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
+import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import type { ProductionRun } from "@/types/production";
 
 const STATUS_LABELS: Record<ProductionRun["status"], string> = {
@@ -17,12 +19,6 @@ const STATUS_LABELS: Record<ProductionRun["status"], string> = {
   RECIBIDA: "Recibida",
   CANCELADA: "Rechazada / cancelada",
   ESPERANDO_MATERIAL: "Esperando material",
-};
-
-const STAGE_STATUS_LABELS: Record<string, string> = {
-  PENDIENTE: "Pendiente",
-  EN_PROCESO: "En proceso",
-  FINALIZADA: "Finalizada",
 };
 
 function dateTimeLabel(value: string | null) {
@@ -45,7 +41,18 @@ function percentText(value: string | null) {
   return Number.isFinite(n) ? n.toLocaleString("es-EC", { maximumFractionDigits: 2 }) : value;
 }
 
-function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }) {
+/** Filas del resumen de una solicitud. Devuelve solo <span>: el llamador las
+ * mete en su propio .userPreviewGrid (mismo contrato que RunWasteHero). Existe
+ * para que la ficha en pantalla y la hoja impresa salgan del MISMO codigo y no
+ * puedan divergir. */
+function RunSummaryRows({ run }: { run: ProductionRun }) {
+  const unit = run.raw_material_unit_code || "g";
+  const products = run.products ?? [];
+  const complements = run.complements ?? [];
+  const assemblyItems = run.assembly_items ?? [];
+
+  // Las fechas van como una fila cada una dentro de la misma ficha, en vez de
+  // un panel "Linea de tiempo" aparte: es la mitad de alto y se lee igual.
   const timeline: Array<[string, string | null]> = [
     ["Solicitada", run.requested_at],
     ["Materiales aprobados", run.materials_approved_at],
@@ -53,139 +60,90 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
     ["Finalizada", run.finished_at],
     ["Recibida", run.received_at],
   ];
+
+  return (
+    <>
+      {run.assembly_pending ? <span><strong>Ensamble</strong>Pendiente de definir</span> : null}
+      <span><strong>Cantidad</strong>{num(run.quantity)}</span>
+      <span>
+        <strong>Material requerido</strong>
+        {num(run.total_required_material)} {unit} · {num(run.raw_material_quantity_per_unit)} {unit} por unidad
+      </span>
+      <span>
+        <strong>Peso</strong>
+        {num(run.expected_finished_weight)} {unit} esperado
+        {run.actual_finished_weight ? ` · ${num(run.actual_finished_weight)} ${unit} real` : ""}
+      </span>
+      <span>
+        <strong>Merma</strong>
+        {run.waste_weight ? `${num(run.waste_weight)} ${unit} (${percentText(run.waste_percent)}%)` : "—"}
+        {` · limite ${percentText(run.waste_limit_percent)}%`}
+      </span>
+      <span><strong>Creada por</strong>{run.created_by_name ?? "—"}</span>
+      <span><strong>Aprobada por</strong>{run.materials_approved_by_name ?? "—"}</span>
+      <span><strong>Recibida por</strong>{run.received_by_name ?? "—"}</span>
+      {run.status === "CANCELADA" ? (
+        <span>
+          <strong>Rechazada por</strong>
+          {run.rejected_by_name ?? "—"}{run.rejection_reason ? ` — ${run.rejection_reason}` : ""}
+        </span>
+      ) : null}
+      {products.length > 0 ? (
+        <span>
+          <strong>Productos</strong>
+          {products.map((p) => `${p.product_name ?? "—"} (${num(p.quantity)} ${p.unit_code || "und"})`).join(" · ")}
+        </span>
+      ) : null}
+      {complements.length > 0 ? (
+        <span>
+          <strong>Complementos</strong>
+          {complements.map((c) => `${c.name ?? "—"} (${num(c.quantity)} ${c.unit_code})`).join(" · ")}
+        </span>
+      ) : null}
+      {assemblyItems.length > 0 ? (
+        <span>
+          <strong>Ensamble aplicado</strong>
+          {assemblyItems.map((i) => `${i.name ?? "—"} (${num(i.quantity)})`).join(" · ")}
+        </span>
+      ) : null}
+      {timeline.map(([label, value]) => (
+        <span key={label}><strong>{label}</strong>{dateTimeLabel(value)}</span>
+      ))}
+    </>
+  );
+}
+
+/** Detalle de una solicitud. Sigue el patron de ficha del resto del sistema
+ * (modalHeader + userPreviewGrid + RunStageSummaryTable), no cards anidadas:
+ * antes apilaba 3 KPIs grandes y 4 paneles con su propio titulo, lo que
+ * obligaba a un scroll larguisimo y no se parecia a ninguna otra ficha. */
+function RunDetail({ run, onClose, onPrint }: { run: ProductionRun; onClose: () => void; onPrint: () => void }) {
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de solicitud">
       <section className="modalWindow processViewWindow">
         <div className="modalHeader">
           <div>
-            <h2 style={{ fontFamily: "monospace", letterSpacing: 1 }}>{run.production_code ?? "Sin codigo"}</h2>
-            <p>{run.process_name}</p>
+            <h2>{run.production_code ?? "Sin codigo"}</h2>
+            <p>{run.process_name} · {STATUS_LABELS[run.status]}</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
           </button>
         </div>
 
-        <div className="summaryGrid">
-          <article className="card metric">
-            <span className="metricLabel">Estado</span>
-            <strong className="metricValue" style={{ fontSize: 16 }}>{STATUS_LABELS[run.status]}</strong>
-            {run.assembly_pending ? (
-              <span className="statusBadge" style={{ background: "#fff4df", color: "var(--warning)", marginTop: 6 }}>
-                Ensamble pendiente
-              </span>
-            ) : null}
-          </article>
-          <article className="card metric">
-            <span className="metricLabel">Cantidad</span>
-            <strong className="metricValue">{num(run.quantity)}</strong>
-          </article>
-          <article className="card metric">
-            <span className="metricLabel">Material requerido</span>
-            <strong className="metricValue" style={{ fontSize: 18 }}>{num(run.total_required_material)} {run.raw_material_unit_code}</strong>
-          </article>
+        <div className="userPreviewGrid">
+          <RunSummaryRows run={run} />
         </div>
 
-        <div className="credentialsStack">
-          <span><strong>Proceso</strong>{run.process_name}</span>
-          <span><strong>Material por unidad</strong>{num(run.raw_material_quantity_per_unit)} {run.raw_material_unit_code}</span>
-          <span><strong>Peso esperado</strong>{num(run.expected_finished_weight)}</span>
-          <span><strong>Peso real</strong>{run.actual_finished_weight ? num(run.actual_finished_weight) : "-"}</span>
-          <span><strong>Merma</strong>{run.waste_weight ? `${num(run.waste_weight)} (${percentText(run.waste_percent)}%)` : "-"}</span>
-          <span><strong>Limite de merma</strong>{percentText(run.waste_limit_percent)}%</span>
-          <span><strong>Creada por</strong>{run.created_by_name ?? "-"}</span>
-          <span><strong>Aprobada por</strong>{run.materials_approved_by_name ?? "-"}</span>
-          <span><strong>Recibida por</strong>{run.received_by_name ?? "-"}</span>
-          {run.status === "CANCELADA" ? (
-            <span><strong>Rechazada por</strong>{run.rejected_by_name ?? "-"}{run.rejection_reason ? ` — ${run.rejection_reason}` : ""}</span>
-          ) : null}
-        </div>
+        {/* Tabla compartida: pagina de 5 en 5, asi una orden de muchas etapas
+            deja de estirar el modal sin fin. */}
+        <RunStageSummaryTable run={run} />
 
-        {(run.products ?? []).length > 0 ? (
-          <div className="card panelBody">
-            <div className="panelHeader"><div><h2 className="panelTitle">Productos resultantes</h2></div></div>
-            <div className="dashboardList">
-              {(run.products ?? []).map((product) => (
-                <div className="dashboardRow" key={product.id}>
-                  <div><strong>{product.product_name ?? "—"}</strong></div>
-                  <small>{num(product.quantity)} {product.unit_code || "und"}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {(run.complements ?? []).length > 0 ? (
-          <div className="card panelBody">
-            <div className="panelHeader"><div><h2 className="panelTitle">Complementos solicitados</h2></div></div>
-            <div className="dashboardList">
-              {(run.complements ?? []).map((complement) => (
-                <div className="dashboardRow" key={complement.id}>
-                  <div><strong>{complement.name ?? "—"}</strong></div>
-                  <small>{num(complement.quantity)} {complement.unit_code} · {complement.status}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {(run.assembly_items ?? []).length > 0 ? (
-          <div className="card panelBody">
-            <div className="panelHeader"><div><h2 className="panelTitle">Ensamble aplicado</h2></div></div>
-            <div className="dashboardList">
-              {(run.assembly_items ?? []).map((item) => (
-                <div className="dashboardRow" key={item.id}>
-                  <div><strong>{item.name ?? "—"}</strong></div>
-                  <small>{num(item.quantity)}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="card panelBody">
-          <div className="panelHeader"><div><h2 className="panelTitle">Linea de tiempo</h2></div></div>
-          <div className="dashboardList">
-            {timeline.map(([label, value]) => (
-              <div className="dashboardRow" key={label}>
-                <div><strong>{label}</strong></div>
-                <small>{dateTimeLabel(value)}</small>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card panelBody">
-          <div className="panelHeader"><div><h2 className="panelTitle">Etapas ({run.stages.length})</h2></div></div>
-          <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Etapa</th>
-                  <th>Fase</th>
-                  <th>Estado</th>
-                  <th>Peso inicial</th>
-                  <th>Peso final</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...run.stages].sort((a, b) => a.stage_order - b.stage_order).map((stage) => (
-                  <tr key={stage.id}>
-                    <td>{stage.stage_order}</td>
-                    <td>{stage.stage_name}</td>
-                    <td>{stage.phase_name ?? "-"}</td>
-                    <td>{STAGE_STATUS_LABELS[stage.status] ?? stage.status}</td>
-                    <td>{stage.initial_weight ? num(stage.initial_weight) : "-"}</td>
-                    <td>{stage.final_weight ? num(stage.final_weight) : "-"}</td>
-                  </tr>
-                ))}
-                {run.stages.length === 0 ? (
-                  <tr><td colSpan={6}><div className="emptyState">Sin etapas.</div></td></tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+        <div className="modalActions">
+          <button className="button buttonPrimary" onClick={onPrint} type="button">
+            <Printer aria-hidden="true" size={14} />
+            Imprimir
+          </button>
         </div>
       </section>
     </div>
@@ -194,6 +152,19 @@ function RunDetail({ run, onClose }: { run: ProductionRun; onClose: () => void }
 
 export function SolicitudesView() {
   const [selectedRun, setSelectedRun] = useState<ProductionRun | null>(null);
+  // Impresion: el documento se monta en un portal fuera del arbol de la app
+  // (@media print oculta todo menos .printArea) y se dispara window.print()
+  // tras un tick, para que el navegador alcance a pintarlo. Mismo patron que
+  // el reporte de merma de produccion.
+  const [printingRun, setPrintingRun] = useState<ProductionRun | null>(null);
+  useEffect(() => {
+    if (!printingRun) return;
+    const timer = setTimeout(() => {
+      window.print();
+      setPrintingRun(null);
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [printingRun]);
 
   const { data: currentUser, isLoading: isLoadingUser } = useQuery({
     queryKey: ["me"],
@@ -375,7 +346,33 @@ export function SolicitudesView() {
         </>
       ) : null}
 
-      {selectedRun ? <RunDetail run={selectedRun} onClose={() => setSelectedRun(null)} /> : null}
+      {selectedRun ? (
+        <RunDetail
+          onClose={() => setSelectedRun(null)}
+          onPrint={() => setPrintingRun(selectedRun)}
+          run={selectedRun}
+        />
+      ) : null}
+
+      {printingRun
+        ? createPortal(
+            <div className="printArea">
+              <div className="printDoc">
+                <h1>Solicitud de produccion</h1>
+                <h2>{printingRun.production_code ?? "Sin codigo"} · {printingRun.process_name}</h2>
+                <p>
+                  Estado: {STATUS_LABELS[printingRun.status]} · Solicitada: {dateTimeLabel(printingRun.requested_at)}
+                </p>
+                <div className="userPreviewGrid">
+                  <RunSummaryRows run={printingRun} />
+                </div>
+                {/* print: sin paginacion, la hoja lleva todas las etapas. */}
+                <RunStageSummaryTable print run={printingRun} />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

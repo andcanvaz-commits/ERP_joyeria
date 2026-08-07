@@ -179,6 +179,31 @@ export function ReportesDashboard() {
         <section className="card panelBody"><div className="emptyState">Cargando reportes...</div></section>
       ) : (
         <>
+          {/* Selector de periodo: mismo patron que reportes de inventario.
+              Sin esto el mes quedaba fijo en el mas reciente, sin forma de
+              consultar meses anteriores. */}
+          <div className="pageHeader">
+            <p style={{ margin: 0, maxWidth: 740 }}>
+              Estadísticas de producción. Los datos cambian según el mes seleccionado.
+            </p>
+            <div className="actions">
+              <label className="fieldGroup" style={{ minWidth: 220 }}>
+                <span>Periodo</span>
+                <select
+                  className="field"
+                  disabled={months.length === 0}
+                  onChange={(event) => setSelectedMonth(event.target.value)}
+                  value={selectedMonth}
+                >
+                  {months.length === 0 ? <option value="">Sin datos</option> : null}
+                  {months.map((month) => (
+                    <option key={month} value={month}>{monthLabel(month)}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
           {/* Resumen ejecutivo */}
           <section className="card reportSummary">
             <div className="reportSummaryHead">
@@ -247,10 +272,10 @@ export function ReportesDashboard() {
                 <thead>
                   <tr>
                     <th>Proceso</th>
-                    <th>Órdenes</th>
-                    <th>Unidades</th>
-                    <th>% de órdenes</th>
-                    <th>Merma</th>
+                    <th className="num">Órdenes</th>
+                    <th className="num">Unidades</th>
+                    <th className="num">% de órdenes</th>
+                    <th className="num">Merma</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -285,8 +310,8 @@ export function ReportesDashboard() {
                 <thead>
                   <tr>
                     <th>Proceso</th>
-                    <th>Merma (peso)</th>
-                    <th>Merma promedio %</th>
+                    <th className="num">Merma (peso)</th>
+                    <th className="num">Merma promedio %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -319,8 +344,8 @@ export function ReportesDashboard() {
                 <thead>
                   <tr>
                     <th>Etapa</th>
-                    <th>Merma (peso)</th>
-                    <th>Merma promedio %</th>
+                    <th className="num">Merma (peso)</th>
+                    <th className="num">Merma promedio %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -353,7 +378,7 @@ export function ReportesDashboard() {
                 <thead>
                   <tr>
                     <th>Etapa</th>
-                    <th>Rechazos</th>
+                    <th className="num">Rechazos</th>
                   </tr>
                 </thead>
                 <tbody>

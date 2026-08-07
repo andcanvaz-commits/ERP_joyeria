@@ -272,6 +272,18 @@ textarea {
   display: grid;
   gap: 1px;
   text-align: right;
+  /* Un item flex no baja de su contenido salvo que se le permita: sin esto un
+     correo largo empuja el bloque y se sale de la barra, cortado a la derecha. */
+  min-width: 0;
+}
+
+.profileText strong,
+.profileText span {
+  /* Idem para los hijos del grid, que tambien traen min-width auto. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profileText strong {
@@ -293,6 +305,14 @@ textarea {
   border-radius: 10px;
   cursor: pointer;
   color: inherit;
+  /* El propio boton tampoco debe crecer con el texto. */
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Los iconos conservan su tamaño: lo que cede es el texto, no ellos. */
+.profileTrigger > svg {
+  flex-shrink: 0;
 }
 
 .profileTrigger:hover,
@@ -852,6 +872,13 @@ textarea {
   font-size: 13px;
   outline: none;
   transition: background 0.12s ease;
+}
+
+/* Categoria existente pero en cero: se lista para no fingir que no existe,
+   atenuada porque no tiene porcion en el anillo con la cual interactuar. */
+.categoryDonutLegendRowEmpty {
+  color: var(--muted);
+  opacity: 0.72;
 }
 
 .categoryDonutLegendRow:hover,
@@ -3659,6 +3686,16 @@ textarea {
   padding: 16px 18px 12px;
 }
 
+/* Columnas numericas de reportes: centradas, encabezado y valor. Son tablas de
+   pocas filas y muy anchas; pegados al borde derecho los numeros quedaban lejos
+   de su titulo. Se centran los DOS juntos para que el valor caiga bajo su
+   encabezado. Solo aplica aqui: en el resto del sistema los numeros siguen a la
+   derecha, que es lo correcto para comparar magnitudes fila contra fila. */
+.reportSection .table th.num,
+.reportSection .table td.num {
+  text-align: center;
+}
+
 @media (max-width: 960px) {
   .reportFigures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .insightGrid { grid-template-columns: 1fr; }
@@ -4571,29 +4608,37 @@ textarea:disabled {
   min-width: 0;
 }
 
-.wasteReportPrint {
+/* Documento para imprimir. `.wasteReportPrint` era el nombre original (solo
+   existia el reporte de merma); `.printDoc` es el alias generico que usan los
+   documentos nuevos. Mismos estilos: son de hoja impresa, no del dominio. */
+.wasteReportPrint,
+.printDoc {
   padding: 12px;
   color: #1a1a1a;
 }
 
-.wasteReportPrint h1 {
+.wasteReportPrint h1,
+.printDoc h1 {
   font-size: 18px;
   margin: 0 0 4px;
 }
 
-.wasteReportPrint h2 {
+.wasteReportPrint h2,
+.printDoc h2 {
   font-size: 14px;
   font-weight: 600;
   margin: 0 0 4px;
 }
 
-.wasteReportPrint > p {
+.wasteReportPrint > p,
+.printDoc > p {
   font-size: 12px;
   color: #444;
   margin: 0 0 14px;
 }
 
-.wasteReportPrint .userPreviewGrid {
+.wasteReportPrint .userPreviewGrid,
+.printDoc .userPreviewGrid {
   margin-bottom: 16px;
 }
 
@@ -4836,3 +4881,4 @@ textarea:disabled {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+

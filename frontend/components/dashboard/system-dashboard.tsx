@@ -345,6 +345,9 @@ export function SystemDashboard() {
                 value: grams,
                 breakdown: type === "SUPPLY" ? suppliesByUnit : undefined,
               }))}
+              // Los 6 tipos de inventario son un catalogo cerrado: el que
+              // esta en cero se lista igual, no desaparece.
+              showEmpty
               unit="g"
             />
           </article>
@@ -607,6 +610,7 @@ export function SystemDashboard() {
                 label: INVENTORY_TYPE_LABELS[type],
                 value: total,
               }))}
+              showEmpty
             />
           </article>
 
