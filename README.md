@@ -3,6 +3,8 @@
 Sistema ERP web para joyería: producción, inventario, merma, reportes y seguridad.
 La arquitectura real y las reglas operativas están en `CLAUDE.md`.
 La especificación funcional original está en `docs/ESPECIFICACION_FUNCIONAL.md`.
+El despliegue vivo, el traspaso de la base de datos y el mantenimiento están en
+`docs/OPERACION_PRODUCCION.md`.
 
 ## Estructura del repositorio
 
