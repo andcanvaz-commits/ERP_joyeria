@@ -10,6 +10,17 @@ from backend.modules.product_types.service import ProductTypeError, ProductTypeI
 router = APIRouter()
 
 
+# Mismo criterio que catalog/units: solo admin escribe, lectura abierta a
+# cualquier usuario autenticado (producción/inventario listan tipos de
+# producto en sus propios formularios).
+def _ensure_admin(current_user: CurrentUser) -> None:
+    if current_user.role not in {"admin", "Admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el administrador puede modificar los tipos de producto.",
+        )
+
+
 def get_product_type_service():
     session = SessionLocal()
     try:
@@ -36,6 +47,7 @@ def create_type(
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductTypeService = Depends(get_product_type_service),
 ) -> ProductTypeRead:
+    _ensure_admin(current_user)
     try:
         return service.create_type(payload)
     except ProductTypeError as exc:
@@ -48,6 +60,7 @@ def delete_type(
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductTypeService = Depends(get_product_type_service),
 ) -> None:
+    _ensure_admin(current_user)
     try:
         service.delete_type(type_id)
     except ProductTypeInUseError as exc:

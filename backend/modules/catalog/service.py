@@ -12,6 +12,10 @@ class CatalogError(ValueError):
     pass
 
 
+class CatalogSegmentInUseError(CatalogError):
+    """El segmento tiene productos con stock y no se puede eliminar."""
+
+
 class CatalogService:
     def __init__(self, session) -> None:
         self.session = session
@@ -58,6 +62,33 @@ class CatalogService:
         segment = self.session.get(CatalogSegment, segment_id)
         if segment is None:
             raise CatalogError("Segmento no encontrado.")
+
+        from sqlalchemy import func
+
+        from backend.modules.inventory.models import InventoryItem
+
+        conditions = [
+            InventoryItem.item_type == "FINISHED_PRODUCT",
+            func.length(InventoryItem.product_code) == 7,
+        ]
+        if segment.kind == "MATERIAL":
+            conditions.append(func.substring(InventoryItem.product_code, 1, 1) == segment.code)
+        elif segment.kind == "CATEGORY":
+            conditions.append(func.substring(InventoryItem.product_code, 2, 2) == segment.code)
+        elif segment.kind == "MODEL":
+            conditions.append(func.substring(InventoryItem.product_code, 2, 2) == (segment.parent_code or ""))
+            conditions.append(func.substring(InventoryItem.product_code, 4, 4) == segment.code)
+
+        total_stock = self.session.execute(
+            select(func.coalesce(func.sum(InventoryItem.current_stock), 0)).select_from(InventoryItem).where(
+                *conditions
+            )
+        ).scalar_one()
+        if total_stock > 0:
+            raise CatalogSegmentInUseError(
+                f"No se puede eliminar: quedan {total_stock} en stock de productos con este código. "
+                f"El stock debe estar en cero primero."
+            )
         self.session.delete(segment)
 
     def _next_code(self, kind: str, parent: str | None, width: int) -> str:

@@ -105,24 +105,25 @@ class ProductTypeService:
         row = self.session.get(ProductType, type_id)
         if row is None:
             raise ProductTypeError("Tipo de producto no encontrado.")
-        # El tipo se comparte entre materiales: solo se puede eliminar si NO
-        # queda ninguna pieza de ese tipo en inventario, de ningun material
-        # (oro, plata, etc. — el digito de material es el primero del codigo
-        # de 7, el resto categoria+modelo es el tipo).
+        # El tipo se comparte entre materiales: solo se puede eliminar si el
+        # stock de ese tipo esta en cero en TODOS los materiales (oro, plata,
+        # etc. — el digito de material es el primero del codigo de 7, el
+        # resto categoria+modelo es el tipo). Piezas archivadas con stock 0
+        # no bloquean el borrado; solo el stock real lo hace.
         from sqlalchemy import func
 
         from backend.modules.inventory.models import InventoryItem
 
-        count = self.session.execute(
-            select(func.count()).select_from(InventoryItem).where(
+        total_stock = self.session.execute(
+            select(func.coalesce(func.sum(InventoryItem.current_stock), 0)).select_from(InventoryItem).where(
                 InventoryItem.item_type == "FINISHED_PRODUCT",
                 func.length(InventoryItem.product_code) == 7,
                 func.substring(InventoryItem.product_code, 2) == f"{row.category_code}{row.model_code}",
             )
         ).scalar_one()
-        if count > 0:
+        if total_stock > 0:
             raise ProductTypeInUseError(
-                f"No se puede eliminar: hay {count} producto(s) de este tipo en inventario "
-                f"(de algun material). Elimina primero esas piezas."
+                f"No se puede eliminar: quedan {total_stock} en stock de este producto "
+                f"(de algun material). El stock debe estar en cero primero."
             )
         self.session.delete(row)

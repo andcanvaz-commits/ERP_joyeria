@@ -146,10 +146,15 @@ class InventoryService(InventoryIntegrationPort):
             raise InventoryDomainError(
                 "No se puede eliminar un item con stock. Deja el stock en cero primero."
             )
-        # Sin stock: se permite eliminar. Se borran tambien sus movimientos para
-        # no dejar historial huerfano (integridad referencial).
-        for movement in self.repository.list_movements(item_id):
-            self.repository.delete_movement(movement)
+        # Los movimientos son el historial inmutable del item: si ya tiene
+        # alguno, no se elimina el item (perderia ese historial). Solo se
+        # puede eliminar un item que nunca tuvo movimientos (alta por error).
+        # Si tuvo movimientos pero ya esta en cero, archivar en su lugar.
+        if self.repository.list_movements(item_id):
+            raise InventoryDomainError(
+                "Este item tiene movimientos registrados: eliminarlo borraria su historial. "
+                "Archívalo en su lugar."
+            )
         self.repository.delete_item(item)
 
     def archive_item(self, item_id: UUID) -> InventoryItemRead:

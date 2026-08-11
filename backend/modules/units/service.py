@@ -25,6 +25,10 @@ class UnitError(ValueError):
     pass
 
 
+class UnitInUseError(UnitError):
+    """Hay items con stock usando esta unidad y no se puede eliminar."""
+
+
 class UnitsService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -58,6 +62,20 @@ class UnitsService:
         unit = self.session.get(UnitOfMeasure, unit_id)
         if unit is None:
             raise UnitError("Unidad no encontrada.")
+
+        from sqlalchemy import func
+
+        from backend.modules.inventory.models import InventoryItem
+
+        total_stock = self.session.execute(
+            select(func.coalesce(func.sum(InventoryItem.current_stock), 0)).select_from(InventoryItem).where(
+                InventoryItem.unit_code == unit.code
+            )
+        ).scalar_one()
+        if total_stock > 0:
+            raise UnitInUseError(
+                f"No se puede eliminar: hay {total_stock} en stock de items que usan esta unidad."
+            )
         self.session.delete(unit)
 
 
