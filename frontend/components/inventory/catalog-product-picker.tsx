@@ -158,7 +158,6 @@ export function CatalogProductPicker({
                   <tr>
                     <th style={{ width: 110 }}>Código</th>
                     <th>Producto</th>
-                    <th className="num">Precio</th>
                     {rowBadge ? <th aria-label="Receta" style={{ width: 28 }} /> : null}
                   </tr>
                 </thead>
@@ -171,13 +170,12 @@ export function CatalogProductPicker({
                     >
                       <td><span className="orderCodeTag">#{type.category_code}{type.model_code}</span></td>
                       <td>{type.name ?? "—"}</td>
-                      <td className="num">{type.price ? `$ ${Number(type.price).toLocaleString("es-EC", { minimumFractionDigits: 2 })}` : "—"}</td>
                       {rowBadge ? <td onClick={(event) => event.stopPropagation()}>{rowBadge(type)}</td> : null}
                     </tr>
                   ))}
                   {drilledType.products.length === 0 ? (
                     <tr>
-                      <td colSpan={rowBadge ? 4 : 3}>
+                      <td colSpan={rowBadge ? 3 : 2}>
                         <div className="emptyState">
                           {drilledType.hiddenCount > 0
                             ? `${drilledType.hiddenCount} ${drilledType.hiddenCount === 1 ? "producto" : "productos"} de este tipo, pero ${drilledType.hiddenCount === 1 ? "se fabrica" : "se fabrican"} por ensamblar (ya tiene${drilledType.hiddenCount === 1 ? "" : "n"} receta).`

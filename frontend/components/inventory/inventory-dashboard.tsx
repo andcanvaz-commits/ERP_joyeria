@@ -2250,31 +2250,10 @@ export function InventoryDashboard() {
                 </button>
               ) : null}
               {itemFilter === "FINISHED_PRODUCT" ? (
-                <>
-                  <button className="button" onClick={openFinishedProductExit} type="button">
-                    <Minus aria-hidden="true" size={17} />
-                    Salida
-                  </button>
-                  <button
-                    className="button"
-                    onClick={() => {
-                      setCombineForm({
-                        sources: [],
-                        material_code: "",
-                        material_type: "",
-                        purity: "",
-                        product_type_id: "",
-                        target_item_id: "",
-                        assemblies: "1",
-                      });
-                      setIsCombineOpen(true);
-                    }}
-                    type="button"
-                  >
-                    <Repeat aria-hidden="true" size={17} />
-                    Ensamblar
-                  </button>
-                </>
+                <button className="button" onClick={openFinishedProductExit} type="button">
+                  <Minus aria-hidden="true" size={17} />
+                  Salida
+                </button>
               ) : null}
               <input accept=".xml,text/xml" hidden onChange={handleXmlInvoice} ref={xmlInputRef} type="file" />
             </div>
