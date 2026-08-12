@@ -35,6 +35,17 @@ async function fetchDocumentosBundle(): Promise<{ runs: ProductionRun[]; items: 
   return { runs, items };
 }
 
+// La recepcion es un acto unico por familia (aunque varios responsables hayan
+// entregado partes por separado) — no se muestra como fraccion "X/Y
+// recibidas", solo el estado real: "Recibida" cuando la familia entera lo
+// esta (misma regla que canPrintRecepcion), o el estado de la corrida raiz.
+function familyStatusText(family: ProductionRun[]): string {
+  if (family.length === 1) return STATUS_LABEL[family[0].status];
+  if (canPrintRecepcion(family)) return "Recibida";
+  const root = family.find((run) => !run.parent_run_id) ?? family[0];
+  return STATUS_LABEL[root.status];
+}
+
 export function DocumentosDashboard() {
   const { data, isLoading } = useQuery({
     queryKey: ["documentos"],
@@ -264,11 +275,7 @@ export function DocumentosDashboard() {
                 {entries.map(([key, family]) => {
                   const isSel = key === selectedKey;
                   const root = family.find((run) => !run.parent_run_id) ?? family[0];
-                  const receivedCount = family.filter((run) => run.status === "RECIBIDA").length;
-                  const statusText =
-                    family.length === 1
-                      ? STATUS_LABEL[family[0].status]
-                      : `${receivedCount}/${family.length} recibidas`;
+                  const statusText = familyStatusText(family);
                   return (
                     <button
                       className={`processPicker${isSel ? " processPickerActive" : ""}`}
@@ -401,9 +408,7 @@ export function DocumentosDashboard() {
                 <div className="movementList movementHistoryEntries pagedListFloor">
                   {(calendarSearchActive ? calendarSearchResults : calendarDayEntries).map(([key, family]) => {
                     const root = familyRoot(family);
-                    const receivedCount = family.filter((run) => run.status === "RECIBIDA").length;
-                    const statusText =
-                      family.length === 1 ? STATUS_LABEL[family[0].status] : `${receivedCount}/${family.length} recibidas`;
+                    const statusText = familyStatusText(family);
                     return (
                       <article
                         className="movementRow"
