@@ -71,12 +71,11 @@ type StageForm = {
   reworkAction: string;
   reworkTargetOrder: string;
   requiresWeighing: boolean;
-  ingredients: Array<{ inventoryItemId: string; quantity: string; unitCode: string }>;
+  ingredients: Array<{ inventoryItemId: string; unitCode: string }>;
 };
 
 type ProcessMaterialForm = {
   inventoryItemId: string;
-  quantityPerUnit: string;
   unitCode: string;
 };
 
@@ -156,8 +155,7 @@ function processToForm(process: ProductionProcess): ProcessForm {
     description: process.description ?? "",
     materials: process.materials.map((material) => ({
       inventoryItemId: material.inventory_item_id,
-      quantityPerUnit: material.quantity_per_unit,
-      unitCode: material.unit_code,
+      unitCode: "",
     })),
     wasteLimitPercent: process.waste_limit_percent ?? "1",
     stages: stages.length > 0 ? stages.map((stage) => ({
@@ -171,8 +169,7 @@ function processToForm(process: ProductionProcess): ProcessForm {
       requiresWeighing: stage.requires_weighing,
       ingredients: (stage.ingredients ?? []).map((ing) => ({
         inventoryItemId: String(ing.inventory_item_id),
-        quantity: String(ing.quantity),
-        unitCode: ing.unit_code,
+        unitCode: "",
       })),
     })) : [emptyStage()],
     productTypeIds: (process.product_type_ids ?? []).map(String),
@@ -1065,7 +1062,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   function addProcessMaterial(item: InventoryItem) {
     setForm((current) => ({
       ...current,
-      materials: [...current.materials, { inventoryItemId: item.id, quantityPerUnit: "", unitCode: item.unit_code }],
+      materials: [...current.materials, { inventoryItemId: item.id, unitCode: item.unit_code }],
     }));
     setIsMaterialPickerOpen(false);
   }
@@ -1079,21 +1076,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   function addStageIngredient(item: InventoryItem) {
     updateStage({
-      ingredients: [...selectedStage.ingredients, { inventoryItemId: item.id, quantity: "", unitCode: item.unit_code }],
+      ingredients: [...selectedStage.ingredients, { inventoryItemId: item.id, unitCode: item.unit_code }],
     });
     setIsIngredientPickerOpen(false);
   }
 
-  function updateProcessMaterial(materialIndex: number, patch: Partial<ProcessMaterialForm>) {
-    setForm((current) => ({
-      ...current,
-      materials: current.materials.map((material, index) =>
-        index === materialIndex ? { ...material, ...patch } : material
-      ),
-    }));
-  }
-
-  function updateStage(fieldOrPatch: keyof StageForm | Partial<StageForm>, value?: string | boolean | Array<{ inventoryItemId: string; quantity: string; unitCode: string }>) {
+  function updateStage(fieldOrPatch: keyof StageForm | Partial<StageForm>, value?: string | boolean | Array<{ inventoryItemId: string; unitCode: string }>) {
     setForm((current) => ({
       ...current,
       stages: current.stages.map((stage, index) => {
@@ -1115,11 +1103,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (form.stages.some((stage) => !stage.name.trim())) {
       throw new Error("Todas las etapas agregadas deben tener nombre.");
     }
-    if (
-      form.materials.length === 0 ||
-      form.materials.some((material) => !material.inventoryItemId || !material.quantityPerUnit || Number(material.quantityPerUnit) <= 0)
-    ) {
-      throw new Error("Agrega al menos una materia prima con su cantidad por unidad.");
+    if (form.materials.length === 0) {
+      throw new Error("Agrega al menos una materia prima.");
     }
     const materialIds = form.materials.map((material) => material.inventoryItemId);
     if (new Set(materialIds).size !== materialIds.length) {
@@ -1132,8 +1117,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       version: 1,
       materials: form.materials.map((material) => ({
         inventory_item_id: material.inventoryItemId,
-        quantity_per_unit: material.quantityPerUnit,
-        unit_code: material.unitCode || "g",
       })),
       waste_limit_percent: "1",
       is_active: true,
@@ -1150,11 +1133,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         requires_weighing: stage.requiresWeighing,
         is_active: true,
         ingredients: stage.ingredients
-          .filter((ing) => ing.inventoryItemId && ing.quantity)
+          .filter((ing) => ing.inventoryItemId)
           .map((ing) => ({
             inventory_item_id: ing.inventoryItemId,
-            quantity: ing.quantity,
-            unit_code: ing.unitCode || rawMaterials.find((m) => m.id === ing.inventoryItemId)?.unit_code || "g",
           })),
       })),
     };
@@ -3360,28 +3341,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 {form.materials.map((material, materialIndex) => {
                   const selectedItem = processMaterialPool.find((item) => item.id === material.inventoryItemId);
                   return (
-                    <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "end" }}>
-                      <div className="materialRow" style={{ flex: 1 }}>
-                        <label className="fieldGroup">
-                          <span>Material</span>
-                          <div className="field" style={{ display: "flex", alignItems: "center" }}>
-                            {selectedItem
-                              ? `${selectedItem.name} · ${itemTypeLabel(selectedItem.item_type)}`
-                              : material.inventoryItemId}
-                          </div>
-                        </label>
-                        <label className="fieldGroup">
-                          <span>Cantidad usada por unidad ({material.unitCode})</span>
-                          <input
-                            className="field"
-                            disabled={isSaving}
-                            min="0.0001"
-                            onChange={(event) => updateProcessMaterial(materialIndex, { quantityPerUnit: event.target.value })}
-                            step="0.0001"
-                            type="number"
-                            value={material.quantityPerUnit}
-                          />
-                        </label>
+                    <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                        {selectedItem
+                          ? `${selectedItem.name} · ${itemTypeLabel(selectedItem.item_type)} · ${selectedItem.unit_code}`
+                          : material.inventoryItemId}
                       </div>
                       <button
                         aria-label="Quitar material"
@@ -3565,27 +3529,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         const selectedItem = suppliesList.find((m) => m.id === ing.inventoryItemId);
                         return (
                           <div key={ingIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <span className="field" style={{ flex: 2, display: "flex", alignItems: "center" }}>
-                              {selectedItem?.name ?? ing.inventoryItemId}
-                            </span>
-                            <input
-                              className="field"
-                              type="number"
-                              min="0"
-                              step="0.0001"
-                              placeholder="Cantidad"
-                              value={ing.quantity}
-                              onChange={(e) => {
-                                updateStage({
-                                  ingredients: selectedStage.ingredients.map((item, idx) =>
-                                    idx === ingIndex ? { ...item, quantity: e.target.value } : item
-                                  ),
-                                });
-                              }}
-                              style={{ flex: 1, minWidth: 90 }}
-                            />
-                            <span style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700, minWidth: 30 }}>
-                              {ing.unitCode}
+                            <span className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                              {selectedItem ? `${selectedItem.name} · ${selectedItem.unit_code}` : ing.inventoryItemId}
                             </span>
                             <button
                               type="button"
@@ -3741,8 +3686,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {viewingProcess.materials.length > 0
                     ? viewingProcess.materials
                         .map((material) => {
-                          const name = rawMaterials.find((item) => item.id === material.inventory_item_id)?.name ?? material.inventory_item_id;
-                          return `${name}: ${material.quantity_per_unit} ${material.unit_code}`;
+                          const item = rawMaterials.find((item) => item.id === material.inventory_item_id);
+                          return item ? `${item.name} · ${item.unit_code}` : material.inventory_item_id;
                         })
                         .join(" · ")
                     : "Sin configurar"}
