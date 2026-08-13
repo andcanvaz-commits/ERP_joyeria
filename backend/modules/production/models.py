@@ -69,8 +69,6 @@ class ProductionProcessMaterial(Base):
         index=True,
     )
     inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
-    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
 
     process: Mapped["ProductionProcess"] = relationship(back_populates="materials")
 
@@ -123,8 +121,6 @@ class ProductionProcessStageIngredient(Base):
         index=True,
     )
     inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
-    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
 
     stage: Mapped["ProductionProcessStage"] = relationship(back_populates="ingredients")
 
@@ -175,7 +171,6 @@ class ProductionRun(Base):
     # Nulo en ordenes historicas migradas (import de certificados de papel):
     # esas actas nunca referencian una materia prima real del inventario.
     raw_material_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    raw_material_quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     raw_material_unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
     total_required_material: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     # Materia prima RESERVADA pero aun no consumida: inventario destino stock a
@@ -281,6 +276,10 @@ class ProductionRunStage(Base):
     # Merma registrada al finalizar la etapa: cuanto material se perdio en ella.
     waste_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     waste_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
+    ingredients: Mapped[list["ProductionRunStageIngredient"]] = relationship(
+        back_populates="stage",
+        cascade="all, delete-orphan",
+    )
 
     run: Mapped[ProductionRun] = relationship(back_populates="stages")
     decisions: Mapped[list["ProductionRunStageDecision"]] = relationship(
@@ -310,6 +309,27 @@ class ProductionRunStageDecision(Base):
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     stage: Mapped["ProductionRunStage"] = relationship(back_populates="decisions")
+
+
+class ProductionRunStageIngredient(Base):
+    __tablename__ = "production_run_stage_ingredients"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_stage_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_run_stages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Guardado para esta orden pero todavia no consumido (mismo patron que
+    # ProductionComplementRequest.reserved_quantity).
+    reserved_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
+    )
+
+    stage: Mapped["ProductionRunStage"] = relationship(back_populates="ingredients")
 
 
 class ProductionRunProduct(Base):
@@ -393,7 +413,7 @@ class AssemblyRecipeItem(Base):
         ForeignKey("assembly_recipes.id", ondelete="CASCADE"), nullable=False, index=True
     )
     complement_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    quantity_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
 
     recipe: Mapped["AssemblyRecipe"] = relationship(back_populates="items")
 
