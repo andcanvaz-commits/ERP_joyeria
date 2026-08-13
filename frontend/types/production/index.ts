@@ -1,8 +1,6 @@
 export interface StageIngredient {
   id: string;
   inventory_item_id: string;
-  quantity: string;
-  unit_code: string;
 }
 
 export type ProductionProcessStage = {
@@ -23,8 +21,6 @@ export type ProductionProcessStage = {
 export type ProductionProcessMaterial = {
   id: string;
   inventory_item_id: string;
-  quantity_per_unit: string;
-  unit_code: string;
 };
 
 export type ProductionProcess = {
@@ -41,10 +37,11 @@ export type ProductionProcess = {
   product_type_ids?: string[];
 };
 
-// Receta de ensamble por clave de modelo (categoria+modelo, cantidades por unidad).
+// Receta de ensamble por clave de modelo (categoria+modelo): ultima cantidad
+// total usada por complemento (sugerencia, no autoritativa).
 export type AssemblyRecipe = {
   model_key: string | null;
-  items: Array<{ complement_item_id: string; name?: string | null; unit_code?: string | null; material_type?: string | null; quantity_per_unit: string }>;
+  items: Array<{ complement_item_id: string; name?: string | null; unit_code?: string | null; material_type?: string | null; quantity: string }>;
 };
 
 export type ProductionRunStage = {
@@ -103,7 +100,6 @@ export type ProductionRun = {
     | "CANCELADA"
     | "ESPERANDO_MATERIAL";
   raw_material_item_id: string | null;
-  raw_material_quantity_per_unit: string;
   raw_material_unit_code: string;
   total_required_material: string;
   // Materia prima guardada para esta orden sin consumir todavía. Con

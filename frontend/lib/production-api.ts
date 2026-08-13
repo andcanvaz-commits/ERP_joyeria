@@ -7,8 +7,6 @@ export type CreateProductionProcessPayload = {
   version?: number;
   materials: Array<{
     inventory_item_id: string;
-    quantity_per_unit: string;
-    unit_code: string;
   }>;
   waste_limit_percent?: string;
   is_active?: boolean;
@@ -24,8 +22,6 @@ export type CreateProductionProcessPayload = {
     is_active?: boolean;
     ingredients?: Array<{
       inventory_item_id: string;
-      quantity: string;
-      unit_code: string;
     }>;
   }>;
   // Tipos de producto del catálogo que el proceso puede producir (vacío = todos).
@@ -62,6 +58,7 @@ export function listProductionRuns() {
 
 export function createProductionRun(payload: {
   process_id: string;
+  // Cantidad total de materia prima en la unidad de medida del item elegido.
   quantity: string;
   raw_material_item_id: string;
   // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
@@ -70,6 +67,8 @@ export function createProductionRun(payload: {
   products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>;
   // Complementos solicitados al inventario (opcional).
   complements?: Array<{ item_id: string; quantity: string }>;
+  // Cantidad total de cada insumo configurado en las etapas activas del proceso (obligatorio 1:1).
+  stage_ingredients?: Array<{ process_stage_ingredient_id: string; quantity: string }>;
 }) {
   return apiRequest<ProductionRun>("/api/production/runs", {
     method: "POST",
@@ -90,7 +89,7 @@ export function updateProductionRunProducts(
 // Define la combinacion de complementos aplicada al ensamble del resultante.
 export function defineRunAssembly(
   runId: string,
-  items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
+  items: Array<{ complement_item_id: string; quantity: string }>,
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/assembly`, {
     method: "POST",
@@ -185,7 +184,7 @@ export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: str
 
 export function upsertAssemblyRecipe(
   modelKey: string,
-  items: Array<{ complement_item_id: string; quantity_per_unit: string }>,
+  items: Array<{ complement_item_id: string; quantity: string }>,
 ) {
   return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes/${modelKey}`, {
     method: "PUT",
