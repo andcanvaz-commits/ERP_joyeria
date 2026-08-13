@@ -44,7 +44,7 @@ class ProductionProcessRepository:
         statement = (
             select(ProductionRun)
             .options(
-                selectinload(ProductionRun.stages),
+                selectinload(ProductionRun.stages).selectinload(ProductionRunStage.ingredients),
                 selectinload(ProductionRun.event_lines),
             )
             .where(ProductionRun.id == run_id)
@@ -63,7 +63,7 @@ class ProductionProcessRepository:
         statement = (
             select(ProductionRun)
             .options(
-                selectinload(ProductionRun.stages),
+                selectinload(ProductionRun.stages).selectinload(ProductionRunStage.ingredients),
                 selectinload(ProductionRun.event_lines),
             )
             .order_by(ProductionRun.requested_at.desc())
