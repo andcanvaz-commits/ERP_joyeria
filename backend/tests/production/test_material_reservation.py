@@ -14,12 +14,12 @@ from backend.tests.production.test_allocate_material import _create_waiting_chil
 
 
 def _reserve_partial(db_session, production_service, current_user, process, raw_material, target_complement):
-    """Deja una corrida hija de 40 unidades con stock para solo 25 y esas 25
-    ya reservadas. Devuelve (hija, stock_fisico)."""
+    """Deja una corrida hija de 40 g con stock para solo 25 g y esos 25 g
+    ya reservados. Devuelve la hija."""
     _, child = _create_waiting_child(
         production_service, current_user, process, raw_material, target_complement
     )
-    raw_material.current_stock = Decimal("250")  # 10 g/unidad -> cubre 25 de 40
+    raw_material.current_stock = Decimal("25")  # cubre 25 de los 40 g
     db_session.flush()
     production_service.reserve_material(child.id, Decimal("40"), current_user)
     return child
@@ -31,7 +31,7 @@ def test_preview_reports_partial_without_touching_anything(
     _, child = _create_waiting_child(
         production_service, current_user, process, raw_material, target_complement
     )
-    raw_material.current_stock = Decimal("250")
+    raw_material.current_stock = Decimal("25")
     db_session.flush()
 
     preview = production_service.preview_allocation(child.id, Decimal("40"))
@@ -42,7 +42,7 @@ def test_preview_reports_partial_without_touching_anything(
     assert preview.limiting_name == raw_material.name
     # Dry-run: ni stock, ni estado, ni reserva se movieron.
     db_session.refresh(raw_material)
-    assert raw_material.current_stock == Decimal("250")
+    assert raw_material.current_stock == Decimal("25")
     db_session.refresh(child)
     assert child.status == "ESPERANDO_MATERIAL"
     assert child.reserved_material_quantity == Decimal("0")
@@ -54,7 +54,7 @@ def test_preview_reports_full_coverage_when_stock_is_enough(
     _, child = _create_waiting_child(
         production_service, current_user, process, raw_material, target_complement
     )
-    raw_material.current_stock = Decimal("400")
+    raw_material.current_stock = Decimal("40")
     db_session.flush()
 
     preview = production_service.preview_allocation(child.id, Decimal("40"))
@@ -71,12 +71,12 @@ def test_reserve_holds_stock_without_consuming_or_starting(
     )
 
     db_session.refresh(child)
-    # Reservado lo que de verdad alcanza (25 unidades x 10 g), no las 40 pedidas.
-    assert child.reserved_material_quantity == Decimal("250")
+    # Reservado lo que de verdad alcanza (25 g), no los 40 g pedidos.
+    assert child.reserved_material_quantity == Decimal("25")
     assert child.status == "ESPERANDO_MATERIAL"
     # El stock sigue fisicamente ahi: reservar NO es un movimiento.
     db_session.refresh(raw_material)
-    assert raw_material.current_stock == Decimal("250")
+    assert raw_material.current_stock == Decimal("25")
     # Y no se partio la orden.
     assert child.quantity == Decimal("40")
 
@@ -94,11 +94,11 @@ def test_reserved_stock_is_not_available_to_another_run(
     assert available == Decimal("0")
 
     reserved = production_service.inventory_service.reserved_stock(raw_material.id)
-    assert reserved == Decimal("250")
+    assert reserved == Decimal("25")
 
     # ...pero para la propia corrida que lo reservo sigue disponible.
     own = production_service.inventory_service.available_stock(raw_material, exclude_run_id=child.id)
-    assert own == Decimal("250")
+    assert own == Decimal("25")
 
 
 def test_reserved_stock_blocks_a_manual_salida(
@@ -111,14 +111,14 @@ def test_reserved_stock_blocks_a_manual_salida(
     payload = InventoryMovementCreate(
         item_id=raw_material.id,
         movement_type="SALIDA",
-        quantity=Decimal("100"),
+        quantity=Decimal("10"),
         reason="Salida manual de prueba",
     )
     with pytest.raises(Exception, match="reservados"):
         production_service.inventory_service.create_movement(payload, user_id=current_user.id)
 
     db_session.refresh(raw_material)
-    assert raw_material.current_stock == Decimal("250")
+    assert raw_material.current_stock == Decimal("25")
 
 
 def test_release_returns_stock_to_available(
@@ -132,7 +132,7 @@ def test_release_returns_stock_to_available(
 
     db_session.refresh(child)
     assert child.reserved_material_quantity == Decimal("0")
-    assert production_service.inventory_service.available_stock(raw_material) == Decimal("250")
+    assert production_service.inventory_service.available_stock(raw_material) == Decimal("25")
 
 
 def test_start_reserved_rejects_incomplete_reservation(
@@ -155,12 +155,12 @@ def test_start_reserved_consumes_and_starts_once_complete(
     child = _reserve_partial(
         db_session, production_service, current_user, process, raw_material, target_complement
     )
-    # Llega el resto del material y se reserva tambien: 40 unidades x 10 g.
-    raw_material.current_stock = Decimal("400")
+    # Llega el resto del material y se reserva tambien: 40 g en total.
+    raw_material.current_stock = Decimal("40")
     db_session.flush()
     production_service.reserve_material(child.id, Decimal("15"), current_user)
     db_session.refresh(child)
-    assert child.reserved_material_quantity == Decimal("400")
+    assert child.reserved_material_quantity == Decimal("40")
 
     result = production_service.start_with_reserved_material(child.id, current_user)
 
@@ -212,8 +212,8 @@ def test_list_items_exposes_reserved_and_available(
     items = production_service.inventory_service.list_items("RAW_MATERIAL")
     read = next(item for item in items if item.id == raw_material.id)
 
-    assert read.current_stock == Decimal("250")
-    assert read.reserved_stock == Decimal("250")
+    assert read.current_stock == Decimal("25")
+    assert read.reserved_stock == Decimal("25")
     assert read.available_stock == Decimal("0")
 
 
@@ -256,9 +256,6 @@ def _run_short_on_both(db_session, production_service, current_user, process, ra
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("15"))],
         complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("15"))],
     )
-    # 1 g por unidad para que el escenario calce con lo reportado.
-    process.materials[0].quantity_per_unit = Decimal("1")
-    db_session.flush()
 
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
@@ -368,3 +365,52 @@ def test_preview_reports_zero_coverage_when_a_complement_is_missing(
     assert preview.covered_qty == Decimal("0")
     assert preview.is_partial is True
     assert preview.limiting_is_complement is True
+
+
+def test_reserve_material_covers_stage_ingredients_too(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    from backend.modules.inventory.models import InventoryItem
+    from backend.modules.production.models import ProductionProcessStageIngredient
+    from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate, RunStageIngredientCreate
+    from backend.modules.production.service import _reservation_is_complete
+    import uuid
+
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Hilo", sku=f"IN-{uuid.uuid4().hex[:8]}", unit_code="m",
+        # Alcanza justo para el 50% que va a cubrir la aprobacion (10 * 0.5),
+        # asi la aprobacion no queda bloqueada por el insumo.
+        current_stock=Decimal("5"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    process.stages[0].ingredients.append(ProductionProcessStageIngredient(inventory_item_id=supply.id))
+    db_session.flush()
+    config_id = process.stages[0].ingredients[0].id
+
+    raw_material.current_stock = Decimal("50")
+    db_session.flush()
+
+    payload = ProductionRunCreate(
+        process_id=process.id,
+        raw_material_item_id=raw_material.id,
+        quantity=Decimal("100"),
+        assembly_mode="ASIGNAR",
+        products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
+        stage_ingredients=[RunStageIngredientCreate(process_stage_ingredient_id=config_id, quantity=Decimal("10"))],
+    )
+    run_read = production_service.create_run(payload, current_user)
+    approved = production_service.approve_materials(run_read.id, current_user)
+    assert approved.quantity == Decimal("50")
+
+    children = [r for r in production_service.repository.list_runs() if r.parent_run_id == approved.id]
+    child = children[0]
+    assert child.stages[0].ingredients[0].quantity == Decimal("5")
+
+    supply.current_stock = Decimal("2")
+    db_session.flush()
+    production_service.reserve_material(child.id, Decimal("50"), current_user)
+    db_session.refresh(child)
+
+    assert child.stages[0].ingredients[0].reserved_quantity == Decimal("2")
+    assert _reservation_is_complete(child) is False

@@ -172,8 +172,8 @@ class _MaterialCoverage:
 
 
 def _reservation_is_complete(run: ProductionRun) -> bool:
-    """True si la corrida tiene reservado el 100% de lo que necesita:
-    materia prima Y cada complemento pendiente."""
+    """True si la corrida tiene reservado el 100% de lo que necesita: materia
+    prima, cada complemento Y cada insumo de etapa pendiente."""
     if run.reserved_material_quantity < run.total_required_material:
         return False
     for complement in run.complements:
@@ -181,6 +181,10 @@ def _reservation_is_complete(run: ProductionRun) -> bool:
             continue
         if complement.reserved_quantity < complement.quantity:
             return False
+    for stage in run.stages:
+        for ingredient in stage.ingredients:
+            if ingredient.reserved_quantity < ingredient.quantity:
+                return False
     return True
 
 
@@ -855,7 +859,7 @@ class ProductionService:
         if quantity_units <= 0:
             raise ProductionDomainError("La cantidad a destinar debe ser mayor a cero.")
         if quantity_units > run.quantity:
-            raise ProductionDomainError("No puedes destinar mas unidades de las que la orden necesita.")
+            raise ProductionDomainError("No puedes destinar mas cantidad de la que la orden necesita.")
         if run.raw_material_item_id is None:
             raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
         return self._compute_coverage(run, quantity_units)
@@ -880,7 +884,7 @@ class ProductionService:
         if quantity_units <= 0:
             raise ProductionDomainError("La cantidad a reservar debe ser mayor a cero.")
         if quantity_units > run.quantity:
-            raise ProductionDomainError("No puedes reservar mas unidades de las que la orden necesita.")
+            raise ProductionDomainError("No puedes reservar mas cantidad de la que la orden necesita.")
 
         # Reserva RECURSO POR RECURSO, independiente. El minimo entre recursos
         # (_compute_coverage) responde "cuantas unidades puedo ARRANCAR"; aqui
@@ -906,7 +910,7 @@ class ProductionService:
         added = Decimal("0")
         short_names: list[str] = []
 
-        wanted = run.raw_material_quantity_per_unit * quantity_units
+        wanted = quantity_units
         pending = run.total_required_material - run.reserved_material_quantity
         take = min(wanted, pending, free_for_this_run(raw_material, run.reserved_material_quantity))
         if take > 0:
@@ -922,8 +926,7 @@ class ProductionService:
             item = self.repository.session.get(InventoryItem, complement.item_id)
             if item is None:
                 raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
-            per_unit = complement.quantity / run_quantity if run_quantity > 0 else complement.quantity
-            wanted = per_unit * quantity_units
+            wanted = complement.quantity * (quantity_units / run_quantity) if run_quantity > 0 else complement.quantity
             pending = complement.quantity - complement.reserved_quantity
             take = min(wanted, pending, free_for_this_run(item, complement.reserved_quantity))
             if take > 0:
@@ -931,6 +934,20 @@ class ProductionService:
                 added += take
             elif pending > 0:
                 short_names.append(item.name)
+
+        for stage in run.stages:
+            for ingredient in stage.ingredients:
+                item = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
+                if item is None:
+                    raise ProductionDomainError("Un insumo solicitado ya no existe en inventario.")
+                wanted = ingredient.quantity * (quantity_units / run_quantity) if run_quantity > 0 else ingredient.quantity
+                pending = ingredient.quantity - ingredient.reserved_quantity
+                take = min(wanted, pending, free_for_this_run(item, ingredient.reserved_quantity))
+                if take > 0:
+                    ingredient.reserved_quantity += take
+                    added += take
+                elif pending > 0:
+                    short_names.append(item.name)
 
         # Reservar es idempotente: si la corrida ya tiene guardado todo lo que
         # habia libre, volver a pedirlo no es un error, es un no-op. Solo falla
@@ -942,6 +959,9 @@ class ProductionService:
                 for complement in run.complements
                 if complement.status == ComplementRequestStatus.PENDING
             ),
+            Decimal("0"),
+        ) + sum(
+            (ingredient.reserved_quantity for stage in run.stages for ingredient in stage.ingredients),
             Decimal("0"),
         )
         if added <= 0 and already_held <= 0:
@@ -966,6 +986,9 @@ class ProductionService:
         run.reserved_material_quantity = Decimal("0")
         for complement in run.complements:
             complement.reserved_quantity = Decimal("0")
+        for stage in run.stages:
+            for ingredient in stage.ingredients:
+                ingredient.reserved_quantity = Decimal("0")
         self.repository.flush()
         return self._read_with_names(run)
 
@@ -1025,6 +1048,9 @@ class ProductionService:
         run.reserved_material_quantity = Decimal("0")
         for complement in run.complements:
             complement.reserved_quantity = Decimal("0")
+        for stage in run.stages:
+            for ingredient in stage.ingredients:
+                ingredient.reserved_quantity = Decimal("0")
         self.repository.flush()
 
         try:
@@ -1037,30 +1063,26 @@ class ProductionService:
             )
         except InventoryDomainError as exc:
             raise ProductionDomainError(str(exc)) from exc
-        # Insumos configurados por etapa: se entregan junto con la materia prima
-        # (cantidad fija por orden) y quedan como un movimiento por insumo.
-        # Si falta stock de algun insumo, la aprobacion completa se revierte.
-        process = self.repository.get(run.process_id)
-        if process is not None:
-            from backend.modules.inventory.models import InventoryItem
-
-            for stage in sorted(process.stages, key=lambda item: item.stage_order):
-                if not stage.is_active:
-                    continue
-                for ingredient in stage.ingredients:
-                    supply = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
-                    supply_name = supply.name if supply is not None else "insumo"
-                    try:
-                        self.inventory_service.consume_material_for_production(
-                            item_id=ingredient.inventory_item_id,
-                            quantity=ingredient.quantity,
-                            production_run_id=run.id,
-                            user_id=current_user.id,
-                            production_code=run.production_code or run.root_production_code,
-                            reason=f"Consumo de insumo en etapa {stage.stage_order}. {stage.name}.",
-                        )
-                    except InventoryDomainError as exc:
-                        raise ProductionDomainError(f"Insumo '{supply_name}': {exc}") from exc
+        # Insumos configurados por etapa: se entregan junto con la materia
+        # prima (cantidad declarada al crear ESTA orden) y quedan como un
+        # movimiento por insumo. Se lee de la corrida (run.stages), no del
+        # proceso en vivo: editar el proceso despues no debe alterar ordenes
+        # ya creadas, igual que el resto del dominio.
+        for stage in sorted(run.stages, key=lambda item: item.stage_order):
+            for ingredient in stage.ingredients:
+                supply = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
+                supply_name = supply.name if supply is not None else "insumo"
+                try:
+                    self.inventory_service.consume_material_for_production(
+                        item_id=ingredient.inventory_item_id,
+                        quantity=ingredient.quantity,
+                        production_run_id=run.id,
+                        user_id=current_user.id,
+                        production_code=run.production_code or run.root_production_code,
+                        reason=f"Consumo de insumo en etapa {stage.stage_order}. {stage.stage_name}.",
+                    )
+                except InventoryDomainError as exc:
+                    raise ProductionDomainError(f"Insumo '{supply_name}': {exc}") from exc
         # Complementos solicitados en la orden: se aprueban y descuentan junto
         # con la materia prima. Si falta stock, toda la aprobacion se revierte.
         from backend.modules.inventory.models import InventoryItem as _InventoryItem
@@ -1128,7 +1150,7 @@ class ProductionService:
         if quantity_units <= 0:
             raise ProductionDomainError("La cantidad a destinar debe ser mayor a cero.")
         if quantity_units > run.quantity:
-            raise ProductionDomainError("No puedes destinar mas unidades de las que la orden necesita.")
+            raise ProductionDomainError("No puedes destinar mas cantidad de la que la orden necesita.")
         if run.raw_material_item_id is None:
             raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
 

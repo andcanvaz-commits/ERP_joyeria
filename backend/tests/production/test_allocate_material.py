@@ -7,9 +7,9 @@ from backend.tests.production.test_material_split import _create_run
 
 
 def _create_waiting_child(production_service, current_user, process, raw_material, target_complement):
-    """100 unidades pedidas, stock alcanza para 60: aprobar parte y deja una
-    hija ESPERANDO_MATERIAL de 40 unidades. Devuelve (padre_id, hija)."""
-    raw_material.current_stock = Decimal("600")
+    """100 g pedidos, stock alcanza para 60: aprobar parte y deja una hija
+    ESPERANDO_MATERIAL de 40 g. Devuelve (padre_id, hija)."""
+    raw_material.current_stock = Decimal("60")
     run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
     approved = production_service.approve_materials(run_read.id, current_user)
     children = [
@@ -22,7 +22,7 @@ def test_allocate_material_full_amount_starts_run(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
-    raw_material.current_stock = Decimal("400")  # cubre las 40 unidades faltantes
+    raw_material.current_stock = Decimal("40")  # cubre los 40 g faltantes
     db_session.flush()
 
     result = production_service.allocate_material(child.id, Decimal("40"), current_user)
@@ -41,7 +41,7 @@ def test_allocate_material_partial_amount_splits_again(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
-    raw_material.current_stock = Decimal("250")  # solo cubre 25 de las 40 faltantes
+    raw_material.current_stock = Decimal("25")  # solo cubre 25 de los 40 g faltantes
     db_session.flush()
 
     result = production_service.allocate_material(child.id, Decimal("25"), current_user)
@@ -75,7 +75,7 @@ def test_allocate_material_starts_what_is_covered_and_splits_the_rest(
     esperando. (Antes esto lanzaba 'Stock insuficiente' por una validacion
     prematura que solo miraba materia prima; ver seccion 3 del handoff.)"""
     _, child = _create_waiting_child(production_service, current_user, process, raw_material, target_complement)
-    raw_material.current_stock = Decimal("100")  # solo cubre 10 de las 40 pedidas
+    raw_material.current_stock = Decimal("10")  # solo cubre 10 de los 40 g pedidos
     db_session.flush()
 
     result = production_service.allocate_material(child.id, Decimal("40"), current_user)
