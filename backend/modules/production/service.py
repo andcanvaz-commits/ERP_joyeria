@@ -306,11 +306,7 @@ class ProductionService:
                 requires_weighing=stage_data.requires_weighing,
                 is_active=stage_data.is_active,
                 ingredients=[
-                    ProductionProcessStageIngredient(
-                        inventory_item_id=ing.inventory_item_id,
-                        quantity=ing.quantity,
-                        unit_code=ing.unit_code,
-                    )
+                    ProductionProcessStageIngredient(inventory_item_id=ing.inventory_item_id)
                     for ing in stage_data.ingredients
                 ],
             )
@@ -325,11 +321,7 @@ class ProductionService:
             is_active=payload.is_active,
             stages=stages,
             materials=[
-                ProductionProcessMaterial(
-                    inventory_item_id=material.inventory_item_id,
-                    quantity_per_unit=material.quantity_per_unit,
-                    unit_code=material.unit_code,
-                )
+                ProductionProcessMaterial(inventory_item_id=material.inventory_item_id)
                 for material in payload.materials
             ],
             product_types=[
@@ -358,11 +350,7 @@ class ProductionService:
         process.waste_limit_percent = payload.waste_limit_percent
         process.is_active = payload.is_active
         process.materials = [
-            ProductionProcessMaterial(
-                inventory_item_id=material.inventory_item_id,
-                quantity_per_unit=material.quantity_per_unit,
-                unit_code=material.unit_code,
-            )
+            ProductionProcessMaterial(inventory_item_id=material.inventory_item_id)
             for material in payload.materials
         ]
         new_stages = []
@@ -379,11 +367,7 @@ class ProductionService:
                 requires_weighing=stage_data.requires_weighing,
                 is_active=stage_data.is_active,
                 ingredients=[
-                    ProductionProcessStageIngredient(
-                        inventory_item_id=ing.inventory_item_id,
-                        quantity=ing.quantity,
-                        unit_code=ing.unit_code,
-                    )
+                    ProductionProcessStageIngredient(inventory_item_id=ing.inventory_item_id)
                     for ing in stage_data.ingredients
                 ],
             )
@@ -450,16 +434,8 @@ class ProductionService:
                     name=definition["name"],
                     description=definition["description"],
                     materials=[
-                        {
-                            "inventory_item_id": silver.id,
-                            "quantity_per_unit": definition["material_per_unit"],
-                            "unit_code": silver.unit_code,
-                        },
-                        {
-                            "inventory_item_id": gold.id,
-                            "quantity_per_unit": definition["material_per_unit"],
-                            "unit_code": gold.unit_code,
-                        },
+                        {"inventory_item_id": silver.id},
+                        {"inventory_item_id": gold.id},
                     ],
                     waste_limit_percent=definition["waste_limit_percent"],
                     stages=[

@@ -91,11 +91,7 @@ def process(db_session, raw_material) -> ProductionProcess:
         waste_limit_percent=Decimal("1"),
         is_active=True,
         materials=[
-            ProductionProcessMaterial(
-                inventory_item_id=raw_material.id,
-                quantity_per_unit=Decimal("10"),
-                unit_code="g",
-            )
+            ProductionProcessMaterial(inventory_item_id=raw_material.id)
         ],
         stages=[
             ProductionProcessStage(

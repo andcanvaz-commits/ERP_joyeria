@@ -1,10 +1,6 @@
 import uuid
 from decimal import Decimal
 
-import pytest
-
-from backend.modules.inventory.models import InventoryItem
-from backend.modules.production.service import ProductionDomainError
 from backend.modules.production.schemas import (
     ProcessMaterialCreate,
     ProductionProcessCreate,
@@ -12,43 +8,43 @@ from backend.modules.production.schemas import (
 )
 
 
-def _make_item(db_session, item_type: str) -> InventoryItem:
-    item = InventoryItem(
-        item_type=item_type,
-        name=f"{item_type} test",
-        sku=f"{item_type[:2]}-TEST-{uuid.uuid4().hex[:8]}",
-        unit_code="g" if item_type != "COMPLEMENT" else "und",
-        current_stock=Decimal("0"),
-    )
-    db_session.add(item)
-    db_session.flush()
-    return item
-
-
-def _payload(item: InventoryItem) -> ProductionProcessCreate:
+def _payload(raw_material_id) -> ProductionProcessCreate:
     return ProductionProcessCreate(
-        name=f"Proceso test {uuid.uuid4().hex[:6]}",
-        materials=[
-            ProcessMaterialCreate(
-                inventory_item_id=item.id,
-                quantity_per_unit=Decimal("5"),
-                unit_code=item.unit_code,
-            )
-        ],
-        stages=[
-            ProductionProcessStageCreate(name="Etapa unica", order=1),
-        ],
+        name=f"Proceso {uuid.uuid4().hex[:6]}",
+        materials=[ProcessMaterialCreate(inventory_item_id=raw_material_id)],
+        stages=[ProductionProcessStageCreate(name="Etapa", order=1)],
     )
 
 
-@pytest.mark.parametrize("item_type", ["RAW_MATERIAL", "COMPLEMENT", "WASTE"])
-def test_create_process_accepts_material_types(db_session, production_service, item_type):
-    item = _make_item(db_session, item_type)
-    result = production_service.create_process(_payload(item))
-    assert result.materials[0].inventory_item_id == item.id
+def test_create_process_without_ratio_fields(production_service, raw_material):
+    read = production_service.create_process(_payload(raw_material.id))
+
+    assert len(read.materials) == 1
+    assert read.materials[0].inventory_item_id == raw_material.id
+    assert not hasattr(read.materials[0], "quantity_per_unit")
 
 
-def test_create_process_rejects_supply_material(db_session, production_service):
-    item = _make_item(db_session, "SUPPLY")
+def test_create_process_rejects_duplicate_material(production_service, raw_material):
+    payload = _payload(raw_material.id)
+    payload = payload.model_copy(
+        update={"materials": [ProcessMaterialCreate(inventory_item_id=raw_material.id)] * 2}
+    )
+    import pytest
+    from backend.modules.production.service import ProductionDomainError
+
     with pytest.raises(ProductionDomainError):
-        production_service.create_process(_payload(item))
+        production_service.create_process(payload)
+
+
+def test_update_process_replaces_materials(production_service, process, raw_material, complement_item):
+    payload = ProductionProcessCreate(
+        name=process.name,
+        materials=[
+            ProcessMaterialCreate(inventory_item_id=raw_material.id),
+            ProcessMaterialCreate(inventory_item_id=complement_item.id),
+        ],
+        stages=[ProductionProcessStageCreate(name="Etapa", order=1)],
+    )
+    read = production_service.update_process(process.id, payload)
+
+    assert {m.inventory_item_id for m in read.materials} == {raw_material.id, complement_item.id}
