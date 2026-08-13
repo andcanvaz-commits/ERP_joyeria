@@ -52,11 +52,7 @@ def _payload(raw_material, product_type_ids, name="Proceso tipos test"):
         waste_limit_percent=Decimal("5"),
         is_active=True,
         materials=[
-            ProcessMaterialCreate(
-                inventory_item_id=raw_material.id,
-                quantity_per_unit=Decimal("10"),
-                unit_code="g",
-            )
+            ProcessMaterialCreate(inventory_item_id=raw_material.id)
         ],
         stages=[
             ProductionProcessStageCreate(name="Etapa", order=1, requires_weighing=True)

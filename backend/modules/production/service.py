@@ -1590,36 +1590,12 @@ class ProductionService:
             else Decimal("0")
         )
 
-        # Auto-ensamble: si la orden es ENSAMBLAR y existe una receta aprendida
-        # para su tipo de producto, y los complementos aprobados alcanzan para
-        # cubrirla completa, se aplica sola y la orden queda lista para recibir.
-        # Si no hay receta o no alcanza, queda pendiente de definir manualmente.
+        # ENSAMBLAR siempre queda pendiente de definir a mano, aunque exista
+        # una receta previa para el model_key: la receta es solo una
+        # sugerencia de prellenado en el frontend (define_run_assembly), no se
+        # aplica sola. El usuario confirma o edita las cantidades cada vez.
         if run.assembly_mode == AssemblyMode.ASSEMBLE:
-            from sqlalchemy import select
-
-            model_key = self._model_key_for_run(run)
-            recipe = None
-            if model_key is not None:
-                recipe = self.repository.session.execute(
-                    select(AssemblyRecipe).where(AssemblyRecipe.model_key == model_key)
-                ).scalars().first()
-
-            approved = self._approved_complement_totals(run)
-            covers_recipe = recipe is not None and all(
-                item.quantity_per_unit * run.quantity <= approved.get(item.complement_item_id, Decimal("0"))
-                for item in recipe.items
-            )
-            if covers_recipe:
-                for item in recipe.items:
-                    run.assembly_items.append(
-                        ProductionRunAssemblyItem(
-                            complement_item_id=item.complement_item_id,
-                            quantity=item.quantity_per_unit * run.quantity,
-                        )
-                    )
-                run.assembly_pending = False
-            else:
-                run.assembly_pending = True
+            run.assembly_pending = True
 
     def define_run_assembly(
         self, run_id: UUID, payload: RunAssemblyDefine, current_user: CurrentUser
@@ -1650,17 +1626,16 @@ class ProductionService:
                 raise ProductionDomainError(
                     f"El complemento '{item_name}' no fue solicitado/aprobado en esta orden."
                 )
-            needed = line.quantity_per_unit * run.quantity
-            if needed > approved[line.complement_item_id]:
+            if line.quantity > approved[line.complement_item_id]:
                 raise ProductionDomainError(
-                    f"Complemento '{item_name}': el ensamble necesita {needed} y la orden solo "
+                    f"Complemento '{item_name}': el ensamble necesita {line.quantity} y la orden solo "
                     f"tiene {approved[line.complement_item_id]} aprobados."
                 )
 
         run.assembly_items = [
             ProductionRunAssemblyItem(
                 complement_item_id=line.complement_item_id,
-                quantity=line.quantity_per_unit * run.quantity,
+                quantity=line.quantity,
             )
             for line in payload.items
         ]
@@ -1680,7 +1655,8 @@ class ProductionService:
         self, model_key: str, lines: list[RunAssemblyLineCreate]
     ) -> None:
         """Reemplaza los items de la receta de ensamble de la clave de modelo
-        (o la crea si aun no existe)."""
+        (o la crea si aun no existe). Guarda la ultima cantidad total usada,
+        como sugerencia de prellenado -- nunca se aplica sola."""
         from sqlalchemy import select
 
         recipe = self.repository.session.execute(
@@ -1689,7 +1665,7 @@ class ProductionService:
         new_items = [
             AssemblyRecipeItem(
                 complement_item_id=line.complement_item_id,
-                quantity_per_unit=line.quantity_per_unit,
+                quantity=line.quantity,
             )
             for line in lines
         ]
@@ -1822,7 +1798,7 @@ class ProductionService:
                 name=names.get(item.complement_item_id),
                 unit_code=units.get(item.complement_item_id),
                 material_type=materials.get(item.complement_item_id),
-                quantity_per_unit=item.quantity_per_unit,
+                quantity=item.quantity,
             )
             for item in recipe.items
         ]

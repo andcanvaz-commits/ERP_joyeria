@@ -27,9 +27,7 @@ def weighed_process(db_session, raw_material) -> ProductionProcess:
         waste_limit_percent=Decimal("100"),
         is_active=True,
         materials=[
-            ProductionProcessMaterial(
-                inventory_item_id=raw_material.id, quantity_per_unit=Decimal("10"), unit_code="g",
-            )
+            ProductionProcessMaterial(inventory_item_id=raw_material.id)
         ],
         stages=[
             ProductionProcessStage(
@@ -72,9 +70,9 @@ def test_receive_with_waste_creates_waste_item_and_posts_ingreso_produccion(
 ):
     raw_material.current_stock = Decimal("2000")
     db_session.flush()
-    # 10 unidades x 10g = 100g requeridos; termina en 95g -> 5g de merma.
+    # 100g requeridos; termina en 95g -> 5g de merma.
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
     assert run.waste_weight == Decimal("5")
 
@@ -99,12 +97,12 @@ def test_receive_reuses_same_waste_item_across_runs_of_same_process(
     raw_material.current_stock = Decimal("2000")
     db_session.flush()
     first = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
     production_service.receive_finished_product(first.id, current_user)
 
     second = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "97"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"97"
     )
     production_service.receive_finished_product(second.id, current_user)
 
@@ -124,7 +122,7 @@ def test_receive_with_zero_waste_creates_no_waste_item(
     db_session.flush()
     # Peso final igual al requerido: cero merma.
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "100"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"100"
     )
     assert run.waste_weight == Decimal("0")
 
@@ -150,7 +148,7 @@ def test_receive_with_explicit_waste_item_id_overrides_default(
     db_session.flush()
 
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
 
     production_service.receive_finished_product(
@@ -168,7 +166,7 @@ def test_receive_rejects_waste_item_id_that_is_not_waste_type(
     raw_material.current_stock = Decimal("2000")
     db_session.flush()
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
 
     with pytest.raises(ProductionDomainError, match="destino de merma"):
@@ -192,7 +190,7 @@ def test_receive_rejects_waste_item_id_with_mismatched_unit_code(
     db_session.flush()
 
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
 
     with pytest.raises(ProductionDomainError, match="unidad distinta"):
@@ -220,7 +218,7 @@ def test_receive_rejects_auto_named_waste_item_with_mismatched_unit_code(
     db_session.flush()
 
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
 
     with pytest.raises(ProductionDomainError, match="unidad distinta"):
@@ -242,7 +240,7 @@ def test_receive_rejects_named_waste_item_with_mismatched_unit_code(
     db_session.flush()
 
     run = _run_to_pending_reception(
-        production_service, current_user, weighed_process, raw_material, target_complement, 10, "95"
+        production_service, current_user, weighed_process, raw_material, target_complement, 100,"95"
     )
 
     with pytest.raises(ProductionDomainError, match="unidad distinta"):
