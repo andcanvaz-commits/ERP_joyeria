@@ -223,12 +223,11 @@ def build_runs_for_order(
 
         entrega_total = sum((line.gramos for line in entrega.lines), Decimal("0")) if entrega else Decimal("0")
         recibido_total = sum((line.gramos for line in recibido.lines), Decimal("0")) if recibido else Decimal("0")
-        # raw_material_quantity_per_unit/unit_code no se usan para mostrar
-        # (event_lines lo reemplaza), pero son NOT NULL: se guarda el total
-        # entregado de esta corrida (o 1 si no hay entrega) para que
-        # quantity=1 * eso siga siendo un total_required_material
-        # internamente consistente. raw_material_item_id queda NULL — estas
-        # ordenes no referencian ninguna materia prima real (decision #6).
+        # total_required_material/expected_finished_weight no se usan para
+        # mostrar (event_lines lo reemplaza), pero son NOT NULL: se guarda el
+        # total entregado de esta corrida (o 1 si no hay entrega).
+        # raw_material_item_id queda NULL — estas ordenes no referencian
+        # ninguna materia prima real (decision #6).
         per_unit = entrega_total if entrega_total > 0 else Decimal("1")
 
         run = ProductionRun(
@@ -239,7 +238,6 @@ def build_runs_for_order(
             status=ProductionRunStatus.RECEIVED if recibido else ProductionRunStatus.PENDING_RECEPTION,
             assembly_mode="ASIGNAR",
             raw_material_item_id=None,
-            raw_material_quantity_per_unit=per_unit,
             raw_material_unit_code="g",
             total_required_material=per_unit,
             waste_limit_percent=process.waste_limit_percent,
