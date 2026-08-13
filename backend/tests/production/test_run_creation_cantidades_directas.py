@@ -84,6 +84,25 @@ def test_create_run_rejects_unconfigured_ingredient(
         production_service.create_run(payload, current_user)
 
 
+def test_create_run_rejects_duplicate_ingredient_line(
+    production_service, current_user, process_with_ingredient, raw_material, target_complement
+):
+    config_id = process_with_ingredient.stages[0].ingredients[0].id
+    payload = ProductionRunCreate(
+        process_id=process_with_ingredient.id,
+        raw_material_item_id=raw_material.id,
+        quantity=Decimal("10"),
+        assembly_mode="ASIGNAR",
+        products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("10"))],
+        stage_ingredients=[
+            RunStageIngredientCreate(process_stage_ingredient_id=config_id, quantity=Decimal("3.5")),
+            RunStageIngredientCreate(process_stage_ingredient_id=config_id, quantity=Decimal("1")),
+        ],
+    )
+    with pytest.raises(ProductionDomainError, match="insumo|repitas"):
+        production_service.create_run(payload, current_user)
+
+
 def test_create_run_copies_ingredient_quantity_to_run_stage(
     production_service, current_user, process_with_ingredient, raw_material, target_complement, supply_item
 ):

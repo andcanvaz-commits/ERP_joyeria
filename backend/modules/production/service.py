@@ -524,6 +524,9 @@ class ProductionService:
             for stage in active_stages
             for ingredient in stage.ingredients
         ]
+        payload_ingredient_ids = [line.process_stage_ingredient_id for line in payload.stage_ingredients]
+        if len(payload_ingredient_ids) != len(set(payload_ingredient_ids)):
+            raise ProductionDomainError("No repitas el mismo insumo en la solicitud.")
         configured_ids = {ingredient.id for _, ingredient in configured_ingredients}
         payload_ids = {line.process_stage_ingredient_id for line in payload.stage_ingredients}
         if configured_ids != payload_ids:
