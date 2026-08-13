@@ -36,11 +36,10 @@ def make_waiting_run(db_session, raw_material, quantity, status=ProductionRunSta
         quantity=Decimal(quantity),
         status=status,
         raw_material_item_id=raw_material.id,
-        raw_material_quantity_per_unit=Decimal("10"),
         raw_material_unit_code="g",
-        total_required_material=Decimal(quantity) * Decimal("10"),
+        total_required_material=Decimal(quantity),
         waste_limit_percent=Decimal("1"),
-        expected_finished_weight=Decimal(quantity) * Decimal("10"),
+        expected_finished_weight=Decimal(quantity),
         created_by_user_id=uuid.uuid4(),
         production_code=f"OP-TEST-{uuid.uuid4().hex[:6]}",
     )

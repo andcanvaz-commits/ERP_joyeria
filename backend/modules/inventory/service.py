@@ -1232,8 +1232,8 @@ class InventoryService(InventoryIntegrationPort):
             final_weight = weighed[-1] if weighed else None
         if final_weight and final_weight > 0 and run.quantity and run.quantity > 0:
             return final_weight / run.quantity, run.raw_material_unit_code
-        if run.raw_material_quantity_per_unit and run.raw_material_quantity_per_unit > 0:
-            return run.raw_material_quantity_per_unit, run.raw_material_unit_code
+        if run.total_required_material and run.total_required_material > 0 and run.quantity and run.quantity > 0:
+            return run.total_required_material / run.quantity, run.raw_material_unit_code
         return None
 
     def _generate_piece_sku(self, product_code: str) -> str:
