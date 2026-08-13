@@ -645,10 +645,11 @@ class ProductionService:
             letter_index += 1
 
     def _split_run_for_partial_material(self, run: ProductionRun, covered_qty: Decimal) -> ProductionRun:
-        """Reduce `run` a `covered_qty` unidades y crea una corrida hija
-        ESPERANDO_MATERIAL con el remanente, mismo folio raiz. Reparte el plan
-        de productos (piezas enteras, llenado del padre primero) y los
-        complementos solicitados (proporcional) entre ambas."""
+        """Reduce `run` a `covered_qty` (cantidad de materia prima, en su
+        unidad) y crea una corrida hija ESPERANDO_MATERIAL con el remanente,
+        mismo folio raiz. Reparte el plan de productos, los complementos y los
+        insumos de etapa proporcionalmente a la MISMA fraccion que cubrio la
+        materia prima."""
         original_quantity = run.quantity
         missing_qty = original_quantity - covered_qty
         root_code = run.root_production_code or run.production_code
@@ -660,11 +661,10 @@ class ProductionService:
             status=ProductionRunStatus.WAITING_MATERIAL,
             assembly_mode=run.assembly_mode,
             raw_material_item_id=run.raw_material_item_id,
-            raw_material_quantity_per_unit=run.raw_material_quantity_per_unit,
             raw_material_unit_code=run.raw_material_unit_code,
-            total_required_material=run.raw_material_quantity_per_unit * missing_qty,
+            total_required_material=missing_qty,
             waste_limit_percent=run.waste_limit_percent,
-            expected_finished_weight=run.raw_material_quantity_per_unit * missing_qty,
+            expected_finished_weight=missing_qty,
             created_by_user_id=run.created_by_user_id,
             target_product_type_id=run.target_product_type_id,
             requested_at=datetime.utcnow(),
@@ -682,10 +682,29 @@ class ProductionService:
         code_parts = child.production_code.split("-") if child.production_code else []
         run_seq = int(code_parts[2]) if len(code_parts) > 2 else 0
         split_suffix = code_parts[3] if len(code_parts) > 3 else None
+        ratio_missing = missing_qty / original_quantity if original_quantity > 0 else Decimal("0")
+        run_stages_by_source = {stage.source_stage_id: stage for stage in run.stages}
         for stage in active_stages:
             stage_code = _stage_code_for(stage.name, run_seq, stage.stage_order)
             if split_suffix:
                 stage_code = f"{stage_code}-{split_suffix}"
+            run_stage = run_stages_by_source.get(stage.id)
+            child_ingredients = []
+            if run_stage is not None:
+                for ingredient in list(run_stage.ingredients):
+                    child_qty = ingredient.quantity * ratio_missing
+                    ingredient.quantity = ingredient.quantity - child_qty
+                    child_reserved = min(ingredient.reserved_quantity, child_qty)
+                    ingredient.reserved_quantity = ingredient.reserved_quantity - child_reserved
+                    if child_qty > 0:
+                        child_ingredients.append(
+                            ProductionRunStageIngredient(
+                                inventory_item_id=ingredient.inventory_item_id,
+                                quantity=child_qty,
+                                reserved_quantity=child_reserved,
+                                unit_code=ingredient.unit_code,
+                            )
+                        )
             child.stages.append(
                 ProductionRunStage(
                     source_stage_id=stage.id,
@@ -699,12 +718,13 @@ class ProductionService:
                     requires_weighing=stage.requires_weighing,
                     status=ProductionRunStageStatus.PENDING,
                     stage_code=stage_code,
+                    ingredients=child_ingredients,
                 )
             )
 
-        # Plan de productos: piezas enteras, se llena el padre en el orden de
-        # las lineas declaradas y el remanente de cada linea va a la hija.
-        # Sin division/redondeo: la suma siempre cuadra exacto.
+        # Plan de productos: se llena el padre en el orden de las lineas
+        # declaradas y el remanente de cada linea va a la hija. Sin
+        # redondeo: la suma siempre cuadra exacto (montos continuos).
         remaining_parent_capacity = covered_qty
         for product in list(run.products):
             take = min(product.quantity, remaining_parent_capacity)
@@ -722,14 +742,10 @@ class ProductionService:
                 )
         run.products = [product for product in run.products if product.quantity > 0]
 
-        # Complementos: proporcional (no son piezas enteras necesariamente).
-        ratio_missing = missing_qty / original_quantity
+        # Complementos: proporcional a la misma fraccion.
         for complement in list(run.complements):
             child_qty = complement.quantity * ratio_missing
             complement.quantity = complement.quantity - child_qty
-            # La reserva viaja con la cantidad: lo reservado que corresponde a
-            # las unidades que se van a la hija sigue reservado alla, no se
-            # libera ni se duplica.
             child_reserved = min(complement.reserved_quantity, child_qty)
             complement.reserved_quantity = complement.reserved_quantity - child_reserved
             if child_qty > 0:
@@ -744,11 +760,9 @@ class ProductionService:
                 )
 
         run.quantity = covered_qty
-        run.total_required_material = run.raw_material_quantity_per_unit * covered_qty
+        run.total_required_material = covered_qty
         run.expected_finished_weight = run.total_required_material
         run.root_production_code = root_code
-        # Idem materia prima: la reserva se reparte segun lo que cada corrida
-        # necesita, sin crear ni perder gramos reservados.
         child_material_reserved = min(
             run.reserved_material_quantity, child.total_required_material
         )
