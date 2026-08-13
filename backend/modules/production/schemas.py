@@ -10,8 +10,6 @@ class StageIngredientCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inventory_item_id: UUID
-    quantity: Decimal = Field(gt=0)
-    unit_code: str = Field(max_length=20)
 
 
 class StageIngredientRead(BaseModel):
@@ -19,16 +17,12 @@ class StageIngredientRead(BaseModel):
 
     id: UUID
     inventory_item_id: UUID
-    quantity: Decimal
-    unit_code: str
 
 
 class ProcessMaterialCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inventory_item_id: UUID
-    quantity_per_unit: Decimal = Field(gt=0)
-    unit_code: str = Field(min_length=1, max_length=20)
 
 
 class ProcessMaterialRead(BaseModel):
@@ -36,8 +30,6 @@ class ProcessMaterialRead(BaseModel):
 
     id: UUID
     inventory_item_id: UUID
-    quantity_per_unit: Decimal
-    unit_code: str
 
 
 class ProductionProcessStageCreate(BaseModel):
@@ -118,12 +110,11 @@ class ProductionProcessRead(BaseModel):
 class RunProductCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Exactamente uno de los dos: tipo del catalogo (sin destino fisico aun) o
-    # pieza ya existente del inventario (destino directo).
     product_type_id: UUID | None = None
     target_item_id: UUID | None = None
-    # Piezas enteras: no se fabrican fracciones de unidad.
-    quantity: Decimal = Field(gt=0, decimal_places=0)
+    # Cantidad en la unidad de medida del recurso (no necesariamente piezas
+    # enteras: puede ser peso).
+    quantity: Decimal = Field(gt=0)
 
     @model_validator(mode="after")
     def _check_one_target(self) -> "RunProductCreate":
@@ -142,6 +133,13 @@ class RunComplementCreate(BaseModel):
     quantity: Decimal = Field(gt=0)
 
 
+class RunStageIngredientCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    process_stage_ingredient_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
 class RunProductsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,17 +150,17 @@ class ProductionRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     process_id: UUID
-    # Material con el que se fabricara: debe ser uno de los configurados en el proceso.
     raw_material_item_id: UUID
-    # Piezas enteras: no se fabrican fracciones de unidad.
-    quantity: Decimal = Field(gt=0, decimal_places=0)
-    # ASIGNAR: split directo a uno o mas destinos. ENSAMBLAR: un solo producto
-    # con toda la cantidad, que luego se arma con complementos.
+    # Cantidad total de materia prima en la unidad de medida del item elegido
+    # (gramos u otra): ya NO se multiplica por ningun factor.
+    quantity: Decimal = Field(gt=0)
     assembly_mode: Literal["ASIGNAR", "ENSAMBLAR"] = "ASIGNAR"
-    # Plan de resultantes (split): la suma de cantidades debe igualar quantity.
     products: list[RunProductCreate] = Field(min_length=1)
-    # Complementos de inventario solicitados para ensamblar (opcional).
     complements: list[RunComplementCreate] = Field(default_factory=list)
+    # Cantidad total a usar de cada insumo configurado en las etapas activas
+    # del proceso (obligatorio 1:1 contra la configuracion, ver validacion en
+    # ProductionService.create_run).
+    stage_ingredients: list[RunStageIngredientCreate] = Field(default_factory=list)
 
 
 class MaterialRejectPayload(BaseModel):
@@ -201,9 +199,9 @@ class AllocationPreviewRead(BaseModel):
 class AllocateMaterialPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # En unidades de producto (piezas), no en peso: inventario piensa en
-    # "cuantas piezas cubro", no convierte gramos a mano.
-    quantity_units: Decimal = Field(gt=0, decimal_places=0)
+    # Cantidad de materia prima (en la unidad de la orden) que se intenta
+    # cubrir ahora mismo, no piezas.
+    quantity_units: Decimal = Field(gt=0)
 
 
 class ProductionRunStageFinish(BaseModel):
@@ -312,7 +310,8 @@ class RunAssemblyLineCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     complement_item_id: UUID
-    quantity_per_unit: Decimal = Field(gt=0, decimal_places=4)
+    # Cantidad total a usar de este complemento en el ensamble (no por unidad).
+    quantity: Decimal = Field(gt=0, decimal_places=4)
 
 
 class RunAssemblyDefine(BaseModel):
@@ -328,7 +327,8 @@ class AssemblyRecipeItemRead(BaseModel):
     name: str | None = None
     unit_code: str | None = None
     material_type: str | None = None
-    quantity_per_unit: Decimal
+    # Ultima cantidad total usada (sugerencia, no autoritativa).
+    quantity: Decimal
 
 
 class AssemblyRecipeRead(BaseModel):
@@ -361,7 +361,6 @@ class ProductionRunRead(BaseModel):
     # antes de que inventario pueda recibir.
     assembly_pending: bool
     raw_material_item_id: UUID | None
-    raw_material_quantity_per_unit: Decimal
     raw_material_unit_code: str
     total_required_material: Decimal
     # Materia prima guardada para esta orden sin consumir todavia. Junto con
