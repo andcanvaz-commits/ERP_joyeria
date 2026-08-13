@@ -26,6 +26,7 @@ from backend.modules.production.models import (
     ProductionRunProduct,
     ProductionRunStage,
     ProductionRunStageDecision,
+    ProductionRunStageIngredient,
     ProductionRunStageStatus,
     ProductionRunStatus,
 )
@@ -457,26 +458,16 @@ class ProductionService:
             raise ProductionDomainError("El proceso no tiene materias primas configuradas.")
 
         # Cualquier materia prima del inventario es utilizable en cualquier
-        # proceso. Si esta configurada en el proceso se usa su cantidad por
-        # unidad; si no, se usa la cantidad estandar del proceso (la de su
-        # primer material configurado).
-        selected = next(
-            (m for m in process.materials if m.inventory_item_id == payload.raw_material_item_id),
-            None,
-        )
-        if selected is not None:
-            quantity_per_unit = selected.quantity_per_unit
-            unit_code = selected.unit_code
-        else:
-            from backend.modules.inventory.models import InventoryItem
+        # proceso: la cantidad que el usuario ingresa es directamente el
+        # total de materia prima a usar (ya no hay ratio por unidad).
+        from backend.modules.inventory.models import InventoryItem
 
-            item = self.repository.session.get(InventoryItem, payload.raw_material_item_id)
-            if item is None or item.item_type != "RAW_MATERIAL":
-                raise ProductionDomainError(
-                    "La materia prima seleccionada no existe en el inventario."
-                )
-            quantity_per_unit = process.materials[0].quantity_per_unit
-            unit_code = item.unit_code
+        item = self.repository.session.get(InventoryItem, payload.raw_material_item_id)
+        if item is None or item.item_type != "RAW_MATERIAL":
+            raise ProductionDomainError(
+                "La materia prima seleccionada no existe en el inventario."
+            )
+        unit_code = item.unit_code
 
         active_stages = [stage for stage in process.stages if stage.is_active]
         if not active_stages:
@@ -507,7 +498,7 @@ class ProductionService:
                 )
             complement_items.append(item)
 
-        total_required = quantity_per_unit * payload.quantity
+        total_required = payload.quantity
         run = ProductionRun(
             process_id=process.id,
             process_name=process.name,
@@ -515,7 +506,6 @@ class ProductionService:
             status=ProductionRunStatus.PENDING_INVENTORY,
             assembly_mode=payload.assembly_mode,
             raw_material_item_id=payload.raw_material_item_id,
-            raw_material_quantity_per_unit=quantity_per_unit,
             raw_material_unit_code=unit_code,
             total_required_material=total_required,
             waste_limit_percent=process.waste_limit_percent,
@@ -525,6 +515,29 @@ class ProductionService:
         )
         run.production_code = _generate_production_code(self.repository, datetime.utcnow().year)
         run_seq = int(run.production_code.split("-")[2]) if run.production_code else 0
+
+        # Insumos: cada etapa activa puede tener insumos configurados
+        # (whitelist en ProductionProcessStageIngredient); la orden debe
+        # declarar la cantidad exacta de cada uno, ni de mas ni de menos.
+        configured_ingredients = [
+            (stage, ingredient)
+            for stage in active_stages
+            for ingredient in stage.ingredients
+        ]
+        configured_ids = {ingredient.id for _, ingredient in configured_ingredients}
+        payload_ids = {line.process_stage_ingredient_id for line in payload.stage_ingredients}
+        if configured_ids != payload_ids:
+            raise ProductionDomainError(
+                "Debes indicar la cantidad de cada insumo configurado en las etapas de este proceso."
+            )
+        payload_by_id = {line.process_stage_ingredient_id: line.quantity for line in payload.stage_ingredients}
+
+        ingredient_items: dict = {}
+        for _, ingredient in configured_ingredients:
+            supply = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
+            if supply is None:
+                raise ProductionDomainError("Un insumo configurado ya no existe en el inventario.")
+            ingredient_items[ingredient.id] = supply
 
         for stage in sorted(active_stages, key=lambda item: item.stage_order):
             run.stages.append(
@@ -540,6 +553,14 @@ class ProductionService:
                     requires_weighing=stage.requires_weighing,
                     status=ProductionRunStageStatus.PENDING,
                     stage_code=_stage_code_for(stage.name, run_seq, stage.stage_order),
+                    ingredients=[
+                        ProductionRunStageIngredient(
+                            inventory_item_id=ingredient.inventory_item_id,
+                            quantity=payload_by_id[ingredient.id],
+                            unit_code=ingredient_items[ingredient.id].unit_code,
+                        )
+                        for ingredient in stage.ingredients
+                    ],
                 )
             )
 
