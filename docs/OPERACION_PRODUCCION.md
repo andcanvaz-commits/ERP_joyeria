@@ -199,6 +199,18 @@ propaga eventos de filesystem al contenedor y el watcher de Turbopack no los ve;
 `next dev` sigue sirviendo los chunks viejos. Tras tocar frontend:
 `docker-compose restart web`. Está documentado en `docker-compose.yml`.
 
+**502 tras un deploy: nginx quedó con la IP vieja de `web`/`api`.** nginx
+resuelve el nombre del servicio a una IP de Docker una sola vez, al arrancar.
+Si `web` o `api` se recrean (`up -d --build`) sin recrear `nginx`, esos
+contenedores obtienen una IP interna nueva y nginx sigue apuntando a la
+vieja — `connect() failed (111: Connection refused) while connecting to
+upstream` en sus logs. Pasa porque el deploy normal del punto 2 no toca
+nginx. Arreglo:
+
+```bash
+docker compose -f docker-compose.prod.yml restart nginx
+```
+
 ## 6. Mantenimiento programado
 
 En el `crontab` del VPS:
