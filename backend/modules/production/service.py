@@ -141,8 +141,10 @@ def _stage_code_for(stage_name: str, run_seq: int, stage_order: int) -> str:
 
 @dataclass
 class _MaterialCoverage:
-    """Resultado del calculo de cobertura: cuantas unidades alcanza a cubrir
-    el stock disponible y cual es el recurso que manda (el mas corto)."""
+    """Resultado del calculo de cobertura: cuanto de `target_qty` (cantidad de
+    materia prima, en su unidad) alcanza a cubrir el stock disponible, y cual
+    es el recurso que manda (el mas corto, entre materia prima, complementos
+    e insumos)."""
 
     covered_qty: Decimal
     target_qty: Decimal
@@ -157,18 +159,15 @@ class _MaterialCoverage:
         return self.covered_qty < self.target_qty
 
     def shortage_message(self) -> str:
-        # Distingue el origen del faltante: la materia prima viene del proceso,
-        # pero un complemento en ENSAMBLAR viene de la receta aprendida
-        # (quantity_per_unit x unidades) y no es evidente de donde salio.
         origin = (
-            " (complemento pedido por la receta de ensamble del producto: cantidad por unidad x unidades a fabricar)"
+            " (complemento/insumo solicitado en la orden)"
             if self.limiting_is_complement
             else ""
         )
         return (
             f"Stock insuficiente de '{self.limiting_name}'{origin}: disponible "
             f"{self.limiting_available} {self.limiting_unit}, se requieren "
-            f"{self.limiting_required_per_unit} {self.limiting_unit} para 1 unidad."
+            f"{self.limiting_required_per_unit} {self.limiting_unit}."
         )
 
 
@@ -761,18 +760,14 @@ class ProductionService:
         return child
 
     def _compute_coverage(self, run: ProductionRun, target_qty: Decimal) -> "_MaterialCoverage":
-        """Cuantas de `target_qty` unidades cubre HOY el stock disponible.
+        """Cuanto de `target_qty` (cantidad de materia prima que se intenta
+        cubrir) alcanza a cubrir el stock disponible HOY, considerando por
+        igual materia prima, cada complemento pendiente y cada insumo de
+        etapa: la fraccion mas corta entre todos manda, y esa MISMA fraccion
+        se aplica a todos al partir la orden (ver _split_run_for_partial_material).
 
-        Fuente unica del calculo: la usan tanto el preview (dry-run, no toca
-        nada) como approve_materials (consume de verdad). Si divergieran, el
-        aviso de "esto va a quedar parcial" mentiria.
-
-        Disponible = fisico - reservas de OTRAS corridas. La reserva propia de
-        esta corrida es el stock que le guardamos, asi que cuenta como
-        disponible para ella (exclude_run_id).
-
-        Los insumos por etapa quedan afuera: son cantidad fija por orden, no
-        proporcional a las unidades fabricadas.
+        Fuente unica del calculo: la usan tanto el preview (dry-run) como
+        approve_materials (consume de verdad).
         """
         from backend.modules.inventory.models import InventoryItem
 
@@ -787,24 +782,34 @@ class ProductionService:
         def available_of(item) -> Decimal:
             return item.current_stock - reserved_by_others.get(item.id, Decimal("0"))
 
-        # La cantidad por unidad de cada complemento se deriva del total pedido
-        # sobre las unidades de la orden, no de `target_qty`.
-        run_quantity = run.quantity or Decimal("0")
-        covered = target_qty
+        raw_needed = run.total_required_material
+        raw_available = available_of(raw_material)
+        fraction = Decimal("1")
         coverage = _MaterialCoverage(
             covered_qty=target_qty,
             target_qty=target_qty,
             limiting_name=raw_material.name,
-            limiting_available=available_of(raw_material),
+            limiting_available=raw_available,
             limiting_unit=raw_material.unit_code,
-            limiting_required_per_unit=run.raw_material_quantity_per_unit,
+            limiting_required_per_unit=raw_needed,
             limiting_is_complement=False,
         )
+        if raw_needed > 0 and raw_available < raw_needed:
+            fraction = max(Decimal("0"), raw_available / raw_needed)
 
-        raw_needed = run.raw_material_quantity_per_unit * target_qty
-        raw_available = available_of(raw_material)
-        if raw_available < raw_needed and run.raw_material_quantity_per_unit > 0:
-            covered = raw_available // run.raw_material_quantity_per_unit
+        def consider(name: str, unit: str, available: Decimal, needed: Decimal) -> None:
+            nonlocal fraction
+            if needed <= 0:
+                return
+            if available < needed:
+                candidate = max(Decimal("0"), available / needed)
+                if candidate < fraction:
+                    fraction = candidate
+                    coverage.limiting_name = name
+                    coverage.limiting_available = available
+                    coverage.limiting_unit = unit
+                    coverage.limiting_required_per_unit = needed
+                    coverage.limiting_is_complement = True
 
         for complement in run.complements:
             if complement.status != ComplementRequestStatus.PENDING:
@@ -812,20 +817,16 @@ class ProductionService:
             item = self.repository.session.get(InventoryItem, complement.item_id)
             if item is None:
                 raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
-            per_unit = complement.quantity / run_quantity if run_quantity > 0 else complement.quantity
-            needed = per_unit * target_qty
-            item_available = available_of(item)
-            if item_available < needed:
-                candidate = item_available // per_unit if per_unit > 0 else Decimal("0")
-                if candidate < covered:
-                    covered = candidate
-                    coverage.limiting_name = item.name
-                    coverage.limiting_available = item_available
-                    coverage.limiting_unit = item.unit_code
-                    coverage.limiting_required_per_unit = per_unit
-                    coverage.limiting_is_complement = True
+            consider(item.name, item.unit_code, available_of(item), complement.quantity)
 
-        coverage.covered_qty = max(Decimal("0"), min(covered, target_qty))
+        for stage in run.stages:
+            for ingredient in stage.ingredients:
+                item = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
+                if item is None:
+                    raise ProductionDomainError("Un insumo solicitado ya no existe en inventario.")
+                consider(item.name, item.unit_code, available_of(item), ingredient.quantity)
+
+        coverage.covered_qty = max(Decimal("0"), min(target_qty, raw_needed * fraction))
         return coverage
 
     def preview_allocation(self, run_id: UUID, quantity_units: Decimal) -> "_MaterialCoverage":
