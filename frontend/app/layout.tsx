@@ -37,7 +37,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fenix Global",
+  title: "Fénix Global",
   description: "Sistema ERP para produccion e inventario de joyeria"
 };
 

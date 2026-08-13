@@ -40,7 +40,7 @@
   --space-7: 40px;
   --space-8: 48px;
   /* Sidebar papel */
-  --sidebar-bg: var(--paper);
+  --sidebar-bg: #E7DEC8;
   --sidebar-surface: var(--surface);
   --sidebar-text: #2A2620;
   --sidebar-muted: #8F867A;
@@ -110,16 +110,16 @@ textarea {
   height: 100dvh;
   overflow-y: auto;
 }
-/* Perfil justo debajo del ultimo item del menu (Estadistica). */
+/* Empujado al fondo del sidebar con margin-top:auto (el aside es flex column). */
 .profileMenu.sidebarProfile {
-  margin: 14px 12px 0;
+  margin: auto 12px 0;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 .sidebarProfile .profileTrigger { width: 100%; }
 .sidebarProfile .profileDropdown {
-  top: calc(100% + 8px);
-  bottom: auto;
+  top: auto;
+  bottom: calc(100% + 8px);
   left: 0;
   right: 0;
 }
@@ -139,6 +139,7 @@ textarea {
   height: 34px;
   display: grid;
   place-items: center;
+  overflow: hidden;
   border: 1px solid var(--gold);
   border-radius: 4px;
   background: #F5EDDC;
@@ -146,6 +147,12 @@ textarea {
   font-family: var(--font-serif, Georgia), serif;
   font-weight: 400;
   font-size: 17px;
+}
+
+.brandMark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .brandText {
@@ -2376,14 +2383,66 @@ textarea {
 }
 
 .loginPage {
+  position: relative;
   min-height: 100vh;
   display: grid;
   place-items: center;
   background: var(--paper);
   padding: 24px;
+  overflow: hidden;
+}
+
+.loginBgWrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.loginBgWrap svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Flujo infinito: un tramo dorado recorre cada linea sin parar (dasharray
+   suma 1 = el pathLength normalizado, asi el patron encaja sin salto al
+   repetirse). Da la sensacion de que las lineas nunca dejan de salir. */
+.loginLinePath {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 1;
+  stroke-opacity: 0.45;
+  stroke-linecap: round;
+  stroke-dasharray: 0.22 0.78;
+  animation: loginLineFlow 9s linear infinite;
+}
+
+.loginLineAccent {
+  stroke-width: 1.6;
+  stroke-opacity: 0.85;
+  stroke-dasharray: 0.3 0.7;
+  animation: loginLineFlow 7s linear infinite;
+}
+
+.loginLineAccentThin {
+  stroke-width: 0.8;
+  stroke-opacity: 0.5;
+  stroke-dasharray: 0.3 0.7;
+  animation: loginLineFlow 7.6s linear infinite;
+}
+
+@keyframes loginLineFlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -1;
+  }
 }
 
 .loginPanel {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 380px;
   padding: 32px;
@@ -2391,25 +2450,147 @@ textarea {
 
 .loginBrand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 24px;
 }
 
-.loginBrand h1 {
-  font-family: var(--font-serif, Georgia), serif;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 23px;
-  font-weight: 400;
-  color: var(--ink);
-  margin: 0;
+.loginLogoWrap {
+  position: relative;
+  width: min(280px, 82%);
+  margin: 0 auto;
+  perspective: 800px;
 }
 
-.loginBrand p {
+.loginLogoSpinner {
+  position: relative;
+  width: 100%;
+  transform-style: preserve-3d;
+  /* Giro 3D sobre el eje vertical (como una moneda vista de canto): se
+     angosta de ancho al girar, el borde derecho se aleja primero. Nunca
+     queda de cabeza ni diagonal porque no rota en el plano de la pantalla. */
+  animation:
+    loginLogoIn 1s cubic-bezier(0.22, 1, 0.36, 1) both,
+    loginLogoSpin 18s linear infinite;
+  transition: scale 0.3s ease, filter 0.4s ease;
+}
+
+.loginLogoFace {
+  display: block;
+  width: 100%;
+  height: auto;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.loginLogoBack {
+  position: absolute;
+  inset: 0;
+  /* Pre-rotada 180: cuando el giro del padre la trae de frente, su
+     orientacion total vuelve a 0 y se ve derecha, no espejada. */
+  transform: rotateY(180deg);
+}
+
+/* Brillo metalico: mismo PNG como mascara, asi el barrido respeta el contorno
+   del ave/alas en vez de iluminar un rectangulo. */
+.loginLogoWrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 32%, rgba(255, 255, 255, 0.9) 48%, transparent 64%);
+  background-size: 260% 100%;
+  background-position: -130% 0;
+  -webkit-mask-image: url("/login-symbol.png");
+  mask-image: url("/login-symbol.png");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loginLogoWrap:hover .loginLogo {
+  /* Pausa el giro continuo; loginLogoIn ya termino (fill: both), asi que
+     pausar el shorthand solo afecta al spin infinito. */
+  animation-play-state: paused;
+  scale: 1.06;
+  filter: drop-shadow(0 8px 20px rgba(156, 122, 60, 0.4));
+}
+
+.loginLogoWrap:hover::after {
+  animation: loginLogoShine 1s ease forwards;
+}
+
+/* Sin rotate: el logo nunca se inclina en el plano de la pantalla, solo
+   aparece con un rebote de escala. Queda siempre derecho. */
+@keyframes loginLogoIn {
+  0% {
+    opacity: 0;
+    scale: 0.72;
+  }
+  65% {
+    opacity: 1;
+    scale: 1.06;
+  }
+  100% {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+/* rotate: y <angulo> = eje vertical (3D), como una moneda girando vista de
+   canto: se angosta de ancho al girar, nunca se ve de cabeza ni diagonal
+   porque no gira sobre el eje Z de la pantalla. En positivo, el borde
+   DERECHO se aleja de la camara primero. */
+@keyframes loginLogoSpin {
+  from {
+    rotate: y 0deg;
+  }
+  to {
+    rotate: y 360deg;
+  }
+}
+
+@keyframes loginLogoShine {
+  from {
+    opacity: 1;
+    background-position: -130% 0;
+  }
+  to {
+    opacity: 1;
+    background-position: 130% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loginLogo {
+    animation: none;
+    transition: none;
+  }
+  .loginLogoWrap:hover .loginLogo {
+    transform: none;
+    filter: none;
+  }
+  .loginLogoWrap:hover::after {
+    animation: none;
+  }
+}
+
+.loginWordmark {
+  width: min(230px, 66%);
+  height: auto;
+  display: block;
+  margin: 6px auto 0;
+}
+
+.loginTagline {
   color: var(--muted);
   font-size: 12px;
-  margin: 2px 0 0;
+  margin: 0;
 }
 
 .loginForm {

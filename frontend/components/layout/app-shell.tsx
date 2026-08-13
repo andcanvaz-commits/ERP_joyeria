@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Boxes, ChevronDown, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, Menu, UserCircle, Wrench } from "lucide-react";
+import { BarChart3, Boxes, ChevronUp, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, Menu, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout } from "@/lib/auth-api";
 import { listProductionRuns } from "@/lib/production-api";
@@ -160,9 +160,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ) : null}
       <aside className={`sidebar${sidebarOpen ? " sidebarOpen" : ""}`}>
         <div className="brand">
-          <div className="brandMark">Au</div>
+          <div className="brandMark">
+            <img alt="Fénix Global" height={34} src="/logo-mark.png" width={34} />
+          </div>
           <div className="brandText">
-            <span className="brandName">Fenix Global</span>
+            <span className="brandName">Fénix Global</span>
           </div>
         </div>
         <nav className="nav" aria-label="Navegacion principal">
@@ -203,7 +205,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </strong>
               <span>({currentUser?.role ?? ""})</span>
             </div>
-            <ChevronDown aria-hidden="true" size={16} />
+            <ChevronUp aria-hidden="true" size={16} />
           </button>
           {menuOpen ? (
             <div className="profileDropdown" role="menu">

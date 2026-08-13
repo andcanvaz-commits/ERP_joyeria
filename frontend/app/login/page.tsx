@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { KeyRound, LockKeyhole, LogIn } from "lucide-react";
+import { KeyRound, LogIn } from "lucide-react";
 import { ApiError, isAuthenticated } from "@/lib/api";
 import { getCurrentUser, login, setInitialPassword } from "@/lib/auth-api";
 import { homeRoute, normalizeRole } from "@/lib/roles";
+import { LoginBackground } from "@/components/login/login-background";
 
 function validateNewPassword(next: string, confirm: string): string | null {
   if (next.length < 8) return "La contrasena debe tener al menos 8 caracteres.";
@@ -84,15 +85,20 @@ export default function LoginPage() {
 
   return (
     <main className="loginPage">
+      <LoginBackground />
       <section className="loginPanel card">
         <div className="loginBrand">
-          <div className="brandMark">
-            {mode === "change" ? <KeyRound aria-hidden="true" size={18} /> : <LockKeyhole aria-hidden="true" size={18} />}
+          <div className="loginLogoWrap">
+            <div className="loginLogoSpinner">
+              {/* Dos caras iguales: la de atras arranca pre-rotada 180 grados,
+                  asi cuando el giro la trae al frente se ve derecha, nunca
+                  espejada como pasaria con una sola cara girando sola. */}
+              <img alt="" aria-hidden="true" className="loginLogoFace loginLogoFront" src="/login-symbol.png" />
+              <img alt="" aria-hidden="true" className="loginLogoFace loginLogoBack" src="/login-symbol.png" />
+            </div>
           </div>
-          <div>
-            <h1>Fenix Global</h1>
-            <p>{mode === "change" ? "Crea tu nueva contraseña" : "Joyeria · Ingreso operativo"}</p>
-          </div>
+          <img alt="Fénix Global" className="loginWordmark" src="/login-wordmark.png" />
+          {mode === "change" ? <p className="loginTagline">Crea tu nueva contraseña</p> : null}
         </div>
 
         <div className="goldRule" aria-hidden="true" />
