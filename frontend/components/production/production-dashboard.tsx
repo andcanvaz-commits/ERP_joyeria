@@ -11,6 +11,7 @@ import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
+import { CreateOrderWizard } from "@/components/production/create-order-wizard";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
@@ -51,7 +52,7 @@ import {
   upsertAssemblyRecipe,
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
-import type { AssemblyRecipe, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
+import type { AssemblyRecipe, ProductChoice, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 import { CaliperScale } from "@/components/ui/caliper-scale";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
@@ -85,14 +86,6 @@ type ProcessForm = {
 
 type FormMode = "create" | "edit";
 type UserFormMode = "create" | "edit";
-
-// Producto resultante elegido: pieza existente (targetItemId) o tipo del
-// catálogo aún sin piezas (productTypeId); label es lo que se muestra elegido.
-type ProductChoice = {
-  targetItemId?: string;
-  productTypeId?: string;
-  label: string;
-};
 
 const SYSTEM_ROLES = ["Jefe de producción", "Admin", "Jefe de inventario"];
 
@@ -1620,6 +1613,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
+  // Abre el picker correcto para el producto de "Crear orden": tipo del
+  // catálogo en ENSAMBLAR (la receta depende del material+tipo, no de una
+  // pieza puntual), pieza/tipo existente en ASIGNAR.
+  function handleOpenProductPicker() {
+    if (assemblyMode === "ENSAMBLAR") {
+      setTypePickerFor("create");
+    } else {
+      setAssignPickerTab("PRODUCTOS");
+      setItemPickerFor("create");
+    }
+  }
+
   // Cambiar de modo limpia el producto elegido y su receta: en ASIGNAR se
   // destina a una pieza/tipo existente, en ENSAMBLAR es el producto final que
   // arrastra la receta de complementos que lo ensambla.
@@ -2245,153 +2250,36 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </>
       )}
 
-      {isCreateOrderOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Crear orden</h2>
-                <p>Proceso, material, producto y cantidad a fabricar</p>
-              </div>
-              <button
-                aria-label="Cerrar"
-                className="iconOnlyButton"
-                onClick={() => {
-                  setIsCreateOrderOpen(false);
-                  resetCreateOrderState();
-                }}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-
-            <div className="materialRow">
-              <label className="fieldGroup">
-                <span>Proceso</span>
-                <select className="field" onChange={(e) => setSelectedProcessId(e.target.value)} value={selectedProcess?.id ?? ""}>
-                  <option value="">Seleccionar proceso</option>
-                  {activeProcesses.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="fieldGroup">
-                <span>Material</span>
-                <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
-                  <option value="">Seleccionar material</option>
-                  {/* Cualquier materia prima del inventario sirve para cualquier proceso. */}
-                  {rawMaterials.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} · {numericText(item.current_stock)} {item.unit_code}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            {/* Modo de destino del resultante: asignar a una pieza/tipo
-                existente o ensamblar un único producto final. */}
-            <div className="fieldGroup">
-              <span>Destino del producto</span>
-              <div className="materialRow" style={{ gap: 8 }}>
-                <button
-                  className={`button${assemblyMode === "ASIGNAR" ? " buttonPrimary" : ""}`}
-                  onClick={() => handleAssemblyModeChange("ASIGNAR")}
-                  type="button"
-                >
-                  Asignar
-                </button>
-                <button
-                  className={`button${assemblyMode === "ENSAMBLAR" ? " buttonPrimary" : ""}`}
-                  onClick={() => handleAssemblyModeChange("ENSAMBLAR")}
-                  type="button"
-                >
-                  Ensamblar
-                </button>
-              </div>
-            </div>
-
-            <label className="fieldGroup">
-              <span>{assemblyMode === "ENSAMBLAR" ? "Producto final" : "Producto"}</span>
-              {renderProductChooser(orderProduct, () => {
-                if (assemblyMode === "ENSAMBLAR") {
-                  // ENSAMBLAR elige el TIPO de producto (compartido entre
-                  // materiales): la receta depende del material de la orden,
-                  // no de una pieza existente con su propio material y stock.
-                  setTypePickerFor("create");
-                } else {
-                  setAssignPickerTab("PRODUCTOS");
-                  setItemPickerFor("create");
-                }
-              })}
-            </label>
-
-            <label className="fieldGroup">
-              <span>Cantidad a fabricar {selectedMaterial ? `(${selectedMaterial.unit_code})` : ""}</span>
-              <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
-            </label>
-
-            {configuredStageIngredients.length > 0 ? (
-              <div className="fieldGroup">
-                <span>Insumos de este proceso</span>
-                <div className="tableWrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Insumo</th>
-                        <th>Etapa</th>
-                        <th className="num">Cantidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {configuredStageIngredients.map((ing) => {
-                        const item = suppliesList.find((candidate) => candidate.id === ing.inventoryItemId);
-                        return (
-                          <tr key={ing.configId}>
-                            <td>{item?.name ?? ing.inventoryItemId}</td>
-                            <td>{ing.stageName}</td>
-                            <td className="num">
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                <input
-                                  aria-label={`Cantidad de ${item?.name ?? "insumo"}`}
-                                  className="field"
-                                  min="0"
-                                  onChange={(event) =>
-                                    setStageIngredientQuantities((current) => ({
-                                      ...current,
-                                      [ing.configId]: event.target.value,
-                                    }))
-                                  }
-                                  step="0.0001"
-                                  style={{ width: 90 }}
-                                  type="number"
-                                  value={stageIngredientQuantities[ing.configId] ?? ""}
-                                />
-                                <span style={{ color: "var(--muted)", fontSize: 13 }}>{item?.unit_code ?? ""}</span>
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : null}
-
-            <button
-              className="button buttonPrimary"
-              disabled={isSaving || !selectedProcess || !selectedMaterialId}
-              onClick={() => void handleCreateProductionOrder()}
-              type="button"
-            >
-              <Play aria-hidden="true" size={16} />
-              Crear orden
-            </button>
-          </section>
-        </div>
-      ) : null}
+      <CreateOrderWizard
+        isOpen={isCreateOrderOpen}
+        onClose={() => {
+          setIsCreateOrderOpen(false);
+          resetCreateOrderState();
+        }}
+        isSaving={isSaving}
+        onError={setError}
+        processes={activeProcesses}
+        selectedProcessId={selectedProcessId}
+        onSelectProcess={setSelectedProcessId}
+        rawMaterials={rawMaterials}
+        selectedMaterialId={selectedMaterialId}
+        onSelectMaterial={setSelectedMaterialId}
+        selectedMaterial={selectedMaterial}
+        suppliesList={suppliesList}
+        configuredStageIngredients={configuredStageIngredients}
+        stageIngredientQuantities={stageIngredientQuantities}
+        onChangeStageIngredientQuantity={(configId, value) =>
+          setStageIngredientQuantities((current) => ({ ...current, [configId]: value }))
+        }
+        assemblyMode={assemblyMode}
+        onChangeAssemblyMode={handleAssemblyModeChange}
+        orderProduct={orderProduct}
+        renderProductChooser={renderProductChooser}
+        onOpenProductPicker={handleOpenProductPicker}
+        runQuantity={runQuantity}
+        onChangeRunQuantity={setRunQuantity}
+        onSubmit={() => void handleCreateProductionOrder()}
+      />
 
       {/* Definir ensamble: combinacion de complementos APROBADOS de la orden.
           Se guarda como receta a futuro (cantidad total, no por unidad). */}

@@ -166,3 +166,11 @@ export type AllocationPreview = {
   limiting_required_per_unit: string;
   limiting_is_complement: boolean;
 };
+
+// Producto resultante elegido: pieza existente (targetItemId) o tipo del
+// catálogo aún sin piezas (productTypeId); label es lo que se muestra elegido.
+export type ProductChoice = {
+  targetItemId?: string;
+  productTypeId?: string;
+  label: string;
+};
