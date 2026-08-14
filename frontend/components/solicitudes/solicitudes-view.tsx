@@ -67,7 +67,7 @@ function RunSummaryRows({ run }: { run: ProductionRun }) {
       <span><strong>Cantidad</strong>{num(run.quantity)}</span>
       <span>
         <strong>Material requerido</strong>
-        {num(run.total_required_material)} {unit} · {num(run.raw_material_quantity_per_unit)} {unit} por unidad
+        {num(run.total_required_material)} {unit}
       </span>
       <span>
         <strong>Peso</strong>

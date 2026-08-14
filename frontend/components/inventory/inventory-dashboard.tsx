@@ -1031,32 +1031,37 @@ export function InventoryDashboard() {
   }
 
   function handleApproveClick(run: ProductionRun) {
-    // Mismo criterio que el backend: el split se decide por el stock mas
-    // corto entre materia prima Y cada complemento pedido, no solo materia
-    // prima (los insumos por etapa quedan afuera, son cantidad fija).
+    // Mismo criterio que el backend (_compute_coverage): la fraccion mas
+    // corta entre materia prima y cada complemento pedido manda (los
+    // insumos por etapa quedan afuera de este preview porque el frontend no
+    // los recibe en el listado de corridas).
     const requiredQty = Number(run.quantity);
-    let coveredQty = requiredQty;
+    let fraction = 1;
     let limitingItem = items.find((it) => it.id === run.raw_material_item_id) ?? null;
     let limitingUnit = run.raw_material_unit_code;
 
-    const rawPerUnit = Number(run.raw_material_quantity_per_unit);
     const rawStock = limitingItem ? Number(limitingItem.current_stock) : 0;
-    const rawCovered = rawPerUnit > 0 ? Math.floor(rawStock / rawPerUnit) : requiredQty;
-    if (rawCovered < coveredQty) coveredQty = rawCovered;
+    if (requiredQty > 0 && rawStock < requiredQty) {
+      fraction = Math.max(0, rawStock / requiredQty);
+    }
 
     for (const complement of run.complements ?? []) {
       if (complement.status !== "PENDIENTE") continue;
       const complementItem = items.find((it) => it.id === complement.item_id);
       if (!complementItem) continue;
-      const perUnit = requiredQty > 0 ? Number(complement.quantity) / requiredQty : Number(complement.quantity);
+      const needed = Number(complement.quantity);
       const stock = Number(complementItem.current_stock);
-      const complementCovered = perUnit > 0 ? Math.floor(stock / perUnit) : requiredQty;
-      if (complementCovered < coveredQty) {
-        coveredQty = complementCovered;
-        limitingItem = complementItem;
-        limitingUnit = complement.unit_code;
+      if (needed > 0 && stock < needed) {
+        const candidate = Math.max(0, stock / needed);
+        if (candidate < fraction) {
+          fraction = candidate;
+          limitingItem = complementItem;
+          limitingUnit = complement.unit_code;
+        }
       }
     }
+
+    const coveredQty = Math.max(0, Math.min(requiredQty, requiredQty * fraction));
 
     if (limitingItem && coveredQty > 0 && coveredQty < requiredQty) {
       setApproveSplitConfirm({
@@ -5098,10 +5103,6 @@ export function InventoryDashboard() {
                           <div className="solicitudDetailItem">
                             <strong>Cantidad</strong>
                             <span>{runQuantityText(run)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Material por unidad</strong>
-                            <span>{numericText(run.raw_material_quantity_per_unit)} {run.raw_material_unit_code}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Material requerido</strong>
