@@ -129,6 +129,21 @@ class ComplementRequestStatus:
     REJECTED = "RECHAZADA"
 
 
+class ActaLineSide:
+    ENTREGA = "ENTREGA"
+    RECEPCION = "RECEPCION"
+
+
+class ActaLineSource:
+    # Sembrada automaticamente al crear la orden, con los valores planeados.
+    PLAN = "PLAN"
+    # Agregada automaticamente por un evento del sistema (material adicional
+    # aprobado, etapa finalizada con merma, recepcion real).
+    AUTO = "AUTO"
+    # Agregada a mano por un usuario editando el acta.
+    MANUAL = "MANUAL"
+
+
 class ProductionRunStageStatus:
     PENDING = "PENDIENTE"
     IN_PROGRESS = "EN_PROCESO"
@@ -228,6 +243,13 @@ class ProductionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
     )
+    # Acta persistida: que entro y que salio de la orden, sembrada con el plan
+    # al crearla y alimentada por eventos reales despues (ver ActaLineSource).
+    acta_lines: Mapped[list["ProductionRunActaLine"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="ProductionRunActaLine.line_order",
+    )
 
 
 class ProductionRunStage(Base):
@@ -310,6 +332,31 @@ class ProductionRunStageIngredient(Base):
     )
 
     stage: Mapped["ProductionRunStage"] = relationship(back_populates="ingredients")
+
+
+class ProductionRunActaLine(Base):
+    __tablename__ = "production_run_acta_lines"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Etapa a la que esta linea esta ligada (ej. merma de esa etapa), o NULL
+    # si es una linea de nivel de orden (materia prima, producto final, etc.).
+    stage_id: Mapped[PyUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("production_run_stages.id", ondelete="SET NULL"), nullable=True
+    )
+    side: Mapped[str] = mapped_column(String(20), nullable=False)
+    label: Mapped[str] = mapped_column(String(180), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default=ActaLineSource.PLAN)
+    line_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="acta_lines")
 
 
 class ProductionRunProduct(Base):

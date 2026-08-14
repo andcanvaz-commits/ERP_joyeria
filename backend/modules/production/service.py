@@ -11,6 +11,8 @@ from backend.modules.inventory.service import (
     InventoryService,
 )
 from backend.modules.production.models import (
+    ActaLineSide,
+    ActaLineSource,
     AssemblyMode,
     AssemblyRecipe,
     AssemblyRecipeItem,
@@ -21,6 +23,7 @@ from backend.modules.production.models import (
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
+    ProductionRunActaLine,
     ProductionRunAssemblyItem,
     ProductionRunProduct,
     ProductionRunStage,
@@ -448,12 +451,12 @@ class ProductionService:
         # total de materia prima a usar (ya no hay ratio por unidad).
         from backend.modules.inventory.models import InventoryItem
 
-        item = self.repository.session.get(InventoryItem, payload.raw_material_item_id)
-        if item is None or item.item_type != "RAW_MATERIAL":
+        raw_material_item = self.repository.session.get(InventoryItem, payload.raw_material_item_id)
+        if raw_material_item is None or raw_material_item.item_type != "RAW_MATERIAL":
             raise ProductionDomainError(
                 "La materia prima seleccionada no existe en el inventario."
             )
-        unit_code = item.unit_code
+        unit_code = raw_material_item.unit_code
 
         active_stages = [stage for stage in process.stages if stage.is_active]
         if not active_stages:
@@ -574,6 +577,80 @@ class ProductionService:
 
         self.repository.add_run(run)
         self.repository.flush()
+
+        # Acta persistida: sembrada con el plan de la orden (materia prima,
+        # insumos, complementos, resultantes). Eventos reales la siguen
+        # alimentando despues (aprobar materiales, material adicional,
+        # merma por etapa, recepcion) — todavia no implementado.
+        stage_by_source_id = {stage.source_stage_id: stage for stage in run.stages}
+        entrega_order = 0
+        run.acta_lines.append(
+            ProductionRunActaLine(
+                side=ActaLineSide.ENTREGA,
+                label=raw_material_item.name,
+                quantity=payload.quantity,
+                unit_code=unit_code,
+                source=ActaLineSource.PLAN,
+                line_order=entrega_order,
+            )
+        )
+        entrega_order += 1
+        for stage, ingredient in configured_ingredients:
+            run.acta_lines.append(
+                ProductionRunActaLine(
+                    side=ActaLineSide.ENTREGA,
+                    stage_id=stage_by_source_id[stage.id].id,
+                    label=ingredient_items[ingredient.id].name,
+                    quantity=payload_by_id[ingredient.id],
+                    unit_code=ingredient_items[ingredient.id].unit_code,
+                    source=ActaLineSource.PLAN,
+                    line_order=entrega_order,
+                )
+            )
+            entrega_order += 1
+        for complement, complement_item in zip(payload.complements, complement_items):
+            run.acta_lines.append(
+                ProductionRunActaLine(
+                    side=ActaLineSide.ENTREGA,
+                    label=complement_item.name,
+                    quantity=complement.quantity,
+                    unit_code=complement_item.unit_code,
+                    source=ActaLineSource.PLAN,
+                    line_order=entrega_order,
+                )
+            )
+            entrega_order += 1
+
+        from sqlalchemy import select
+        from backend.modules.product_types.models import ProductType
+
+        product_type_ids = {p.product_type_id for p in payload.products if p.product_type_id}
+        product_types: dict = {}
+        if product_type_ids:
+            rows = self.repository.session.execute(
+                select(ProductType).where(ProductType.id.in_(product_type_ids))
+            ).scalars().all()
+            product_types = {pt.id: pt for pt in rows}
+        for line_order, product in enumerate(payload.products):
+            if product.product_type_id:
+                product_type = product_types.get(product.product_type_id)
+                label = product_type.name if product_type else "Producto"
+                product_unit = "und"
+            else:
+                target_item = self.repository.session.get(InventoryItem, product.target_item_id)
+                label = target_item.name if target_item else "Producto"
+                product_unit = target_item.unit_code if target_item else "und"
+            run.acta_lines.append(
+                ProductionRunActaLine(
+                    side=ActaLineSide.RECEPCION,
+                    label=label,
+                    quantity=product.quantity,
+                    unit_code=product_unit,
+                    source=ActaLineSource.PLAN,
+                    line_order=line_order,
+                )
+            )
+
         self.inventory_service.reserve_materials_for_production(
             production_order_id=run.id,
             requirements=(),
