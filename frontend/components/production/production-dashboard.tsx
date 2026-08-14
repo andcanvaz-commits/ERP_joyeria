@@ -306,7 +306,7 @@ function RecipeBadgeIcon({ recipe }: { recipe: AssemblyRecipe | null }) {
                       {item.material_type ? <span style={{ color: "var(--muted)" }}> · {item.material_type}</span> : null}
                     </span>
                     <span style={{ color: "var(--muted)" }}>
-                      {item.quantity_per_unit}
+                      {item.quantity}
                       {item.unit_code ? ` ${item.unit_code}` : ""}
                     </span>
                   </li>
@@ -957,7 +957,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     const lines = assemblyLines.filter((line) => Number(line.perUnit) > 0);
     if (lines.length === 0) return;
     if (lines.some((line) => (line.perUnit.split(".")[1]?.length ?? 0) > 4)) {
-      setError("Máximo 4 decimales por unidad.");
+      setError("Máximo 4 decimales.");
       return;
     }
     setError(null);
@@ -966,7 +966,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     try {
       await defineRunAssembly(
         assemblyRun.id,
-        lines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
+        lines.map((line) => ({ complement_item_id: line.itemId, quantity: line.perUnit })),
       );
       setSuccess("Ensamble definido. La receta quedó guardada para el futuro.");
       closeAssemblyModal();
@@ -1615,7 +1615,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setOrderRecipe(null);
       return;
     }
-    const key = choice.targetItemId ?? choice.productTypeId ?? "";
     const seq = ++recipeLookupSeq.current;
     try {
       const recipe = choice.targetItemId
@@ -1624,20 +1623,25 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
       if (seq !== recipeLookupSeq.current) return;
 
-      if (recipe.items.length > 0) {
-        setOrderRecipe({ key, recipe });
-        return;
-      }
-      if (recipe.model_key) {
+      if (!recipe.model_key) {
+        setError("Esta pieza no tiene tipo en el catálogo: usa Asignar.");
+        setOrderProduct(null);
         setOrderRecipe(null);
-        setRecipeLines([]);
-        setRecipeModalContext("order");
-        setRecipeModalModelKey(recipe.model_key);
         return;
       }
-      setError("Esta pieza no tiene tipo en el catálogo: usa Asignar.");
-      setOrderProduct(null);
+      // Siempre se pide confirmar/editar los complementos, aunque ya exista
+      // una receta previa: sus valores solo prellenan como sugerencia.
       setOrderRecipe(null);
+      setRecipeLines(
+        recipe.items.map((item) => ({
+          itemId: item.complement_item_id,
+          label: item.name ?? "Complemento",
+          unitCode: item.unit_code ?? "",
+          perUnit: String(Number(item.quantity)),
+        })),
+      );
+      setRecipeModalContext("order");
+      setRecipeModalModelKey(recipe.model_key);
     } catch (nextError) {
       if (seq !== recipeLookupSeq.current) return;
       setError(nextError instanceof Error ? nextError.message : "No se pudo cargar la receta.");
@@ -1722,11 +1726,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   async function handleSaveRecipe() {
     if (!recipeModalModelKey) return;
     if (recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))) {
-      setError("Completa la cantidad por unidad de todos los complementos (o quita los que sobren).");
+      setError("Completa la cantidad de todos los complementos (o quita los que sobren).");
       return;
     }
     if (recipeLines.some((line) => (line.perUnit.split(".")[1]?.length ?? 0) > 4)) {
-      setError("Máximo 4 decimales por unidad.");
+      setError("Máximo 4 decimales.");
       return;
     }
 
@@ -1736,7 +1740,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     try {
       const saved = await upsertAssemblyRecipe(
         recipeModalModelKey,
-        recipeLines.map((line) => ({ complement_item_id: line.itemId, quantity_per_unit: line.perUnit })),
+        recipeLines.map((line) => ({ complement_item_id: line.itemId, quantity: line.perUnit })),
       );
       if (recipeModalContext === "order") {
         const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalModelKey : recipeModalModelKey;
@@ -1745,7 +1749,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setRecipeModalModelKey(null);
       setRecipeLines([]);
       setRecipeModalContext("order");
-      setSuccess("Receta guardada.");
+      setSuccess("Complementos guardados.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] }),
         queryClient.invalidateQueries({ queryKey: ["assembly-recipes"] }),
@@ -1925,7 +1929,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <button className="maintenanceTile" onClick={() => setIsMaintenanceRecipePickerOpen(true)} type="button">
                 <ScrollText aria-hidden="true" size={22} />
                 <strong>Crear receta</strong>
-                <span>Complementos por unidad de un producto.</span>
+                <span>Complementos y cantidad a usar de un producto.</span>
               </button>
               <button className="maintenanceTile" onClick={() => setIsRecipesViewOpen(true)} type="button">
                 <FileText aria-hidden="true" size={22} />
@@ -2437,18 +2441,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </div>
       ) : null}
 
-      {/* Definir ensamble: combinacion de complementos APROBADOS de la orden,
-          por unidad × cantidad fabricada. Se guarda como receta a futuro. */}
+      {/* Definir ensamble: combinacion de complementos APROBADOS de la orden.
+          Se guarda como receta a futuro (cantidad total, no por unidad). */}
       {assemblyRun ? (() => {
         const approvedComplements = (assemblyRun.complements ?? []).filter((complement) => complement.status === "APROBADA");
-        const runQuantity = Number(assemblyRun.quantity) || 0;
         const hasValidLine = assemblyLines.some((line) => Number(line.perUnit) > 0);
         const hasExcess = assemblyLines.some((line) => {
-          const perUnit = Number(line.perUnit);
-          if (!(perUnit > 0)) return false;
+          const qty = Number(line.perUnit);
+          if (!(qty > 0)) return false;
           const complement = approvedComplements.find((candidate) => candidate.item_id === line.itemId);
           const approvedQty = complement ? Number(complement.quantity) : 0;
-          return perUnit * runQuantity > approvedQty;
+          return qty > approvedQty;
         });
         const canSubmitAssembly = hasValidLine && !hasExcess;
         return (
@@ -2470,25 +2473,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <tr>
                         <th>Complemento</th>
                         <th className="num">Aprobado</th>
-                        <th className="num">Por unidad</th>
-                        <th className="num">Total</th>
+                        <th className="num">Cantidad a usar</th>
                       </tr>
                     </thead>
                     <tbody>
                       {approvedComplements.map((complement) => {
                         const line = assemblyLines.find((candidate) => candidate.itemId === complement.item_id);
-                        const perUnit = line?.perUnit ?? "";
-                        const perUnitNumber = Number(perUnit);
-                        const total = perUnitNumber > 0 ? perUnitNumber * runQuantity : 0;
+                        const qty = line?.perUnit ?? "";
+                        const qtyNumber = Number(qty);
                         const approvedQty = Number(complement.quantity);
-                        const exceeds = perUnitNumber > 0 && total > approvedQty;
+                        const exceeds = qtyNumber > 0 && qtyNumber > approvedQty;
                         return (
                           <tr key={complement.id}>
                             <td>{complement.name ?? "—"}</td>
                             <td className="num">{numericText(complement.quantity)} {complement.unit_code}</td>
                             <td className="num">
                               <input
-                                aria-label={`Cantidad por unidad de ${complement.name ?? "complemento"}`}
+                                aria-label={`Cantidad a usar de ${complement.name ?? "complemento"}`}
                                 className="field"
                                 min="0"
                                 onChange={(event) => {
@@ -2502,13 +2503,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                 step="0.0001"
                                 style={{ width: 90 }}
                                 type="number"
-                                value={perUnit}
+                                value={qty}
                               />
-                            </td>
-                            <td className="num">
-                              <span style={{ color: exceeds ? "var(--danger, #c0392b)" : undefined }}>
-                                {numericText(total)} {complement.unit_code}
-                              </span>
                               {exceeds ? (
                                 <small style={{ display: "block", color: "var(--danger, #c0392b)" }}>
                                   Supera lo aprobado
@@ -2670,7 +2666,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>Recetas de ensamble</h2>
-                <p>Complementos por unidad de cada producto</p>
+                <p>Ultima cantidad usada de cada complemento</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsRecipesViewOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -2704,7 +2700,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <td>
                             {recipe.items.map((item) => (
                               <div key={item.complement_item_id}>
-                                {numericText(item.quantity_per_unit)} {item.unit_code ?? ""} × {item.name ?? "Complemento"}
+                                {numericText(item.quantity)} {item.unit_code ?? ""} × {item.name ?? "Complemento"}
                                 {item.material_type ? ` (${item.material_type})` : ""}
                               </div>
                             ))}
@@ -2722,7 +2718,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                       itemId: item.complement_item_id,
                                       label: item.name ?? "Complemento",
                                       unitCode: item.unit_code ?? "",
-                                      perUnit: String(Number(item.quantity_per_unit)),
+                                      perUnit: String(Number(item.quantity)),
                                     })),
                                   );
                                   setRecipeModalModelKey(modelKey);
@@ -2797,7 +2793,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <p>
                   {(() => {
                     const { product, material } = describeRecipeKey(recipeModalModelKey);
-                    return `${product} · ${material} — complementos y cantidad por unidad`;
+                    return `${product} · ${material} — complementos y cantidad a usar`;
                   })()}
                 </p>
               </div>
@@ -2812,7 +2808,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <thead>
                     <tr>
                       <th>Complemento</th>
-                      <th className="num">Por unidad</th>
+                      <th className="num">Cantidad</th>
                       <th aria-label="Quitar" />
                     </tr>
                   </thead>
@@ -2823,7 +2819,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <td className="num">
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                             <input
-                              aria-label={`Cantidad por unidad de ${line.label}, en ${line.unitCode || "su unidad"}`}
+                              aria-label={`Cantidad de ${line.label}, en ${line.unitCode || "su unidad"}`}
                               className="field"
                               min="0"
                               onChange={(event) => updateRecipeLinePerUnit(line.itemId, event.target.value)}
