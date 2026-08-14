@@ -37,6 +37,9 @@ from backend.modules.production.models import (
 DECISION_STAGE_TYPES = {"DECISION", "CONTROL"}
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    ActaLineCreate,
+    ActaLineRead,
+    ActaLineUpdate,
     AdditionalMaterialRequestCreate,
     AdditionalMaterialRequestRead,
     AssemblyRecipeItemRead,
@@ -1491,6 +1494,85 @@ class ProductionService:
                 for r in run.additional_material_requests
             ]
 
+    def _attach_acta_lines(self, reads: list, runs: list) -> None:
+        """Nombres de etapa/usuario para las lineas de la acta persistida."""
+        user_ids = [line.created_by_user_id for run in runs for line in run.acta_lines]
+        user_names = _resolve_run_user_names(self.repository.session, user_ids)
+        for read, run in zip(reads, runs):
+            stages_by_id = {stage.id: stage for stage in run.stages}
+            read.acta_lines = [
+                ActaLineRead(
+                    id=line.id,
+                    side=line.side,
+                    label=line.label,
+                    quantity=line.quantity,
+                    unit_code=line.unit_code,
+                    source=line.source,
+                    stage_id=line.stage_id,
+                    stage_name=(stages_by_id[line.stage_id].stage_name if line.stage_id in stages_by_id else None),
+                    note=line.note,
+                    created_by_name=(
+                        user_names.get(str(line.created_by_user_id)) if line.created_by_user_id else None
+                    ),
+                    created_at=line.created_at,
+                )
+                for line in run.acta_lines
+            ]
+
+    def add_acta_line(self, run_id: UUID, payload: ActaLineCreate, current_user: CurrentUser) -> ProductionRunRead:
+        """Agrega a mano una linea a la acta -- disponible en cualquier etapa
+        de la orden, y tambien despues de recibida."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        line_order = sum(1 for line in run.acta_lines if line.side == payload.side)
+        run.acta_lines.append(
+            ProductionRunActaLine(
+                side=payload.side,
+                label=payload.label.strip(),
+                quantity=payload.quantity,
+                unit_code=payload.unit_code.strip(),
+                source=ActaLineSource.MANUAL,
+                line_order=line_order,
+                note=(payload.note or "").strip() or None,
+                created_by_user_id=current_user.id,
+            )
+        )
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def update_acta_line(self, line_id: UUID, payload: ActaLineUpdate, current_user: CurrentUser) -> ProductionRunRead:
+        """Edita una linea existente (de cualquier origen: plan, automatica o
+        manual). Solo actualiza los campos que vengan en el payload."""
+        line = self.repository.get_acta_line(line_id)
+        if line is None:
+            raise ProductionNotFoundError("Linea de acta no encontrada.")
+        if payload.label is not None:
+            line.label = payload.label.strip()
+        if payload.quantity is not None:
+            line.quantity = payload.quantity
+        if payload.unit_code is not None:
+            line.unit_code = payload.unit_code.strip()
+        if payload.note is not None:
+            line.note = payload.note.strip() or None
+        self.repository.flush()
+        return self._read_with_names(line.run)
+
+    def delete_acta_line(self, line_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
+        """Borra una linea agregada a mano. Las lineas planeadas o generadas
+        automaticamente por un evento real no se borran -- son el rastro de lo
+        que de verdad paso; si estan mal, se editan, no se esconden."""
+        line = self.repository.get_acta_line(line_id)
+        if line is None:
+            raise ProductionNotFoundError("Linea de acta no encontrada.")
+        if line.source != ActaLineSource.MANUAL:
+            raise ProductionDomainError("Solo se pueden borrar lineas agregadas a mano.")
+        run = line.run
+        run.acta_lines.remove(line)
+        self.repository.session.delete(line)
+        self.repository.flush()
+        return self._read_with_names(run)
+
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:
         read = ProductionRunRead.model_validate(run)
         _populate_run_names(self.repository.session, [read], [run])
@@ -1498,6 +1580,7 @@ class ProductionService:
         self._attach_supply_consumptions([read], [run])
         self._attach_plan_names([read], [run])
         self._attach_additional_materials([read], [run])
+        self._attach_acta_lines([read], [run])
         read.reservation_is_complete = _reservation_is_complete(run)
         return read
 
@@ -1509,6 +1592,7 @@ class ProductionService:
         self._attach_supply_consumptions(reads, runs)
         self._attach_plan_names(reads, runs)
         self._attach_additional_materials(reads, runs)
+        self._attach_acta_lines(reads, runs)
         for read, run in zip(reads, runs):
             read.reservation_is_complete = _reservation_is_complete(run)
         return reads

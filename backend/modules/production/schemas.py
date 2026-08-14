@@ -355,6 +355,41 @@ class AdditionalMaterialRequestRead(BaseModel):
     rejection_reason: str | None = None
 
 
+class ActaLineRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    side: str
+    label: str
+    quantity: Decimal
+    unit_code: str
+    source: str
+    stage_id: UUID | None = None
+    stage_name: str | None = None
+    note: str | None = None
+    created_by_name: str | None = None
+    created_at: datetime
+
+
+class ActaLineCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    side: Literal["ENTREGA", "RECEPCION"]
+    label: str = Field(min_length=1, max_length=180)
+    quantity: Decimal = Field(gt=0)
+    unit_code: str = Field(min_length=1, max_length=20)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ActaLineUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, min_length=1, max_length=180)
+    quantity: Decimal | None = Field(default=None, gt=0)
+    unit_code: str | None = Field(default=None, min_length=1, max_length=20)
+    note: str | None = Field(default=None, max_length=500)
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -413,3 +448,5 @@ class ProductionRunRead(BaseModel):
     assembly_items: list[RunAssemblyItemRead] = Field(default_factory=list)
     # Material adicional pedido mientras la corrida esta EN_PROCESO.
     additional_materials: list[AdditionalMaterialRequestRead] = Field(default_factory=list)
+    # Acta persistida: que entro y que salio de la orden (ver ActaLineSource).
+    acta_lines: list[ActaLineRead] = Field(default_factory=list)

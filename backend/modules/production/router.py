@@ -8,6 +8,8 @@ from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.service import InventoryService
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    ActaLineCreate,
+    ActaLineUpdate,
     AdditionalMaterialRequestCreate,
     AllocateMaterialPayload,
     AllocationPreviewRead,
@@ -374,6 +376,53 @@ def reject_additional_material(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.reject_additional_material(request_id, payload.reason if payload else None, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/acta-lines", response_model=ProductionRunRead)
+def add_acta_line(
+    run_id: UUID,
+    payload: ActaLineCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.add_acta_line(run_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.put("/runs/acta-lines/{line_id}", response_model=ProductionRunRead)
+def update_acta_line(
+    line_id: UUID,
+    payload: ActaLineUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.update_acta_line(line_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.delete("/runs/acta-lines/{line_id}", response_model=ProductionRunRead)
+def delete_acta_line(
+    line_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.delete_acta_line(line_id, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

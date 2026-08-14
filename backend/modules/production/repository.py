@@ -10,6 +10,7 @@ from backend.modules.production.models import (
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
+    ProductionRunActaLine,
     ProductionRunAdditionalMaterialRequest,
     ProductionRunStage,
 )
@@ -63,6 +64,14 @@ class ProductionProcessRepository:
             select(ProductionRunAdditionalMaterialRequest)
             .options(selectinload(ProductionRunAdditionalMaterialRequest.run).selectinload(ProductionRun.stages))
             .where(ProductionRunAdditionalMaterialRequest.id == request_id)
+        )
+        return self.session.execute(statement).scalar_one_or_none()
+
+    def get_acta_line(self, line_id: UUID) -> ProductionRunActaLine | None:
+        statement = (
+            select(ProductionRunActaLine)
+            .options(selectinload(ProductionRunActaLine.run).selectinload(ProductionRun.stages))
+            .where(ProductionRunActaLine.id == line_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
 
