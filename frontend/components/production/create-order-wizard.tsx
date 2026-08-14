@@ -277,19 +277,17 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
                             <td>{item?.name ?? ing.inventoryItemId}</td>
                             <td>{ing.stageName}</td>
                             <td className="num">
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                <input
-                                  aria-label={`Cantidad de ${item?.name ?? "insumo"}`}
-                                  className="field"
-                                  min="0"
-                                  onChange={(event) => onChangeStageIngredientQuantity(ing.configId, event.target.value)}
-                                  step="0.0001"
-                                  style={{ width: 90 }}
-                                  type="number"
-                                  value={stageIngredientQuantities[ing.configId] ?? ""}
-                                />
-                                <span style={{ color: "var(--muted)", fontSize: 13 }}>{item?.unit_code ?? ""}</span>
-                              </span>
+                              <input
+                                aria-label={`Cantidad de ${item?.name ?? "insumo"}, en ${item?.unit_code || "su unidad"}`}
+                                className="field"
+                                min="0"
+                                onChange={(event) => onChangeStageIngredientQuantity(ing.configId, event.target.value)}
+                                placeholder={item?.unit_code ?? ""}
+                                step="0.0001"
+                                style={{ width: 90 }}
+                                type="number"
+                                value={stageIngredientQuantities[ing.configId] ?? ""}
+                              />
                             </td>
                           </tr>
                         );
