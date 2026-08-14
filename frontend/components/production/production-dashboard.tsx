@@ -12,6 +12,7 @@ import { ComplementsManager } from "@/components/mantenimiento/complements-manag
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { CreateOrderWizard } from "@/components/production/create-order-wizard";
+import { ActaView } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
@@ -523,6 +524,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, []);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
+  // Acta editable: disponible en cualquier etapa de la orden y tambien
+  // despues de recibida (ver ActaView).
+  const [actaRun, setActaRun] = useState<ProductionRun | null>(null);
   // Ventana con las demas partes de una orden dividida.
   const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   const [printingWasteRun, setPrintingWasteRun] = useState<ProductionRun | null>(null);
@@ -574,6 +578,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   useEffect(() => {
     setSelectedRunForStages((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
     setSelectedStatsRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
+    setActaRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
   }, [runs]);
 
   useEffect(() => {
@@ -3099,6 +3104,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       )
                     ) : null}
                   </div>
+
+                  <button className="button" onClick={() => setActaRun(selectedRunForStages)} type="button">
+                    Ver acta
+                  </button>
                 </>
               );
             })() : null}
@@ -3115,6 +3124,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           onSelect={pickAdditionalMaterialItem}
           title="Solicitar material adicional"
         />
+      ) : null}
+
+      {actaRun ? (
+        <ActaView run={actaRun} onClose={() => setActaRun(null)} onChanged={() => void reload()} />
       ) : null}
 
       {familyRuns ? (
@@ -3216,6 +3229,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
             <RunStageSummaryTable run={selectedStatsRun} />
             <div className="modalActions">
+              <button className="button" onClick={() => setActaRun(selectedStatsRun)} type="button">
+                Ver acta
+              </button>
               <button className="button buttonPrimary" onClick={() => setPrintingWasteRun(selectedStatsRun)} type="button">
                 <Printer aria-hidden="true" size={14} />
                 Imprimir

@@ -191,6 +191,26 @@ export function rejectAdditionalMaterial(requestId: string, reason?: string | nu
   });
 }
 
+export function addActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; label: string; quantity: string; unit_code: string; note?: string | null }) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/acta-lines`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateActaLine(lineId: string, payload: { label?: string; quantity?: string; unit_code?: string; note?: string | null }) {
+  return apiRequest<ProductionRun>(`/api/production/runs/acta-lines/${lineId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteActaLine(lineId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/acta-lines/${lineId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: string; materialItemId?: string }) {
   const query = params.productTypeId
     ? `product_type_id=${params.productTypeId}`

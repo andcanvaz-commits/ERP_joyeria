@@ -170,6 +170,20 @@ export type ProductionRun = {
     approved_at?: string | null;
     rejection_reason?: string | null;
   }>;
+  // Acta persistida: que entro y que salio de la orden.
+  acta_lines?: Array<{
+    id: string;
+    side: "ENTREGA" | "RECEPCION";
+    label: string;
+    quantity: string;
+    unit_code: string;
+    source: "PLAN" | "AUTO" | "MANUAL";
+    stage_id?: string | null;
+    stage_name?: string | null;
+    note?: string | null;
+    created_by_name?: string | null;
+    created_at: string;
+  }>;
 };
 
 /** Dry-run de "destinar": cuánto alcanza a cubrir el stock disponible hoy. */
