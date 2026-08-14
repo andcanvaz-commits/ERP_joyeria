@@ -153,6 +153,12 @@ class MaterialRejectPayload(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class RunCancelPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class ReceiveFinishedProductPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -195,6 +201,13 @@ class ProductionRunStageFinish(BaseModel):
     final_weight: Decimal | None = Field(default=None, ge=0)
     decision: Literal["APPROVED", "REJECTED"] | None = None
     justification: str | None = Field(default=None, max_length=1000)
+
+
+class StageWeightEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    initial_weight: Decimal | None = Field(default=None, ge=0)
+    final_weight: Decimal = Field(ge=0)
 
 
 class StageDecisionRead(BaseModel):

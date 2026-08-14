@@ -31,17 +31,20 @@ ADMIN_PERMISSIONS = [
     "production.runs.read",
     "production.runs.create",
     "production.runs.update",
+    "production.runs.delete",
     "inventory.read",
     "inventory.items.create",
     "inventory.items.update",
     "inventory.items.delete",
     "inventory.movements.create",
+    "inventory.movements.revert",
 ]
 PRODUCTION_MANAGER_PERMISSIONS = [
     "production.processes.read",
     "production.runs.read",
     "production.runs.create",
     "production.runs.update",
+    # Cancelar/eliminar una orden es exclusivo del administrador.
     # Lectura de inventario: ver materiales y stock para planificar produccion.
     "inventory.read",
 ]
@@ -53,6 +56,9 @@ INVENTORY_MANAGER_PERMISSIONS = [
     "inventory.items.create",
     "inventory.items.update",
     "inventory.items.delete",
+    # Revertir la ultima entrada es distinto de editar/eliminar items: el jefe
+    # de inventario si puede (igual que el admin); ver INVENTORY_ADMIN_ONLY.
+    "inventory.movements.revert",
     "inventory.movements.create",
 ]
 

@@ -1,0 +1,153 @@
+"""Cancelar una orden de produccion (OP) por error -- etapa aceptada por
+equivocacion, dato mal tipeado, etc. Debe liberar reservas y devolver al
+inventario todo lo que la orden ya consumio, sin borrar la fila."""
+from decimal import Decimal
+
+import pytest
+
+from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
+from backend.tests.production.test_allocate_material import _create_waiting_child
+from backend.tests.production.test_material_reservation import _reserve_partial
+from backend.tests.production.test_material_split import _create_run
+from backend.tests.production.test_receive_merma import _run_to_pending_reception, weighed_process  # noqa: F401
+
+
+def test_cancel_from_waiting_material_frees_the_reservation(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    child = _reserve_partial(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    assert child.reserved_material_quantity == Decimal("25")
+
+    result = production_service.cancel_run(child.id, current_user, "Etapa aceptada por error")
+
+    assert result.status == "CANCELADA"
+    db_session.refresh(child)
+    assert child.reserved_material_quantity == Decimal("0")
+    # Nunca se consumio de verdad: el stock fisico no se toco, solo se libero.
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("25")
+    assert production_service.inventory_service.available_stock(raw_material) == Decimal("25")
+
+
+def test_cancel_from_in_progress_restores_consumed_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("1000")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("900")  # 100g consumidos directos
+
+    result = production_service.cancel_run(run_read.id, current_user, "Se acepto una etapa que no debia")
+
+    assert result.status == "CANCELADA"
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("1000")
+    reversions = [
+        m for m in raw_material.movements
+        if m.movement_type == "REVERSION_PRODUCCION" and m.reference_id == run_read.id
+    ]
+    assert len(reversions) == 1
+    assert reversions[0].quantity == Decimal("100")
+
+
+def test_cancel_does_not_touch_average_cost(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """REVERSION_PRODUCCION devuelve gramos pero no es una compra: el costo
+    promedio ponderado (kardex) debe quedar exactamente como estaba."""
+    from backend.modules.inventory.schemas import InventoryMovementCreate
+
+    production_service.inventory_service.create_movement(
+        InventoryMovementCreate(
+            item_id=raw_material.id, movement_type="ENTRADA", quantity=Decimal("1000"),
+            unit_cost=Decimal("50"), reason="Compra inicial",
+        ),
+        user_id=current_user.id,
+    )
+    db_session.refresh(raw_material)
+    cost_before = raw_material.average_cost
+    assert cost_before == Decimal("50")
+
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+
+    production_service.cancel_run(run_read.id, current_user, "Error de tipeo en la cantidad")
+
+    db_session.refresh(raw_material)
+    assert raw_material.average_cost == cost_before
+
+
+def test_cancel_from_pending_reception_restores_stock(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 100, "95"
+    )
+    assert run.status == "PENDIENTE_RECEPCION"
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("1900")
+
+    production_service.cancel_run(run.id, current_user, "La etapa se acepto por error, hay que rehacerla")
+
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("2000")
+    db_session.refresh(run)
+    assert run.status == "CANCELADA"
+    assert run.rejection_reason == "La etapa se acepto por error, hay que rehacerla"
+
+
+def test_cancel_rejects_a_received_run(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 100, "95"
+    )
+    production_service.receive_finished_product(run.id, current_user)
+
+    with pytest.raises(ProductionDomainError, match="ya recibida"):
+        production_service.cancel_run(run.id, current_user, "motivo")
+
+
+def test_cancel_rejects_an_already_cancelled_run(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    child = _reserve_partial(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    production_service.cancel_run(child.id, current_user, "primera cancelacion")
+
+    with pytest.raises(ProductionDomainError, match="ya esta cancelada"):
+        production_service.cancel_run(child.id, current_user, "segundo intento")
+
+
+def test_cancel_rejects_when_an_active_child_split_exists(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    parent_id, child = _create_waiting_child(
+        production_service, current_user, process, raw_material, target_complement
+    )
+
+    with pytest.raises(ProductionDomainError, match="hija"):
+        production_service.cancel_run(parent_id, current_user, "motivo")
+
+    # Cancelando primero la hija, el padre si se puede cancelar despues.
+    production_service.cancel_run(child.id, current_user, "hija cancelada")
+    result = production_service.cancel_run(parent_id, current_user, "ahora si")
+    assert result.status == "CANCELADA"
+
+
+def test_cancel_unknown_run_raises_not_found(production_service, current_user):
+    import uuid
+
+    with pytest.raises(ProductionNotFoundError):
+        production_service.cancel_run(uuid.uuid4(), current_user, "motivo")

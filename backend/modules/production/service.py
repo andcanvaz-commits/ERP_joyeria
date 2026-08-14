@@ -56,6 +56,7 @@ from backend.modules.production.schemas import (
     RunAssemblyDefine,
     RunAssemblyLineCreate,
     RunProductsUpdate,
+    StageWeightEdit,
     SupplyConsumptionRead,
 )
 
@@ -1311,6 +1312,64 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(request.run)
 
+    def cancel_run(self, run_id: UUID, current_user: CurrentUser, reason: str) -> ProductionRunRead:
+        """Cancela una orden por error (etapa aceptada por equivocacion, dato mal
+        tipeado, etc.): libera cualquier reserva y devuelve al inventario todo lo
+        que la orden ya consumio (materia prima, insumos, complementos). No borra
+        la fila -- igual criterio que InventoryService.delete_item: una orden con
+        movimientos no se borra, se cancela, para no perder la trazabilidad del
+        error ni romper actas/reportes que ya la referencian."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status == ProductionRunStatus.RECEIVED:
+            raise ProductionDomainError(
+                "No se puede cancelar una orden ya recibida (ya se convirtio en producto terminado)."
+            )
+        if run.status == ProductionRunStatus.CANCELLED:
+            raise ProductionDomainError("Esta orden ya esta cancelada.")
+
+        from sqlalchemy import select
+
+        active_child = self.repository.session.execute(
+            select(ProductionRun.id).where(
+                ProductionRun.parent_run_id == run.id,
+                ProductionRun.status != ProductionRunStatus.CANCELLED,
+            )
+        ).first()
+        if active_child is not None:
+            raise ProductionDomainError(
+                "Esta orden tiene una corrida hija activa (se dividio por falta de material). "
+                "Cancela primero esa corrida hija."
+            )
+
+        if run.status == ProductionRunStatus.WAITING_MATERIAL:
+            run.reserved_material_quantity = Decimal("0")
+            for complement in run.complements:
+                complement.reserved_quantity = Decimal("0")
+
+        if run.materials_approved_at is not None:
+            if self.inventory_service is None:
+                raise ProductionDomainError("Inventario no esta disponible para revertir el consumo de esta orden.")
+            self.inventory_service.reverse_production_consumption(
+                run.id,
+                current_user.id,
+                reason=f"Reversion por cancelacion de orden {run.production_code or run.id}. {reason}",
+            )
+
+        run.status = ProductionRunStatus.CANCELLED
+        run.rejected_by_user_id = current_user.id
+        run.rejection_reason = reason.strip()
+        run.rejected_at = datetime.utcnow()
+        for complement in run.complements:
+            if complement.status == ComplementRequestStatus.PENDING:
+                complement.status = ComplementRequestStatus.REJECTED
+        for request in run.additional_material_requests:
+            if request.status == ComplementRequestStatus.PENDING:
+                request.status = ComplementRequestStatus.REJECTED
+        self.repository.flush()
+        return self._read_with_names(run)
+
     def allocate_material(
         self, run_id: UUID, quantity_units: Decimal, current_user: CurrentUser
     ) -> ProductionRunRead:
@@ -1828,6 +1887,111 @@ class ProductionService:
         self._finish_run(run, payload.final_weight)
         self.repository.flush()
         return self._read_with_names(run)
+
+    def edit_stage_weight(
+        self, stage_id: UUID, payload: StageWeightEdit, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        """Corrige el peso de una etapa YA finalizada (tipeo mal hecho al pesar).
+        Solo antes de recibir: RECIBIDA ya uso estos pesos para mover inventario
+        (producto terminado + merma), corregir despues descuadraria el stock."""
+        stage = self.repository.get_run_stage(stage_id)
+        if stage is None:
+            raise ProductionNotFoundError("Etapa de produccion no encontrada.")
+        run = stage.run
+        if run.status in (ProductionRunStatus.RECEIVED, ProductionRunStatus.CANCELLED):
+            raise ProductionDomainError(
+                "No se puede editar el peso de una orden ya recibida o cancelada."
+            )
+        if stage.status != ProductionRunStageStatus.FINISHED:
+            raise ProductionDomainError("Solo se puede corregir el peso de una etapa ya finalizada.")
+        if not stage.requires_weighing:
+            raise ProductionDomainError("Esta etapa no registra peso.")
+
+        if payload.initial_weight is not None:
+            stage.initial_weight = payload.initial_weight
+        stage.final_weight = payload.final_weight
+        self._recompute_stage_waste_chain(run)
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def _recompute_stage_waste_chain(self, run: ProductionRun) -> None:
+        """Recalcula merma etapa por etapa desde el inicio, con la misma regla que
+        finish_stage/_previous_stage_weight: la referencia de cada etapa pesada es
+        el final_weight de la ultima etapa pesada anterior (o el material total si
+        es la primera). Se corta en la primera etapa aun no finalizada -- lo que
+        sigue no tiene peso todavia. Si la orden ya paso por _finish_run, sus
+        totales (que son la suma de estas mermas) se recalculan tambien.
+
+        finish_stage genera una linea AUTO en la acta persistida por cada merma de
+        fase (ver ahi): al corregir el peso esa linea queda desactualizada si no
+        se sincroniza aqui tambien -- por eso, para cada etapa recalculada, se
+        actualiza/crea/borra su linea de merma segun el nuevo resultado."""
+        ordered = sorted(run.stages, key=lambda item: item.stage_order)
+        reference = run.total_required_material
+        for stage in ordered:
+            if stage.status != ProductionRunStageStatus.FINISHED:
+                break
+            if stage.requires_weighing and stage.final_weight is not None:
+                if reference and reference > 0:
+                    loss = max(Decimal("0"), reference - stage.final_weight)
+                    stage.waste_weight = loss
+                    stage.waste_percent = loss / reference * Decimal("100")
+                else:
+                    stage.waste_weight = None
+                    stage.waste_percent = None
+                reference = stage.final_weight
+                self._sync_stage_waste_acta_line(run, stage)
+
+        if run.finished_at is not None:
+            total_waste = sum(
+                (stage.waste_weight for stage in run.stages if stage.waste_weight is not None),
+                Decimal("0"),
+            )
+            run.waste_weight = total_waste
+            run.waste_percent = (
+                total_waste / run.total_required_material * Decimal("100")
+                if run.total_required_material
+                else Decimal("0")
+            )
+            if ordered:
+                run.actual_finished_weight = ordered[-1].final_weight
+
+    def _sync_stage_waste_acta_line(self, run: ProductionRun, stage: ProductionRunStage) -> None:
+        """Mantiene en linea la fila AUTO de merma de esta etapa en la acta
+        persistida con el `stage.waste_weight` recien recalculado -- misma
+        fila que finish_stage crea la primera vez que la etapa termina con
+        perdida (ver ahi). La busca por stage_id (a lo sumo una por etapa)."""
+        existing = next(
+            (
+                line for line in run.acta_lines
+                if line.side == ActaLineSide.RECEPCION
+                and line.stage_id == stage.id
+                and line.source == ActaLineSource.AUTO
+            ),
+            None,
+        )
+        loss = stage.waste_weight or Decimal("0")
+        if loss <= 0:
+            if existing is not None:
+                run.acta_lines.remove(existing)
+                self.repository.session.delete(existing)
+            return
+        if existing is not None:
+            existing.quantity = loss
+            return
+        recepcion_count = sum(1 for line in run.acta_lines if line.side == ActaLineSide.RECEPCION)
+        run.acta_lines.append(
+            ProductionRunActaLine(
+                side=ActaLineSide.RECEPCION,
+                stage_id=stage.id,
+                label=f"Merma etapa {stage.stage_name}",
+                quantity=loss,
+                unit_code=run.raw_material_unit_code,
+                item_id=run.raw_material_item_id,
+                source=ActaLineSource.AUTO,
+                line_order=recepcion_count,
+            )
+        )
 
     def _previous_stage_weight(self, run: ProductionRun, stage: ProductionRunStage) -> Decimal | None:
         """Peso de referencia para validar una etapa: el peso final de la etapa pesada

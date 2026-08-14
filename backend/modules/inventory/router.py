@@ -246,7 +246,10 @@ def revert_last_entry(
     current_user: CurrentUser = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> InventoryItemRead | None:
-    ensure_permission(current_user, "inventory.items.update")
+    # Revertir la ultima entrada es distinto de editar/eliminar el item: el
+    # jefe de inventario tambien puede, igual que el admin (no esta en
+    # INVENTORY_ADMIN_ONLY como si lo estan items.update/items.delete).
+    ensure_permission(current_user, "inventory.movements.revert")
     try:
         return service.revert_last_entry(item_id)
     except InventoryNotFoundError as exc:

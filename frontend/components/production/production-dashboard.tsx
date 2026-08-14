@@ -34,11 +34,13 @@ import { materialCodeForItem } from "@/lib/material-match";
 import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
+  cancelProductionRun,
   createProcess,
   createProductionRun,
   defineRunAssembly,
   deleteAssemblyRecipe,
   deleteProcess,
+  editProductionRunStageWeight,
   finishProductionRunStage,
   getAssemblyRecipe,
   listAssemblyRecipeModelKeys,
@@ -467,6 +469,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
+  const [cancelRun, setCancelRun] = useState<ProductionRun | null>(null);
+  const [cancelRunReason, setCancelRunReason] = useState("");
+  const [isCancellingRun, setIsCancellingRun] = useState(false);
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const [editWeightValue, setEditWeightValue] = useState("");
+  const [isSavingStageWeight, setIsSavingStageWeight] = useState(false);
   const [showResponsables, setShowResponsables] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   // Modo de destino del resultante: asignar a una pieza/tipo existente o
@@ -606,6 +614,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const canCreate = isAdmin || currentUser?.permissions.includes("production.processes.create") === true;
   const canUpdate = isAdmin || currentUser?.permissions.includes("production.processes.update") === true;
   const canDelete = isAdmin || currentUser?.permissions.includes("production.processes.delete") === true;
+  const canCancelRun = isAdmin || currentUser?.permissions.includes("production.runs.delete") === true;
 
   function showConfirm(title: string, message: string, onConfirm: () => void, isDanger = true, confirmLabel = "Confirmar") {
     setConfirmDialog({ title, message, onConfirm, isDanger, confirmLabel });
@@ -781,9 +790,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 Definir ensamble
               </button>
             ) : null}
-            <button className="iconTextButton" onClick={() => openStatsModal(run)} type="button">
+            {run.status === "PENDIENTE_RECEPCION" ? (
+              <button aria-label="Corregir pesos" className="iconOnlyButton" onClick={() => openRunStagesModal(run)} title="Corregir pesos" type="button">
+                <Pencil aria-hidden="true" size={14} />
+              </button>
+            ) : null}
+            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => openStatsModal(run)} title="Visualizar" type="button">
               <Eye aria-hidden="true" size={14} />
-              Visualizar
             </button>
           </>
         ) : null}
@@ -919,6 +932,67 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedRunForStages(null);
     setStageModalIndex(0);
     setStageModalKey(0);
+  }
+
+  // Cancelar solo tiene sentido antes de recibir: una vez RECIBIDA la orden ya
+  // se convirtio en producto terminado (revertir eso es otro flujo, mas riesgoso).
+  function canRunBeCancelled(run: ProductionRun) {
+    return run.status !== "RECIBIDA" && run.status !== "CANCELADA";
+  }
+
+  function openCancelRunModal(run: ProductionRun) {
+    setCancelRunReason("");
+    setCancelRun(run);
+  }
+
+  async function handleCancelRun(run: ProductionRun, reason: string) {
+    if (!reason.trim()) {
+      setError("Indica el motivo de la cancelación.");
+      return;
+    }
+    setError(null);
+    setIsCancellingRun(true);
+    try {
+      await cancelProductionRun(run.id, reason.trim());
+      setCancelRun(null);
+      setSuccess(`Orden ${run.production_code ?? ""} cancelada. Inventario fue restaurado.`.trim());
+      closeRunStagesModal();
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo cancelar la orden.");
+    } finally {
+      setIsCancellingRun(false);
+    }
+  }
+
+  function openEditStageWeight(stage: ProductionRunStage) {
+    setEditingStageId(stage.id);
+    setEditWeightValue(stage.final_weight != null ? String(stage.final_weight) : "");
+  }
+
+  function closeEditStageWeight() {
+    setEditingStageId(null);
+    setEditWeightValue("");
+  }
+
+  async function handleSaveStageWeight(stage: ProductionRunStage) {
+    const value = editWeightValue.trim();
+    if (!value) {
+      setError("Ingresa el peso corregido.");
+      return;
+    }
+    setError(null);
+    setIsSavingStageWeight(true);
+    try {
+      await editProductionRunStageWeight(stage.id, { final_weight: value });
+      setSuccess("Peso corregido.");
+      closeEditStageWeight();
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo corregir el peso.");
+    } finally {
+      setIsSavingStageWeight(false);
+    }
   }
 
   function openStatsModal(run: ProductionRun) {
@@ -2277,9 +2351,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                 Definir ensamble
                               </button>
                             ) : null}
-                            <button className="iconTextButton" onClick={() => openStatsModal(root)} type="button">
+                            {root.status === "PENDIENTE_RECEPCION" ? (
+                              <button aria-label="Corregir pesos" className="iconOnlyButton" onClick={() => openRunStagesModal(root)} title="Corregir pesos" type="button">
+                                <Pencil aria-hidden="true" size={14} />
+                              </button>
+                            ) : null}
+                            <button aria-label="Visualizar" className="iconOnlyButton" onClick={() => openStatsModal(root)} title="Visualizar" type="button">
                               <Eye aria-hidden="true" size={14} />
-                              Visualizar
                             </button>
                           </>
                         )}
@@ -2781,9 +2859,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {numericText(selectedRunForStages.quantity)} {Number(selectedRunForStages.quantity) === 1 ? "unidad" : "unidades"}
                 </p>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {canCancelRun && canRunBeCancelled(selectedRunForStages) ? (
+                  <button
+                    className="button buttonDanger"
+                    onClick={() => openCancelRunModal(selectedRunForStages)}
+                    type="button"
+                  >
+                    <Trash2 aria-hidden="true" size={15} />
+                    Cancelar orden
+                  </button>
+                ) : null}
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
             </div>
 
             {/* Global progress bar */}
@@ -2913,6 +3003,46 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <strong>Merma de esta fase</strong>
                         {numericText(stage.waste_weight)} {selectedRunForStages.raw_material_unit_code} · {percentText(stage.waste_percent)}%
                       </div>
+                    ) : null}
+
+                    {stage.status === "FINALIZADA" && stage.requires_weighing && canRunBeCancelled(selectedRunForStages) ? (
+                      editingStageId === stage.id ? (
+                        <div className="stageFinishBox">
+                          <input
+                            autoFocus
+                            className="field"
+                            min="0"
+                            onChange={(e) => setEditWeightValue(e.target.value)}
+                            placeholder="Peso corregido"
+                            step="0.0001"
+                            type="number"
+                            value={editWeightValue}
+                          />
+                          <div className="modalActions">
+                            <button className="button" onClick={closeEditStageWeight} type="button">
+                              Cancelar
+                            </button>
+                            <button
+                              className="button buttonPrimary"
+                              disabled={isSavingStageWeight}
+                              onClick={() => void handleSaveStageWeight(stage)}
+                              type="button"
+                            >
+                              {isSavingStageWeight ? "Guardando" : "Guardar peso"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          className="button"
+                          onClick={() => openEditStageWeight(stage)}
+                          style={{ alignSelf: "flex-start" }}
+                          type="button"
+                        >
+                          <Pencil aria-hidden="true" size={14} />
+                          Corregir peso
+                        </button>
+                      )
                     ) : null}
 
                     {stage.decisions && stage.decisions.length > 0 ? (
@@ -3072,6 +3202,53 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               );
             })() : null}
           </section>
+        </div>
+      ) : null}
+
+      {cancelRun ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Cancelar orden">
+          <form
+            className="modalWindow processFormWindow"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (cancelRun) void handleCancelRun(cancelRun, cancelRunReason);
+            }}
+          >
+            <div className="modalHeader">
+              <div>
+                <h2>Cancelar orden</h2>
+                <p>
+                  {cancelRun.production_code ? `${cancelRun.production_code} · ` : ""}{cancelRun.process_name}
+                </p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setCancelRun(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Motivo de la cancelación</span>
+              <textarea
+                className="field textarea"
+                maxLength={1000}
+                onChange={(event) => setCancelRunReason(event.target.value)}
+                rows={3}
+                required
+                value={cancelRunReason}
+              />
+            </label>
+            <p className="panelText">
+              La orden quedará cancelada y se restaurará al inventario todo lo que ya consumió (materia prima,
+              insumos, complementos). No se puede deshacer.
+            </p>
+            <div className="modalActions">
+              <button className="button" onClick={() => setCancelRun(null)} type="button">
+                Volver
+              </button>
+              <button className="button buttonDanger" disabled={isCancellingRun || !cancelRunReason.trim()} type="submit">
+                {isCancellingRun ? "Cancelando" : "Cancelar orden"}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 

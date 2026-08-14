@@ -25,7 +25,9 @@ from backend.modules.production.schemas import (
     ProductionRunStageFinish,
     ReceiveFinishedProductPayload,
     RunAssemblyDefine,
+    RunCancelPayload,
     RunProductsUpdate,
+    StageWeightEdit,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 from backend.modules.security.permissions import require_permission
@@ -49,13 +51,28 @@ def get_production_service():
         session.close()
 
 
+ADMIN_ONLY_PRODUCTION_PERMISSIONS = {
+    # Cancelar una orden y borrar una plantilla de proceso son exclusivos del
+    # administrador -- ni el jefe de produccion pasa por el atajo generico de
+    # abajo para estos dos permisos puntuales.
+    "production.runs.delete": "Solo el administrador puede cancelar una orden de produccion.",
+    "production.processes.delete": "Solo el administrador puede eliminar un proceso.",
+}
+
+
 def ensure_permission(current_user: CurrentUser, permission: str) -> None:
+    is_admin = current_user.role in {"admin", "Admin"}
+    if permission in ADMIN_ONLY_PRODUCTION_PERMISSIONS:
+        if is_admin:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ADMIN_ONLY_PRODUCTION_PERMISSIONS[permission],
+        )
     inventory_run_permissions = {"production.runs.read", "production.runs.update"}
     if current_user.role == "Jefe de inventario" and permission in inventory_run_permissions:
         return
-    if current_user.role in {"admin", "Admin", "Jefe de producción"} and permission.startswith("production."):
-        return
-    if current_user.role in {"admin", "Admin", "Jefe de produccion", "Jefe de producción"} and permission.startswith("production."):
+    if is_admin or current_user.role in {"Jefe de produccion", "Jefe de producción"} and permission.startswith("production."):
         return
     try:
         require_permission(current_user, permission)
@@ -194,6 +211,25 @@ def reject_run_materials(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.post("/runs/{run_id}/cancel", response_model=ProductionRunRead)
+def cancel_run(
+    run_id: UUID,
+    payload: RunCancelPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    # Cancelar una orden ya avanzada (etapa aceptada por error, dato mal
+    # tipeado): revierte inventario. Distinto de reject-materials, que solo
+    # sirve antes de tocar inventario.
+    ensure_permission(current_user, "production.runs.delete")
+    try:
+        return service.cancel_run(run_id, current_user, payload.reason)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/runs/{run_id}/allocate-material", response_model=ProductionRunRead)
 def allocate_run_material(
     run_id: UUID,
@@ -314,6 +350,23 @@ def finish_run_stage(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.finish_stage(stage_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/stages/{stage_id}/edit-weight", response_model=ProductionRunRead)
+def edit_run_stage_weight(
+    stage_id: UUID,
+    payload: StageWeightEdit,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    # Corrige un peso mal tipeado en una etapa ya finalizada (antes de recibir).
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.edit_stage_weight(stage_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

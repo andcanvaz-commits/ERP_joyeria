@@ -59,7 +59,10 @@ class InventoryNotFoundError(LookupError):
     pass
 
 
-POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION", "DEVOLUCION_PRODUCCION", "CONVERSION_ENTRADA", "RECLASIFICACION_ENTRADA"}
+POSITIVE_MOVEMENTS = {
+    "ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION", "DEVOLUCION_PRODUCCION",
+    "CONVERSION_ENTRADA", "RECLASIFICACION_ENTRADA", "REVERSION_PRODUCCION",
+}
 NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA", "CONVERSION_SALIDA", "RECLASIFICACION_SALIDA"}
 # Salidas que nacen del propio flujo de produccion: no se les aplica el tope
 # por stock reservado porque approve_materials ya libero la reserva de la
@@ -486,6 +489,37 @@ class InventoryService(InventoryIntegrationPort):
             reference_id=production_run_id,
         )
         return self.create_movement(payload, user_id=user_id, lot_code=production_code)
+
+    def reverse_production_consumption(self, run_id: UUID, user_id: UUID | None, reason: str) -> None:
+        """Restaura el stock de todo lo que una corrida consumio (materia prima,
+        insumos por etapa, complementos): cubre los tres porque
+        consume_material_for_production siempre guarda reference_id=run_id sin
+        importar el item. No toca el costo promedio -- REVERSION_PRODUCCION no
+        es ENTRADA, solo devuelve gramos/unidades al stock fisico."""
+        movements = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.movement_type == "CONSUMO_PRODUCCION",
+                InventoryMovement.reference_type == "production_run",
+                InventoryMovement.reference_id == run_id,
+            )
+        ).scalars().all()
+        consumed: dict[UUID, Decimal] = {}
+        for movement in movements:
+            consumed[movement.item_id] = consumed.get(movement.item_id, Decimal("0")) + movement.quantity
+        for item_id, quantity in consumed.items():
+            if quantity <= 0:
+                continue
+            self.create_movement(
+                InventoryMovementCreate(
+                    item_id=item_id,
+                    movement_type="REVERSION_PRODUCCION",
+                    quantity=quantity,
+                    reason=reason,
+                    reference_type="production_run",
+                    reference_id=run_id,
+                ),
+                user_id=user_id,
+            )
 
     def list_movements(self, item_id: UUID | None = None) -> list[InventoryMovementRead]:
         movements = self.repository.list_movements(item_id)

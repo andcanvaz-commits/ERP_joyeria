@@ -606,6 +606,10 @@ export function InventoryDashboard() {
     enabled: isAuthenticated(),
   });
   const canSeeAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
+  // Revertir la ultima entrada es distinto de ver auditoria/usuarios: el jefe
+  // de inventario tambien puede, igual que el admin (ver INVENTORY_ADMIN_ONLY
+  // en el backend -- inventory.movements.revert no esta ahi).
+  const canRevertEntry = canSeeAudit || currentUser?.role === "Jefe de inventario";
 
   useEffect(() => {
     if (itemFilter === "ORDENES_TERMINADAS") {
@@ -3101,7 +3105,7 @@ export function InventoryDashboard() {
                     <Eye aria-hidden="true" size={15} />
                     Visualizar
                   </button>
-                  {movement.id === sortedMovements[0]?.id && canSeeAudit && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
+                  {movement.id === sortedMovements[0]?.id && canRevertEntry && movement.movement_type === "ENTRADA" && withinRevertWindow(movement.created_at) ? (
                     <button className="iconTextButton dangerText" onClick={() => void handleRevertLastEntry(movement.item)} type="button">
                       <RotateCcw aria-hidden="true" size={15} />
                       Revertir
