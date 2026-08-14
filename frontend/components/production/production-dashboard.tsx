@@ -175,7 +175,10 @@ async function fetchProductionBundle(variant: "production" | "maintenance") {
     runs: nextRuns,
     // Un item archivado no debe poder elegirse para una orden nueva en vivo.
     rawMaterials: nextRawMaterials.filter((item) => !item.archived_at),
-    supplies: nextSupplies.filter((item) => !item.archived_at),
+    // Los insumos aqui solo se usan para RESOLVER el nombre en la tabla de
+    // "insumos de este proceso" (ya vienen fijados por el proceso, no se
+    // eligen aqui): un insumo archivado sigue necesitando mostrar su nombre.
+    supplies: nextSupplies,
     complements: nextComplements,
     waste: nextWaste,
     finishedItems: nextFinishedItems,
