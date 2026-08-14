@@ -78,7 +78,6 @@ export function buildOrdenProduccion(
 ): OrdenProduccionModel {
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
   const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name;
-  const materialUnit = root.raw_material_unit_code || "g";
 
   const entrega: DocSide[] = [];
   const recepcion: DocSide[] = [];
@@ -87,19 +86,15 @@ export function buildOrdenProduccion(
   for (const run of family) {
     const entregaLines = (run.event_lines ?? []).filter((line) => line.side === "ENTREGA");
     if (run.materials_approved_at !== null) {
+      // Historica (papel): sus propias lineas. Corrida en vivo: la acta
+      // persistida (run.acta_lines), la misma fuente que se ve/edita en
+      // "Ver acta" — incluye lo planeado y lo agregado durante el proceso.
       const rows: DocRow[] =
         entregaLines.length > 0
           ? entregaLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
-          : [{ gramos: num(run.total_required_material), unidad: materialUnit, detalle: materialName }];
-      if (entregaLines.length === 0) {
-        for (const supply of run.supply_consumptions ?? []) {
-          rows.push({
-            gramos: num(supply.quantity),
-            unidad: supply.unit_code || "g",
-            detalle: `Insumo: ${supply.name}`
-          });
-        }
-      }
+          : (run.acta_lines ?? [])
+              .filter((line) => line.side === "ENTREGA")
+              .map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
       entrega.push({
         fecha: run.materials_approved_at,
         responsable: run.materials_approved_by_name ?? DASH,
@@ -112,51 +107,9 @@ export function buildOrdenProduccion(
       const rows: DocRow[] =
         recepcionLines.length > 0
           ? recepcionLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
-          : [];
-      if (recepcionLines.length === 0) {
-        const products = run.products ?? [];
-        // Producto unico medido en peso (no "und"): el peso final que
-        // sobrevivio la merma ES el producto — product.quantity es un conteo
-        // de piezas declarado al crear la orden, no gramos, y no coincide con
-        // el peso real. Mostrarlo aparte de la materia prima duplicaba el
-        // mismo numero con dos nombres distintos (materia prima vs producto).
-        const singleWeightProduct =
-          products.length === 1 && products[0].unit_code && products[0].unit_code !== "und"
-            ? products[0]
-            : null;
-        if (singleWeightProduct && run.actual_finished_weight !== null) {
-          rows.push({
-            gramos: num(run.actual_finished_weight),
-            unidad: singleWeightProduct.unit_code || materialUnit,
-            detalle: `Producto final: ${singleWeightProduct.product_name ?? "—"}`
-          });
-        } else {
-          if (run.actual_finished_weight !== null) {
-            rows.push({
-              gramos: num(run.actual_finished_weight),
-              unidad: materialUnit,
-              detalle: run.process_name
-            });
-          }
-          for (const product of products) {
-            rows.push({
-              gramos: num(product.quantity),
-              unidad: product.unit_code || "und",
-              detalle: `Producto final: ${product.product_name ?? "—"}`
-            });
-          }
-        }
-        // Merma del proceso (perdida entre etapas pesadas, ya calculada y
-        // sumada en run.waste_weight): sin esta fila el certificado mostraba
-        // el peso final y las piezas resultantes sin explicar la diferencia.
-        if (num(run.waste_weight) > 0) {
-          rows.push({
-            gramos: num(run.waste_weight),
-            unidad: materialUnit,
-            detalle: "Merma"
-          });
-        }
-      }
+          : (run.acta_lines ?? [])
+              .filter((line) => line.side === "RECEPCION")
+              .map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
       recepcion.push({
         fecha: run.received_at,
         responsable: run.received_by_name ?? DASH,
