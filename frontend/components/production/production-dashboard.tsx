@@ -478,6 +478,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [selectedProcessId, setSelectedProcessId] = useState("");
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
   const [runQuantity, setRunQuantity] = useState("1");
+  // Cantidad a usar de cada insumo configurado en las etapas activas del
+  // proceso elegido, tecleada al crear la orden (clave = id de la fila de
+  // configuracion ProductionProcessStageIngredient).
+  const [stageIngredientQuantities, setStageIngredientQuantities] = useState<Record<string, string>>({});
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
   const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
   const [rejectJustification, setRejectJustification] = useState("");
@@ -618,6 +622,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
   const selectedMaterial = orderMaterialPool.find((item) => item.id === selectedMaterialId) ?? null;
+  // Insumos configurados en las etapas activas del proceso elegido: se piden
+  // obligatorios al crear la orden, igual que los complementos.
+  const configuredStageIngredients = (selectedProcess?.stages ?? []).flatMap((stage) =>
+    (stage.ingredients ?? []).map((ing) => ({
+      configId: ing.id,
+      stageName: stage.name,
+      inventoryItemId: ing.inventory_item_id,
+    })),
+  );
   // Código de material (1 dígito) de la materia prima elegida: la clave de
   // receta ahora es material+categoria+modelo. Sin material elegido no se
   // puede saber qué piezas/tipos ya tienen receta, así que no se excluye
@@ -1207,10 +1220,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Ingresa una cantidad valida para fabricar.");
       return;
     }
-    if (!Number.isInteger(Number(runQuantity))) {
-      setError("La cantidad a fabricar debe ser un número entero.");
-      return;
-    }
     if (!selectedMaterialId) {
       setError("Selecciona la materia prima con la que se fabricará esta orden.");
       return;
@@ -1225,25 +1234,36 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       return;
     }
 
+    const missingIngredient = configuredStageIngredients.find(
+      (ing) => !(Number(stageIngredientQuantities[ing.configId]) > 0),
+    );
+    if (missingIngredient) {
+      setError("Ingresa la cantidad de todos los insumos de este proceso.");
+      return;
+    }
+
     const productsPayload = [productRowToPayload(orderProduct, runQuantity)];
 
-    // ASIGNAR no solicita complementos. ENSAMBLAR calcula la solicitud
-    // automáticamente a partir de la receta del producto elegido (Task 4).
+    // ASIGNAR no solicita complementos. ENSAMBLAR usa las cantidades totales
+    // definidas a mano en orderRecipe (formulario editable, ver Task 15) --
+    // nunca se calculan solas multiplicando por la cantidad de la orden.
     let complementsPayload: Array<{ item_id: string; quantity: string }> = [];
     if (assemblyMode === "ENSAMBLAR") {
       const productKey = orderProduct.targetItemId ?? orderProduct.productTypeId;
       if (!orderRecipe || orderRecipe.key !== productKey || orderRecipe.recipe.items.length === 0) {
-        setError("Este producto necesita receta para ensamblar.");
+        setError("Este producto necesita complementos definidos para ensamblar.");
         return;
       }
-      complementsPayload = orderRecipe.recipe.items.map((item) => {
-        const qty = Number(item.quantity_per_unit) * Number(runQuantity);
-        return {
-          item_id: item.complement_item_id,
-          quantity: String(Number(qty.toFixed(4))),
-        };
-      });
+      complementsPayload = orderRecipe.recipe.items.map((item) => ({
+        item_id: item.complement_item_id,
+        quantity: String(Number(item.quantity)),
+      }));
     }
+
+    const stageIngredientsPayload = configuredStageIngredients.map((ing) => ({
+      process_stage_ingredient_id: ing.configId,
+      quantity: stageIngredientQuantities[ing.configId],
+    }));
 
     setError(null);
     setSuccess(null);
@@ -1256,6 +1276,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         assembly_mode: assemblyMode,
         products: productsPayload,
         complements: complementsPayload,
+        stage_ingredients: stageIngredientsPayload,
       });
       setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima y complementos.");
       setIsCreateOrderOpen(false);
@@ -1659,6 +1680,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setOrderProduct(null);
     setAssemblyMode("ASIGNAR");
     setRunQuantity("1");
+    setStageIngredientQuantities({});
     setOrderRecipe(null);
     setRecipeModalModelKey(null);
     setRecipeLines([]);
@@ -2350,9 +2372,57 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </label>
 
             <label className="fieldGroup">
-              <span>Cantidad a fabricar</span>
-              <input className="field" min="1" onChange={(e) => setRunQuantity(e.target.value)} step="1" type="number" value={runQuantity} />
+              <span>Cantidad a fabricar {selectedMaterial ? `(${selectedMaterial.unit_code})` : ""}</span>
+              <input className="field" min="0.0001" onChange={(e) => setRunQuantity(e.target.value)} step="0.0001" type="number" value={runQuantity} />
             </label>
+
+            {configuredStageIngredients.length > 0 ? (
+              <div className="fieldGroup">
+                <span>Insumos de este proceso</span>
+                <div className="tableWrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Insumo</th>
+                        <th>Etapa</th>
+                        <th className="num">Cantidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {configuredStageIngredients.map((ing) => {
+                        const item = suppliesList.find((candidate) => candidate.id === ing.inventoryItemId);
+                        return (
+                          <tr key={ing.configId}>
+                            <td>{item?.name ?? ing.inventoryItemId}</td>
+                            <td>{ing.stageName}</td>
+                            <td className="num">
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                <input
+                                  aria-label={`Cantidad de ${item?.name ?? "insumo"}`}
+                                  className="field"
+                                  min="0"
+                                  onChange={(event) =>
+                                    setStageIngredientQuantities((current) => ({
+                                      ...current,
+                                      [ing.configId]: event.target.value,
+                                    }))
+                                  }
+                                  step="0.0001"
+                                  style={{ width: 90 }}
+                                  type="number"
+                                  value={stageIngredientQuantities[ing.configId] ?? ""}
+                                />
+                                <span style={{ color: "var(--muted)", fontSize: 13 }}>{item?.unit_code ?? ""}</span>
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
 
             <button
               className="button buttonPrimary"
