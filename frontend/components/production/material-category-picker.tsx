@@ -24,6 +24,7 @@ const TAB_LABEL: Record<InventoryItemType, string> = {
  */
 export function MaterialCategoryPicker({
   title,
+  description = "Elige un material y luego define su cantidad por unidad",
   items,
   allowedTypes,
   excludeIds,
@@ -32,6 +33,7 @@ export function MaterialCategoryPicker({
   onClose,
 }: {
   title: string;
+  description?: string;
   items: InventoryItem[];
   allowedTypes: InventoryItemType[];
   excludeIds?: string[];
@@ -65,7 +67,7 @@ export function MaterialCategoryPicker({
         <div className="modalHeader">
           <div>
             <h2>{title}</h2>
-            <p className="panelText">Elige un material y luego define su cantidad por unidad</p>
+            <p className="panelText">{description}</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />

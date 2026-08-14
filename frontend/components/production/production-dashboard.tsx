@@ -173,9 +173,9 @@ async function fetchProductionBundle(variant: "production" | "maintenance") {
     processes: nextProcesses,
     users: nextUsers,
     runs: nextRuns,
-    // Materiales elegibles para procesos: materia prima + insumos, sin archivados
-    // (un item archivado no debe poder elegirse para una orden nueva en vivo).
-    rawMaterials: [...nextRawMaterials, ...nextSupplies].filter((item) => !item.archived_at),
+    // Un item archivado no debe poder elegirse para una orden nueva en vivo.
+    rawMaterials: nextRawMaterials.filter((item) => !item.archived_at),
+    supplies: nextSupplies.filter((item) => !item.archived_at),
     complements: nextComplements,
     waste: nextWaste,
     finishedItems: nextFinishedItems,
@@ -406,6 +406,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const users = bundle?.users ?? EMPTY_USERS;
   const runs = bundle?.runs ?? EMPTY_RUNS;
   const rawMaterials = bundle?.rawMaterials ?? EMPTY_RAW_MATERIALS;
+  const orderSupplyItems = bundle?.supplies ?? EMPTY_RAW_MATERIALS;
   const complementItems = bundle?.complements ?? EMPTY_RAW_MATERIALS;
   const wasteItems = bundle?.waste ?? EMPTY_RAW_MATERIALS;
   const finishedItems = bundle?.finishedItems ?? EMPTY_RAW_MATERIALS;
@@ -2265,7 +2266,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         selectedMaterialId={selectedMaterialId}
         onSelectMaterial={setSelectedMaterialId}
         selectedMaterial={selectedMaterial}
-        suppliesList={suppliesList}
+        suppliesList={orderSupplyItems}
         configuredStageIngredients={configuredStageIngredients}
         stageIngredientQuantities={stageIngredientQuantities}
         onChangeStageIngredientQuantity={(configId, value) =>

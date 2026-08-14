@@ -2,6 +2,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductChoice, ProductionProcess } from "@/types/production";
 
@@ -55,35 +56,55 @@ const STEP_LABELS: Array<{ n: 1 | 2 | 3; label: string }> = [
   { n: 3, label: "Producto" },
 ];
 
-function StepIndicator({ step }: { step: 1 | 2 | 3 }) {
+function StepIndicator({ step, onStepClick }: { step: 1 | 2 | 3; onStepClick: (n: 1 | 2 | 3) => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-      {STEP_LABELS.map(({ n, label }, index) => (
-        <div key={n} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 22,
-              height: 22,
-              borderRadius: "50%",
-              border: `1px solid ${n <= step ? "var(--gold-deep)" : "var(--border)"}`,
-              color: n <= step ? "var(--gold-deep)" : "var(--muted)",
-              fontSize: 12,
-              flexShrink: 0,
-            }}
-          >
-            {n < step ? "✓" : n}
-          </span>
-          <span style={{ fontSize: 13, fontWeight: n === step ? 700 : 500, color: n === step ? "var(--gold-deep)" : "var(--muted)" }}>
-            {label}
-          </span>
-          {index < STEP_LABELS.length - 1 ? (
-            <span style={{ width: 24, height: 1, background: "var(--border)" }} />
-          ) : null}
-        </div>
-      ))}
+      {STEP_LABELS.map(({ n, label }, index) => {
+        // Solo se puede volver a un paso ya recorrido: adelantar de un
+        // salto se salta la validación de los pasos intermedios.
+        const isReachable = n < step;
+        return (
+          <div key={n} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              disabled={!isReachable}
+              onClick={() => onStepClick(n)}
+              type="button"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: isReachable ? "pointer" : "default",
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `1px solid ${n <= step ? "var(--gold-deep)" : "var(--border)"}`,
+                  color: n <= step ? "var(--gold-deep)" : "var(--muted)",
+                  fontSize: 12,
+                  flexShrink: 0,
+                }}
+              >
+                {n < step ? "✓" : n}
+              </span>
+              <span style={{ fontSize: 13, fontWeight: n === step ? 700 : 500, color: n === step ? "var(--gold-deep)" : "var(--muted)" }}>
+                {label}
+              </span>
+            </button>
+            {index < STEP_LABELS.length - 1 ? (
+              <span style={{ width: 24, height: 1, background: "var(--border)" }} />
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -117,11 +138,13 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [processSearch, setProcessSearch] = useState("");
+  const [isMaterialPickerOpen, setIsMaterialPickerOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setStep(1);
       setProcessSearch("");
+      setIsMaterialPickerOpen(false);
     }
   }, [isOpen]);
 
@@ -164,7 +187,7 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
           </button>
         </div>
 
-        <StepIndicator step={step} />
+        <StepIndicator step={step} onStepClick={setStep} />
 
         {step === 1 ? (
           <div className="fieldGroup">
@@ -214,15 +237,24 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
         {step === 2 ? (
           <>
             <label className="fieldGroup">
-              <span>Material</span>
-              <select className="field" onChange={(e) => onSelectMaterial(e.target.value)} value={selectedMaterialId}>
-                <option value="">Seleccionar material</option>
-                {rawMaterials.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} · {numericText(item.current_stock)} {item.unit_code}
-                  </option>
-                ))}
-              </select>
+              <span>Materia prima</span>
+              <div className="materialRow">
+                <button
+                  className="button"
+                  onClick={() => setIsMaterialPickerOpen(true)}
+                  style={{ flex: 1, justifyContent: "flex-start" }}
+                  type="button"
+                >
+                  {selectedMaterial
+                    ? `${selectedMaterial.name} · ${numericText(selectedMaterial.current_stock)} ${selectedMaterial.unit_code}`
+                    : "Elegir materia prima"}
+                </button>
+                {selectedMaterial ? (
+                  <button className="button" onClick={() => setIsMaterialPickerOpen(true)} type="button">
+                    Cambiar
+                  </button>
+                ) : null}
+              </div>
             </label>
 
             {configuredStageIngredients.length > 0 ? (
@@ -268,7 +300,7 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
               </div>
             ) : null}
 
-            <div className="modalActions">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 4 }}>
               <button className="button" onClick={() => setStep(1)} type="button">
                 Atrás
               </button>
@@ -318,7 +350,7 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
               />
             </label>
 
-            <div className="modalActions">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 4 }}>
               <button className="button" onClick={() => setStep(2)} type="button">
                 Atrás
               </button>
@@ -329,6 +361,20 @@ export function CreateOrderWizard(props: CreateOrderWizardProps) {
           </>
         ) : null}
       </section>
+
+      {isMaterialPickerOpen ? (
+        <MaterialCategoryPicker
+          allowedTypes={["RAW_MATERIAL"]}
+          description="Elige la materia prima con la que se fabricará esta orden"
+          items={rawMaterials}
+          onClose={() => setIsMaterialPickerOpen(false)}
+          onSelect={(item) => {
+            onSelectMaterial(item.id);
+            setIsMaterialPickerOpen(false);
+          }}
+          title="Elegir materia prima"
+        />
+      ) : null}
     </div>
   );
 }
