@@ -1623,6 +1623,19 @@ class ProductionService:
                 loss = max(Decimal("0"), reference - stage.final_weight)
                 stage.waste_weight = loss
                 stage.waste_percent = loss / reference * Decimal("100")
+                if loss > 0:
+                    recepcion_count = sum(1 for line in run.acta_lines if line.side == ActaLineSide.RECEPCION)
+                    run.acta_lines.append(
+                        ProductionRunActaLine(
+                            side=ActaLineSide.RECEPCION,
+                            stage_id=stage.id,
+                            label=f"Merma etapa {stage.stage_name}",
+                            quantity=loss,
+                            unit_code=run.raw_material_unit_code,
+                            source=ActaLineSource.AUTO,
+                            line_order=recepcion_count,
+                        )
+                    )
             else:
                 stage.waste_weight = None
                 stage.waste_percent = None
@@ -2150,6 +2163,19 @@ class ProductionService:
                 ),
                 user_id=current_user.id,
                 lot_code=run.production_code,
+            )
+
+        if run.actual_finished_weight is not None:
+            recepcion_count = sum(1 for line in run.acta_lines if line.side == ActaLineSide.RECEPCION)
+            run.acta_lines.append(
+                ProductionRunActaLine(
+                    side=ActaLineSide.RECEPCION,
+                    label="Peso final recibido",
+                    quantity=run.actual_finished_weight,
+                    unit_code=run.raw_material_unit_code,
+                    source=ActaLineSource.AUTO,
+                    line_order=recepcion_count,
+                )
             )
 
         run.status = ProductionRunStatus.RECEIVED
