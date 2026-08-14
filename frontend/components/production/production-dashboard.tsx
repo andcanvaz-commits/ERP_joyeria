@@ -3126,10 +3126,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         />
       ) : null}
 
-      {actaRun ? (
-        <ActaView run={actaRun} onClose={() => setActaRun(null)} onChanged={() => void reload()} />
-      ) : null}
-
       {familyRuns ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Partes de la orden">
           <section className="modalWindow processViewWindow">
@@ -3970,6 +3966,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </div>
         </div>
+      ) : null}
+
+      {actaRun ? (
+        <ActaView run={actaRun} onClose={() => setActaRun(null)} onChanged={() => void reload()} />
       ) : null}
     </div>
   );
