@@ -19,19 +19,6 @@ class StageIngredientRead(BaseModel):
     inventory_item_id: UUID
 
 
-class ProcessMaterialCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    inventory_item_id: UUID
-
-
-class ProcessMaterialRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    id: UUID
-    inventory_item_id: UUID
-
-
 class ProductionProcessStageCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -54,7 +41,6 @@ class ProductionProcessCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
     version: int = Field(default=1, ge=1)
-    materials: list[ProcessMaterialCreate] = Field(min_length=1)
     waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
@@ -68,7 +54,6 @@ class ProductionProcessUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
     version: int = Field(default=1, ge=1)
-    materials: list[ProcessMaterialCreate] = Field(min_length=1)
     waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
     stages: list[ProductionProcessStageCreate] = Field(min_length=1)
@@ -100,7 +85,6 @@ class ProductionProcessRead(BaseModel):
     code: str | None = None
     description: str | None = None
     version: int
-    materials: list[ProcessMaterialRead] = Field(default_factory=list)
     waste_limit_percent: Decimal
     is_active: bool
     stages: list[ProductionProcessStageRead] = Field(default_factory=list)

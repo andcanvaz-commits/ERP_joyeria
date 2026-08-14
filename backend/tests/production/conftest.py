@@ -9,7 +9,6 @@ from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.service import InventoryService
 from backend.modules.production.models import (
     ProductionProcess,
-    ProductionProcessMaterial,
     ProductionProcessStage,
 )
 from backend.modules.production.repository import ProductionProcessRepository
@@ -100,14 +99,11 @@ def catalog_finished_item(db_session) -> InventoryItem:
 
 
 @pytest.fixture()
-def process(db_session, raw_material) -> ProductionProcess:
+def process(db_session) -> ProductionProcess:
     proc = ProductionProcess(
         name=f"Proceso test {uuid.uuid4().hex[:6]}",
         waste_limit_percent=Decimal("1"),
         is_active=True,
-        materials=[
-            ProductionProcessMaterial(inventory_item_id=raw_material.id)
-        ],
         stages=[
             ProductionProcessStage(
                 name="Etapa unica",

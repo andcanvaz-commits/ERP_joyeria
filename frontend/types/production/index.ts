@@ -18,18 +18,12 @@ export type ProductionProcessStage = {
   ingredients?: StageIngredient[];
 };
 
-export type ProductionProcessMaterial = {
-  id: string;
-  inventory_item_id: string;
-};
-
 export type ProductionProcess = {
   id: string;
   name: string;
   code?: string | null;
   description: string | null;
   version: number;
-  materials: ProductionProcessMaterial[];
   waste_limit_percent: string;
   is_active: boolean;
   stages: ProductionProcessStage[];

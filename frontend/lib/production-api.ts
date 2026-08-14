@@ -5,9 +5,6 @@ export type CreateProductionProcessPayload = {
   name: string;
   description?: string | null;
   version?: number;
-  materials: Array<{
-    inventory_item_id: string;
-  }>;
   waste_limit_percent?: string;
   is_active?: boolean;
   stages: Array<{

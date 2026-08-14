@@ -12,7 +12,6 @@ import pytest
 
 from backend.modules.product_types.models import ProductType
 from backend.modules.production.schemas import (
-    ProcessMaterialCreate,
     ProductionProcessCreate,
     ProductionProcessStageCreate,
     ProductionProcessUpdate,
@@ -51,9 +50,6 @@ def _payload(raw_material, product_type_ids, name="Proceso tipos test"):
         version=1,
         waste_limit_percent=Decimal("5"),
         is_active=True,
-        materials=[
-            ProcessMaterialCreate(inventory_item_id=raw_material.id)
-        ],
         stages=[
             ProductionProcessStageCreate(name="Etapa", order=1, requires_weighing=True)
         ],

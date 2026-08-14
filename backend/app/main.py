@@ -215,12 +215,6 @@ def upgrade_inventory_movements_table() -> None:
 def upgrade_production_tables() -> None:
     statements = (
         "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS waste_limit_percent NUMERIC(7, 4) NOT NULL DEFAULT 5",
-        "CREATE TABLE IF NOT EXISTS production_process_materials ("
-        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
-        "process_id UUID NOT NULL REFERENCES production_processes(id) ON DELETE CASCADE, "
-        "inventory_item_id UUID NOT NULL, "
-        "quantity_per_unit NUMERIC(14,4) NOT NULL, "
-        "unit_code VARCHAR(20) NOT NULL)",
         "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS phase_name VARCHAR(120)",
         "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS stage_type VARCHAR(40) NOT NULL DEFAULT 'PROCESS'",
         "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS quality_check TEXT",

@@ -74,15 +74,9 @@ type StageForm = {
   ingredients: Array<{ inventoryItemId: string; unitCode: string }>;
 };
 
-type ProcessMaterialForm = {
-  inventoryItemId: string;
-  unitCode: string;
-};
-
 type ProcessForm = {
   name: string;
   description: string;
-  materials: ProcessMaterialForm[];
   wasteLimitPercent: string;
   stages: StageForm[];
   // Tipos de producto del catálogo que el proceso puede producir (vacío = todos).
@@ -136,7 +130,6 @@ const emptyStage = (): StageForm => ({
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  materials: [],
   wasteLimitPercent: "1",
   stages: [emptyStage()],
   productTypeIds: [],
@@ -153,10 +146,6 @@ function processToForm(process: ProductionProcess): ProcessForm {
   return {
     name: process.name,
     description: process.description ?? "",
-    materials: process.materials.map((material) => ({
-      inventoryItemId: material.inventory_item_id,
-      unitCode: "",
-    })),
     wasteLimitPercent: process.waste_limit_percent ?? "1",
     stages: stages.length > 0 ? stages.map((stage) => ({
       name: stage.name,
@@ -428,12 +417,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const wasteItems = bundle?.waste ?? EMPTY_RAW_MATERIALS;
   const finishedItems = bundle?.finishedItems ?? EMPTY_RAW_MATERIALS;
   const isLoading = !currentUser || isBundleLoading;
-  // Pool del picker "Materias primas del proceso": materia prima + complementos
-  // + merma reclasificada (los 3 tipos que un proceso puede consumir).
-  const processMaterialPool = [...rawMaterialsList, ...complementsList, ...wasteList];
-  // Resuelve nombre/stock de cualquier material configurado en un proceso
-  // (materia prima, complemento o merma) al crear una orden.
-  const orderMaterialPool = [...rawMaterials, ...complementItems, ...wasteItems];
 
   // Invalidación cruzada: las acciones de producción cambian lo que muestran
   // inventario (productos en proceso, solicitudes) y el badge del menú. Sin
@@ -464,7 +447,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [formMode, setFormMode] = useState<FormMode>("create");
   const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
   const [selectedStageIndex, setSelectedStageIndex] = useState(0);
-  const [isMaterialPickerOpen, setIsMaterialPickerOpen] = useState(false);
   const [isIngredientPickerOpen, setIsIngredientPickerOpen] = useState(false);
   const [viewingProcess, setViewingProcess] = useState<ProductionProcess | null>(null);
   const [viewingUser, setViewingUser] = useState<ManagedUser | null>(null);
@@ -621,7 +603,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
   const activeProcesses = processes.filter((process) => process.is_active);
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
-  const selectedMaterial = orderMaterialPool.find((item) => item.id === selectedMaterialId) ?? null;
+  const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
   // Insumos configurados en las etapas activas del proceso elegido: se piden
   // obligatorios al crear la orden, igual que los complementos.
   const configuredStageIngredients = (selectedProcess?.stages ?? []).flatMap((stage) =>
@@ -638,10 +620,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const orderMaterialCode = materialCodeForItem(selectedMaterial, catalogSegments);
 
   useEffect(() => {
-    // Al cambiar de proceso se sugiere su primer material configurado, pero se
-    // respeta cualquier materia prima ya elegida (todas son utilizables).
-    const materials = selectedProcess?.materials ?? [];
-    setSelectedMaterialId((current) => current || (materials[0]?.inventory_item_id ?? ""));
+    // Cualquier materia prima del inventario sirve para cualquier proceso:
+    // se sugiere la primera de la lista, pero se respeta cualquiera ya elegida.
+    setSelectedMaterialId((current) => current || (rawMaterials[0]?.id ?? ""));
   }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
@@ -1072,21 +1053,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     });
   }
 
-  function addProcessMaterial(item: InventoryItem) {
-    setForm((current) => ({
-      ...current,
-      materials: [...current.materials, { inventoryItemId: item.id, unitCode: item.unit_code }],
-    }));
-    setIsMaterialPickerOpen(false);
-  }
-
-  function removeProcessMaterial(materialIndex: number) {
-    setForm((current) => ({
-      ...current,
-      materials: current.materials.filter((_, index) => index !== materialIndex),
-    }));
-  }
-
   function addStageIngredient(item: InventoryItem) {
     updateStage({
       ingredients: [...selectedStage.ingredients, { inventoryItemId: item.id, unitCode: item.unit_code }],
@@ -1116,21 +1082,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (form.stages.some((stage) => !stage.name.trim())) {
       throw new Error("Todas las etapas agregadas deben tener nombre.");
     }
-    if (form.materials.length === 0) {
-      throw new Error("Agrega al menos una materia prima.");
-    }
-    const materialIds = form.materials.map((material) => material.inventoryItemId);
-    if (new Set(materialIds).size !== materialIds.length) {
-      throw new Error("No repitas la misma materia prima.");
-    }
 
     return {
       name: processName,
       description: form.description.trim() || null,
       version: 1,
-      materials: form.materials.map((material) => ({
-        inventory_item_id: material.inventoryItemId,
-      })),
       waste_limit_percent: "1",
       is_active: true,
       product_type_ids: form.productTypeIds,
@@ -2324,16 +2280,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <span>Material</span>
                 <select className="field" onChange={(e) => setSelectedMaterialId(e.target.value)} value={selectedMaterialId}>
                   <option value="">Seleccionar material</option>
-                  {/* Solo los materiales configurados en este proceso (mantenimiento). */}
-                  {(selectedProcess?.materials ?? []).map((material) => {
-                    const item = orderMaterialPool.find((candidate) => candidate.id === material.inventory_item_id);
-                    if (!item) return null;
-                    return (
-                      <option key={item.id} value={item.id}>
-                        {item.name} · {itemTypeLabel(item.item_type)} · {numericText(item.current_stock)} {item.unit_code}
-                      </option>
-                    );
-                  })}
+                  {/* Cualquier materia prima del inventario sirve para cualquier proceso. */}
+                  {rawMaterials.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · {numericText(item.current_stock)} {item.unit_code}
+                    </option>
+                  ))}
                 </select>
               </label>
             </div>
@@ -3401,37 +3353,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               />
             </label>
 
-            <div className="fieldGroup">
-              <span>Materias primas del proceso</span>
-              <div className="materialList">
-                {form.materials.map((material, materialIndex) => {
-                  const selectedItem = processMaterialPool.find((item) => item.id === material.inventoryItemId);
-                  return (
-                    <div key={materialIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
-                        {selectedItem
-                          ? `${selectedItem.name} · ${itemTypeLabel(selectedItem.item_type)} · ${selectedItem.unit_code}`
-                          : material.inventoryItemId}
-                      </div>
-                      <button
-                        aria-label="Quitar material"
-                        className="iconOnlyButton dangerIconButton"
-                        disabled={isSaving}
-                        onClick={() => removeProcessMaterial(materialIndex)}
-                        type="button"
-                      >
-                        <X aria-hidden="true" size={14} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-              <button className="button" disabled={isSaving} onClick={() => setIsMaterialPickerOpen(true)} type="button">
-                <Plus aria-hidden="true" size={14} />
-                Agregar material
-              </button>
-            </div>
-
             <section className="stageSingleWindow">
               <div className="stageTopActions">
                 <strong>Etapa {selectedStageIndex + 1}</strong>
@@ -3633,17 +3554,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </div>
       ) : null}
 
-      {isMaterialPickerOpen ? (
-        <MaterialCategoryPicker
-          allowedTypes={["RAW_MATERIAL", "COMPLEMENT", "WASTE"]}
-          excludeIds={form.materials.map((material) => material.inventoryItemId)}
-          items={processMaterialPool}
-          onClose={() => setIsMaterialPickerOpen(false)}
-          onSelect={addProcessMaterial}
-          title="Agregar material del proceso"
-        />
-      ) : null}
-
       {isIngredientPickerOpen ? (
         <MaterialCategoryPicker
           allowedTypes={["SUPPLY"]}
@@ -3746,19 +3656,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             ) : null}
 
             <div className="processFlowInfoBar">
-              <div className="processFlowMeta" style={{ gridColumn: "span 2" }}>
-                <strong>Materias primas</strong>
-                <span>
-                  {viewingProcess.materials.length > 0
-                    ? viewingProcess.materials
-                        .map((material) => {
-                          const item = rawMaterials.find((item) => item.id === material.inventory_item_id);
-                          return item ? `${item.name} · ${item.unit_code}` : material.inventory_item_id;
-                        })
-                        .join(" · ")
-                    : "Sin configurar"}
-                </span>
-              </div>
               <div className="processFlowMeta">
                 <strong>Limite de merma</strong>
                 <span>{viewingProcess.waste_limit_percent ? `${percentText(viewingProcess.waste_limit_percent)}%` : "Sin configurar"}</span>

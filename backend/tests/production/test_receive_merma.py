@@ -5,7 +5,6 @@ import pytest
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import (
     ProductionProcess,
-    ProductionProcessMaterial,
     ProductionProcessStage,
 )
 from backend.modules.production.schemas import (
@@ -18,7 +17,7 @@ from backend.modules.production.service import ProductionDomainError
 
 
 @pytest.fixture()
-def weighed_process(db_session, raw_material) -> ProductionProcess:
+def weighed_process(db_session) -> ProductionProcess:
     """Variante del fixture `process`: una sola etapa que SI pesa, y limite de
     merma alto para que no dispare el flujo de rechazo por peso al finalizar
     con una perdida grande a proposito en los tests."""
@@ -26,9 +25,6 @@ def weighed_process(db_session, raw_material) -> ProductionProcess:
         name="Cadenas test",
         waste_limit_percent=Decimal("100"),
         is_active=True,
-        materials=[
-            ProductionProcessMaterial(inventory_item_id=raw_material.id)
-        ],
         stages=[
             ProductionProcessStage(
                 name="Etapa pesada", stage_type="PROCESS", stage_order=1, is_active=True,

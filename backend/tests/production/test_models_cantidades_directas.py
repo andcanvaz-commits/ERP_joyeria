@@ -10,7 +10,6 @@ from decimal import Decimal
 from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.models import (
     ProductionProcess,
-    ProductionProcessMaterial,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
     ProductionRun,
@@ -20,27 +19,12 @@ from backend.modules.production.models import (
 )
 
 
-def test_process_material_has_no_ratio_columns(db_session, raw_material):
-    process = ProductionProcess(
-        name=f"Proceso {uuid.uuid4().hex[:6]}",
-        waste_limit_percent=Decimal("1"),
-        materials=[ProductionProcessMaterial(inventory_item_id=raw_material.id)],
-        stages=[ProductionProcessStage(name="Etapa", stage_order=1)],
-    )
-    db_session.add(process)
-    db_session.flush()
-
-    assert not hasattr(ProductionProcessMaterial, "quantity_per_unit")
-    assert not hasattr(ProductionProcessMaterial, "unit_code")
-
-
 def test_stage_ingredient_has_no_quantity_column(db_session, raw_material):
     stage = ProductionProcessStage(name="Etapa", stage_order=1)
     stage.ingredients.append(ProductionProcessStageIngredient(inventory_item_id=raw_material.id))
     process = ProductionProcess(
         name=f"Proceso {uuid.uuid4().hex[:6]}",
         waste_limit_percent=Decimal("1"),
-        materials=[ProductionProcessMaterial(inventory_item_id=raw_material.id)],
         stages=[stage],
     )
     db_session.add(process)

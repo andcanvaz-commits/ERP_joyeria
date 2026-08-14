@@ -27,12 +27,6 @@ class ProductionProcess(Base):
         cascade="all, delete-orphan",
         order_by="ProductionProcessStage.stage_order",
     )
-    # Materias primas configuradas: cada una es una opcion de fabricacion (ej.
-    # plata o oro) con su cantidad por unidad. Al crear una orden se elige una.
-    materials: Mapped[list["ProductionProcessMaterial"]] = relationship(
-        back_populates="process",
-        cascade="all, delete-orphan",
-    )
     # Tipos de producto del catalogo que este proceso puede producir. Vacio =
     # produce cualquier tipo. Gobierna el combo de conversion de lotes.
     product_types: Mapped[list["ProductionProcessProductType"]] = relationship(
@@ -57,20 +51,6 @@ class ProductionProcessProductType(Base):
     )
 
     process: Mapped["ProductionProcess"] = relationship(back_populates="product_types")
-
-
-class ProductionProcessMaterial(Base):
-    __tablename__ = "production_process_materials"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    process_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("production_processes.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-
-    process: Mapped["ProductionProcess"] = relationship(back_populates="materials")
 
 
 class ProductionProcessStage(Base):

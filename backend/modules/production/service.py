@@ -17,7 +17,6 @@ from backend.modules.production.models import (
     ComplementRequestStatus,
     ProductionComplementRequest,
     ProductionProcess,
-    ProductionProcessMaterial,
     ProductionProcessProductType,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
@@ -293,7 +292,6 @@ class ProductionService:
 
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
-        self._validate_materials(payload.materials)
         self._validate_product_types(payload.product_type_ids)
 
         stages = []
@@ -324,10 +322,6 @@ class ProductionService:
             waste_limit_percent=payload.waste_limit_percent,
             is_active=payload.is_active,
             stages=stages,
-            materials=[
-                ProductionProcessMaterial(inventory_item_id=material.inventory_item_id)
-                for material in payload.materials
-            ],
             product_types=[
                 ProductionProcessProductType(product_type_id=type_id)
                 for type_id in payload.product_type_ids
@@ -342,7 +336,6 @@ class ProductionService:
 
     def update_process(self, process_id: UUID, payload: ProductionProcessUpdate) -> ProductionProcessRead:
         self._ensure_unique_stage_order(payload.stages)
-        self._validate_materials(payload.materials)
         self._validate_product_types(payload.product_type_ids)
         process = self.repository.get(process_id)
         if process is None:
@@ -353,10 +346,6 @@ class ProductionService:
         process.version = payload.version
         process.waste_limit_percent = payload.waste_limit_percent
         process.is_active = payload.is_active
-        process.materials = [
-            ProductionProcessMaterial(inventory_item_id=material.inventory_item_id)
-            for material in payload.materials
-        ]
         new_stages = []
         for stage_data in payload.stages:
             stage = ProductionProcessStage(
@@ -429,18 +418,14 @@ class ProductionService:
                 )
             return item
 
-        gold = ensure_raw("Oro 18K")
-        silver = ensure_raw("Plata 925")
+        ensure_raw("Oro 18K")
+        ensure_raw("Plata 925")
 
         for definition in EXAMPLE_PROCESSES:
             self.create_process(
                 ProductionProcessCreate(
                     name=definition["name"],
                     description=definition["description"],
-                    materials=[
-                        {"inventory_item_id": silver.id},
-                        {"inventory_item_id": gold.id},
-                    ],
                     waste_limit_percent=definition["waste_limit_percent"],
                     stages=[
                         {"order": index + 1, **stage}
@@ -457,8 +442,6 @@ class ProductionService:
             raise ProductionNotFoundError("Proceso no encontrado.")
         if not process.is_active:
             raise ProductionDomainError("El proceso no esta activo.")
-        if not process.materials:
-            raise ProductionDomainError("El proceso no tiene materias primas configuradas.")
 
         # Cualquier materia prima del inventario es utilizable en cualquier
         # proceso: la cantidad que el usuario ingresa es directamente el
@@ -1954,26 +1937,3 @@ class ProductionService:
         if len(stage_orders) != len(set(stage_orders)):
             raise ProductionDomainError("El orden de las etapas no puede repetirse.")
 
-    def _validate_materials(self, materials: list) -> None:
-        item_ids = [material.inventory_item_id for material in materials]
-        if len(item_ids) != len(set(item_ids)):
-            raise ProductionDomainError("No repitas la misma materia prima en el proceso.")
-        from sqlalchemy import select
-        from backend.modules.inventory.models import InventoryItem
-
-        rows = self.repository.session.execute(
-            select(InventoryItem.id, InventoryItem.item_type).where(
-                InventoryItem.id.in_(item_ids)
-            )
-        ).all()
-        item_types = {row[0]: row[1] for row in rows}
-        for item_id in item_ids:
-            item_type = item_types.get(item_id)
-            if item_type is None:
-                raise ProductionDomainError(
-                    "Una materia prima seleccionada no existe en el inventario."
-                )
-            if item_type not in ("RAW_MATERIAL", "COMPLEMENT", "WASTE"):
-                raise ProductionDomainError(
-                    "Solo se pueden usar materia prima, complementos o merma del inventario."
-                )
