@@ -59,7 +59,7 @@ class InventoryNotFoundError(LookupError):
     pass
 
 
-POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION", "CONVERSION_ENTRADA", "RECLASIFICACION_ENTRADA"}
+POSITIVE_MOVEMENTS = {"ENTRADA", "AJUSTE_POSITIVO", "INGRESO_PRODUCCION", "DEVOLUCION_PRODUCCION", "CONVERSION_ENTRADA", "RECLASIFICACION_ENTRADA"}
 NEGATIVE_MOVEMENTS = {"SALIDA", "AJUSTE_NEGATIVO", "CONSUMO_PRODUCCION", "MERMA", "CONVERSION_SALIDA", "RECLASIFICACION_SALIDA"}
 # Salidas que nacen del propio flujo de produccion: no se les aplica el tope
 # por stock reservado porque approve_materials ya libero la reserva de la
@@ -462,6 +462,26 @@ class InventoryService(InventoryIntegrationPort):
             movement_type="CONSUMO_PRODUCCION",
             quantity=quantity,
             reason=reason or "Consumo de materia prima por inicio de produccion.",
+            reference_type="production_run",
+            reference_id=production_run_id,
+        )
+        return self.create_movement(payload, user_id=user_id, lot_code=production_code)
+
+    def return_material_from_production(
+        self,
+        *,
+        item_id: UUID,
+        quantity: Decimal,
+        production_run_id: UUID,
+        user_id: UUID | None,
+        production_code: str | None = None,
+        reason: str | None = None,
+    ) -> InventoryMovementRead:
+        payload = InventoryMovementCreate(
+            item_id=item_id,
+            movement_type="DEVOLUCION_PRODUCCION",
+            quantity=quantity,
+            reason=reason or "Devolucion de sobrante de produccion.",
             reference_type="production_run",
             reference_id=production_run_id,
         )

@@ -84,6 +84,12 @@ export function DocumentosDashboard() {
     return date ? dateKey(date) : null;
   }
 
+  // Numero de folio para desempate: "OP-2026-0014" -> 14. Sin match, al final.
+  function familyNumber(key: string): number {
+    const match = key.match(/(\d+)(?:-[A-Z])?$/);
+    return match ? parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+  }
+
   function familyMonthKey(family: ProductionRun[]): string {
     const date = familyDate(family);
     if (!date) return "Sin fecha";
@@ -121,6 +127,17 @@ export function DocumentosDashboard() {
       const list = groups.get(monthKey) ?? [];
       list.push(entry);
       groups.set(monthKey, list);
+    }
+    // Dentro de cada mes, la lista llega en orden de llegada (insercion del
+    // Map), que no siempre coincide con la fecha real ni con el numero de
+    // folio (p.ej. requested_at desalineado). Reordenamos: fecha desc (mas
+    // reciente arriba, igual que antes) y, a igual fecha, folio asc.
+    for (const list of groups.values()) {
+      list.sort((a, b) => {
+        const dateDiff = (familyDate(b[1])?.getTime() ?? 0) - (familyDate(a[1])?.getTime() ?? 0);
+        if (dateDiff !== 0) return dateDiff;
+        return familyNumber(a[0]) - familyNumber(b[0]);
+      });
     }
     return Array.from(groups.entries());
   }, [familyList]);

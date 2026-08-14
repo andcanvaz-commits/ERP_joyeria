@@ -64,15 +64,13 @@ function RunSummaryRows({ run }: { run: ProductionRun }) {
   return (
     <>
       {run.assembly_pending ? <span><strong>Ensamble</strong>Pendiente de definir</span> : null}
-      <span><strong>Cantidad</strong>{num(run.quantity)}</span>
       <span>
         <strong>Material requerido</strong>
         {num(run.total_required_material)} {unit}
       </span>
       <span>
-        <strong>Peso</strong>
-        {num(run.expected_finished_weight)} {unit} esperado
-        {run.actual_finished_weight ? ` · ${num(run.actual_finished_weight)} ${unit} real` : ""}
+        <strong>Peso real</strong>
+        {run.actual_finished_weight ? `${num(run.actual_finished_weight)} ${unit}` : "—"}
       </span>
       <span>
         <strong>Merma</strong>
@@ -229,7 +227,6 @@ export function SolicitudesView() {
                 <tr>
                   <th>Codigo</th>
                   <th>Proceso</th>
-                  <th>Cantidad</th>
                   <th>Material requerido</th>
                   <th>Estado</th>
                   <th>Solicitada</th>
@@ -241,7 +238,6 @@ export function SolicitudesView() {
                   <tr key={run.id}>
                     <td>{run.production_code ?? "-"}</td>
                     <td>{run.process_name}</td>
-                    <td>{num(run.quantity)}</td>
                     <td>{num(run.total_required_material)} {run.raw_material_unit_code}</td>
                     <td><span className="statusBadge">{STATUS_LABELS[run.status]}</span></td>
                     <td>{dateTimeLabel(run.requested_at)}</td>
@@ -249,7 +245,7 @@ export function SolicitudesView() {
                   </tr>
                 ))}
                 {myRuns.length === 0 ? (
-                  <tr><td colSpan={7}><div className="emptyState">Aun no has enviado solicitudes.</div></td></tr>
+                  <tr><td colSpan={6}><div className="emptyState">Aun no has enviado solicitudes.</div></td></tr>
                 ) : null}
               </tbody>
             </table>
@@ -273,7 +269,6 @@ export function SolicitudesView() {
                     <th>Codigo</th>
                     <th>Proceso</th>
                     <th>Cantidad</th>
-                    <th>Peso esperado</th>
                     <th>Peso real</th>
                     <th>Finalizada</th>
                     <th></th>
@@ -285,14 +280,13 @@ export function SolicitudesView() {
                       <td>{run.production_code ?? "-"}</td>
                       <td>{run.process_name}</td>
                       <td>{num(run.quantity)}</td>
-                      <td>{num(run.expected_finished_weight)}</td>
                       <td>{run.actual_finished_weight ? num(run.actual_finished_weight) : "-"}</td>
                       <td>{dateTimeLabel(run.finished_at)}</td>
                       <td>{detailButton(run)}</td>
                     </tr>
                   ))}
                   {pendingReception.length === 0 ? (
-                    <tr><td colSpan={7}><div className="emptyState">No hay recepciones pendientes.</div></td></tr>
+                    <tr><td colSpan={6}><div className="emptyState">No hay recepciones pendientes.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>
@@ -313,7 +307,6 @@ export function SolicitudesView() {
                   <tr>
                     <th>Codigo</th>
                     <th>Proceso</th>
-                    <th>Cantidad</th>
                     <th>Material</th>
                     <th>Estado</th>
                     <th>Respondida por</th>
@@ -325,7 +318,6 @@ export function SolicitudesView() {
                     <tr key={run.id}>
                       <td>{run.production_code ?? "-"}</td>
                       <td>{run.process_name}</td>
-                      <td>{num(run.quantity)}</td>
                       <td>{num(run.total_required_material)} {run.raw_material_unit_code}</td>
                       <td><span className="statusBadge">{STATUS_LABELS[run.status]}</span></td>
                       <td>
@@ -337,7 +329,7 @@ export function SolicitudesView() {
                     </tr>
                   ))}
                   {respondedRuns.length === 0 ? (
-                    <tr><td colSpan={7}><div className="emptyState">Aun no has respondido solicitudes.</div></td></tr>
+                    <tr><td colSpan={6}><div className="emptyState">Aun no has respondido solicitudes.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>

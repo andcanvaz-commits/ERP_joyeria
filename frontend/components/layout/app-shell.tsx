@@ -86,11 +86,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Pendientes por seccion: inventario aprueba/recibe; produccion inicia las
   // ordenes con materiales aprobados. El punto rojo aparece donde hay accion.
-  const invPending = navRuns.filter(
-    (run) =>
-      (run.status === "PENDIENTE_INVENTARIO" || run.status === "PENDIENTE_RECEPCION") &&
-      (run.event_lines ?? []).length === 0,
-  ).length;
+  // Incluye tambien el material adicional pedido desde la acta mientras la
+  // corrida esta EN_PROCESO: no cambia el status de la orden, asi que sin
+  // esto el numerito no se movia aunque hubiera varias solicitudes esperando
+  // (mismo conteo que usa la bandeja de Solicitudes de Inventario).
+  const pendingAdditionalMaterials = navRuns.reduce(
+    (total, run) =>
+      run.status === "EN_PROCESO"
+        ? total + (run.additional_materials ?? []).filter((request) => request.status === "PENDIENTE").length
+        : total,
+    0,
+  );
+  const invPending =
+    navRuns.filter(
+      (run) =>
+        (run.status === "PENDIENTE_INVENTARIO" || run.status === "PENDIENTE_RECEPCION") &&
+        (run.event_lines ?? []).length === 0,
+    ).length + pendingAdditionalMaterials;
   const prodPending = navRuns.filter((run) => run.status === "MATERIALES_APROBADOS").length;
   const navBadges: Record<string, number> = {
     "/inventario": invPending,

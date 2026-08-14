@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.modules.production.models import (
+    ProductionComplementRequest,
     ProductionProcess,
     ProductionProcessStage,
     ProductionProcessStageIngredient,
@@ -64,6 +65,14 @@ class ProductionProcessRepository:
             select(ProductionRunAdditionalMaterialRequest)
             .options(selectinload(ProductionRunAdditionalMaterialRequest.run).selectinload(ProductionRun.stages))
             .where(ProductionRunAdditionalMaterialRequest.id == request_id)
+        )
+        return self.session.execute(statement).scalar_one_or_none()
+
+    def get_complement_request(self, complement_id: UUID) -> ProductionComplementRequest | None:
+        statement = (
+            select(ProductionComplementRequest)
+            .options(selectinload(ProductionComplementRequest.run).selectinload(ProductionRun.stages))
+            .where(ProductionComplementRequest.id == complement_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
 

@@ -124,7 +124,7 @@ export type ProductionRun = {
   // Tipos de producto que el proceso de esta orden puede producir (vacío = todos).
   allowed_product_type_ids?: string[];
   // Insumos consumidos al aprobar materiales (para el acta de entrega).
-  supply_consumptions?: Array<{ name: string; quantity: string; unit_code: string }>;
+  supply_consumptions?: Array<{ item_id: string; name: string; quantity: string; unit_code: string }>;
   // Plan de resultantes (split) declarado al crear la orden.
   products?: Array<{
     id: string;
@@ -144,6 +144,10 @@ export type ProductionRun = {
     reserved_quantity?: string;
     unit_code: string;
     status: string;
+    // Cuanto de lo aprobado ya se devolvio a inventario por sobrante.
+    returned_quantity?: string;
+    // Cuanto de lo aprobado se uso de verdad en el ensamble.
+    used_quantity?: string;
   }>;
   // Líneas de evento del acta de entrega/recepción para certificación histórica.
   event_lines?: Array<{ side: "ENTREGA" | "RECEPCION"; gramos: string; unidad: string; detalle: string | null; line_order: number }>;
@@ -177,6 +181,10 @@ export type ProductionRun = {
     label: string;
     quantity: string;
     unit_code: string;
+    // Item real de inventario detras de la linea (identidad, no texto):
+    // permite distinguir materia prima de insumos/complementos aunque
+    // coincidan en nombre, y sumar/reconciliar por item real.
+    item_id?: string | null;
     source: "PLAN" | "AUTO" | "MANUAL";
     stage_id?: string | null;
     stage_name?: string | null;

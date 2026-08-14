@@ -30,6 +30,7 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   AJUSTE_NEGATIVO: "Ajuste negativo",
   CONSUMO_PRODUCCION: "Consumo produccion",
   INGRESO_PRODUCCION: "Ingreso produccion",
+  DEVOLUCION_PRODUCCION: "Devolucion produccion",
   MERMA: "Merma",
   CONVERSION_SALIDA: "Conversion salida",
   CONVERSION_ENTRADA: "Conversion entrada",

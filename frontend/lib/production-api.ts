@@ -191,7 +191,7 @@ export function rejectAdditionalMaterial(requestId: string, reason?: string | nu
   });
 }
 
-export function addActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; label: string; quantity: string; unit_code: string; note?: string | null }) {
+export function addActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; label: string; quantity: string; unit_code: string; item_id?: string | null; note?: string | null }) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/acta-lines`, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -202,6 +202,13 @@ export function updateActaLine(lineId: string, payload: { label?: string; quanti
   return apiRequest<ProductionRun>(`/api/production/runs/acta-lines/${lineId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function returnComplement(complementId: string, quantity: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/complements/${complementId}/return`, {
+    method: "POST",
+    body: JSON.stringify({ quantity }),
   });
 }
 

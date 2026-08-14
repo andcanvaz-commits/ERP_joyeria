@@ -357,6 +357,12 @@ class ProductionRunActaLine(Base):
     label: Mapped[str] = mapped_column(String(180), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Item real de inventario detras de esta linea (materia prima, insumo o
+    # complemento). NULL en lineas que no representan un item puntual (ej. un
+    # producto resultante por tipo de catalogo). Es lo que permite fusionar
+    # por identidad real en vez de por texto -- dos items distintos pueden
+    # coincidir en nombre+unidad y no son lo mismo.
+    item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default=ActaLineSource.PLAN)
     line_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -442,6 +448,13 @@ class ProductionComplementRequest(Base):
     )
     approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Cuanto de lo aprobado (y ya descontado de inventario al aprobar) se
+    # devolvio por sobrante al recibir: aprobado - usado en ensamble -
+    # devuelto = lo que todavia falta devolver. Ver ProductionService.
+    # return_complement.
+    returned_quantity: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
+    )
 
     run: Mapped["ProductionRun"] = relationship(back_populates="complements")
 

@@ -45,6 +45,7 @@ from backend.modules.production.schemas import (
     AssemblyRecipeItemRead,
     AssemblyRecipeRead,
     AssemblyRecipeUpsert,
+    ComplementReturnCreate,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
@@ -596,6 +597,7 @@ class ProductionService:
                 label=raw_material_item.name,
                 quantity=payload.quantity,
                 unit_code=unit_code,
+                item_id=raw_material_item.id,
                 source=ActaLineSource.PLAN,
                 line_order=entrega_order,
             )
@@ -609,6 +611,7 @@ class ProductionService:
                     label=ingredient_items[ingredient.id].name,
                     quantity=payload_by_id[ingredient.id],
                     unit_code=ingredient_items[ingredient.id].unit_code,
+                    item_id=ingredient_items[ingredient.id].id,
                     source=ActaLineSource.PLAN,
                     line_order=entrega_order,
                 )
@@ -621,6 +624,7 @@ class ProductionService:
                     label=complement_item.name,
                     quantity=complement.quantity,
                     unit_code=complement_item.unit_code,
+                    item_id=complement_item.id,
                     source=ActaLineSource.PLAN,
                     line_order=entrega_order,
                 )
@@ -1268,17 +1272,26 @@ class ProductionService:
         request.approved_by_user_id = current_user.id
         request.approved_at = datetime.utcnow()
 
-        entrega_count = sum(1 for line in run.acta_lines if line.side == ActaLineSide.ENTREGA)
-        run.acta_lines.append(
-            ProductionRunActaLine(
-                side=ActaLineSide.ENTREGA,
-                stage_id=request.stage_id,
-                label=item_name,
-                quantity=request.quantity,
-                unit_code=request.unit_code,
-                source=ActaLineSource.AUTO,
-                line_order=entrega_count,
-            )
+        # Si lo aprobado es MAS de la propia materia prima de la orden (no un
+        # insumo/complemento aparte), el total que entro a la orden crece: la
+        # merma automatica por etapa (_previous_stage_weight/
+        # _accumulated_loss_percent) usa run.total_required_material como
+        # base, asi que las etapas siguientes recalculan solas contra el
+        # nuevo total. Las etapas ya finalizadas no se tocan retroactivamente.
+        if request.item_id == run.raw_material_item_id:
+            run.total_required_material += request.quantity
+            if run.expected_finished_weight is not None:
+                run.expected_finished_weight += request.quantity
+
+        self._add_or_merge_acta_line(
+            run,
+            side=ActaLineSide.ENTREGA,
+            stage_id=request.stage_id,
+            label=item_name,
+            quantity=request.quantity,
+            unit_code=request.unit_code,
+            item_id=request.item_id,
+            source=ActaLineSource.AUTO,
         )
         self.repository.flush()
         return self._read_with_names(run)
@@ -1397,14 +1410,24 @@ class ProductionService:
         for movement in movements:
             by_run.setdefault(movement.reference_id, []).append(movement)
         for read, run in zip(reads, runs):
+            # Sumado por item: dos aprobaciones del mismo insumo (ej. material
+            # adicional pedido dos veces) son UN insumo con mas cantidad, no
+            # dos filas separadas -- asi el acta y el picker de "Entregar
+            # material" ven el total real disponible.
+            totals: dict = {}
+            for m in by_run.get(run.id, []):
+                if m.item_id == run.raw_material_item_id:
+                    continue
+                entry = totals.setdefault(m.item_id, {"quantity": Decimal("0"), "unit_code": m.unit_code})
+                entry["quantity"] += m.quantity
             read.supply_consumptions = [
                 SupplyConsumptionRead(
-                    name=names.get(m.item_id, "Insumo"),
-                    quantity=m.quantity,
-                    unit_code=m.unit_code,
+                    item_id=item_id,
+                    name=names.get(item_id, "Insumo"),
+                    quantity=entry["quantity"],
+                    unit_code=entry["unit_code"],
                 )
-                for m in by_run.get(run.id, [])
-                if m.item_id != run.raw_material_item_id
+                for item_id, entry in totals.items()
             ]
 
     def _attach_plan_names(self, reads: list, runs: list) -> None:
@@ -1447,8 +1470,14 @@ class ProductionService:
                 else:
                     product.product_name = target_names.get(product.target_item_id)
                     product.unit_code = item_units.get(product.target_item_id)
+            used_by_item: dict = {}
+            for assembly_item in read.assembly_items:
+                used_by_item[assembly_item.complement_item_id] = (
+                    used_by_item.get(assembly_item.complement_item_id, Decimal("0")) + assembly_item.quantity
+                )
             for complement in read.complements:
                 complement.name = item_names.get(complement.item_id)
+                complement.used_quantity = used_by_item.get(complement.item_id, Decimal("0"))
             for assembly_item in read.assembly_items:
                 assembly_item.name = item_names.get(assembly_item.complement_item_id)
 
@@ -1507,6 +1536,7 @@ class ProductionService:
                     label=line.label,
                     quantity=line.quantity,
                     unit_code=line.unit_code,
+                    item_id=line.item_id,
                     source=line.source,
                     stage_id=line.stage_id,
                     stage_name=(stages_by_id[line.stage_id].stage_name if line.stage_id in stages_by_id else None),
@@ -1519,24 +1549,80 @@ class ProductionService:
                 for line in run.acta_lines
             ]
 
+    def _add_or_merge_acta_line(
+        self,
+        run: ProductionRun,
+        *,
+        side: str,
+        label: str,
+        quantity: Decimal,
+        unit_code: str,
+        source: str,
+        item_id: UUID | None = None,
+        stage_id: UUID | None = None,
+        note: str | None = None,
+        created_by_user_id: UUID | None = None,
+    ) -> None:
+        """Si ya existe una linea del mismo lado y material, suma la cantidad
+        ahi en vez de agregar otra fila -- volver a solicitar/registrar algo
+        que ya esta en el acta es MAS de lo mismo, no un evento nuevo que
+        merezca su propia linea.
+
+        "El mismo material" se decide por item_id (identidad real de
+        inventario) cuando se conoce -- dos items distintos pueden coincidir
+        en nombre+unidad (ej. una materia prima y un insumo ambos llamados
+        igual) y NO son lo mismo. Solo cuando no hay item_id (linea libre)
+        se cae al match por texto, y unicamente contra otras lineas
+        igualmente libres."""
+        if item_id is not None:
+            existing = next(
+                (line for line in run.acta_lines if line.side == side and line.item_id == item_id),
+                None,
+            )
+        else:
+            existing = next(
+                (
+                    line
+                    for line in run.acta_lines
+                    if line.side == side and line.item_id is None and line.label == label and line.unit_code == unit_code
+                ),
+                None,
+            )
+        if existing is not None:
+            existing.quantity += quantity
+            return
+        line_order = sum(1 for line in run.acta_lines if line.side == side)
+        run.acta_lines.append(
+            ProductionRunActaLine(
+                side=side,
+                stage_id=stage_id,
+                label=label,
+                quantity=quantity,
+                unit_code=unit_code,
+                item_id=item_id,
+                source=source,
+                line_order=line_order,
+                note=note,
+                created_by_user_id=created_by_user_id,
+            )
+        )
+
     def add_acta_line(self, run_id: UUID, payload: ActaLineCreate, current_user: CurrentUser) -> ProductionRunRead:
         """Agrega a mano una linea a la acta -- disponible en cualquier etapa
         de la orden, y tambien despues de recibida."""
         run = self.repository.get_run(run_id)
         if run is None:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
-        line_order = sum(1 for line in run.acta_lines if line.side == payload.side)
-        run.acta_lines.append(
-            ProductionRunActaLine(
-                side=payload.side,
-                label=payload.label.strip(),
-                quantity=payload.quantity,
-                unit_code=payload.unit_code.strip(),
-                source=ActaLineSource.MANUAL,
-                line_order=line_order,
-                note=(payload.note or "").strip() or None,
-                created_by_user_id=current_user.id,
-            )
+        self._add_or_merge_acta_line(
+            run,
+            side=payload.side,
+            label=payload.label.strip(),
+            quantity=payload.quantity,
+            unit_code=payload.unit_code.strip(),
+            item_id=payload.item_id,
+            source=ActaLineSource.MANUAL,
+            note=(payload.note or "").strip() or None,
+            created_by_user_id=current_user.id,
         )
         self.repository.flush()
         return self._read_with_names(run)
@@ -1716,6 +1802,7 @@ class ProductionService:
                             label=f"Merma etapa {stage.stage_name}",
                             quantity=loss,
                             unit_code=run.raw_material_unit_code,
+                            item_id=run.raw_material_item_id,
                             source=ActaLineSource.AUTO,
                             line_order=recepcion_count,
                         )
@@ -1879,6 +1966,66 @@ class ProductionService:
                 continue
             totals[complement.item_id] = totals.get(complement.item_id, Decimal("0")) + complement.quantity
         return totals
+
+    def return_complement(
+        self, complement_id: UUID, payload: ComplementReturnCreate, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        """Devuelve a inventario el sobrante de un complemento aprobado: se
+        desconto entero al aprobar (approve_materials), pero el ensamble puede
+        no haber usado todo (ej. 100 'bolas 2.5' aprobadas, 80 ensambladas,
+        20 sobran). Genera un movimiento DEVOLUCION_PRODUCCION real y una
+        linea AUTO en la acta, lado RECEPCION."""
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible para devolver el sobrante.")
+        complement = self.repository.get_complement_request(complement_id)
+        if complement is None:
+            raise ProductionNotFoundError("Complemento no encontrado.")
+        if complement.status != ComplementRequestStatus.APPROVED:
+            raise ProductionDomainError("Solo se puede devolver un complemento ya aprobado (descontado de inventario).")
+
+        run = complement.run
+        used = sum(
+            (item.quantity for item in run.assembly_items if item.complement_item_id == complement.item_id),
+            Decimal("0"),
+        )
+        remaining = complement.quantity - used - complement.returned_quantity
+        if payload.quantity > remaining:
+            raise ProductionDomainError(
+                f"Solo quedan {remaining} {complement.unit_code} de sobrante para devolver."
+            )
+
+        from backend.modules.inventory.models import InventoryItem
+
+        item = self.repository.session.get(InventoryItem, complement.item_id)
+        item_name = item.name if item is not None else "complemento"
+        try:
+            self.inventory_service.return_material_from_production(
+                item_id=complement.item_id,
+                quantity=payload.quantity,
+                production_run_id=run.id,
+                user_id=current_user.id,
+                production_code=run.production_code or run.root_production_code,
+                reason=f"Devolucion de sobrante: {item_name}.",
+            )
+        except InventoryDomainError as exc:
+            raise ProductionDomainError(f"Complemento '{item_name}': {exc}") from exc
+
+        complement.returned_quantity += payload.quantity
+
+        recepcion_count = sum(1 for line in run.acta_lines if line.side == ActaLineSide.RECEPCION)
+        run.acta_lines.append(
+            ProductionRunActaLine(
+                side=ActaLineSide.RECEPCION,
+                label=f"Devolucion: {item_name}",
+                quantity=payload.quantity,
+                unit_code=complement.unit_code,
+                item_id=complement.item_id,
+                source=ActaLineSource.AUTO,
+                line_order=recepcion_count,
+            )
+        )
+        self.repository.flush()
+        return self._read_with_names(run)
 
     def _finish_run(self, run: ProductionRun, final_weight: Decimal | None) -> None:
         run.status = ProductionRunStatus.PENDING_RECEPTION
@@ -2257,6 +2404,7 @@ class ProductionService:
                     label="Peso final recibido",
                     quantity=run.actual_finished_weight,
                     unit_code=run.raw_material_unit_code,
+                    item_id=run.raw_material_item_id,
                     source=ActaLineSource.AUTO,
                     line_order=recepcion_count,
                 )

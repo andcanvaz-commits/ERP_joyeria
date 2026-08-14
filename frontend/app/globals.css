@@ -2190,6 +2190,18 @@ textarea {
   overflow-y: auto;
 }
 
+/* El documento (opDoc) pide 720px de ancho minimo: la ventana de la acta
+   necesita mas espacio que una ficha comun, y aun asi el marco de abajo
+   scrollea en horizontal en vez de cortar contenido en pantallas chicas. */
+.actaWindow {
+  width: min(860px, 100%);
+  overflow-y: auto;
+}
+
+.actaDocFrame {
+  overflow-x: auto;
+}
+
 .modalHeader,
 .modalActions {
   display: flex;
@@ -4787,6 +4799,123 @@ textarea:disabled {
 .printArea .opDoc {
   border: none;
   min-width: 0;
+}
+
+/* ── Acta editable sobre el documento (acta-view.tsx) ─────────── */
+.actaDocRow:hover {
+  background: #f4f7fc;
+}
+
+.actaDocDetail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.actaDocRowActions {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
+}
+
+.actaDocRow:hover .actaDocRowActions,
+.actaDocRow:focus-within .actaDocRowActions {
+  opacity: 1;
+}
+
+.actaDocRowActions .iconOnlyButton,
+.actaDocInputs .iconOnlyButton {
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  border-radius: 4px;
+}
+
+.actaDocInputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.actaDocInputs .field {
+  min-height: 24px;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.actaDocAddRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  color: var(--doc-ink);
+  opacity: 0.45;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.actaDocAddRow:hover {
+  opacity: 1;
+}
+
+.actaBalance {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 2px solid var(--doc-ink);
+  display: grid;
+  gap: 4px;
+}
+
+.actaBalanceRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.actaBalanceCheck {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--doc-line);
+  font-weight: 800;
+}
+
+.actaBalanceMismatch {
+  color: var(--danger, #b42318);
+}
+
+.actaDocAction {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.actaDocReturns {
+  border-top: 1px dashed var(--doc-line);
+  padding-top: 8px;
+}
+
+.actaDocActionLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--doc-ink-strong);
+}
+
+.actaDocActionForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Documento para imprimir. `.wasteReportPrint` era el nombre original (solo

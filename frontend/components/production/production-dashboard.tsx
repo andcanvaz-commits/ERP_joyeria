@@ -12,7 +12,7 @@ import { ComplementsManager } from "@/components/mantenimiento/complements-manag
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { CreateOrderWizard } from "@/components/production/create-order-wizard";
-import { ActaView } from "@/components/production/acta-view";
+import { ActaView, RecepcionActions, returnableComplements } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
@@ -46,7 +46,6 @@ import {
   listProcesses,
   listProductionRuns,
   releaseProductionRunReservation,
-  requestAdditionalMaterial,
   startProductionRun,
   startProductionRunWithReserved,
   updateProcess,
@@ -468,13 +467,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
-  // Solicitar material adicional mientras la corrida esta EN_PROCESO: primero
-  // se elige el item con el picker, luego se completa cantidad/nota antes de
-  // enviar la solicitud (pasa por aprobacion real de Inventario).
-  const [isAdditionalMaterialPickerOpen, setIsAdditionalMaterialPickerOpen] = useState(false);
-  const [pendingAdditionalMaterialItem, setPendingAdditionalMaterialItem] = useState<InventoryItem | null>(null);
-  const [additionalMaterialQuantity, setAdditionalMaterialQuantity] = useState("");
-  const [additionalMaterialNote, setAdditionalMaterialNote] = useState("");
   const [showResponsables, setShowResponsables] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   // Modo de destino del resultante: asignar a una pieza/tipo existente o
@@ -527,6 +519,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Acta editable: disponible en cualquier etapa de la orden y tambien
   // despues de recibida (ver ActaView).
   const [actaRun, setActaRun] = useState<ProductionRun | null>(null);
+  // Ritual automatico al terminar la ultima etapa: 1) si queda sobrante de
+  // complementos por devolver, se pide (opcional) antes que nada; 2) se abre
+  // la acta como quedaria, con opcion a entregar material faltante o corregir
+  // algo mal tipeado; 3) recien ahi el resumen/reporte de merma de siempre.
+  const [postFinishReturnRun, setPostFinishReturnRun] = useState<ProductionRun | null>(null);
+  const [isPostFinishActa, setIsPostFinishActa] = useState(false);
   // Ventana con las demas partes de una orden dividida.
   const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   const [printingWasteRun, setPrintingWasteRun] = useState<ProductionRun | null>(null);
@@ -579,6 +577,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedRunForStages((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
     setSelectedStatsRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
     setActaRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
+    setPostFinishReturnRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
   }, [runs]);
 
   useEffect(() => {
@@ -974,6 +973,29 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedStatsRun(null);
   }
 
+  // Paso 1 -> 2 del ritual automatico al terminar produccion: de devolver
+  // sobrante (opcional) se pasa a la acta.
+  function continueFromReturnStep() {
+    const run = postFinishReturnRun;
+    setPostFinishReturnRun(null);
+    if (run) {
+      setIsPostFinishActa(true);
+      setActaRun(run);
+    }
+  }
+
+  // Paso 2 -> 3: al cerrar la acta abierta por el ritual automatico, recien
+  // ahi se abre el resumen/reporte de merma de siempre (flujo normal). Si la
+  // acta se abrio a mano ("Ver acta"), isPostFinishActa es false y solo cierra.
+  function closeActaModal() {
+    const run = actaRun;
+    setActaRun(null);
+    if (isPostFinishActa) {
+      setIsPostFinishActa(false);
+      if (run) openStatsModal(run);
+    }
+  }
+
   const currentHistoryMonth = historyMonth || (new Date().toISOString().slice(0, 7));
   const historyDays = buildCalendarDays(currentHistoryMonth);
   const selectedDateRuns = selectedHistoryDate
@@ -1330,11 +1352,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       );
       await reload();
       if (updatedRun.status === "PENDIENTE_RECEPCION") {
-        // Última fase terminada: se cierra el detalle de etapas y se abre el
-        // resumen del proceso (pesos, merma y decisiones por fase).
+        // Última fase terminada: se cierra el detalle de etapas. Antes del
+        // resumen/reporte de merma de siempre, el ritual automatico pasa
+        // primero por sobrante de complementos por devolver (si hay) y
+        // despues por la acta, para que quede todo al dia antes de recibir.
         setSelectedRunForStages(null);
         setSuccess("Producción finalizada. Pendiente de recepción en inventario.");
-        openStatsModal(updatedRun);
+        if (returnableComplements(updatedRun).length > 0) {
+          setPostFinishReturnRun(updatedRun);
+        } else {
+          setIsPostFinishActa(true);
+          setActaRun(updatedRun);
+        }
         return;
       }
       if (options.decision === "REJECTED") {
@@ -1422,40 +1451,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       return;
     }
     run();
-  }
-
-  function pickAdditionalMaterialItem(item: InventoryItem) {
-    setPendingAdditionalMaterialItem(item);
-    setAdditionalMaterialQuantity("");
-    setAdditionalMaterialNote("");
-    setIsAdditionalMaterialPickerOpen(false);
-  }
-
-  async function handleRequestAdditionalMaterial() {
-    if (!selectedRunForStages || !pendingAdditionalMaterialItem) return;
-    if (!additionalMaterialQuantity || Number(additionalMaterialQuantity) <= 0) {
-      setError("Ingresa una cantidad valida para el material adicional.");
-      return;
-    }
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      await requestAdditionalMaterial(selectedRunForStages.id, {
-        item_id: pendingAdditionalMaterialItem.id,
-        quantity: additionalMaterialQuantity,
-        note: additionalMaterialNote.trim() || null,
-      });
-      setSuccess("Solicitud enviada. Inventario debe aprobarla.");
-      setPendingAdditionalMaterialItem(null);
-      setAdditionalMaterialQuantity("");
-      setAdditionalMaterialNote("");
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo solicitar el material adicional.");
-    } finally {
-      setIsSaving(false);
-    }
   }
 
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
@@ -3017,10 +3012,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {selectedRunForStages.status === "PENDIENTE_RECEPCION" || selectedRunForStages.status === "RECIBIDA" ? (
                     <div className="productionStats">
                       <span>
-                        <strong>Peso esperado</strong>
-                        {numericText(selectedRunForStages.expected_finished_weight)} {selectedRunForStages.raw_material_unit_code}
-                      </span>
-                      <span>
                         <strong>Peso real</strong>
                         {numericText(selectedRunForStages.actual_finished_weight)} {selectedRunForStages.raw_material_unit_code}
                       </span>
@@ -3034,96 +3025,54 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     </div>
                   ) : null}
 
-                  {/* Material adicional: pedido puntual a Inventario fuera de
-                      lo declarado al crear la orden, mientras esta EN_PROCESO. */}
+                  {/* Solicitudes de material fuera de lo declarado al crear la
+                      orden. La solicitud misma ahora se hace desde la acta
+                      (lado Entregado, boton "Solicitar material"). Una vez
+                      APROBADA ya quedo como linea AUTO en la acta -- mostrarla
+                      aqui tambien seria la misma info duplicada, asi que solo
+                      se listan las que siguen pendientes de que Inventario
+                      responda (o las que rechazo). */}
                   <div className="fieldGroup">
-                    <span>Material adicional</span>
-                    {(selectedRunForStages.additional_materials ?? []).length > 0 ? (
-                      <div className="tableWrap">
-                        <table className="table">
-                          <thead>
-                            <tr>
-                              <th>Material</th>
-                              <th>Etapa</th>
-                              <th className="num">Cantidad</th>
-                              <th>Estado</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(selectedRunForStages.additional_materials ?? []).map((request) => (
-                              <tr key={request.id}>
-                                <td>{request.name ?? request.item_id}</td>
-                                <td>{request.stage_name ?? "—"}</td>
-                                <td className="num">{numericText(request.quantity)} {request.unit_code}</td>
-                                <td><StatusPunch label={request.status} tone={request.status === "APROBADA" ? "done" : request.status === "RECHAZADA" ? "danger" : "warning"} /></td>
+                    <span>Acta y materiales</span>
+                    {(() => {
+                      const openRequests = (selectedRunForStages.additional_materials ?? []).filter(
+                        (request) => request.status !== "APROBADA",
+                      );
+                      return openRequests.length > 0 ? (
+                        <div className="tableWrap">
+                          <table className="table">
+                            <thead>
+                              <tr>
+                                <th>Material</th>
+                                <th>Etapa</th>
+                                <th className="num">Cantidad</th>
+                                <th>Estado</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : null}
-
-                    {selectedRunForStages.status === "EN_PROCESO" ? (
-                      pendingAdditionalMaterialItem ? (
-                        <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 8 }}>
-                          <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
-                            {pendingAdditionalMaterialItem.name} · {pendingAdditionalMaterialItem.unit_code}
-                          </div>
-                          <input
-                            aria-label="Cantidad"
-                            className="field"
-                            min="0.0001"
-                            onChange={(e) => setAdditionalMaterialQuantity(e.target.value)}
-                            placeholder={pendingAdditionalMaterialItem.unit_code}
-                            step="0.0001"
-                            style={{ width: 100 }}
-                            type="number"
-                            value={additionalMaterialQuantity}
-                          />
-                          <input
-                            aria-label="Motivo (opcional)"
-                            className="field"
-                            onChange={(e) => setAdditionalMaterialNote(e.target.value)}
-                            placeholder="Motivo (opcional)"
-                            style={{ flex: 1 }}
-                            type="text"
-                            value={additionalMaterialNote}
-                          />
-                          <button className="button" disabled={isSaving} onClick={() => setPendingAdditionalMaterialItem(null)} type="button">
-                            Cancelar
-                          </button>
-                          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleRequestAdditionalMaterial()} type="button">
-                            Enviar solicitud
-                          </button>
+                            </thead>
+                            <tbody>
+                              {openRequests.map((request) => (
+                                <tr key={request.id}>
+                                  <td>{request.name ?? request.item_id}</td>
+                                  <td>{request.stage_name ?? "—"}</td>
+                                  <td className="num">{numericText(request.quantity)} {request.unit_code}</td>
+                                  <td><StatusPunch label={request.status} tone={request.status === "RECHAZADA" ? "danger" : "warning"} /></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
-                      ) : (
-                        <button className="button" onClick={() => setIsAdditionalMaterialPickerOpen(true)} style={{ marginTop: 8 }} type="button">
-                          <Plus aria-hidden="true" size={14} />
-                          Solicitar material
-                        </button>
-                      )
-                    ) : null}
-                  </div>
+                      ) : null;
+                    })()}
 
-                  <button className="button" onClick={() => setActaRun(selectedRunForStages)} type="button">
-                    Ver acta
-                  </button>
+                    <button className="button" onClick={() => setActaRun(selectedRunForStages)} style={{ marginTop: 8 }} type="button">
+                      Ver acta
+                    </button>
+                  </div>
                 </>
               );
             })() : null}
           </section>
         </div>
-      ) : null}
-
-      {isAdditionalMaterialPickerOpen ? (
-        <MaterialCategoryPicker
-          allowedTypes={["RAW_MATERIAL", "SUPPLY", "COMPLEMENT"]}
-          description="Elige el material que necesitas pedir para esta orden"
-          items={[...rawMaterials, ...orderSupplyItems, ...complementItems]}
-          onClose={() => setIsAdditionalMaterialPickerOpen(false)}
-          onSelect={pickAdditionalMaterialItem}
-          title="Solicitar material adicional"
-        />
       ) : null}
 
       {familyRuns ? (
@@ -3968,8 +3917,44 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </div>
       ) : null}
 
+      {postFinishReturnRun ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Sobrante por devolver">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Sobrante por devolver</h2>
+                <p>
+                  {postFinishReturnRun.production_code ?? postFinishReturnRun.process_name} quedo con complementos
+                  aprobados que no se usaron enteros. Devolvelos ahora o segui — es opcional, se puede hacer despues
+                  desde la acta.
+                </p>
+              </div>
+              <button
+                aria-label="Cerrar"
+                className="iconOnlyButton"
+                onClick={() => continueFromReturnStep()}
+                type="button"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <RecepcionActions onChanged={() => void reload()} onError={setError} run={postFinishReturnRun} />
+            <div className="modalActions">
+              <button className="button buttonPrimary" onClick={() => continueFromReturnStep()} type="button">
+                Continuar
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {actaRun ? (
-        <ActaView run={actaRun} onClose={() => setActaRun(null)} onChanged={() => void reload()} />
+        <ActaView
+          materialItems={[...rawMaterials, ...orderSupplyItems, ...complementItems]}
+          onChanged={() => void reload()}
+          onClose={() => closeActaModal()}
+          run={actaRun}
+        />
       ) : null}
     </div>
   );

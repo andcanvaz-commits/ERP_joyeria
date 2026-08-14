@@ -240,6 +240,7 @@ class ProductionRunStageRead(BaseModel):
 class SupplyConsumptionRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    item_id: UUID
     name: str
     quantity: Decimal
     unit_code: str
@@ -279,6 +280,19 @@ class RunComplementRead(BaseModel):
     reserved_quantity: Decimal = Decimal("0")
     unit_code: str
     status: str
+    # Cuanto de lo aprobado ya se devolvio a inventario por sobrante.
+    returned_quantity: Decimal = Decimal("0")
+    # Cuanto de lo aprobado se uso de verdad en el ensamble (suma de
+    # run.assembly_items para este item) — no viene del ORM, lo llena
+    # ProductionService._attach_plan_names. quantity - used - returned es lo
+    # que todavia se puede devolver.
+    used_quantity: Decimal = Decimal("0")
+
+
+class ComplementReturnCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: Decimal = Field(gt=0)
 
 
 class RunAssemblyItemRead(BaseModel):
@@ -363,6 +377,7 @@ class ActaLineRead(BaseModel):
     label: str
     quantity: Decimal
     unit_code: str
+    item_id: UUID | None = None
     source: str
     stage_id: UUID | None = None
     stage_name: str | None = None
@@ -378,6 +393,10 @@ class ActaLineCreate(BaseModel):
     label: str = Field(min_length=1, max_length=180)
     quantity: Decimal = Field(gt=0)
     unit_code: str = Field(min_length=1, max_length=20)
+    # Item real de inventario detras de esta linea, si se conoce (permite
+    # fusionar por identidad y no por texto). Opcional: una linea totalmente
+    # libre (sin item de catalogo) sigue siendo valida.
+    item_id: UUID | None = None
     note: str | None = Field(default=None, max_length=500)
 
 

@@ -99,6 +99,7 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "AJUSTE_NEGATIVO", label: "Ajuste negativo" },
   { value: "CONSUMO_PRODUCCION", label: "Consumo produccion" },
   { value: "INGRESO_PRODUCCION", label: "Ingreso produccion" },
+  { value: "DEVOLUCION_PRODUCCION", label: "Devolucion produccion" },
   { value: "MERMA", label: "Merma" },
   { value: "CONVERSION_SALIDA", label: "Conversion salida" },
   { value: "CONVERSION_ENTRADA", label: "Conversion entrada" },
@@ -284,7 +285,7 @@ function kardexDetail(movement: InventoryMovement) {
 // Signo del movimiento sobre el stock: suma entradas/ingresos/ajustes+ y resta
 // salidas/consumos/merma/ajustes-. Base del saldo corrido del kardex.
 function movementSign(type: InventoryMovementType) {
-  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" || type === "RECLASIFICACION_ENTRADA" ? 1 : -1;
+  return type === "ENTRADA" || type === "INGRESO_PRODUCCION" || type === "DEVOLUCION_PRODUCCION" || type === "AJUSTE_POSITIVO" || type === "CONVERSION_ENTRADA" || type === "RECLASIFICACION_ENTRADA" ? 1 : -1;
 }
 
 function unitLabel(value: string) {
@@ -919,10 +920,11 @@ export function InventoryDashboard() {
     return initial > 0 ? initial : null;
   }
 
-  // Cantidad producida de una orden con su equivalente en gramos.
+  // El sistema ya no trabaja por unidades: la cantidad de una orden es su
+  // peso en gramos (igual al material requerido).
   function runQuantityText(run: ProductionRun) {
     const total = runFinalWeight(run);
-    return `${numericText(run.quantity)} unidades${total ? ` · ${numericText(String(total))} g` : ""}`;
+    return total ? `${numericText(String(total))} g` : "—";
   }
 
   function archiveSuggestion(item: InventoryItem) {
@@ -1079,6 +1081,20 @@ export function InventoryDashboard() {
     void handleApproveMaterials(run);
   }
 
+  // Cuanto queda pendiente en la bandeja de Solicitudes (materia prima +
+  // recepcion + material adicional): si llega a 0 tras una accion, la
+  // bandeja se cierra sola. Corridas historicas migradas (event_lines) se
+  // excluyen porque pueden quedar en PENDIENTE_RECEPCION para siempre.
+  function countRemainingSolicitudes(runs: ProductionRun[]): number {
+    const materialsAndReception = runs.filter(
+      (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
+    ).length;
+    const additionalMaterial = runs
+      .filter((r) => r.status === "EN_PROCESO")
+      .reduce((total, r) => total + (r.additional_materials ?? []).filter((req) => req.status === "PENDIENTE").length, 0);
+    return materialsAndReception + additionalMaterial;
+  }
+
   async function handleApproveMaterials(run: ProductionRun) {
     setError(null);
     setIsSavingProduction(true);
@@ -1091,14 +1107,7 @@ export function InventoryDashboard() {
           ? `Salida aprobada para ${updated.production_code}. ${splitChild.production_code} queda a la espera de más material.`
           : "Salida de materia prima aprobada."
       );
-      // Corridas historicas migradas pueden quedar varadas en PENDIENTE_RECEPCION
-      // para siempre (ver pendingReceptionRuns mas abajo) — sin excluirlas aqui
-      // "remaining" nunca llega a 0 y la ventana de Solicitudes no se cierra
-      // aunque ya no quede nada visible en la lista.
-      const remaining = nextRuns.filter(
-        (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
-      ).length;
-      if (remaining === 0) {
+      if (countRemainingSolicitudes(nextRuns) === 0) {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -1124,10 +1133,7 @@ export function InventoryDashboard() {
       setRejectRun(null);
       setSuccess("Solicitud rechazada. La orden fue cancelada.");
       const nextRuns = await listProductionRuns();
-      const remaining = nextRuns.filter(
-        (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
-      ).length;
-      if (remaining === 0) {
+      if (countRemainingSolicitudes(nextRuns) === 0) {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -1153,6 +1159,7 @@ export function InventoryDashboard() {
       setSuccess("Merma reclasificada.");
       setReclassifyConfirm(null);
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo reclasificar la merma.");
     } finally {
@@ -1167,10 +1174,7 @@ export function InventoryDashboard() {
       const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId, wasteItemName);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
-      const remaining = nextRuns.filter(
-        (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
-      ).length;
-      if (remaining === 0) {
+      if (countRemainingSolicitudes(nextRuns) === 0) {
         setIsSolicitudesOpen(false);
       }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -1193,6 +1197,10 @@ export function InventoryDashboard() {
     try {
       await approveAdditionalMaterial(requestId);
       setSuccess("Material adicional aprobado.");
+      const nextRuns = await listProductionRuns();
+      if (countRemainingSolicitudes(nextRuns) === 0) {
+        setIsSolicitudesOpen(false);
+      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1209,6 +1217,10 @@ export function InventoryDashboard() {
     try {
       await rejectAdditionalMaterial(requestId);
       setSuccess("Solicitud de material adicional rechazada.");
+      const nextRuns = await listProductionRuns();
+      if (countRemainingSolicitudes(nextRuns) === 0) {
+        setIsSolicitudesOpen(false);
+      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1814,6 +1826,7 @@ export function InventoryDashboard() {
       setIsSalidaFormOpen(false);
       setSalidaLines([]);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo registrar la salida.");
     } finally {
@@ -1834,6 +1847,7 @@ export function InventoryDashboard() {
       await deleteInventoryItem(item.id);
       setSuccess("Materia prima eliminada.");
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
     }
@@ -1853,6 +1867,7 @@ export function InventoryDashboard() {
       setSuccess(remainingItem ? "Último lote revertido." : "Último lote revertido; el item creado por la factura también se eliminó.");
       setViewingItem(null);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo revertir el lote.");
     }
@@ -1871,6 +1886,7 @@ export function InventoryDashboard() {
       setViewingItem(null);
       setSuccess("Item archivado.");
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo archivar el item.");
     }
@@ -1882,6 +1898,7 @@ export function InventoryDashboard() {
       await unarchiveInventoryItem(item.id);
       setSuccess("Item restaurado al inventario activo.");
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo restaurar el item.");
     }
@@ -1896,6 +1913,7 @@ export function InventoryDashboard() {
       await deleteInventoryItem(item.id);
       setSuccess("Item eliminado permanentemente junto con su historial.");
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo eliminar el item.");
     }
@@ -1972,6 +1990,10 @@ export function InventoryDashboard() {
       setIsMovementFormOpen(false);
       setMovementForm(emptyMovementForm());
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      // El picker de materiales de produccion (acta, etapas) lee stock de su
+      // propia query: sin esto quedaba con el valor viejo hasta su refetch
+      // automatico de 30s.
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
       if (created.waiting_production_runs.length > 0) {
         setAllocateRuns(created.waiting_production_runs);
         setAllocateQuantities(
@@ -2087,6 +2109,7 @@ export function InventoryDashboard() {
       setXmlImportDraft(null);
       setSuccess(`Factura XML importada: ${imported} lineas registradas.`);
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      await queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo importar la factura XML.");
     } finally {
@@ -5141,20 +5164,8 @@ export function InventoryDashboard() {
                             <span>{run.process_name}</span>
                           </div>
                           <div className="solicitudDetailItem">
-                            <strong>Cantidad</strong>
-                            <span>{runQuantityText(run)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
                             <strong>Material requerido</strong>
                             <span>{numericText(run.total_required_material)} {run.raw_material_unit_code}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Peso esperado</strong>
-                            <span>{numericText(run.expected_finished_weight)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Etapas</strong>
-                            <span>{run.stages.length}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Solicitada por</strong>
@@ -5183,7 +5194,7 @@ export function InventoryDashboard() {
                             {run.process_name}
                           </strong>
                           <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                            {numericText(run.quantity)} unidades · Merma: {run.waste_percent ?? 0}%
+                            {runQuantityText(run)} · Merma: {run.waste_percent ?? 0}%
                           </span>
                         </div>
                         <button
@@ -5218,10 +5229,6 @@ export function InventoryDashboard() {
                           <div className="solicitudDetailItem">
                             <strong>Finalizado</strong>
                             <span>{productionTimeLabel(run.finished_at)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Peso esperado</strong>
-                            <span>{numericText(run.expected_finished_weight)}</span>
                           </div>
                           <div className="solicitudDetailItem">
                             <strong>Peso real</strong>
