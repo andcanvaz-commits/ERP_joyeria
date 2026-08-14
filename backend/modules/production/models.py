@@ -250,6 +250,13 @@ class ProductionRun(Base):
         cascade="all, delete-orphan",
         order_by="ProductionRunActaLine.line_order",
     )
+    # Material adicional pedido mientras la corrida esta EN_PROCESO, fuera de
+    # lo declarado al crear la orden.
+    additional_material_requests: Mapped[list["ProductionRunAdditionalMaterialRequest"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="ProductionRunAdditionalMaterialRequest.requested_at",
+    )
 
 
 class ProductionRunStage(Base):
@@ -357,6 +364,32 @@ class ProductionRunActaLine(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     run: Mapped["ProductionRun"] = relationship(back_populates="acta_lines")
+
+
+class ProductionRunAdditionalMaterialRequest(Base):
+    __tablename__ = "production_run_additional_material_requests"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Etapa que estaba EN_PROCESO cuando se pidio (para trazabilidad/acta), o
+    # NULL si al pedirlo ninguna etapa estaba activa.
+    stage_id: Mapped[PyUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("production_run_stages.id", ondelete="SET NULL"), nullable=True
+    )
+    item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=ComplementRequestStatus.PENDING)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_by_user_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="additional_material_requests")
 
 
 class ProductionRunProduct(Base):

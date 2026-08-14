@@ -5,7 +5,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.modules.production.models import ProductionProcess, ProductionProcessStage, ProductionProcessStageIngredient, ProductionRun, ProductionRunStage
+from backend.modules.production.models import (
+    ProductionProcess,
+    ProductionProcessStage,
+    ProductionProcessStageIngredient,
+    ProductionRun,
+    ProductionRunAdditionalMaterialRequest,
+    ProductionRunStage,
+)
 
 
 class ProductionProcessRepository:
@@ -48,6 +55,14 @@ class ProductionProcessRepository:
                 selectinload(ProductionRun.event_lines),
             )
             .where(ProductionRun.id == run_id)
+        )
+        return self.session.execute(statement).scalar_one_or_none()
+
+    def get_additional_material_request(self, request_id: UUID) -> ProductionRunAdditionalMaterialRequest | None:
+        statement = (
+            select(ProductionRunAdditionalMaterialRequest)
+            .options(selectinload(ProductionRunAdditionalMaterialRequest.run).selectinload(ProductionRun.stages))
+            .where(ProductionRunAdditionalMaterialRequest.id == request_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
 

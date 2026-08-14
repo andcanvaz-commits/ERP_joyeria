@@ -328,6 +328,33 @@ class AssemblyRecipeUpsert(BaseModel):
     items: list[RunAssemblyLineCreate] = Field(min_length=1)
 
 
+class AdditionalMaterialRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: UUID
+    quantity: Decimal = Field(gt=0)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class AdditionalMaterialRequestRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    item_id: UUID
+    name: str | None = None
+    quantity: Decimal
+    unit_code: str
+    status: str
+    stage_id: UUID | None = None
+    stage_name: str | None = None
+    note: str | None = None
+    requested_by_name: str | None = None
+    requested_at: datetime
+    approved_by_name: str | None = None
+    approved_at: datetime | None = None
+    rejection_reason: str | None = None
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -384,3 +411,5 @@ class ProductionRunRead(BaseModel):
     complements: list[RunComplementRead] = Field(default_factory=list)
     # Combinacion de complementos aplicada al ensamble (cantidades totales).
     assembly_items: list[RunAssemblyItemRead] = Field(default_factory=list)
+    # Material adicional pedido mientras la corrida esta EN_PROCESO.
+    additional_materials: list[AdditionalMaterialRequestRead] = Field(default_factory=list)
