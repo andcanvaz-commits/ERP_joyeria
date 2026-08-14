@@ -153,6 +153,23 @@ export type ProductionRun = {
   assembly_pending: boolean;
   // Combinacion de complementos aplicada al ensamble (totales).
   assembly_items?: Array<{ id: string; complement_item_id: string; name?: string | null; quantity: string }>;
+  // Material adicional pedido mientras la corrida esta EN_PROCESO.
+  additional_materials?: Array<{
+    id: string;
+    item_id: string;
+    name?: string | null;
+    quantity: string;
+    unit_code: string;
+    status: "PENDIENTE" | "APROBADA" | "RECHAZADA";
+    stage_id?: string | null;
+    stage_name?: string | null;
+    note?: string | null;
+    requested_by_name?: string | null;
+    requested_at: string;
+    approved_by_name?: string | null;
+    approved_at?: string | null;
+    rejection_reason?: string | null;
+  }>;
 };
 
 /** Dry-run de "destinar": cuánto alcanza a cubrir el stock disponible hoy. */

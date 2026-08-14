@@ -41,8 +41,10 @@ import {
 } from "@/lib/inventory-api";
 import {
   allocateProductionRunMaterial,
+  approveAdditionalMaterial,
   approveProductionRunMaterials,
   previewProductionRunAllocation,
+  rejectAdditionalMaterial,
   rejectProductionRunMaterials,
   reserveProductionRunMaterial,
   listProductionRuns,
@@ -1185,6 +1187,38 @@ export function InventoryDashboard() {
     }
   }
 
+  async function handleApproveAdditionalMaterial(requestId: string) {
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      await approveAdditionalMaterial(requestId);
+      setSuccess("Material adicional aprobado.");
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar el material adicional.");
+    } finally {
+      setIsSavingProduction(false);
+    }
+  }
+
+  async function handleRejectAdditionalMaterial(requestId: string) {
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      await rejectAdditionalMaterial(requestId);
+      setSuccess("Solicitud de material adicional rechazada.");
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
+    } finally {
+      setIsSavingProduction(false);
+    }
+  }
+
   /**
    * Paso 1 de destinar: pregunta al backend cuanto se alcanza a cubrir SIN
    * tocar nada. Si cubre todo, procede directo; si va a quedar parcial, abre
@@ -1392,6 +1426,12 @@ export function InventoryDashboard() {
   );
   const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
   const inProcessRuns = productionRuns.filter((run) => run.status === "EN_PROCESO");
+  // Material adicional pedido durante EN_PROCESO, pendiente de aprobar/rechazar.
+  const pendingAdditionalMaterialRequests = inProcessRuns.flatMap((run) =>
+    (run.additional_materials ?? [])
+      .filter((request) => request.status === "PENDIENTE")
+      .map((request) => ({ run, request })),
+  );
   // Órdenes tras aplicar los filtros de fecha y estado (pestañas de procesos).
   const receivedRunsFiltered = receivedRuns.filter(
     (run) => (orderStatusFilter === "TODOS" || run.status === orderStatusFilter) && withinDateRange(run.received_at),
@@ -2134,8 +2174,8 @@ export function InventoryDashboard() {
             >
               <Inbox aria-hidden="true" size={18} />
               Solicitudes
-              {pendingInventoryRuns.length + pendingReceptionRuns.length > 0 ? (
-                <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length}</span>
+              {pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length > 0 ? (
+                <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length}</span>
               ) : null}
             </button>,
             topbarSlot,
@@ -5037,7 +5077,7 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>Solicitudes de produccion</h2>
-                <p>{pendingInventoryRuns.length + pendingReceptionRuns.length} solicitudes pendientes</p>
+                <p>{pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length} solicitudes pendientes</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsSolicitudesOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -5197,6 +5237,52 @@ export function InventoryDashboard() {
                           </div>
                         </div>
                       ) : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {pendingAdditionalMaterialRequests.length > 0 ? (
+              <>
+                <h3 style={{ margin: "12px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
+                  Material adicional ({pendingAdditionalMaterialRequests.length})
+                </h3>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {pendingAdditionalMaterialRequests.map(({ run, request }) => (
+                    <div className="solicitudCard" key={request.id}>
+                      <div className="solicitudCardHead">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>
+                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                            {request.name ?? request.item_id}
+                          </strong>
+                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
+                            {numericText(request.quantity)} {request.unit_code}
+                            {request.stage_name ? ` · Etapa: ${request.stage_name}` : ""}
+                            {request.note ? ` · ${request.note}` : ""}
+                            {" · "}{productionTimeLabel(request.requested_at)}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <button
+                            className="button buttonPrimary"
+                            disabled={isSavingProduction}
+                            onClick={() => void handleApproveAdditionalMaterial(request.id)}
+                            type="button"
+                          >
+                            Aprobar
+                          </button>
+                          <button
+                            className="button buttonDanger"
+                            disabled={isSavingProduction}
+                            onClick={() => void handleRejectAdditionalMaterial(request.id)}
+                            type="button"
+                          >
+                            Rechazar
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>

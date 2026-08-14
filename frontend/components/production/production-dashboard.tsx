@@ -45,6 +45,7 @@ import {
   listProcesses,
   listProductionRuns,
   releaseProductionRunReservation,
+  requestAdditionalMaterial,
   startProductionRun,
   startProductionRunWithReserved,
   updateProcess,
@@ -466,6 +467,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
+  // Solicitar material adicional mientras la corrida esta EN_PROCESO: primero
+  // se elige el item con el picker, luego se completa cantidad/nota antes de
+  // enviar la solicitud (pasa por aprobacion real de Inventario).
+  const [isAdditionalMaterialPickerOpen, setIsAdditionalMaterialPickerOpen] = useState(false);
+  const [pendingAdditionalMaterialItem, setPendingAdditionalMaterialItem] = useState<InventoryItem | null>(null);
+  const [additionalMaterialQuantity, setAdditionalMaterialQuantity] = useState("");
+  const [additionalMaterialNote, setAdditionalMaterialNote] = useState("");
   const [showResponsables, setShowResponsables] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   // Modo de destino del resultante: asignar a una pieza/tipo existente o
@@ -1409,6 +1417,40 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       return;
     }
     run();
+  }
+
+  function pickAdditionalMaterialItem(item: InventoryItem) {
+    setPendingAdditionalMaterialItem(item);
+    setAdditionalMaterialQuantity("");
+    setAdditionalMaterialNote("");
+    setIsAdditionalMaterialPickerOpen(false);
+  }
+
+  async function handleRequestAdditionalMaterial() {
+    if (!selectedRunForStages || !pendingAdditionalMaterialItem) return;
+    if (!additionalMaterialQuantity || Number(additionalMaterialQuantity) <= 0) {
+      setError("Ingresa una cantidad valida para el material adicional.");
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      await requestAdditionalMaterial(selectedRunForStages.id, {
+        item_id: pendingAdditionalMaterialItem.id,
+        quantity: additionalMaterialQuantity,
+        note: additionalMaterialNote.trim() || null,
+      });
+      setSuccess("Solicitud enviada. Inventario debe aprobarla.");
+      setPendingAdditionalMaterialItem(null);
+      setAdditionalMaterialQuantity("");
+      setAdditionalMaterialNote("");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo solicitar el material adicional.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
@@ -2986,11 +3028,93 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </span>
                     </div>
                   ) : null}
+
+                  {/* Material adicional: pedido puntual a Inventario fuera de
+                      lo declarado al crear la orden, mientras esta EN_PROCESO. */}
+                  <div className="fieldGroup">
+                    <span>Material adicional</span>
+                    {(selectedRunForStages.additional_materials ?? []).length > 0 ? (
+                      <div className="tableWrap">
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>Material</th>
+                              <th>Etapa</th>
+                              <th className="num">Cantidad</th>
+                              <th>Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(selectedRunForStages.additional_materials ?? []).map((request) => (
+                              <tr key={request.id}>
+                                <td>{request.name ?? request.item_id}</td>
+                                <td>{request.stage_name ?? "—"}</td>
+                                <td className="num">{numericText(request.quantity)} {request.unit_code}</td>
+                                <td><StatusPunch label={request.status} tone={request.status === "APROBADA" ? "done" : request.status === "RECHAZADA" ? "danger" : "warning"} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+
+                    {selectedRunForStages.status === "EN_PROCESO" ? (
+                      pendingAdditionalMaterialItem ? (
+                        <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 8 }}>
+                          <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                            {pendingAdditionalMaterialItem.name} · {pendingAdditionalMaterialItem.unit_code}
+                          </div>
+                          <input
+                            aria-label="Cantidad"
+                            className="field"
+                            min="0.0001"
+                            onChange={(e) => setAdditionalMaterialQuantity(e.target.value)}
+                            placeholder={pendingAdditionalMaterialItem.unit_code}
+                            step="0.0001"
+                            style={{ width: 100 }}
+                            type="number"
+                            value={additionalMaterialQuantity}
+                          />
+                          <input
+                            aria-label="Motivo (opcional)"
+                            className="field"
+                            onChange={(e) => setAdditionalMaterialNote(e.target.value)}
+                            placeholder="Motivo (opcional)"
+                            style={{ flex: 1 }}
+                            type="text"
+                            value={additionalMaterialNote}
+                          />
+                          <button className="button" disabled={isSaving} onClick={() => setPendingAdditionalMaterialItem(null)} type="button">
+                            Cancelar
+                          </button>
+                          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleRequestAdditionalMaterial()} type="button">
+                            Enviar solicitud
+                          </button>
+                        </div>
+                      ) : (
+                        <button className="button" onClick={() => setIsAdditionalMaterialPickerOpen(true)} style={{ marginTop: 8 }} type="button">
+                          <Plus aria-hidden="true" size={14} />
+                          Solicitar material
+                        </button>
+                      )
+                    ) : null}
+                  </div>
                 </>
               );
             })() : null}
           </section>
         </div>
+      ) : null}
+
+      {isAdditionalMaterialPickerOpen ? (
+        <MaterialCategoryPicker
+          allowedTypes={["RAW_MATERIAL", "SUPPLY", "COMPLEMENT"]}
+          description="Elige el material que necesitas pedir para esta orden"
+          items={[...rawMaterials, ...orderSupplyItems, ...complementItems]}
+          onClose={() => setIsAdditionalMaterialPickerOpen(false)}
+          onSelect={pickAdditionalMaterialItem}
+          title="Solicitar material adicional"
+        />
       ) : null}
 
       {familyRuns ? (
