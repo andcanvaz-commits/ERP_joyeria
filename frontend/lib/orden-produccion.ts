@@ -220,8 +220,10 @@ export function buildOrdenProduccion(
     : actaRightPhase({
         approved: canPrintEntrega(family),
         stages: family.flatMap((run) => run.stages),
+        // La linea RECEPCION "PLAN" (producto resultante planeado) se siembra
+        // al crear la orden -- no es avance real, no debe disparar CONSTRUYENDO.
         hasRecepcionLines: family.some((run) =>
-          (run.acta_lines ?? []).some((line) => line.side === "RECEPCION")
+          (run.acta_lines ?? []).some((line) => line.side === "RECEPCION" && line.source !== "PLAN")
         ),
       });
   const productosResultantes = formatProductosResultantes(

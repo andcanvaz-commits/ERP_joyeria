@@ -1,3 +1,4 @@
+import { Info } from "lucide-react";
 import { ActaRightPhase, DocSide, DocTotalRow, OrdenProduccionModel, formatDocDate, formatGramos } from "@/lib/orden-produccion";
 
 export type DocMode = "entrega" | "recepcion" | "completo";
@@ -53,6 +54,10 @@ function SideColumn({
           <span className="opColSub">
             {" "}
             · {formatDocDate(singleEvent.fecha) || "—"} · {singleEvent.responsable || DASH_RESPONSABLE}
+          </span>
+        ) : events.length === 0 ? (
+          <span className="opColSubPending">
+            <Info aria-hidden="true" size={12} /> Pendiente
           </span>
         ) : null}
       </div>

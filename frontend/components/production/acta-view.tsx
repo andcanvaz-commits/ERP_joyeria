@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
+import { Check, Info, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
 import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
 import { ActaRightPhase, actaRightPhase, formatDocDate, formatGramos, formatProductosResultantes } from "@/lib/orden-produccion";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
@@ -100,7 +100,13 @@ function ActaDocSide({
     <section className="opCol actaDocCol">
       <div className="opColHead">
         {title}
-        <span className="opColSub"> · {formatDocDate(fecha) || DASH} · {responsable || DASH}</span>
+        {fecha ? (
+          <span className="opColSub"> · {formatDocDate(fecha) || DASH} · {responsable || DASH}</span>
+        ) : (
+          <span className="opColSubPending">
+            <Info aria-hidden="true" size={12} /> Pendiente
+          </span>
+        )}
       </div>
       {notice && notice.phase === "SOLO_PRODUCTO" ? (
         <div className="opColNotice">
@@ -611,7 +617,9 @@ export function ActaView({
   const recepcionPhase = actaRightPhase({
     approved: run.materials_approved_at !== null,
     stages: run.stages,
-    hasRecepcionLines: recepcion.length > 0,
+    // La linea RECEPCION "PLAN" (producto resultante planeado) se siembra al
+    // crear la orden -- no es avance real, no debe disparar CONSTRUYENDO.
+    hasRecepcionLines: recepcion.some((line) => line.source !== "PLAN"),
   });
   const productosResultantes = formatProductosResultantes(run.products ?? []);
 

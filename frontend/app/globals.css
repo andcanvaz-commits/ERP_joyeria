@@ -4683,6 +4683,20 @@ textarea:disabled {
   opacity: 0.85;
 }
 
+/* Sin fecha/responsable todavia (nada paso de ese lado): rojo mas claro que
+   --danger, para que se lea sobre el fondo oscuro de opColHead. */
+.opColSubPending {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  color: #ff8a80;
+  font-weight: 800;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .opColHead {
   background: var(--doc-ink);
   color: #ffffff;
