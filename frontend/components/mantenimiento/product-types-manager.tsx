@@ -32,7 +32,6 @@ export function ProductTypesManager({
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [prodTypeCode, setProdTypeCode] = useState("");
   const [prodName, setProdName] = useState("");
-  const [prodPrice, setProdPrice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -114,10 +113,8 @@ export function ProductTypesManager({
       const created = await createProductType({
         category_code: prodTypeCode,
         name: prodName.trim().toUpperCase(),
-        price: prodPrice.trim() || null,
       });
       setProdName("");
-      setProdPrice("");
       setSuccess(`Producto ${created.name ?? ""} creado.`);
       void queryClient.invalidateQueries({ queryKey: ["product-types"] });
       onProductCreated?.(created);
@@ -201,10 +198,6 @@ export function ProductTypesManager({
               </label>
             </div>
             <div className="formStepGrid colsPairAction">
-              <label className="fieldGroup">
-                <span>Precio referencial (opcional)</span>
-                <input className="field" disabled={isSaving} min="0" onChange={(e) => setProdPrice(e.target.value)} placeholder="Ej. 120.00" step="0.01" type="number" value={prodPrice} />
-              </label>
               <button className="button buttonPrimary" disabled={isSaving || !prodTypeCode || !prodName.trim()} type="submit">
                 <Plus aria-hidden="true" size={14} /> Crear producto
               </button>

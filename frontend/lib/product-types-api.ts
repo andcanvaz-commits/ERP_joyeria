@@ -5,7 +5,6 @@ export type ProductType = {
   category_code: string;
   model_code: string;
   name: string | null;
-  price: string | null;
   category_label: string;
   model_label: string;
   is_active: boolean;
@@ -20,7 +19,6 @@ export function createProductType(payload: {
   // Opcional: sin él, el backend asigna el siguiente código libre del tipo.
   model_code?: string;
   name: string;
-  price?: string | null;
 }) {
   return apiRequest<ProductType>("/api/product-types", {
     method: "POST",
