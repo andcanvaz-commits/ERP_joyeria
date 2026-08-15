@@ -471,6 +471,16 @@ class AssemblyRecipe(Base):
     # materiales (oro y plata tienen recetas distintas).
     model_key: Mapped[str] = mapped_column(String(7), nullable=False, unique=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    # Corrida que la creo (null si se creo a mano en Mantenimiento, o para
+    # recetas ya existentes antes de esta columna). Solo se setea al CREAR la
+    # receta -- si otra corrida despues la actualiza, esto no cambia. Sirve
+    # para borrar la receta si esa corrida en particular se cancela (ver
+    # ProductionService.cancel_run/_cancel_orphaned_recipe); si una corrida
+    # distinta ya la reuso/actualizo, cancelar la creadora original ya no la
+    # toca (dejo de ser "solo de esta orden").
+    created_by_run_id: Mapped[PyUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("production_runs.id", ondelete="SET NULL"), nullable=True
+    )
 
     items: Mapped[list["AssemblyRecipeItem"]] = relationship(
         back_populates="recipe",

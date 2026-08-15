@@ -1352,6 +1352,20 @@ class ProductionService:
         for request in run.additional_material_requests:
             if request.status == ComplementRequestStatus.PENDING:
                 request.status = ComplementRequestStatus.REJECTED
+        self._cancel_orphaned_recipe(run)
+
+    def _cancel_orphaned_recipe(self, run: ProductionRun) -> None:
+        """Si esta corrida fue la que CREO una receta de ensamble (nadie mas la
+        toco desde entonces, ver _upsert_recipe_items), al cancelarla la
+        receta se borra con ella -- no tiene sentido dejarla viva sin la
+        orden que la origino y que nunca se termino de verdad."""
+        from sqlalchemy import select
+
+        recipe = self.repository.session.execute(
+            select(AssemblyRecipe).where(AssemblyRecipe.created_by_run_id == run.id)
+        ).scalars().first()
+        if recipe is not None:
+            self.repository.session.delete(recipe)
 
     def cancel_run(self, run_id: UUID, current_user: CurrentUser, reason: str | None) -> ProductionRunRead:
         """Cancela una orden por error (etapa aceptada por equivocacion, dato mal
@@ -2421,17 +2435,30 @@ class ProductionService:
         # mismo modelo se apliquen solos.
         model_key = self._model_key_for_run(run)
         if model_key is not None:
-            self._upsert_recipe_items(model_key, payload.items)
+            self._upsert_recipe_items(model_key, payload.items, created_by_run_id=run.id)
 
         self.repository.flush()
         return self._read_with_names(run)
 
     def _upsert_recipe_items(
-        self, model_key: str, lines: list[RunAssemblyLineCreate]
+        self,
+        model_key: str,
+        lines: list[RunAssemblyLineCreate],
+        created_by_run_id: UUID | None = None,
     ) -> None:
         """Reemplaza los items de la receta de ensamble de la clave de modelo
         (o la crea si aun no existe). Guarda la ultima cantidad total usada,
-        como sugerencia de prellenado -- nunca se aplica sola."""
+        como sugerencia de prellenado -- nunca se aplica sola.
+
+        created_by_run_id solo se guarda al CREAR la receta (None = creada a
+        mano en Mantenimiento, sin ligar a ninguna orden). Si la receta ya
+        existia, esta llamada la ACTUALIZA y limpia created_by_run_id a None
+        sin importar quien la esta tocando ahora: en cuanto una receta ya no
+        es un dato exclusivo de la corrida que la origino -- otra corrida la
+        reutilizo, o se edito a mano en Mantenimiento -- deja de ser
+        candidata a borrarse sola si esa corrida original se cancela (ver
+        cancel_run/_cancel_orphaned_recipe). Solo se borra sola la receta
+        que nadie mas toco desde que se creo."""
         from sqlalchemy import select
 
         recipe = self.repository.session.execute(
@@ -2447,8 +2474,9 @@ class ProductionService:
         if recipe is not None:
             recipe.items = new_items
             recipe.updated_at = datetime.utcnow()
+            recipe.created_by_run_id = None
         else:
-            recipe = AssemblyRecipe(model_key=model_key, items=new_items)
+            recipe = AssemblyRecipe(model_key=model_key, items=new_items, created_by_run_id=created_by_run_id)
             self.repository.session.add(recipe)
 
     def list_assembly_recipe_model_keys(self) -> list[str]:
