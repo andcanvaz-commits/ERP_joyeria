@@ -480,6 +480,11 @@ class ProductionRunRead(BaseModel):
     rejected_by_name: str | None = None
     rejection_reason: str | None = None
     rejected_at: datetime | None = None
+    # False = rechazo de solicitud (reject_materials, antes de aprobar); True
+    # = cancelacion de una orden ya avanzada (cancel_run/cancel_run_family,
+    # con reversion de inventario). Distingue "Solicitud rechazada" de
+    # "Orden cancelada" en el historial -- antes eran indistinguibles.
+    is_cancellation: bool = False
     target_product_type_id: UUID | None = None
     requested_at: datetime
     materials_approved_at: datetime | None = None

@@ -113,6 +113,10 @@ export type ProductionRun = {
   rejected_by_name?: string | null;
   rejection_reason?: string | null;
   rejected_at?: string | null;
+  // false = rechazo de solicitud (antes de aprobar); true = cancelacion de
+  // una orden ya avanzada (con reversion de inventario). Distingue
+  // "Solicitud rechazada" de "Orden cancelada" en el historial.
+  is_cancellation?: boolean;
   // Producto objetivo declarado al crear la orden (opcional).
   target_product_type_id?: string | null;
   requested_at: string;

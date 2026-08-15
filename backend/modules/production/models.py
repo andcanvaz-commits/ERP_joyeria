@@ -201,6 +201,16 @@ class ProductionRun(Base):
     materials_approved_responsable_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
     received_responsable_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # rejected_by_user_id/rejection_reason/rejected_at se llenan igual desde
+    # reject_materials (rechazo antes de aprobar, PENDIENTE_INVENTARIO) que
+    # desde cancel_run/cancel_run_family (cancelacion de una orden ya
+    # avanzada, con reversion de inventario) -- sin este campo, el frontend
+    # no podia distinguir "Solicitud rechazada" de "Orden cancelada" y
+    # mostraba el primero para los dos casos (bug reportado: confundia con
+    # un rechazo real de Inventario). False = rechazo (default, incluye las
+    # filas viejas anteriores a esta columna: la funcion de cancelar una
+    # orden ya avanzada es nueva, casi todo lo historico es rechazo real).
+    is_cancellation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Producto objetivo declarado al crear la orden (opcional): intención, no
     # obligación — la clasificación real ocurre al convertir el lote.
     target_product_type_id: Mapped[PyUUID | None] = mapped_column(

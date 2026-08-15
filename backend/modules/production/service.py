@@ -1248,6 +1248,7 @@ class ProductionService:
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = (reason or "").strip() or None
         run.rejected_at = datetime.utcnow()
+        run.is_cancellation = False
         for complement in run.complements:
             if complement.status == ComplementRequestStatus.PENDING:
                 complement.status = ComplementRequestStatus.REJECTED
@@ -1394,6 +1395,7 @@ class ProductionService:
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = reason
         run.rejected_at = datetime.utcnow()
+        run.is_cancellation = True
         for complement in run.complements:
             if complement.status == ComplementRequestStatus.PENDING:
                 complement.status = ComplementRequestStatus.REJECTED

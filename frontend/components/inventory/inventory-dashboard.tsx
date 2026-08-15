@@ -1045,6 +1045,15 @@ export function InventoryDashboard() {
     return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
+  // rejected_by_user_id/rejection_reason/rejected_at se llenan igual desde
+  // reject_materials (rechazo antes de aprobar) que desde
+  // cancel_run/cancel_run_family (cancelacion de una orden ya avanzada) --
+  // is_cancellation es lo unico que las distingue, para no confundir una
+  // cancelacion real con un simple rechazo de solicitud.
+  function rejectionEntryLabel(run: ProductionRun) {
+    return run.is_cancellation ? "Orden cancelada" : "Solicitud rechazada";
+  }
+
   async function handleApproveClick(run: ProductionRun) {
     // La cobertura la calcula el backend (_compute_coverage), la misma
     // fuente que usa approve_materials de verdad -- antes se replicaba a
@@ -3011,9 +3020,9 @@ export function InventoryDashboard() {
               if (entry.kind === "rejection" && entry.run) {
                 const run = entry.run;
                 return (
-                  <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
+                  <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver ${run.is_cancellation ? "cancelación" : "rechazo"} de ${run.process_name}`)}>
                     <div>
-                      <strong className="dangerText">Solicitud rechazada</strong>
+                      <strong className="dangerText">{rejectionEntryLabel(run)}</strong>
                       {run.production_code ? (
                         <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{run.production_code}</span>
                       ) : null}
@@ -3198,9 +3207,9 @@ export function InventoryDashboard() {
                     if (entry.kind === "rejection" && entry.run) {
                       const run = entry.run;
                       return (
-                        <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver rechazo de ${run.process_name}`)}>
+                        <article className="movementRow" key={`rej-${run.id}`} {...openableProps(() => setRejectionInfoRun(run), `Ver ${run.is_cancellation ? "cancelación" : "rechazo"} de ${run.process_name}`)}>
                           <div>
-                            <strong className="dangerText">Solicitud rechazada</strong>
+                            <strong className="dangerText">{rejectionEntryLabel(run)}</strong>
                             {run.production_code ? (
                               <span style={{ fontFamily: "monospace", fontSize: 11, color: "var(--primary-strong)", fontWeight: 700 }}>{run.production_code}</span>
                             ) : null}
@@ -3941,11 +3950,16 @@ export function InventoryDashboard() {
       ) : null}
 
       {rejectionInfoRun ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Detalle del rechazo">
+        <div
+          className="modalBackdrop modalBackdropTop"
+          role="dialog"
+          aria-modal="true"
+          aria-label={rejectionInfoRun.is_cancellation ? "Detalle de la cancelación" : "Detalle del rechazo"}
+        >
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
-                <h2>Solicitud rechazada</h2>
+                <h2>{rejectionEntryLabel(rejectionInfoRun)}</h2>
                 <p>{rejectionInfoRun.production_code ?? rejectionInfoRun.process_name} · {rejectionInfoRun.process_name}</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setRejectionInfoRun(null)} type="button">
@@ -3953,7 +3967,10 @@ export function InventoryDashboard() {
               </button>
             </div>
             <div className="userPreviewGrid">
-              <span><strong>Rechazada por</strong>{rejectionInfoRun.rejected_by_name ?? "—"}{rejectionInfoRun.rejected_at ? ` · ${productionTimeLabel(rejectionInfoRun.rejected_at)}` : ""}</span>
+              <span>
+                <strong>{rejectionInfoRun.is_cancellation ? "Cancelada por" : "Rechazada por"}</strong>
+                {rejectionInfoRun.rejected_by_name ?? "—"}{rejectionInfoRun.rejected_at ? ` · ${productionTimeLabel(rejectionInfoRun.rejected_at)}` : ""}
+              </span>
               <span><strong>Solicitada por</strong>{rejectionInfoRun.created_by_name ?? "—"}{rejectionInfoRun.requested_at ? ` · ${productionTimeLabel(rejectionInfoRun.requested_at)}` : ""}</span>
               <span><strong>Cantidad</strong>{numericText(rejectionInfoRun.quantity)} {rejectionInfoRun.raw_material_unit_code}</span>
               <span>

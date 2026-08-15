@@ -45,6 +45,9 @@ def test_cancel_from_in_progress_restores_consumed_stock(
     result = production_service.cancel_run(run_read.id, current_user, "Se acepto una etapa que no debia")
 
     assert result.status == "CANCELADA"
+    # No es un rechazo de solicitud (reject_materials) -- distingue "Orden
+    # cancelada" de "Solicitud rechazada" en el historial de Inventario.
+    assert result.is_cancellation is True
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("1000")
     reversions = [
