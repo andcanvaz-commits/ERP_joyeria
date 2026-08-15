@@ -19,8 +19,6 @@ export type ActaSideTotal = { label: string; quantity: number; unit: string; kin
 export type OrdenProduccionModel = {
   folio: string;
   procesoNombre: string;
-  cantidad: number | null;
-  cantidadUnidad: string;
   categoria: string;
   responsableProduccion: string;
   entregaLines: ActaSideLine[];
@@ -326,8 +324,6 @@ export function buildOrdenProduccion(
     return {
       folio: root.root_production_code ?? root.production_code ?? DASH,
       procesoNombre: root.process_name,
-      cantidad: num(root.quantity),
-      cantidadUnidad: root.raw_material_unit_code,
       categoria: materialName,
       responsableProduccion: root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
@@ -418,8 +414,6 @@ export function buildOrdenProduccion(
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
     procesoNombre: root.process_name,
-    cantidad: isHistorical ? null : family.reduce((total, run) => total + num(run.quantity), 0),
-    cantidadUnidad: root.raw_material_unit_code,
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entregaLines: entregaSide.lines,

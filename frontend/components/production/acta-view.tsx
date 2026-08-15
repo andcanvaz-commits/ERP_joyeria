@@ -413,6 +413,11 @@ export function ActaView({
                 <div className="opFolio">Nº {run.production_code ?? DASH}</div>
               </header>
 
+              <div className="opResponsable">
+                RESPONSABLE PRODUCCIÓN: <span>{run.created_by_name ?? DASH}</span>
+                <span className="opCantidad">Producto: {sides.productosResultantes}</span>
+              </div>
+
               <div className="opBody">
                 <ActaSide
                   actions={

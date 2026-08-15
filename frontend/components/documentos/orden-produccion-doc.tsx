@@ -27,7 +27,7 @@ export function OrdenProduccionDoc({
 
         <div className="opResponsable">
           RESPONSABLE PRODUCCIÓN: <span>{model.responsableProduccion}</span>
-          {model.cantidad !== null ? <span className="opCantidad">Cantidad: {model.cantidad} {model.cantidadUnidad}</span> : null}
+          <span className="opCantidad">Producto: {model.productosResultantes}</span>
         </div>
 
         <div className="opBody">
