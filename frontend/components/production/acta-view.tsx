@@ -438,14 +438,19 @@ export function ActaView({
   const [success, setSuccess] = useState<string | null>(null);
   const lines = run.acta_lines ?? [];
   const entrega = lines.filter((line) => line.side === "ENTREGA");
-  const recepcion = lines.filter((line) => line.side === "RECEPCION");
+  // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
+  // crear la orden) no es una fila real recibida ni avance real -- se queda
+  // fuera de las filas que se muestran (esa info ya la da el aviso "Producto
+  // resultante") y fuera del disparador de fase. Mismo criterio que
+  // recepcionHasData en lib/orden-produccion.ts (Documentos): si no se
+  // filtra aca tambien, Ver Acta mostraba esa linea como si fuera un recibo
+  // real mientras Documentos no mostraba nada (bug reportado).
+  const recepcion = lines.filter((line) => line.side === "RECEPCION" && line.source !== "PLAN");
   const { entregaTotalRows, recepcionTotalRows } = computeBalanceTotals(run);
   const recepcionPhase = actaRightPhase({
     approved: run.materials_approved_at !== null,
     stages: run.stages,
-    // La linea RECEPCION "PLAN" (producto resultante planeado) se siembra al
-    // crear la orden -- no es avance real, no debe disparar CONSTRUYENDO.
-    hasRecepcionLines: recepcion.some((line) => line.source !== "PLAN"),
+    hasRecepcionLines: recepcion.length > 0,
   });
   const productosResultantes = formatProductosResultantes(run.products ?? []);
 

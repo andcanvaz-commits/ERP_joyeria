@@ -153,10 +153,12 @@ function entregaRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "r
     .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
 }
 
-/** Filas RECEPCION de un run -- misma fuente que Ver Acta (acta_lines sin
- * filtrar, PLAN incluido: si el evento se muestra es porque ya paso algo
- * real, ver recepcionHasData; una vez ahi, las mismas filas que ve Ver Acta,
- * planeadas o no). */
+/** Filas RECEPCION de un run -- misma fuente que Ver Acta, y mismo filtro: la
+ * linea PLAN (producto resultante planeado, sembrada al crear la orden) no
+ * es un recibo real, se queda fuera (esa info ya la da el aviso "Producto
+ * resultante"); mostrarla como fila hacia que Ver Acta y Documentos
+ * divergieran (Ver Acta la mostraba sin filtrar, Documentos no la contaba
+ * como dato asi que no empujaba el evento -- bug reportado). */
 function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "row" }>[] {
   const eventLines = (run.event_lines ?? []).filter((line) => line.side === "RECEPCION");
   if (eventLines.length > 0) {
@@ -170,7 +172,7 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
     }));
   }
   return (run.acta_lines ?? [])
-    .filter((line) => line.side === "RECEPCION")
+    .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN")
     .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
 }
 
