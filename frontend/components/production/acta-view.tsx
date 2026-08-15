@@ -3,13 +3,7 @@
 import { useState } from "react";
 import { Plus, Undo2, X } from "lucide-react";
 import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
-import {
-  actaRightPhase,
-  formatGramos,
-  formatProductosResultantes,
-  type ActaSideLine,
-  type ActaSideTotal,
-} from "@/lib/orden-produccion";
+import { buildRunActaSides, formatGramos } from "@/lib/orden-produccion";
 import { ActaSide } from "@/components/production/acta-side";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import type { ProductionRun } from "@/types/production";
@@ -17,28 +11,7 @@ import type { InventoryItem } from "@/types/inventory";
 
 const DASH = "—";
 
-type ActaLine = NonNullable<ProductionRun["acta_lines"]>[number];
 type Complement = NonNullable<ProductionRun["complements"]>[number];
-
-// Fila de total/balance: mismo lugar que una linea real, con su propia
-// etiqueta en DETALLES ("Total entregado", "Total recibido", "Merma total")
-// y un color distinto segun el tipo -- un total no es lo mismo que una
-// merma, no deben leerse igual.
-type TotalRow = ActaSideTotal;
-
-// ActaLine -> ActaSideLine: unica conversion de forma antes de pasarle los
-// datos al mismo componente ActaSide que usa Documentos (acta-side.tsx). Solo
-// las lineas MANUAL son editables/borrables a mano.
-function toSideLines(lines: ActaLine[]): ActaSideLine[] {
-  return lines.map((line) => ({
-    kind: "row",
-    id: line.id,
-    label: line.label,
-    quantity: line.quantity,
-    unit_code: line.unit_code,
-    editable: line.source === "MANUAL",
-  }));
-}
 
 // Lado Entrega: nada de texto libre — lo que entra a la orden mientras esta
 // EN_PROCESO es una solicitud real a Inventario (mismo circuito y mismo
@@ -380,49 +353,6 @@ export function RecepcionActions({
   );
 }
 
-// Merma total, como fila del propio certificado (no una caja aparte): los
-// gramos que entraron a producir NO quedan fijos -- se actualizan segun la
-// merma que se va registrando. Por eso la fuente de la merma no es ninguna
-// linea de la acta (ni "Merma etapa X" ni el producto resultante, que nace
-// con la cantidad PLANEADA al crear la orden y nunca se corrige despues del
-// pesaje real): es `stage.waste_weight`, el mismo numero que ya mantiene al
-// dia finish_stage/_recompute_stage_waste_chain etapa por etapa, y que se
-// convierte en run.waste_weight cuando la orden termina. Recibido = entregado
-// menos esa merma acumulada; nunca una segunda cuenta aparte que termine
-// restando (o sumando) la merma dos veces.
-function sumByItem(lines: ActaLine[], itemId: string): number {
-  return lines.filter((l) => l.item_id === itemId).reduce((sum, l) => sum + Number(l.quantity), 0);
-}
-
-function computeBalanceTotals(run: ProductionRun): { entregaTotalRows: TotalRow[]; recepcionTotalRows: TotalRow[] } {
-  const unit = run.raw_material_unit_code;
-  const rawMaterialId = run.raw_material_item_id;
-  if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
-  // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
-  // siembra al crear la orden, asi que sumar por item_id sin este chequeo
-  // daba un "Total entregado"/"Total recibido" desde el dia 1, antes de que
-  // inventario aprobara nada.
-  if (run.materials_approved_at === null) return { entregaTotalRows: [], recepcionTotalRows: [] };
-  const lines = run.acta_lines ?? [];
-  const entregaTotal = sumByItem(lines.filter((l) => l.side === "ENTREGA"), rawMaterialId);
-  if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
-  const mermaAcumulada = run.stages.reduce((sum, stage) => sum + Number(stage.waste_weight ?? 0), 0);
-  const recepcionTotalRows: TotalRow[] = [
-    { label: "Total recibido", quantity: entregaTotal - mermaAcumulada, unit, kind: "total" },
-  ];
-  // La fila de merma total solo tiene sentido "al final": finished_at queda
-  // seteado en _finish_run sin importar si hubo o no una etapa que pese.
-  // Antes de eso el proceso sigue en curso -- lo que "falta" en recibido no
-  // es merma todavia, es simplemente material que aun no paso por una etapa.
-  if (run.finished_at !== null) {
-    recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit, kind: "merma" });
-  }
-  return {
-    entregaTotalRows: [{ label: "Total entregado", quantity: entregaTotal, unit, kind: "total" }],
-    recepcionTotalRows,
-  };
-}
-
 export function ActaView({
   run,
   materialItems,
@@ -436,23 +366,10 @@ export function ActaView({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const lines = run.acta_lines ?? [];
-  const entrega = lines.filter((line) => line.side === "ENTREGA");
-  // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
-  // crear la orden) no es una fila real recibida ni avance real -- se queda
-  // fuera de las filas que se muestran (esa info ya la da el aviso "Producto
-  // resultante") y fuera del disparador de fase. Mismo criterio que
-  // recepcionHasData en lib/orden-produccion.ts (Documentos): si no se
-  // filtra aca tambien, Ver Acta mostraba esa linea como si fuera un recibo
-  // real mientras Documentos no mostraba nada (bug reportado).
-  const recepcion = lines.filter((line) => line.side === "RECEPCION" && line.source !== "PLAN");
-  const { entregaTotalRows, recepcionTotalRows } = computeBalanceTotals(run);
-  const recepcionPhase = actaRightPhase({
-    approved: run.materials_approved_at !== null,
-    stages: run.stages,
-    hasRecepcionLines: recepcion.length > 0,
-  });
-  const productosResultantes = formatProductosResultantes(run.products ?? []);
+  // Misma funcion que arma la acta para Documentos cuando la orden no esta
+  // partida (buildOrdenProduccion en lib/orden-produccion.ts) -- una sola
+  // fuente para las dos vistas, no dos calculos que puedan divergir.
+  const sides = buildRunActaSides(run);
 
   function flagSuccess(message: string) {
     setError(null);
@@ -506,27 +423,27 @@ export function ActaView({
                       run={run}
                     />
                   }
-                  fecha={run.materials_approved_at}
-                  lines={toSideLines(entrega)}
+                  fecha={sides.entregaFecha}
+                  lines={sides.entregaLines}
                   onDeleteLine={(lineId) => deleteActaLine(lineId)}
                   onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
                   onError={flagError}
-                  responsable={run.materials_approved_by_name ?? DASH}
+                  responsable={sides.entregaResponsable}
                   title="ENTREGADO"
-                  totalRows={entregaTotalRows}
+                  totalRows={sides.entregaTotalRows}
                 />
                 <div className="opDivider" aria-hidden="true" />
                 <ActaSide
-                  fecha={run.received_at}
+                  fecha={sides.recepcionFecha}
                   footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
-                  lines={toSideLines(recepcion)}
-                  notice={{ phase: recepcionPhase, productos: productosResultantes }}
+                  lines={sides.recepcionLines}
+                  notice={{ phase: sides.recepcionPhase, productos: sides.productosResultantes }}
                   onDeleteLine={(lineId) => deleteActaLine(lineId)}
                   onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
                   onError={flagError}
-                  responsable={run.received_by_name ?? DASH}
+                  responsable={sides.recepcionResponsable}
                   title="RECIBIDO"
-                  totalRows={recepcionTotalRows}
+                  totalRows={sides.recepcionTotalRows}
                 />
               </div>
             </article>
