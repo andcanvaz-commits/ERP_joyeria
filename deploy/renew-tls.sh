@@ -26,7 +26,8 @@ docker compose -f docker-compose.prod.yml run --rm certbot \
 
 docker compose -f docker-compose.prod.yml run --rm --entrypoint sh certbot -c \
   "cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem /nginx-certs/fullchain.pem && \
-   cp /etc/letsencrypt/live/$DOMAIN/privkey.pem /nginx-certs/privkey.pem"
+   cp /etc/letsencrypt/live/$DOMAIN/privkey.pem /nginx-certs/privkey.pem && \
+   cp /etc/letsencrypt/live/$DOMAIN/chain.pem /nginx-certs/chain.pem"
 
 AFTER=$(md5sum ./nginx/certs/fullchain.pem 2>/dev/null | cut -d' ' -f1 || echo "")
 

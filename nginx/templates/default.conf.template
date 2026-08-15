@@ -30,15 +30,31 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
 
+    # OCSP stapling: nginx adjunta la respuesta de revocacion del certificado
+    # en el handshake, asi el navegador no tiene que consultarla aparte.
+    # chain.pem (cadena SIN el cert hoja) lo copian init-tls.sh/renew-tls.sh.
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/nginx/certs/chain.pem;
+    resolver 1.1.1.1 8.8.8.8 valid=300s;
+    resolver_timeout 5s;
+
     # Limite de tamano de payload (subida de archivos/XML).
     client_max_body_size 10m;
 
-    # Cabeceras de seguridad en el borde (defensa en profundidad).
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # Cabeceras de seguridad en el borde (defensa en profundidad). CSP
+    # asume todo self-hosted (next/font descarga en build, sin fuentes
+    # externas en runtime; sin CDN ni scripts de terceros) -- revisar la
+    # consola del navegador tras desplegar por si algo la viola.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
     add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 
     gzip on;
     gzip_types text/plain text/css application/json application/javascript;

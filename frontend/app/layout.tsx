@@ -38,7 +38,21 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Fénix Global",
-  description: "Sistema ERP para produccion e inventario de joyeria"
+  description: "Sistema ERP para produccion e inventario de joyeria",
+  openGraph: {
+    title: "Fénix Global",
+    description: "Sistema ERP para produccion e inventario de joyeria",
+    siteName: "Fénix Global",
+    images: ["/logo-mark.png"],
+    locale: "es_EC",
+    type: "website"
+  },
+  twitter: {
+    card: "summary",
+    title: "Fénix Global",
+    description: "Sistema ERP para produccion e inventario de joyeria",
+    images: ["/logo-mark.png"]
+  }
 };
 
 // Escala correcta en celulares y tablets; el zoom del usuario queda permitido.

@@ -22,7 +22,8 @@ docker compose -f docker-compose.prod.yml run --rm -p 80:80 certbot \
 
 docker compose -f docker-compose.prod.yml run --rm --entrypoint sh certbot -c \
   "cp /etc/letsencrypt/live/$DOMAIN/fullchain.pem /nginx-certs/fullchain.pem && \
-   cp /etc/letsencrypt/live/$DOMAIN/privkey.pem /nginx-certs/privkey.pem"
+   cp /etc/letsencrypt/live/$DOMAIN/privkey.pem /nginx-certs/privkey.pem && \
+   cp /etc/letsencrypt/live/$DOMAIN/chain.pem /nginx-certs/chain.pem"
 
 echo ""
 echo "Certificado listo en ./nginx/certs/."
