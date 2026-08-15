@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -150,11 +150,28 @@ def _stage_code_for(stage_name: str, run_seq: int, stage_order: int) -> str:
 
 
 @dataclass
+class _ResourceShortage:
+    """Un recurso puntual (materia prima, complemento o insumo de etapa) que
+    no alcanza. `shortages` en _MaterialCoverage junta TODOS los que esten
+    cortos a la vez -- no solo el que manda la fraccion cubierta -- para que
+    el aviso al usuario los liste todos (bug reportado: solo se mostraba
+    uno, ej. faltaba materia prima Y un insumo a la vez y solo se avisaba de
+    la materia prima)."""
+
+    name: str
+    unit: str
+    available: Decimal
+    needed: Decimal
+    is_complement: bool
+
+
+@dataclass
 class _MaterialCoverage:
     """Resultado del calculo de cobertura: cuanto de `target_qty` (cantidad de
     materia prima, en su unidad) alcanza a cubrir el stock disponible, y cual
     es el recurso que manda (el mas corto, entre materia prima, complementos
-    e insumos)."""
+    e insumos). `shortages` trae TODOS los recursos cortos, no solo el que
+    manda."""
 
     covered_qty: Decimal
     target_qty: Decimal
@@ -163,6 +180,7 @@ class _MaterialCoverage:
     limiting_unit: str
     limiting_required_per_unit: Decimal
     limiting_is_complement: bool
+    shortages: list[_ResourceShortage] = field(default_factory=list)
 
     @property
     def is_partial(self) -> bool:
@@ -891,12 +909,24 @@ class ProductionService:
         )
         if raw_needed > 0 and raw_available < raw_needed:
             fraction = max(Decimal("0"), raw_available / raw_needed)
+            coverage.shortages.append(
+                _ResourceShortage(
+                    name=raw_material.name,
+                    unit=raw_material.unit_code,
+                    available=raw_available,
+                    needed=raw_needed,
+                    is_complement=False,
+                )
+            )
 
         def consider(name: str, unit: str, available: Decimal, needed: Decimal) -> None:
             nonlocal fraction
             if needed <= 0:
                 return
             if available < needed:
+                coverage.shortages.append(
+                    _ResourceShortage(name=name, unit=unit, available=available, needed=needed, is_complement=True)
+                )
                 candidate = max(Decimal("0"), available / needed)
                 if candidate < fraction:
                     fraction = candidate
@@ -1091,6 +1121,24 @@ class ProductionService:
         self.repository.flush()
         self.approve_materials(run.id, current_user)
         return self.start_run(run.id, current_user)
+
+    def preview_approve_materials(self, run_id: UUID) -> "_MaterialCoverage":
+        """Dry-run de aprobar materiales: cuanto se alcanza a cubrir HOY, sin
+        tocar nada -- mismo calculo que approve_materials (_compute_coverage,
+        incluye insumos por etapa), para la confirmacion previa cuando va a
+        quedar parcial. El frontend no tiene los insumos de cada etapa en el
+        listado de corridas, asi que antes calculaba la cobertura a mano SIN
+        ellos (bug reportado: el aviso de split no los mencionaba)."""
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible.")
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.PENDING_INVENTORY:
+            raise ProductionDomainError("Solo se puede previsualizar la aprobacion de ordenes pendientes de Inventario.")
+        if run.raw_material_item_id is None:
+            raise ProductionDomainError("Esta orden no tiene materia prima asignada.")
+        return self._compute_coverage(run, run.quantity)
 
     def approve_materials(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         if self.inventory_service is None:

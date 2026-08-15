@@ -194,7 +194,19 @@ export type ProductionRun = {
   }>;
 };
 
-/** Dry-run de "destinar": cuánto alcanza a cubrir el stock disponible hoy. */
+// Un recurso puntual (materia prima, complemento o insumo de etapa) que no
+// alcanza -- una orden puede estar corta de varios a la vez.
+export type MaterialShortage = {
+  name: string;
+  unit: string;
+  available: string;
+  needed: string;
+  is_complement: boolean;
+};
+
+/** Dry-run de "destinar" o de "aprobar materiales": cuánto alcanza a cubrir
+ * el stock disponible hoy. `shortages` trae TODOS los recursos cortos, no
+ * solo el que manda la fracción cubierta (limiting_*). */
 export type AllocationPreview = {
   covered_qty: string;
   target_qty: string;
@@ -204,6 +216,7 @@ export type AllocationPreview = {
   limiting_unit: string;
   limiting_required_per_unit: string;
   limiting_is_complement: boolean;
+  shortages: MaterialShortage[];
 };
 
 // Producto resultante elegido: pieza existente (targetItemId) o tipo del

@@ -1773,15 +1773,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         setOrderRecipe(null);
         return;
       }
-      // Siempre se pide confirmar/editar los complementos, aunque ya exista
-      // una receta previa: sus valores solo prellenan como sugerencia.
+      // Siempre se pide escribir la cantidad de nuevo, aunque ya exista una
+      // receta previa: solo se reusa la LISTA de complementos (cuales hacen
+      // falta), nunca el valor guardado -- Rodrigo: no debe salir con el
+      // ultimo valor, debe salir vacio para llenarlo de nuevo cada vez.
       setOrderRecipe(null);
       setRecipeLines(
         recipe.items.map((item) => ({
           itemId: item.complement_item_id,
           label: item.name ?? "Complemento",
           unitCode: item.unit_code ?? "",
-          perUnit: String(Number(item.quantity)),
+          perUnit: "",
         })),
       );
       setRecipeModalContext("order");

@@ -45,6 +45,7 @@ import {
   approveAdditionalMaterial,
   approveProductionRunMaterials,
   previewProductionRunAllocation,
+  previewProductionRunApproveMaterials,
   rejectAdditionalMaterial,
   rejectProductionRunMaterials,
   reserveProductionRunMaterial,
@@ -470,17 +471,10 @@ export function InventoryDashboard() {
   } | null>(null);
   // Pregunta previa al split: se muestra ANTES de aprobar cuando el stock no
   // alcanza para toda la cantidad, para que Inventario decida si aprueba la
-  // parte cubierta (el resto queda esperando material) o cancela.
-  const [approveSplitConfirm, setApproveSplitConfirm] = useState<{
-    run: ProductionRun;
-    // Todos los recursos con stock insuficiente, no solo el mas corto -- una
-    // orden puede quedar corta de materia prima Y de un complemento a la vez
-    // (bug reportado: el aviso solo mencionaba uno).
-    shortages: Array<{ name: string; unitCode: string; available: string; needed: string }>;
-    coveredQty: string;
-    requiredQty: string;
-    missingQty: string;
-  } | null>(null);
+  // parte cubierta (el resto queda esperando material) o cancela. La
+  // cobertura (incluidos TODOS los recursos cortos, no solo uno) sale del
+  // dry-run del backend -- previewProductionRunApproveMaterials.
+  const [approveSplitConfirm, setApproveSplitConfirm] = useState<{ run: ProductionRun; preview: AllocationPreview } | null>(null);
   // Reclasificar merma ya recibida: mueve cantidad de un movimiento
   // INGRESO_PRODUCCION de item WASTE hacia otro item WASTE.
   const [reclassifyConfirm, setReclassifyConfirm] = useState<{ movement: InventoryMovement } | null>(null);
@@ -1051,60 +1045,25 @@ export function InventoryDashboard() {
     return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
-  function handleApproveClick(run: ProductionRun) {
-    // Mismo criterio que el backend (_compute_coverage): la fraccion mas
-    // corta entre materia prima y cada complemento pedido manda cuanto se
-    // cubre (los insumos por etapa quedan afuera de este preview porque el
-    // frontend no los recibe en el listado de corridas). A diferencia del
-    // backend, aca se juntan TODOS los recursos que no alcanzan -- no solo
-    // el mas corto -- para que el aviso los liste todos, no solo uno.
-    const requiredQty = Number(run.quantity);
-    let fraction = 1;
-    const shortages: Array<{ name: string; unitCode: string; available: string; needed: string }> = [];
-
-    const rawItem = items.find((it) => it.id === run.raw_material_item_id) ?? null;
-    const rawStock = rawItem ? Number(rawItem.current_stock) : 0;
-    if (requiredQty > 0 && rawStock < requiredQty) {
-      fraction = Math.max(0, rawStock / requiredQty);
-      shortages.push({
-        name: rawItem?.name ?? "Materia prima",
-        unitCode: run.raw_material_unit_code,
-        available: numericText(String(rawStock)),
-        needed: numericText(run.quantity),
-      });
-    }
-
-    for (const complement of run.complements ?? []) {
-      if (complement.status !== "PENDIENTE") continue;
-      const complementItem = items.find((it) => it.id === complement.item_id);
-      if (!complementItem) continue;
-      const needed = Number(complement.quantity);
-      const stock = Number(complementItem.current_stock);
-      if (needed > 0 && stock < needed) {
-        const candidate = Math.max(0, stock / needed);
-        if (candidate < fraction) fraction = candidate;
-        shortages.push({
-          name: complementItem.name,
-          unitCode: complement.unit_code,
-          available: numericText(String(stock)),
-          needed: numericText(complement.quantity),
-        });
+  async function handleApproveClick(run: ProductionRun) {
+    // La cobertura la calcula el backend (_compute_coverage), la misma
+    // fuente que usa approve_materials de verdad -- antes se replicaba a
+    // mano aca y siempre quedaba corta de algo (primero los insumos por
+    // etapa, que el frontend ni recibe; bugs reportados varias veces).
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      const preview = await previewProductionRunApproveMaterials(run.id);
+      if (preview.shortages.length > 0 && Number(preview.covered_qty) > 0 && preview.is_partial) {
+        setApproveSplitConfirm({ run, preview });
+        return;
       }
+      await handleApproveMaterials(run);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo calcular la cobertura de esta orden.");
+    } finally {
+      setIsSavingProduction(false);
     }
-
-    const coveredQty = Math.max(0, Math.min(requiredQty, requiredQty * fraction));
-
-    if (shortages.length > 0 && coveredQty > 0 && coveredQty < requiredQty) {
-      setApproveSplitConfirm({
-        run,
-        shortages,
-        coveredQty: numericText(String(coveredQty)),
-        requiredQty: numericText(run.quantity),
-        missingQty: numericText(String(requiredQty - coveredQty)),
-      });
-      return;
-    }
-    void handleApproveMaterials(run);
   }
 
   async function handleApproveMaterials(run: ProductionRun) {
@@ -5145,7 +5104,7 @@ export function InventoryDashboard() {
                           <button
                             className="button buttonPrimary"
                             disabled={isSavingProduction}
-                            onClick={() => handleApproveClick(run)}
+                            onClick={() => void handleApproveClick(run)}
                             type="button"
                           >
                             Aprobar
@@ -5334,8 +5293,8 @@ export function InventoryDashboard() {
               <div>
                 <h2>Stock insuficiente{approveSplitConfirm.run.production_code ? ` para ${approveSplitConfirm.run.production_code}` : ""}</h2>
                 <p>
-                  Solo hay {approveSplitConfirm.coveredQty} de {approveSplitConfirm.requiredQty}{" "}
-                  {approveSplitConfirm.run.raw_material_unit_code} cubiertos.
+                  Solo hay {numericText(approveSplitConfirm.preview.covered_qty)} de{" "}
+                  {numericText(approveSplitConfirm.preview.target_qty)} {approveSplitConfirm.run.raw_material_unit_code} cubiertos.
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setApproveSplitConfirm(null)} type="button">
@@ -5343,18 +5302,19 @@ export function InventoryDashboard() {
               </button>
             </div>
             <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-              {approveSplitConfirm.shortages.map((shortage, index) => (
+              {approveSplitConfirm.preview.shortages.map((shortage, index) => (
                 <div key={index} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
                   <span style={{ color: "var(--muted)" }}>
-                    <strong>{shortage.name}</strong>: quedan {shortage.available} {shortage.unitCode} disponibles, se
-                    necesitan {shortage.needed} {shortage.unitCode}.
+                    <strong>{shortage.name}</strong>: quedan {numericText(shortage.available)} {shortage.unit} disponibles, se
+                    necesitan {numericText(shortage.needed)} {shortage.unit}.
                   </span>
                 </div>
               ))}
             </div>
             <p style={{ margin: "8px 0 0" }}>
-              ¿Aprobar la parte cubierta? Los {approveSplitConfirm.missingQty} {approveSplitConfirm.run.raw_material_unit_code} restantes
-              pasarán a una nueva orden a la espera de más material.
+              ¿Aprobar la parte cubierta? Los{" "}
+              {numericText(String(Number(approveSplitConfirm.preview.target_qty) - Number(approveSplitConfirm.preview.covered_qty)))}{" "}
+              {approveSplitConfirm.run.raw_material_unit_code} restantes pasarán a una nueva orden a la espera de más material.
             </p>
             <div className="modalActions">
               <button className="button" onClick={() => setApproveSplitConfirm(null)} type="button">

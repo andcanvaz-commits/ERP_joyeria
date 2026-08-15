@@ -16,6 +16,7 @@ from backend.modules.production.schemas import (
     AssemblyRecipeRead,
     AssemblyRecipeUpsert,
     ComplementReturnCreate,
+    MaterialShortageRead,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
@@ -49,6 +50,28 @@ def get_production_service():
         raise
     finally:
         session.close()
+
+
+def _coverage_to_preview(coverage) -> AllocationPreviewRead:
+    """_MaterialCoverage -> AllocationPreviewRead, compartido entre el
+    preview de destinar y el de aprobar materiales (misma forma, mismo
+    calculo de origen: ProductionService._compute_coverage)."""
+    return AllocationPreviewRead(
+        covered_qty=coverage.covered_qty,
+        target_qty=coverage.target_qty,
+        is_partial=coverage.is_partial,
+        limiting_name=coverage.limiting_name,
+        limiting_available=coverage.limiting_available,
+        limiting_unit=coverage.limiting_unit,
+        limiting_required_per_unit=coverage.limiting_required_per_unit,
+        limiting_is_complement=coverage.limiting_is_complement,
+        shortages=[
+            MaterialShortageRead(
+                name=s.name, unit=s.unit, available=s.available, needed=s.needed, is_complement=s.is_complement
+            )
+            for s in coverage.shortages
+        ],
+    )
 
 
 ADMIN_ONLY_PRODUCTION_PERMISSIONS = {
@@ -283,16 +306,27 @@ def preview_run_allocation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return AllocationPreviewRead(
-        covered_qty=coverage.covered_qty,
-        target_qty=coverage.target_qty,
-        is_partial=coverage.is_partial,
-        limiting_name=coverage.limiting_name,
-        limiting_available=coverage.limiting_available,
-        limiting_unit=coverage.limiting_unit,
-        limiting_required_per_unit=coverage.limiting_required_per_unit,
-        limiting_is_complement=coverage.limiting_is_complement,
-    )
+    return _coverage_to_preview(coverage)
+
+
+@router.get("/runs/{run_id}/approve-materials-preview", response_model=AllocationPreviewRead)
+def preview_run_approve_materials(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> AllocationPreviewRead:
+    """Dry-run: cuanto cubriria aprobar materiales HOY, con TODOS los
+    recursos cortos (materia prima, complementos e insumos por etapa) --
+    alimenta la confirmacion previa cuando la aprobacion va a quedar
+    parcial y la orden se divide. NO consume ni cambia estado."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        coverage = service.preview_approve_materials(run_id)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _coverage_to_preview(coverage)
 
 
 @router.post("/runs/{run_id}/reserve-material", response_model=ProductionRunRead)

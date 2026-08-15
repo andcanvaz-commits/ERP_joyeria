@@ -171,8 +171,25 @@ class ReceiveFinishedProductPayload(BaseModel):
     waste_item_name: str | None = Field(default=None, max_length=180)
 
 
+class MaterialShortageRead(BaseModel):
+    """Un recurso puntual (materia prima, complemento o insumo de etapa) que
+    no alcanza -- una orden puede estar corta de varios a la vez."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    unit: str
+    available: Decimal
+    needed: Decimal
+    is_complement: bool
+
+
 class AllocationPreviewRead(BaseModel):
-    """Dry-run de destinar: cuanto se alcanza a cubrir, sin tocar nada."""
+    """Dry-run de destinar o de aprobar materiales: cuanto se alcanza a
+    cubrir, sin tocar nada. Misma forma para las dos, mismo calculo
+    (_compute_coverage). `shortages` trae TODOS los recursos cortos, no solo
+    el que manda la fraccion cubierta (limiting_*, que se mantiene por
+    compatibilidad con el mensaje de error de aprobacion bloqueada)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -184,6 +201,7 @@ class AllocationPreviewRead(BaseModel):
     limiting_unit: str
     limiting_required_per_unit: Decimal
     limiting_is_complement: bool
+    shortages: list[MaterialShortageRead] = Field(default_factory=list)
 
 
 class AllocateMaterialPayload(BaseModel):

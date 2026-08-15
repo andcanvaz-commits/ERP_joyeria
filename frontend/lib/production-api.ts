@@ -140,6 +140,12 @@ export function previewProductionRunAllocation(runId: string, quantityUnits: str
   });
 }
 
+/** Dry-run: cuánto cubriría aprobar materiales hoy, con todos los recursos
+ * cortos (materia prima, complementos e insumos). No consume ni cambia estado. */
+export function previewProductionRunApproveMaterials(runId: string) {
+  return apiRequest<AllocationPreview>(`/api/production/runs/${runId}/approve-materials-preview`);
+}
+
 /** Guarda el stock para la orden sin consumirlo ni arrancarla. */
 export function reserveProductionRunMaterial(runId: string, quantityUnits: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/reserve-material`, {
