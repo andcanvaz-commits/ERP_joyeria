@@ -5373,10 +5373,6 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>Stock insuficiente{approveSplitConfirm.run.production_code ? ` para ${approveSplitConfirm.run.production_code}` : ""}</h2>
-                <p>
-                  Solo hay {numericText(approveSplitConfirm.preview.covered_qty)} de{" "}
-                  {numericText(approveSplitConfirm.preview.target_qty)} {approveSplitConfirm.run.raw_material_unit_code} cubiertos.
-                </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setApproveSplitConfirm(null)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -5393,9 +5389,7 @@ export function InventoryDashboard() {
               ))}
             </div>
             <p style={{ margin: "8px 0 0" }}>
-              ¿Aprobar la parte cubierta? Los{" "}
-              {numericText(String(Number(approveSplitConfirm.preview.target_qty) - Number(approveSplitConfirm.preview.covered_qty)))}{" "}
-              {approveSplitConfirm.run.raw_material_unit_code} restantes pasarán a una nueva orden a la espera de más material.
+              ¿Aprobar la parte cubierta? El resto pasará a una nueva orden a la espera de más material.
             </p>
             <div className="modalActions">
               <button className="button" onClick={() => setApproveSplitConfirm(null)} type="button">
