@@ -30,6 +30,8 @@ export type OrdenProduccionModel = {
   entregaTotalRows: DocTotalRow[];
   recepcionTotalRows: DocTotalRow[];
   cancelada: boolean;
+  recepcionPhase: ActaRightPhase;
+  productosResultantes: string;
 };
 
 const DASH = "—"; // —
@@ -38,6 +40,53 @@ function num(value: string | null | undefined): number {
   if (value === null || value === undefined || value === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export type ActaRightPhase = "NO_APROBADO" | "SOLO_PRODUCTO" | "CONSTRUYENDO";
+
+/** Fase del lado RECIBIDO del certificado/acta: sin aprobar todavia, aprobado
+ * pero sin avance real, o con avance real que ya justifica mostrar la tabla.
+ * Una etapa que pesa y termina en 0% de merma cuenta como avance real -- no
+ * es "merma > 0" lo que dispara CONSTRUYENDO, es que de verdad se peso algo. */
+export function actaRightPhase(params: {
+  approved: boolean;
+  stages: Array<{ requires_weighing: boolean; status: string }>;
+  hasRecepcionLines: boolean;
+}): ActaRightPhase {
+  if (!params.approved) return "NO_APROBADO";
+  const hasWeighedStage = params.stages.some(
+    (s) => s.requires_weighing && s.status === "FINALIZADA"
+  );
+  if (hasWeighedStage || params.hasRecepcionLines) return "CONSTRUYENDO";
+  return "SOLO_PRODUCTO";
+}
+
+function formatQty(value: number): string {
+  return value.toLocaleString("es-EC", { maximumFractionDigits: 4 });
+}
+
+/** "Anillo Filigrana (5 und) · Cadena Barbada (3 und)" -- mismo formato que
+ * RunSummaryRows en solicitudes-view.tsx. Agrupa por identidad real
+ * (product_type_id / target_item_id), no por nombre, para no fusionar dos
+ * productos distintos que compartan texto. */
+export function formatProductosResultantes(
+  products: NonNullable<ProductionRun["products"]>
+): string {
+  const merged = new Map<string, { label: string; quantity: number; unit: string }>();
+  for (const p of products) {
+    const key = p.product_type_id ?? p.target_item_id ?? p.product_name ?? "—";
+    const qty = num(p.quantity);
+    const existing = merged.get(key);
+    if (existing) {
+      existing.quantity += qty;
+    } else {
+      merged.set(key, { label: p.product_name ?? "—", quantity: qty, unit: p.unit_code || "und" });
+    }
+  }
+  if (merged.size === 0) return "—";
+  return [...merged.values()]
+    .map((p) => `${p.label} (${formatQty(p.quantity)} ${p.unit})`)
+    .join(" · ");
 }
 
 /** Mapa inventory_item_id → nombre, a partir de la lista de inventario. */
@@ -162,6 +211,19 @@ export function buildOrdenProduccion(
     }
   }
 
+  const recepcionPhase: ActaRightPhase = isHistorical
+    ? "CONSTRUYENDO"
+    : actaRightPhase({
+        approved: canPrintEntrega(family),
+        stages: family.flatMap((run) => run.stages),
+        hasRecepcionLines: family.some((run) =>
+          (run.acta_lines ?? []).some((line) => line.side === "RECEPCION")
+        ),
+      });
+  const productosResultantes = formatProductosResultantes(
+    family.flatMap((run) => run.products ?? [])
+  );
+
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
     procesoNombre: root.process_name,
@@ -173,7 +235,9 @@ export function buildOrdenProduccion(
     recepcion,
     entregaTotalRows,
     recepcionTotalRows,
-    cancelada: family.every((run) => run.status === "CANCELADA")
+    cancelada: family.every((run) => run.status === "CANCELADA"),
+    recepcionPhase,
+    productosResultantes
   };
 }
 
