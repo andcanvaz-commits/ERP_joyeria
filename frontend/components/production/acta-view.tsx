@@ -102,16 +102,10 @@ function ActaDocSide({
         {title}
         <span className="opColSub"> · {formatDocDate(fecha) || DASH} · {responsable || DASH}</span>
       </div>
-      {notice && notice.phase !== "CONSTRUYENDO" ? (
+      {notice && notice.phase === "SOLO_PRODUCTO" ? (
         <div className="opColNotice">
-          {notice.phase === "NO_APROBADO" ? (
-            <span>Aún no aprobado por inventario</span>
-          ) : (
-            <>
-              <strong>Producto resultante</strong>
-              <span>{notice.productos}</span>
-            </>
-          )}
+          <strong>Producto resultante</strong>
+          <span>{notice.productos}</span>
         </div>
       ) : (
       <table className="opTable">

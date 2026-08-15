@@ -56,17 +56,13 @@ function SideColumn({
           </span>
         ) : null}
       </div>
-      {notice && notice.phase !== "CONSTRUYENDO" ? (
+      {notice && notice.phase === "SOLO_PRODUCTO" ? (
         <div className="opColNotice">
-          {notice.phase === "NO_APROBADO" ? (
-            <span className={dataClass}>Aún no aprobado por inventario</span>
-          ) : (
-            <span className={dataClass}>
-              <strong>Producto resultante</strong>
-              <br />
-              {notice.productos}
-            </span>
-          )}
+          <span className={dataClass}>
+            <strong>Producto resultante</strong>
+            <br />
+            {notice.productos}
+          </span>
         </div>
       ) : (
         <table className="opTable">

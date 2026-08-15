@@ -42,18 +42,22 @@ function num(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export type ActaRightPhase = "NO_APROBADO" | "SOLO_PRODUCTO" | "CONSTRUYENDO";
+export type ActaRightPhase = "SOLO_PRODUCTO" | "CONSTRUYENDO";
 
-/** Fase del lado RECIBIDO del certificado/acta: sin aprobar todavia, aprobado
- * pero sin avance real, o con avance real que ya justifica mostrar la tabla.
- * Una etapa que pesa y termina en 0% de merma cuenta como avance real -- no
- * es "merma > 0" lo que dispara CONSTRUYENDO, es que de verdad se peso algo. */
+/** Fase del lado RECIBIDO del certificado/acta. La aprobacion de inventario
+ * es del lado ENTREGA, no de RECEPCION -- sin aprobar todavia, RECEPCION no
+ * lleva ningun aviso especial, se queda en blanco (CONSTRUYENDO con tabla
+ * vacia, igual que siempre). Solo cuando ya se aprobo y todavia no hay avance
+ * real (ninguna etapa que pesa termino, sin devoluciones) tiene sentido un
+ * aviso: que producto sera el resultante. Una etapa que pesa y termina en 0%
+ * de merma cuenta como avance real -- no es "merma > 0" lo que dispara
+ * CONSTRUYENDO, es que de verdad se peso algo. */
 export function actaRightPhase(params: {
   approved: boolean;
   stages: Array<{ requires_weighing: boolean; status: string }>;
   hasRecepcionLines: boolean;
 }): ActaRightPhase {
-  if (!params.approved) return "NO_APROBADO";
+  if (!params.approved) return "CONSTRUYENDO";
   const hasWeighedStage = params.stages.some(
     (s) => s.requires_weighing && s.status === "FINALIZADA"
   );
