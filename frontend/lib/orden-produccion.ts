@@ -143,6 +143,14 @@ export function buildOrdenProduccion(
   const entrega: DocSide[] = [];
   const recepcion: DocSide[] = [];
   const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
+  // Misma condicion que dispara CONSTRUYENDO en actaRightPhase: una etapa que
+  // pesa y termina cuenta como avance real de RECEPCION aunque todavia no
+  // haya devolucion ni recepcion final -- sin esto, un pesaje sin devolucion
+  // dejaba el evento de recepcion sin empujar y el certificado divergia de
+  // Ver Acta (que ya mostraba fila por fila con la misma condicion).
+  const familyHasWeighedStage = family
+    .flatMap((run) => run.stages)
+    .some((s) => s.requires_weighing && s.status === "FINALIZADA");
 
   for (const run of family) {
     const entregaLines = (run.event_lines ?? []).filter((line) => line.side === "ENTREGA");
@@ -164,13 +172,18 @@ export function buildOrdenProduccion(
     }
 
     const recepcionLines = (run.event_lines ?? []).filter((line) => line.side === "RECEPCION");
-    if (run.received_at !== null) {
+    const recepcionActaLines = (run.acta_lines ?? []).filter((line) => line.side === "RECEPCION");
+    // Mismo criterio que actaRightPhase: una linea PLAN (producto resultante
+    // planeado) no es avance real. Esperar a received_at para recien mostrar
+    // algo dejaba el certificado en "solo totales" mientras ya habia
+    // devoluciones/merma real -- Ver Acta ya las mostraba de una (bug
+    // reportado: Documentos no se veia igual que Ver Acta).
+    const hasRealRecepcionActivity = recepcionActaLines.some((line) => line.source !== "PLAN");
+    if (recepcionLines.length > 0 || hasRealRecepcionActivity || run.received_at !== null || familyHasWeighedStage) {
       const rows: DocRow[] =
         recepcionLines.length > 0
           ? recepcionLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
-          : (run.acta_lines ?? [])
-              .filter((line) => line.side === "RECEPCION")
-              .map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
+          : recepcionActaLines.map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
       recepcion.push({
         fecha: run.received_at,
         responsable: run.received_by_name ?? DASH,

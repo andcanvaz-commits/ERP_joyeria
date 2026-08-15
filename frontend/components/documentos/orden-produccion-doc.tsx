@@ -50,16 +50,16 @@ function SideColumn({
     <section className="opCol">
       <div className="opColHead">
         {title}
-        {singleEvent ? (
+        {singleEvent && singleEvent.fecha ? (
           <span className="opColSub">
             {" "}
             · {formatDocDate(singleEvent.fecha) || "—"} · {singleEvent.responsable || DASH_RESPONSABLE}
           </span>
-        ) : events.length === 0 ? (
+        ) : events.length > 1 ? null : (
           <span className="opColSubPending">
             <Info aria-hidden="true" size={12} /> Pendiente
           </span>
-        ) : null}
+        )}
       </div>
       {notice && notice.phase === "SOLO_PRODUCTO" ? (
         <div className="opColNotice">
