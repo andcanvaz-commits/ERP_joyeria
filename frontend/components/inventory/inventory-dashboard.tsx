@@ -48,6 +48,7 @@ import {
   previewProductionRunApproveMaterials,
   rejectAdditionalMaterial,
   rejectProductionRunMaterials,
+  releaseProductionRunReservation,
   reserveProductionRunMaterial,
   listProductionRuns,
   receiveProductionRunFinishedProduct,
@@ -1119,6 +1120,23 @@ export function InventoryDashboard() {
     }
   }
 
+  // La reserva la hizo Inventario ("Reservar y esperar a completar" del
+  // modal Destinar) -- liberarla tambien es decision de Inventario.
+  async function handleReleaseReservation(run: ProductionRun) {
+    setError(null);
+    setIsSavingProduction(true);
+    try {
+      await releaseProductionRunReservation(run.id);
+      setSuccess(`Reserva liberada para ${run.production_code ?? run.process_name}: el material vuelve a estar disponible.`);
+      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+      void queryClient.invalidateQueries({ queryKey: ["production"] });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo liberar la reserva.");
+    } finally {
+      setIsSavingProduction(false);
+    }
+  }
+
   async function handleConfirmReclassify() {
     if (!reclassifyConfirm || !reclassifyTargetId || isReclassifying) return;
     setIsReclassifying(true);
@@ -1406,8 +1424,16 @@ export function InventoryDashboard() {
       .filter((request) => request.status === "PENDIENTE")
       .map((request) => ({ run, request })),
   );
+  // ESPERANDO_MATERIAL con algo ya reservado: la reserva la hizo Inventario
+  // (boton "Reservar y esperar a completar" del modal Destinar), asi que
+  // liberarla tambien es decision de Inventario, no de Produccion -- antes
+  // el boton "Liberar reserva" vivia en Produccion, que solo debia poder
+  // VER estas ordenes (bug reportado: se puede confundir con inventario).
+  const waitingReservedRuns = productionRuns.filter(
+    (run) => run.status === "ESPERANDO_MATERIAL" && Number(run.reserved_material_quantity ?? 0) > 0,
+  );
   const totalPendingSolicitudes =
-    pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length;
+    pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length + waitingReservedRuns.length;
   // La bandeja se cierra sola apenas queda en 0, sin importar que la vacio:
   // una accion adentro del modal, el refetch periodico (10s) o el refetch al
   // volver a la pestana. Antes esto se checaba a mano despues de cada accion
@@ -5250,6 +5276,42 @@ export function InventoryDashboard() {
                           </div>
                         </div>
                       ) : null}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {waitingReservedRuns.length > 0 ? (
+              <>
+                <h3 style={{ margin: "12px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
+                  Reservas de material ({waitingReservedRuns.length})
+                </h3>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {waitingReservedRuns.map((run) => (
+                    <div className="solicitudCard" key={run.id}>
+                      <div className="solicitudCardHead">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>
+                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                            {run.process_name}
+                          </strong>
+                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
+                            Reservado {numericText(run.reserved_material_quantity ?? "0")} de{" "}
+                            {numericText(run.total_required_material)} {run.raw_material_unit_code}
+                            {run.reservation_is_complete ? "" : " · reserva incompleta"}
+                          </span>
+                        </div>
+                        <button
+                          className="button"
+                          disabled={isSavingProduction}
+                          onClick={() => void handleReleaseReservation(run)}
+                          type="button"
+                          style={{ flexShrink: 0 }}
+                        >
+                          Liberar reserva
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

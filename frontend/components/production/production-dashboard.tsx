@@ -48,7 +48,6 @@ import {
   listAssemblyRecipes,
   listProcesses,
   listProductionRuns,
-  releaseProductionRunReservation,
   startProductionRun,
   startProductionRunWithReserved,
   updateProcess,
@@ -1447,21 +1446,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  /** Devuelve el material reservado al stock disponible del inventario. */
-  async function handleReleaseReservation(run: ProductionRun) {
-    setError(null);
-    setSuccess(null);
-    setReservationRunId(run.id);
-    try {
-      await releaseProductionRunReservation(run.id);
-      setSuccess("Reserva liberada: el material vuelve a estar disponible.");
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo liberar la reserva.");
-    } finally {
-      setReservationRunId(null);
-    }
-  }
 
   async function handleFinishStage(
     stage: ProductionRunStage,
@@ -2276,6 +2260,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         </span>
                       ) : null}
                     </div>
+                    {/* Liberar la reserva es decision de Inventario (fue quien
+                        la creo, desde el modal "Destinar material") -- ese
+                        boton vive ahora en el panel de Solicitudes de
+                        Inventario, no aca (bug reportado: se confundia con
+                        una accion de Produccion). */}
                     {Number(run.reserved_material_quantity ?? 0) > 0 ? (
                       <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                         {run.reservation_is_complete ? (
@@ -2290,14 +2279,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         ) : (
                           <span className="panelText">Reserva incompleta: falta material para iniciar.</span>
                         )}
-                        <button
-                          className="button"
-                          disabled={reservationRunId === run.id}
-                          onClick={() => void handleReleaseReservation(run)}
-                          type="button"
-                        >
-                          Liberar reserva
-                        </button>
                       </div>
                     ) : null}
                   </div>
