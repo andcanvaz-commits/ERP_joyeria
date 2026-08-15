@@ -402,11 +402,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: listCatalogSegments,
     enabled: Boolean(currentUser),
   });
-  // Recetas completas (con complementos) para la vista de mantenimiento.
+  // Recetas completas (con complementos): alimenta la vista de mantenimiento
+  // Y el indicador de receta del picker ENSAMBLAR en Crear orden (variant
+  // "production") -- antes solo se pedia en mantenimiento, asi que ese
+  // indicador SIEMPRE mostraba "Sin receta" fuera de mantenimiento aunque la
+  // receta existiera de verdad (bug reportado: recien se veia la data real
+  // al abrir el panel de definir receta, que consulta aparte y sin ese gate).
   const { data: assemblyRecipes = EMPTY_ASSEMBLY_RECIPES } = useQuery({
     queryKey: ["assembly-recipes"],
     queryFn: listAssemblyRecipes,
-    enabled: Boolean(currentUser) && variant === "maintenance",
+    enabled: Boolean(currentUser),
   });
 
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
