@@ -2929,16 +2929,34 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {canCancelRun && canRunBeCancelled(selectedRunForStages) ? (
-                  <button
-                    className="button buttonDanger"
-                    onClick={() => openCancelRunModal(selectedRunForStages)}
-                    type="button"
-                  >
-                    <Trash2 aria-hidden="true" size={15} />
-                    Cancelar orden
-                  </button>
-                ) : null}
+                {(() => {
+                  if (!canCancelRun || !canRunBeCancelled(selectedRunForStages)) return null;
+                  const family = getRunFamily(runs, selectedRunForStages);
+                  // Con una hermana todavia activa, "Cancelar orden" sola
+                  // siempre rebota contra el backend -- se ofrece directo
+                  // "Cancelar todo" para no repetir el mismo error.
+                  const hasActiveSibling = family.some(
+                    (member) => member.id !== selectedRunForStages.id && member.status !== "CANCELADA"
+                  );
+                  if (hasActiveSibling) {
+                    return (
+                      <button className="button buttonDanger" onClick={() => openCancelFamilyModal(family)} type="button">
+                        <Trash2 aria-hidden="true" size={15} />
+                        Cancelar todo
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      className="button buttonDanger"
+                      onClick={() => openCancelRunModal(selectedRunForStages)}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={15} />
+                      Cancelar orden
+                    </button>
+                  );
+                })()}
                 <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeRunStagesModal} type="button">
                   <X aria-hidden="true" size={18} />
                 </button>
