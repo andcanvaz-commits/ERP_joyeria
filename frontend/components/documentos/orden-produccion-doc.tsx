@@ -1,4 +1,4 @@
-import { DocSide, DocTotalRow, OrdenProduccionModel, formatDocDate, formatGramos } from "@/lib/orden-produccion";
+import { ActaRightPhase, DocSide, DocTotalRow, OrdenProduccionModel, formatDocDate, formatGramos } from "@/lib/orden-produccion";
 
 export type DocMode = "entrega" | "recepcion" | "completo";
 
@@ -14,12 +14,14 @@ function SideColumn({
   events,
   title,
   dataClass,
-  totalRows
+  totalRows,
+  notice
 }: {
   events: DocSide[];
   title: string;
   dataClass: string;
   totalRows?: DocTotalRow[];
+  notice?: { phase: ActaRightPhase; productos: string };
 }) {
   // Un solo evento (caso normal, sin split): fecha/responsable van en el
   // subtitulo de la columna, no como fila de tabla — no tiene sentido
@@ -54,51 +56,65 @@ function SideColumn({
           </span>
         ) : null}
       </div>
-      <table className="opTable">
-        <thead>
-          <tr>
-            <th className="opThFecha">FECHA</th>
-            <th className="opThGramos">CANTIDAD</th>
-            <th>DETALLES</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line, index) =>
-            line.kind === "group" ? (
-              <tr className="opGroupRow" key={`group-${index}`}>
-                <td colSpan={3}>
-                  <span className={dataClass}>
-                    {formatDocDate(line.fecha) || " "} · Responsable Inventario: {line.responsable}
-                  </span>
-                </td>
-              </tr>
-            ) : (
-              <tr key={`row-${index}`}>
-                <td> </td>
-                <td className="opTdGramos">{line.row ? <span className={dataClass}>{formatGramos(line.row.gramos)} {line.row.unidad}</span> : " "}</td>
-                <td>{line.row ? <span className={dataClass}>{line.row.detalle}</span> : " "}</td>
-              </tr>
-            )
+      {notice && notice.phase !== "CONSTRUYENDO" ? (
+        <div className="opColNotice">
+          {notice.phase === "NO_APROBADO" ? (
+            <span className={dataClass}>Aún no aprobado por inventario</span>
+          ) : (
+            <span className={dataClass}>
+              <strong>Producto resultante</strong>
+              <br />
+              {notice.productos}
+            </span>
           )}
-          {totals.map((row, index) => (
-            <tr
-              className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
-              key={`total-${index}`}
-            >
-              <td> </td>
-              <td className="opTdGramos"><span className={dataClass}>{formatGramos(row.gramos)} {row.unidad}</span></td>
-              <td><span className={dataClass}>{row.label}</span></td>
+        </div>
+      ) : (
+        <table className="opTable">
+          <thead>
+            <tr>
+              <th className="opThFecha">FECHA</th>
+              <th className="opThGramos">CANTIDAD</th>
+              <th>DETALLES</th>
             </tr>
-          ))}
-          {Array.from({ length: blankCount }).map((_, index) => (
-            <tr key={`blank-${index}`}>
-              <td> </td>
-              <td className="opTdGramos"> </td>
-              <td> </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {lines.map((line, index) =>
+              line.kind === "group" ? (
+                <tr className="opGroupRow" key={`group-${index}`}>
+                  <td colSpan={3}>
+                    <span className={dataClass}>
+                      {formatDocDate(line.fecha) || " "} · Responsable Inventario: {line.responsable}
+                    </span>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={`row-${index}`}>
+                  <td> </td>
+                  <td className="opTdGramos">{line.row ? <span className={dataClass}>{formatGramos(line.row.gramos)} {line.row.unidad}</span> : " "}</td>
+                  <td>{line.row ? <span className={dataClass}>{line.row.detalle}</span> : " "}</td>
+                </tr>
+              )
+            )}
+            {totals.map((row, index) => (
+              <tr
+                className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
+                key={`total-${index}`}
+              >
+                <td> </td>
+                <td className="opTdGramos"><span className={dataClass}>{formatGramos(row.gramos)} {row.unidad}</span></td>
+                <td><span className={dataClass}>{row.label}</span></td>
+              </tr>
+            ))}
+            {Array.from({ length: blankCount }).map((_, index) => (
+              <tr key={`blank-${index}`}>
+                <td> </td>
+                <td className="opTdGramos"> </td>
+                <td> </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }
@@ -127,7 +143,13 @@ export function OrdenProduccionDoc({
         <div className="opBody">
           <SideColumn dataClass="opEntregaData" events={model.entrega} title="ENTREGADO" totalRows={model.entregaTotalRows} />
           <div className="opDivider" aria-hidden="true" />
-          <SideColumn dataClass="opRecepcionData" events={model.recepcion} title="RECIBIDO" totalRows={model.recepcionTotalRows} />
+          <SideColumn
+            dataClass="opRecepcionData"
+            events={model.recepcion}
+            notice={{ phase: model.recepcionPhase, productos: model.productosResultantes }}
+            title="RECIBIDO"
+            totalRows={model.recepcionTotalRows}
+          />
         </div>
 
         {model.cancelada ? <div className="opStamp opStampCancel">CANCELADO</div> : null}
