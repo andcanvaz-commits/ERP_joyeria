@@ -1318,6 +1318,41 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(request.run)
 
+    def _cancel_run_core(self, run: ProductionRun, current_user: CurrentUser, reason: str | None) -> None:
+        """Nucleo de la cancelacion: libera cualquier reserva y devuelve al
+        inventario todo lo que la corrida ya consumio (materia prima, insumos,
+        complementos), y la marca CANCELADA. Sin el chequeo de "hijo activo" --
+        lo usa tanto cancel_run (una corrida sola, ese chequeo si aplica) como
+        cancel_run_family (todas las corridas de la familia juntas, donde el
+        chequeo no tiene sentido: se estan cancelando todas a la vez)."""
+        if run.status == ProductionRunStatus.WAITING_MATERIAL:
+            run.reserved_material_quantity = Decimal("0")
+            for complement in run.complements:
+                complement.reserved_quantity = Decimal("0")
+
+        if run.materials_approved_at is not None:
+            if self.inventory_service is None:
+                raise ProductionDomainError("Inventario no esta disponible para revertir el consumo de esta orden.")
+            self.inventory_service.reverse_production_consumption(
+                run.id,
+                current_user.id,
+                reason=(
+                    f"Reversion por cancelacion de orden {run.production_code or run.id}."
+                    + (f" {reason}" if reason else "")
+                ),
+            )
+
+        run.status = ProductionRunStatus.CANCELLED
+        run.rejected_by_user_id = current_user.id
+        run.rejection_reason = reason
+        run.rejected_at = datetime.utcnow()
+        for complement in run.complements:
+            if complement.status == ComplementRequestStatus.PENDING:
+                complement.status = ComplementRequestStatus.REJECTED
+        for request in run.additional_material_requests:
+            if request.status == ComplementRequestStatus.PENDING:
+                request.status = ComplementRequestStatus.REJECTED
+
     def cancel_run(self, run_id: UUID, current_user: CurrentUser, reason: str | None) -> ProductionRunRead:
         """Cancela una orden por error (etapa aceptada por equivocacion, dato mal
         tipeado, etc.): libera cualquier reserva y devuelve al inventario todo lo
@@ -1348,38 +1383,61 @@ class ProductionService:
         if active_child is not None:
             raise ProductionDomainError(
                 "Esta orden tiene una corrida hija activa (se dividio por falta de material). "
-                "Cancela primero esa corrida hija."
+                "Cancela primero esa corrida hija, o cancela toda la familia junta desde 'Cancelar todo'."
             )
 
-        if run.status == ProductionRunStatus.WAITING_MATERIAL:
-            run.reserved_material_quantity = Decimal("0")
-            for complement in run.complements:
-                complement.reserved_quantity = Decimal("0")
-
-        if run.materials_approved_at is not None:
-            if self.inventory_service is None:
-                raise ProductionDomainError("Inventario no esta disponible para revertir el consumo de esta orden.")
-            self.inventory_service.reverse_production_consumption(
-                run.id,
-                current_user.id,
-                reason=(
-                    f"Reversion por cancelacion de orden {run.production_code or run.id}."
-                    + (f" {reason}" if reason else "")
-                ),
-            )
-
-        run.status = ProductionRunStatus.CANCELLED
-        run.rejected_by_user_id = current_user.id
-        run.rejection_reason = reason
-        run.rejected_at = datetime.utcnow()
-        for complement in run.complements:
-            if complement.status == ComplementRequestStatus.PENDING:
-                complement.status = ComplementRequestStatus.REJECTED
-        for request in run.additional_material_requests:
-            if request.status == ComplementRequestStatus.PENDING:
-                request.status = ComplementRequestStatus.REJECTED
+        self._cancel_run_core(run, current_user, reason)
         self.repository.flush()
         return self._read_with_names(run)
+
+    def cancel_run_family(
+        self, run_id: UUID, current_user: CurrentUser, reason: str | None
+    ) -> list[ProductionRunRead]:
+        """Cancela TODA la familia de una orden dividida (la raiz y cada corrida
+        hija) de una sola vez, sin importar en que estado quedo cada una -- una
+        corrida ya EN_PROCESO y su hermana todavia ESPERANDO_MATERIAL se
+        cancelan juntas, revirtiendo a inventario lo que cada una ya haya
+        consumido. Existe para el caso donde un split arranco solo una parte y
+        el resto ya no tiene sentido seguir esperando: cancelar la raiz sola
+        (cancel_run) lo bloquea el chequeo de "hijo activo"; esta funcion no
+        lo tiene porque cancela a todos de una."""
+        reason = (reason or "").strip() or None
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+
+        root_code = run.root_production_code or run.production_code
+        from sqlalchemy import or_, select
+
+        family = (
+            self.repository.session.execute(
+                select(ProductionRun).where(
+                    or_(
+                        ProductionRun.production_code == root_code,
+                        ProductionRun.root_production_code == root_code,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+            if root_code is not None
+            else [run]
+        )
+        if not family:
+            family = [run]
+
+        cancellable = [
+            member
+            for member in family
+            if member.status not in (ProductionRunStatus.CANCELLED, ProductionRunStatus.RECEIVED)
+        ]
+        if not cancellable:
+            raise ProductionDomainError("No hay ninguna parte de esta orden que se pueda cancelar.")
+
+        for member in cancellable:
+            self._cancel_run_core(member, current_user, reason)
+        self.repository.flush()
+        return [self._read_with_names(member) for member in cancellable]
 
     def allocate_material(
         self, run_id: UUID, quantity_units: Decimal, current_user: CurrentUser

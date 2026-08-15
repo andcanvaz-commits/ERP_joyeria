@@ -230,6 +230,25 @@ def cancel_run(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.post("/runs/{run_id}/cancel-family", response_model=list[ProductionRunRead])
+def cancel_run_family(
+    run_id: UUID,
+    payload: RunCancelPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> list[ProductionRunRead]:
+    # Cancela toda la familia (raiz + corridas hijas de split) de una vez,
+    # sin el chequeo de "hijo activo" de cancel_run -- pensado para cuando
+    # un split arranco solo una parte y el resto ya no tiene sentido esperar.
+    ensure_permission(current_user, "production.runs.delete")
+    try:
+        return service.cancel_run_family(run_id, current_user, payload.reason)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/runs/{run_id}/allocate-material", response_model=ProductionRunRead)
 def allocate_run_material(
     run_id: UUID,

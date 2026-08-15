@@ -167,3 +167,59 @@ def test_cancel_unknown_run_raises_not_found(production_service, current_user):
 
     with pytest.raises(ProductionNotFoundError):
         production_service.cancel_run(uuid.uuid4(), current_user, "motivo")
+
+
+def test_cancel_run_family_cancels_parent_and_waiting_child_together(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Un split donde solo el padre arranco (60g consumidos) y la hija sigue
+    ESPERANDO_MATERIAL (40g reservados, nunca consumidos): cancelar la
+    familia desde el padre cancela y revierte ambas de una, sin tener que
+    cancelar la hija primero."""
+    parent_id, child = _create_waiting_child(
+        production_service, current_user, process, raw_material, target_complement
+    )
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")  # 60g consumidos por el padre
+
+    results = production_service.cancel_run_family(parent_id, current_user, "split ya no tiene sentido")
+
+    assert {r.status for r in results} == {"CANCELADA"}
+    assert {r.id for r in results} == {parent_id, child.id}
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("60")  # revertidos los 60g consumidos
+    assert production_service.inventory_service.available_stock(raw_material) == Decimal("60")
+
+
+def test_cancel_run_family_from_child_also_cancels_parent(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Da igual desde cual miembro de la familia se dispara: siempre se
+    resuelve la familia completa por root_production_code."""
+    parent_id, child = _create_waiting_child(
+        production_service, current_user, process, raw_material, target_complement
+    )
+
+    results = production_service.cancel_run_family(child.id, current_user, "motivo")
+
+    assert {r.id for r in results} == {parent_id, child.id}
+
+
+def test_cancel_run_family_skips_already_cancelled_members(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    parent_id, child = _create_waiting_child(
+        production_service, current_user, process, raw_material, target_complement
+    )
+    production_service.cancel_run(child.id, current_user, "cancelada antes")
+
+    results = production_service.cancel_run_family(parent_id, current_user, "ahora el resto")
+
+    assert {r.id for r in results} == {parent_id}
+
+
+def test_cancel_run_family_unknown_run_raises_not_found(production_service, current_user):
+    import uuid
+
+    with pytest.raises(ProductionNotFoundError):
+        production_service.cancel_run_family(uuid.uuid4(), current_user, "motivo")

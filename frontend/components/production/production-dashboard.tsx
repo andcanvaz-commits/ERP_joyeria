@@ -35,6 +35,7 @@ import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
   cancelProductionRun,
+  cancelProductionRunFamily,
   createProcess,
   createProductionRun,
   defineRunAssembly,
@@ -472,6 +473,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [cancelRun, setCancelRun] = useState<ProductionRun | null>(null);
   const [cancelRunReason, setCancelRunReason] = useState("");
   const [isCancellingRun, setIsCancellingRun] = useState(false);
+  // Cancelar TODA la familia (raiz + hijas de split) de una vez -- para cuando
+  // un split arranco solo una parte y el resto ya no tiene sentido esperar.
+  const [cancelFamilyRuns, setCancelFamilyRuns] = useState<ProductionRun[] | null>(null);
+  const [cancelFamilyReason, setCancelFamilyReason] = useState("");
+  const [isCancellingFamily, setIsCancellingFamily] = useState(false);
   const [editingStageId, setEditingStageId] = useState<string | null>(null);
   const [editWeightValue, setEditWeightValue] = useState("");
   const [isSavingStageWeight, setIsSavingStageWeight] = useState(false);
@@ -960,6 +966,28 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError(nextError instanceof Error ? nextError.message : "No se pudo cancelar la orden.");
     } finally {
       setIsCancellingRun(false);
+    }
+  }
+
+  function openCancelFamilyModal(runs: ProductionRun[]) {
+    setCancelFamilyReason("");
+    setCancelFamilyRuns(runs);
+  }
+
+  async function handleCancelRunFamily(runs: ProductionRun[], reason: string) {
+    setError(null);
+    setIsCancellingFamily(true);
+    try {
+      await cancelProductionRunFamily(runs[0].id, reason.trim() || undefined);
+      setCancelFamilyRuns(null);
+      setFamilyRuns(null);
+      const folio = runs[0].root_production_code ?? runs[0].production_code ?? "";
+      setSuccess(`Orden ${folio} y sus partes fueron canceladas. Inventario fue restaurado.`.trim());
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo cancelar la orden.");
+    } finally {
+      setIsCancellingFamily(false);
     }
   }
 
@@ -3321,6 +3349,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>Orden {familyRuns[0].root_production_code ?? familyRuns[0].production_code}</h2>
                 <p>Dividida en {familyRuns.length} partes por falta de materia prima</p>
               </div>
+              {canCancelRun && familyRuns.some(canRunBeCancelled) ? (
+                <button className="button buttonDanger" onClick={() => openCancelFamilyModal(familyRuns)} type="button">
+                  Cancelar todo
+                </button>
+              ) : null}
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setFamilyRuns(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
@@ -3350,6 +3383,53 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </table>
             </div>
           </section>
+        </div>
+      ) : null}
+
+      {cancelFamilyRuns ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Cancelar toda la orden">
+          <form
+            className="modalWindow processFormWindow"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCancelRunFamily(cancelFamilyRuns, cancelFamilyReason);
+            }}
+          >
+            <div className="modalHeader">
+              <div>
+                <h2>Cancelar toda la orden</h2>
+                <p>
+                  {cancelFamilyRuns[0].root_production_code ?? cancelFamilyRuns[0].production_code} ·{" "}
+                  {cancelFamilyRuns.length} partes
+                </p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setCancelFamilyRuns(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Motivo de la cancelación (opcional)</span>
+              <textarea
+                className="field textarea"
+                maxLength={1000}
+                onChange={(event) => setCancelFamilyReason(event.target.value)}
+                rows={3}
+                value={cancelFamilyReason}
+              />
+            </label>
+            <p className="panelText">
+              Se cancelarán las {cancelFamilyRuns.length} partes de esta orden, sin importar en qué estado esté cada
+              una, y se restaurará al inventario todo lo que ya se haya consumido. No se puede deshacer.
+            </p>
+            <div className="modalActions">
+              <button className="button" onClick={() => setCancelFamilyRuns(null)} type="button">
+                Volver
+              </button>
+              <button className="button buttonDanger" disabled={isCancellingFamily} type="submit">
+                {isCancellingFamily ? "Cancelando" : "Cancelar todo"}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 

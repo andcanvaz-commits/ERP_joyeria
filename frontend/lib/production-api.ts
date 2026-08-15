@@ -108,6 +108,17 @@ export function cancelProductionRun(runId: string, reason?: string) {
   });
 }
 
+// Cancela toda la familia (raiz + corridas hijas de split) de una vez, sin
+// importar en que estado quedo cada una -- para cuando un split arranco solo
+// una parte y el resto ya no tiene sentido esperar. Puede llamarse con el id
+// de cualquier miembro de la familia.
+export function cancelProductionRunFamily(runId: string, reason?: string) {
+  return apiRequest<ProductionRun[]>(`/api/production/runs/${runId}/cancel-family`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason?.trim() || null }),
+  });
+}
+
 export function approveProductionRunMaterials(runId: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/approve-materials`, {
     method: "POST",
