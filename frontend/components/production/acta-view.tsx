@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Plus, Undo2, X } from "lucide-react";
 import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
-import { buildRunActaSides, formatGramos } from "@/lib/orden-produccion";
+import { buildFamilyActaSides, buildRunActaSides, formatGramos } from "@/lib/orden-produccion";
 import { ActaSide } from "@/components/production/acta-side";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import type { ProductionRun } from "@/types/production";
@@ -355,11 +355,19 @@ export function RecepcionActions({
 
 export function ActaView({
   run,
+  family,
   materialItems,
   onClose,
   onChanged,
 }: {
   run: ProductionRun;
+  // Las demas corridas de la misma orden (padre + hijas de split), incluida
+  // esta. Con 2+ miembros reales se muestra la acta SUMADA de toda la
+  // familia (igual que Documentos) en vez de solo esta corrida -- pero las
+  // acciones (solicitar material, devolver sobrante, editar linea) siguen
+  // actuando sobre `run` puntualmente, la que se abrio. Sin esta prop (o con
+  // una sola corrida) el comportamiento es el de siempre: acta de un run.
+  family?: ProductionRun[];
   materialItems: InventoryItem[];
   onClose: () => void;
   onChanged: () => void;
@@ -368,8 +376,15 @@ export function ActaView({
   const [success, setSuccess] = useState<string | null>(null);
   // Misma funcion que arma la acta para Documentos cuando la orden no esta
   // partida (buildOrdenProduccion en lib/orden-produccion.ts) -- una sola
-  // fuente para las dos vistas, no dos calculos que puedan divergir.
-  const sides = buildRunActaSides(run);
+  // fuente para las dos vistas, no dos calculos que puedan divergir. Con
+  // split real (2+ miembros en `family`) se usa la version sumada, tambien
+  // compartida con Documentos.
+  const isSplitFamily = (family?.length ?? 1) > 1;
+  const sides = isSplitFamily ? buildFamilyActaSides(family as ProductionRun[]) : buildRunActaSides(run);
+  // Con familia dividida el encabezado es el de la RAIZ (folio compartido,
+  // ej. "OP-2026-0042" en vez de "-B"): es una sola acta para toda la orden,
+  // sin importar desde cual pierna se abrio.
+  const headerRun = isSplitFamily ? (family as ProductionRun[]).find((r) => !r.parent_run_id) ?? run : run;
 
   function flagSuccess(message: string) {
     setError(null);
@@ -409,12 +424,12 @@ export function ActaView({
             <article className="opDoc actaDoc">
               <header className="opHeader">
                 <div className="opTitleBar">ORDEN DE PRODUCCIÓN</div>
-                <div className="opCategoryBar">{run.process_name}</div>
-                <div className="opFolio">Nº {run.production_code ?? DASH}</div>
+                <div className="opCategoryBar">{headerRun.process_name}</div>
+                <div className="opFolio">Nº {headerRun.root_production_code ?? headerRun.production_code ?? DASH}</div>
               </header>
 
               <div className="opResponsable">
-                RESPONSABLE PRODUCCIÓN: <span>{run.created_by_name ?? DASH}</span>
+                RESPONSABLE PRODUCCIÓN: <span>{headerRun.created_by_name ?? DASH}</span>
               </div>
 
               <div className="opBody">

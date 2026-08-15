@@ -4275,6 +4275,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
       {actaRun ? (
         <ActaView
+          family={getRunFamily(runs, actaRun)}
           materialItems={[...rawMaterials, ...orderSupplyItems, ...complementItems]}
           onChanged={() => void reload()}
           onClose={() => closeActaModal()}

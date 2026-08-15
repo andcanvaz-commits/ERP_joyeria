@@ -8,6 +8,7 @@ import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
+import { getRunFamily } from "@/lib/orden-produccion";
 import { listInventoryItems } from "@/lib/inventory-api";
 import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import { ActaView } from "@/components/production/acta-view";
@@ -384,6 +385,7 @@ export function SolicitudesView() {
 
       {actaRun ? (
         <ActaView
+          family={getRunFamily(runs, actaRun)}
           materialItems={materialItems}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ["solicitudes"] })}
           onClose={() => setActaRun(null)}

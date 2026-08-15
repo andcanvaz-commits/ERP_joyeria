@@ -315,8 +315,36 @@ export function buildOrdenProduccion(
   }
 
   // Split real (2+ corridas activas) o familia historica (event_lines,
-  // migrada de papel): "Ver acta" no puede mostrar esto -- solo conoce un
-  // run a la vez -- asi que no hay con que igualar, se agrega por corrida.
+  // migrada de papel): se agrega por corrida (buildFamilyActaSides).
+  const sides = buildFamilyActaSides(family);
+  return {
+    folio: root.root_production_code ?? root.production_code ?? DASH,
+    procesoNombre: root.process_name,
+    categoria: materialName,
+    responsableProduccion: root.created_by_name ?? DASH,
+    entregaLines: sides.entregaLines,
+    entregaFecha: sides.entregaFecha,
+    entregaResponsable: sides.entregaResponsable,
+    recepcionLines: sides.recepcionLines,
+    recepcionFecha: sides.recepcionFecha,
+    recepcionResponsable: sides.recepcionResponsable,
+    entregaTotalRows: sides.entregaTotalRows,
+    recepcionTotalRows: sides.recepcionTotalRows,
+    cancelada: family.every((run) => run.status === "CANCELADA"),
+    productosResultantes: sides.productosResultantes,
+  };
+}
+
+/** El acta de una FAMILIA completa (2+ corridas activas por split, o una
+ * familia historica migrada de papel): mismo shape que buildRunActaSides,
+ * sumando/agrupando todos los miembros -- fuente unica para Documentos
+ * (buildOrdenProduccion) y para Ver Acta cuando la corrida que se abre
+ * pertenece a una familia dividida, asi ninguna de las dos vuelve a
+ * divergir de lo que la otra muestra. */
+export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
+  const root = family.find((run) => !run.parent_run_id) ?? family[0];
+  const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
+
   const familyHasWeighedStage = family
     .flatMap((run) => run.stages)
     .some((s) => s.requires_weighing && s.status === "FINALIZADA");
@@ -376,10 +404,6 @@ export function buildOrdenProduccion(
   );
 
   return {
-    folio: root.root_production_code ?? root.production_code ?? DASH,
-    procesoNombre: root.process_name,
-    categoria: materialName,
-    responsableProduccion: root.created_by_name ?? DASH,
     entregaLines: entregaSide.lines,
     entregaFecha: entregaSide.fecha,
     entregaResponsable: entregaSide.responsable,
@@ -388,8 +412,7 @@ export function buildOrdenProduccion(
     recepcionResponsable: recepcionSide.responsable,
     entregaTotalRows,
     recepcionTotalRows,
-    cancelada: family.every((run) => run.status === "CANCELADA"),
-    productosResultantes
+    productosResultantes,
   };
 }
 
