@@ -3531,7 +3531,7 @@ export function InventoryDashboard() {
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
-                <h2>Ordenes esperando esta materia prima</h2>
+                <h2>Ordenes esperando este material</h2>
                 <p>Este ingreso puede cubrir partes de ordenes que quedaron esperando material.</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setAllocateRuns([])} type="button">

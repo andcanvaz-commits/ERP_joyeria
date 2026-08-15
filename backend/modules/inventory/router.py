@@ -45,16 +45,21 @@ INVENTORY_ADMIN_ONLY = {"inventory.items.update", "inventory.items.delete"}
 
 
 def _find_waiting_production_runs(session, item_id):
-    """Ordenes ESPERANDO_MATERIAL que necesitan este item -- de materia prima
-    O de complemento pendiente (receta de ensamble): candidatas para el aviso
-    de 'destinar' al registrar un ingreso. allocate_material ya revalida
-    ambos recursos (materia prima y complementos) al aprobar, asi que basta
-    con encontrar la orden aqui; la cobertura real la decide el backend."""
+    """Ordenes ESPERANDO_MATERIAL que necesitan este item -- de materia
+    prima, de complemento pendiente (receta de ensamble) O de insumo de
+    etapa: candidatas para el aviso de 'destinar' al registrar un ingreso.
+    allocate_material ya revalida los tres recursos al aprobar, asi que
+    basta con encontrar la orden aqui; la cobertura real la decide el
+    backend. Antes solo miraba materia prima y complementos -- un ingreso
+    de insumo (SUPPLY) nunca disparaba el aviso aunque fuera lo unico que
+    le faltaba a la orden (bug reportado)."""
     from sqlalchemy import select
     from backend.modules.production.models import (
         ComplementRequestStatus,
         ProductionComplementRequest,
         ProductionRun,
+        ProductionRunStage,
+        ProductionRunStageIngredient,
         ProductionRunStatus,
     )
 
@@ -71,8 +76,19 @@ def _find_waiting_production_runs(session, item_id):
             ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
         )
     )
+    by_ingredient = (
+        select(ProductionRun)
+        .join(ProductionRunStage, ProductionRunStage.run_id == ProductionRun.id)
+        .join(ProductionRunStageIngredient, ProductionRunStageIngredient.run_stage_id == ProductionRunStage.id)
+        .where(
+            ProductionRunStageIngredient.inventory_item_id == item_id,
+            ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
+        )
+    )
     runs = {run.id: run for run in session.execute(by_material).scalars().all()}
     for run in session.execute(by_complement).scalars().all():
+        runs.setdefault(run.id, run)
+    for run in session.execute(by_ingredient).scalars().all():
         runs.setdefault(run.id, run)
     return list(runs.values())
 
@@ -337,7 +353,7 @@ def create_movement(
     except InventoryDomainError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-    if payload.movement_type == "ENTRADA" and result.item.item_type in ("RAW_MATERIAL", "COMPLEMENT"):
+    if payload.movement_type == "ENTRADA" and result.item.item_type in ("RAW_MATERIAL", "COMPLEMENT", "SUPPLY"):
         from backend.modules.inventory.schemas import WaitingProductionRunSummary
 
         waiting_runs = _find_waiting_production_runs(service.repository.session, payload.item_id)
