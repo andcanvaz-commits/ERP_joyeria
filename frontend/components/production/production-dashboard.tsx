@@ -981,6 +981,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       await cancelProductionRunFamily(runs[0].id, reason.trim() || undefined);
       setCancelFamilyRuns(null);
       setFamilyRuns(null);
+      closeRunStagesModal();
       const folio = runs[0].root_production_code ?? runs[0].production_code ?? "";
       setSuccess(`Orden ${folio} y sus partes fueron canceladas. Inventario fue restaurado.`.trim());
       await reload();
