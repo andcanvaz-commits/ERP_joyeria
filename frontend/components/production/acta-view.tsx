@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
 import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
-import { formatDocDate, formatGramos } from "@/lib/orden-produccion";
+import { ActaRightPhase, actaRightPhase, formatDocDate, formatGramos, formatProductosResultantes } from "@/lib/orden-produccion";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
@@ -37,6 +37,7 @@ function ActaDocSide({
   actions,
   footer,
   totalRows,
+  notice,
 }: {
   title: string;
   lines: ActaLine[];
@@ -46,6 +47,7 @@ function ActaDocSide({
   actions?: React.ReactNode;
   footer?: React.ReactNode;
   totalRows?: TotalRow[];
+  notice?: { phase: ActaRightPhase; productos: string };
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
@@ -100,6 +102,18 @@ function ActaDocSide({
         {title}
         <span className="opColSub"> · {formatDocDate(fecha) || DASH} · {responsable || DASH}</span>
       </div>
+      {notice && notice.phase !== "CONSTRUYENDO" ? (
+        <div className="opColNotice">
+          {notice.phase === "NO_APROBADO" ? (
+            <span>Aún no aprobado por inventario</span>
+          ) : (
+            <>
+              <strong>Producto resultante</strong>
+              <span>{notice.productos}</span>
+            </>
+          )}
+        </div>
+      ) : (
       <table className="opTable">
         <thead>
           <tr>
@@ -198,6 +212,7 @@ function ActaDocSide({
           ))}
         </tbody>
       </table>
+      )}
       {actions}
       {footer}
     </section>
@@ -599,6 +614,12 @@ export function ActaView({
   const entrega = lines.filter((line) => line.side === "ENTREGA");
   const recepcion = lines.filter((line) => line.side === "RECEPCION");
   const { entregaTotalRows, recepcionTotalRows } = computeBalanceTotals(run);
+  const recepcionPhase = actaRightPhase({
+    approved: run.materials_approved_at !== null,
+    stages: run.stages,
+    hasRecepcionLines: recepcion.length > 0,
+  });
+  const productosResultantes = formatProductosResultantes(run.products ?? []);
 
   function flagSuccess(message: string) {
     setError(null);
@@ -664,6 +685,7 @@ export function ActaView({
                   fecha={run.received_at}
                   footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
                   lines={recepcion}
+                  notice={{ phase: recepcionPhase, productos: productosResultantes }}
                   onError={flagError}
                   responsable={run.received_by_name ?? DASH}
                   title="RECIBIDO"
