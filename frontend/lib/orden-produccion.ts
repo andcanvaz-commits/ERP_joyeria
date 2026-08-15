@@ -154,16 +154,18 @@ export function buildOrdenProduccion(
 
   for (const run of family) {
     const entregaLines = (run.event_lines ?? []).filter((line) => line.side === "ENTREGA");
-    if (run.materials_approved_at !== null) {
-      // Historica (papel): sus propias lineas. Corrida en vivo: la acta
-      // persistida (run.acta_lines), la misma fuente que se ve/edita en
-      // "Ver acta" — incluye lo planeado y lo agregado durante el proceso.
+    const entregaActaLines = (run.acta_lines ?? []).filter((line) => line.side === "ENTREGA");
+    // Igual que Ver Acta: las lineas ENTREGA (materia prima/insumos/
+    // complementos, sembradas PLAN al crear la orden) se muestran de una,
+    // sin esperar la aprobacion -- es "la parte de entrega" que el
+    // certificado si debe traer desde el principio. Esperar a
+    // materials_approved_at dejaba el certificado sin desglose (solo con el
+    // total, una vez que ese total tambien se gateo por aprobacion).
+    if (entregaLines.length > 0 || entregaActaLines.length > 0) {
       const rows: DocRow[] =
         entregaLines.length > 0
           ? entregaLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
-          : (run.acta_lines ?? [])
-              .filter((line) => line.side === "ENTREGA")
-              .map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
+          : entregaActaLines.map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
       entrega.push({
         fecha: run.materials_approved_at,
         responsable: run.materials_approved_by_name ?? DASH,
@@ -204,7 +206,11 @@ export function buildOrdenProduccion(
   const rawMaterialId = root.raw_material_item_id;
   const entregaTotalRows: DocTotalRow[] = [];
   const recepcionTotalRows: DocTotalRow[] = [];
-  if (!isHistorical && rawUnit && rawMaterialId) {
+  // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
+  // siembra al crear la orden, asi que sumar por item_id sin este chequeo
+  // daba un "Total entregado"/"Total recibido" desde el dia 1, antes de que
+  // inventario aprobara nada.
+  if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
     const entregaTotal = family
       .flatMap((run) => run.acta_lines ?? [])
       .filter((line) => line.side === "ENTREGA" && line.item_id === rawMaterialId)

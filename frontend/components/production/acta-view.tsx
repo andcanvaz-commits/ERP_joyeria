@@ -577,6 +577,11 @@ function computeBalanceTotals(run: ProductionRun): { entregaTotalRows: TotalRow[
   const unit = run.raw_material_unit_code;
   const rawMaterialId = run.raw_material_item_id;
   if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
+  // siembra al crear la orden, asi que sumar por item_id sin este chequeo
+  // daba un "Total entregado"/"Total recibido" desde el dia 1, antes de que
+  // inventario aprobara nada.
+  if (run.materials_approved_at === null) return { entregaTotalRows: [], recepcionTotalRows: [] };
   const lines = run.acta_lines ?? [];
   const entregaTotal = sumByItem(lines.filter((l) => l.side === "ENTREGA"), rawMaterialId);
   if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
