@@ -91,7 +91,7 @@ function RunSummaryRows({ run }: { run: ProductionRun }) {
       {products.length > 0 ? (
         <span>
           <strong>Productos</strong>
-          {products.map((p) => `${p.product_name ?? "—"} (${num(p.quantity)} ${p.unit_code || "und"})`).join(" · ")}
+          {products.map((p) => `${p.product_name ?? "—"} (${num(p.quantity)} ${p.unit_code || unit})`).join(" · ")}
         </span>
       ) : null}
       {complements.length > 0 ? (

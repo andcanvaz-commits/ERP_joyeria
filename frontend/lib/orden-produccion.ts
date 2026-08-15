@@ -74,7 +74,13 @@ function formatQty(value: number): string {
  * (product_type_id / target_item_id), no por nombre, para no fusionar dos
  * productos distintos que compartan texto. */
 export function formatProductosResultantes(
-  products: NonNullable<ProductionRun["products"]>
+  products: NonNullable<ProductionRun["products"]>,
+  // Unidad de la orden (raw_material_unit_code) -- el resultante hereda esa
+  // unidad cuando su propia unit_code no viene (product_type_id sin unidad
+  // propia; ver create_run en backend/modules/production/service.py, mismo
+  // criterio). Nunca "und" inventado: todo en este sistema se pesa, no se
+  // cuenta, salvo que la orden misma sea por unidad.
+  fallbackUnit: string
 ): string {
   const merged = new Map<string, { label: string; quantity: number; unit: string }>();
   for (const p of products) {
@@ -84,7 +90,7 @@ export function formatProductosResultantes(
     if (existing) {
       existing.quantity += qty;
     } else {
-      merged.set(key, { label: p.product_name ?? "—", quantity: qty, unit: p.unit_code || "und" });
+      merged.set(key, { label: p.product_name ?? "—", quantity: qty, unit: p.unit_code || fallbackUnit });
     }
   }
   if (merged.size === 0) return "—";
@@ -170,7 +176,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     stages: run.stages,
     hasRecepcionLines: recepcionLines.length > 0,
   });
-  const productosResultantes = formatProductosResultantes(run.products ?? []);
+  const productosResultantes = formatProductosResultantes(run.products ?? [], run.raw_material_unit_code);
 
   return {
     entregaLines,
@@ -408,7 +414,8 @@ export function buildOrdenProduccion(
         ),
       });
   const productosResultantes = formatProductosResultantes(
-    family.flatMap((run) => run.products ?? [])
+    family.flatMap((run) => run.products ?? []),
+    root.raw_material_unit_code
   );
 
   return {
