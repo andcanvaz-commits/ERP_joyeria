@@ -2429,12 +2429,34 @@ class ProductionService:
             else final_weight
         )
 
-        # ENSAMBLAR siempre queda pendiente de definir a mano, aunque exista
-        # una receta previa para el model_key: la receta es solo una
-        # sugerencia de prellenado en el frontend (define_run_assembly), no se
-        # aplica sola. El usuario confirma o edita las cantidades cada vez.
+        # ENSAMBLAR se aplica solo con lo que ya se aprobo de cada complemento
+        # (lo que Inventario de verdad entrego) -- ya se declaro una vez al
+        # crear la orden, no se vuelve a pedir confirmacion aparte. Antes
+        # quedaba assembly_pending=True y producción tenia que confirmar a
+        # mano en "Definir ensamble"; ahora ese paso se hace solo (decision
+        # de Rodrigo: "ya se lleno eso al inicio creando la orden").
         if run.assembly_mode == AssemblyMode.ASSEMBLE:
-            run.assembly_pending = True
+            self._auto_apply_assembly(run)
+
+    def _auto_apply_assembly(self, run: ProductionRun) -> None:
+        """Arma run.assembly_items con TODO lo aprobado de cada complemento
+        (lo que Inventario de verdad entrego, ver _approved_complement_totals)
+        y aprende la receta del model_key -- mismo resultado que
+        define_run_assembly, pero automatico, sin esperar confirmacion."""
+        approved = self._approved_complement_totals(run)
+        run.assembly_items = [
+            ProductionRunAssemblyItem(complement_item_id=item_id, quantity=quantity)
+            for item_id, quantity in approved.items()
+        ]
+        run.assembly_pending = False
+        if approved:
+            model_key = self._model_key_for_run(run)
+            if model_key is not None:
+                lines = [
+                    RunAssemblyLineCreate(complement_item_id=item_id, quantity=quantity)
+                    for item_id, quantity in approved.items()
+                ]
+                self._upsert_recipe_items(model_key, lines, created_by_run_id=run.id)
 
     def define_run_assembly(
         self, run_id: UUID, payload: RunAssemblyDefine, current_user: CurrentUser

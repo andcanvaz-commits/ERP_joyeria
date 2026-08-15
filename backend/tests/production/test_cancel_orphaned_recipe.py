@@ -7,7 +7,6 @@ from backend.modules.production.schemas import (
     AssemblyRecipeUpsert,
     ProductionRunCreate,
     ProductionRunStageFinish,
-    RunAssemblyDefine,
     RunAssemblyLineCreate,
     RunComplementCreate,
     RunProductCreate,
@@ -23,8 +22,10 @@ def _model_key(production_service, raw_material, catalog_finished_item):
 def _run_to_pending_reception_with_assembly_defined(
     production_service, current_user, process, raw_material, complement_item, catalog_finished_item
 ):
-    """Crea una corrida ENSAMBLAR, la lleva a PENDIENTE_RECEPCION y define su
-    ensamble (crea o actualiza la receta del model_key). Devuelve el run ORM."""
+    """Crea una corrida ENSAMBLAR y la lleva a PENDIENTE_RECEPCION -- el
+    ensamble se aplica solo con lo aprobado al terminar (_auto_apply_assembly),
+    aprendiendo (o actualizando) la receta del model_key de una. Devuelve el
+    run ORM."""
     payload = ProductionRunCreate(
         process_id=process.id,
         raw_material_item_id=raw_material.id,
@@ -39,11 +40,6 @@ def _run_to_pending_reception_with_assembly_defined(
     run = production_service.repository.get_run(run_read.id)
     production_service.finish_stage(
         run.stages[0].id, ProductionRunStageFinish(final_weight=Decimal("95")), current_user
-    )
-    production_service.define_run_assembly(
-        run_read.id,
-        RunAssemblyDefine(items=[RunAssemblyLineCreate(complement_item_id=complement_item.id, quantity=Decimal("5"))]),
-        current_user,
     )
     return production_service.repository.get_run(run_read.id)
 
