@@ -1,125 +1,14 @@
-import { Info } from "lucide-react";
-import { ActaRightPhase, DocSide, DocTotalRow, OrdenProduccionModel, formatDocDate, formatGramos } from "@/lib/orden-produccion";
+import { ActaSide } from "@/components/production/acta-side";
+import { OrdenProduccionModel } from "@/lib/orden-produccion";
 
 export type DocMode = "entrega" | "recepcion" | "completo";
 
-const MIN_ROWS = 5;
-const DASH_RESPONSABLE = "—";
-
-type DisplayRow = { gramos: number; unidad: string; detalle: string } | null;
-type DisplayLine =
-  | { kind: "group"; fecha: string | null; responsable: string }
-  | { kind: "row"; row: DisplayRow };
-
-function SideColumn({
-  events,
-  title,
-  dataClass,
-  totalRows,
-  notice
-}: {
-  events: DocSide[];
-  title: string;
-  dataClass: string;
-  totalRows?: DocTotalRow[];
-  notice?: { phase: ActaRightPhase; productos: string };
-}) {
-  // Un solo evento (caso normal, sin split): fecha/responsable van en el
-  // subtitulo de la columna, no como fila de tabla — no tiene sentido
-  // "agrupar" cuando hay un solo grupo. Con 2+ eventos (split real, varios
-  // responsables/fechas) cada uno se distingue con su propia fila.
-  const singleEvent = events.length === 1 ? events[0] : null;
-  const lines: DisplayLine[] = [];
-  if (events.length > 1) {
-    for (const event of events) {
-      lines.push({ kind: "group", fecha: event.fecha, responsable: event.responsable });
-      for (const row of event.rows) {
-        lines.push({ kind: "row", row });
-      }
-    }
-  } else if (singleEvent) {
-    for (const row of singleEvent.rows) {
-      lines.push({ kind: "row", row });
-    }
-  }
-  const totals = totalRows ?? [];
-  const rowCount = lines.filter((line) => line.kind === "row").length;
-  const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length);
-
-  return (
-    <section className="opCol">
-      <div className="opColHead">
-        {title}
-        {singleEvent && singleEvent.fecha ? (
-          <span className="opColSub">
-            {" "}
-            · {formatDocDate(singleEvent.fecha) || "—"} · {singleEvent.responsable || DASH_RESPONSABLE}
-          </span>
-        ) : events.length > 1 ? null : (
-          <span className="opColSubPending">
-            <Info aria-hidden="true" size={12} /> Pendiente
-          </span>
-        )}
-      </div>
-      {notice && notice.phase === "SOLO_PRODUCTO" ? (
-        <div className="opColNotice">
-          <span className={dataClass}>
-            <strong>Producto resultante</strong>
-            <br />
-            {notice.productos}
-          </span>
-        </div>
-      ) : (
-        <table className="opTable">
-          <thead>
-            <tr>
-              <th className="opThFecha">FECHA</th>
-              <th className="opThGramos">CANTIDAD</th>
-              <th>DETALLES</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line, index) =>
-              line.kind === "group" ? (
-                <tr className="opGroupRow" key={`group-${index}`}>
-                  <td colSpan={3}>
-                    <span className={dataClass}>
-                      {formatDocDate(line.fecha) || " "} · Responsable Inventario: {line.responsable}
-                    </span>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={`row-${index}`}>
-                  <td> </td>
-                  <td className="opTdGramos">{line.row ? <span className={dataClass}>{formatGramos(line.row.gramos)} {line.row.unidad}</span> : " "}</td>
-                  <td>{line.row ? <span className={dataClass}>{line.row.detalle}</span> : " "}</td>
-                </tr>
-              )
-            )}
-            {totals.map((row, index) => (
-              <tr
-                className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
-                key={`total-${index}`}
-              >
-                <td> </td>
-                <td className="opTdGramos"><span className={dataClass}>{formatGramos(row.gramos)} {row.unidad}</span></td>
-                <td><span className={dataClass}>{row.label}</span></td>
-              </tr>
-            ))}
-            {Array.from({ length: blankCount }).map((_, index) => (
-              <tr key={`blank-${index}`}>
-                <td> </td>
-                <td className="opTdGramos"> </td>
-                <td> </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
-  );
-}
-
+// Mismo componente que Ver Acta (components/production/acta-side.tsx): antes
+// este documento tenia su propio SideColumn, calculaba las filas distinto y
+// se desincronizaba de Ver Acta cada vez que se agregaba un aviso/fase nuevo
+// (bug reportado varias veces). dataClass sigue siendo lo unico especifico de
+// impresion (visibilidad selectiva por opMode-entrega/opMode-recepcion, ver
+// globals.css) -- Ver Acta no lo usa porque no imprime por seccion.
 export function OrdenProduccionDoc({
   model,
   mode
@@ -142,12 +31,21 @@ export function OrdenProduccionDoc({
         </div>
 
         <div className="opBody">
-          <SideColumn dataClass="opEntregaData" events={model.entrega} title="ENTREGADO" totalRows={model.entregaTotalRows} />
+          <ActaSide
+            dataClass="opEntregaData"
+            fecha={model.entregaFecha}
+            lines={model.entregaLines}
+            responsable={model.entregaResponsable}
+            title="ENTREGADO"
+            totalRows={model.entregaTotalRows}
+          />
           <div className="opDivider" aria-hidden="true" />
-          <SideColumn
+          <ActaSide
             dataClass="opRecepcionData"
-            events={model.recepcion}
+            fecha={model.recepcionFecha}
+            lines={model.recepcionLines}
             notice={{ phase: model.recepcionPhase, productos: model.productosResultantes }}
+            responsable={model.recepcionResponsable}
             title="RECIBIDO"
             totalRows={model.recepcionTotalRows}
           />

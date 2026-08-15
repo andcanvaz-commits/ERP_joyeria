@@ -1,222 +1,43 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Info, Pencil, Plus, Trash2, Undo2, X } from "lucide-react";
+import { Plus, Undo2, X } from "lucide-react";
 import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
-import { ActaRightPhase, actaRightPhase, formatDocDate, formatGramos, formatProductosResultantes } from "@/lib/orden-produccion";
+import {
+  actaRightPhase,
+  formatGramos,
+  formatProductosResultantes,
+  type ActaSideLine,
+  type ActaSideTotal,
+} from "@/lib/orden-produccion";
+import { ActaSide } from "@/components/production/acta-side";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
 const DASH = "—";
-const MIN_ROWS = 5;
 
 type ActaLine = NonNullable<ProductionRun["acta_lines"]>[number];
 type Complement = NonNullable<ProductionRun["complements"]>[number];
 
-// Misma pinta que el documento impreso (opDoc/opTable, ver
-// components/documentos/orden-produccion-doc.tsx): las lineas se editan
-// directo sobre las mismas celdas FECHA/CANTIDAD/DETALLES que despues salen
-// en el papel. La columna FECHA queda en blanco fila por fila (igual que en
-// el impreso: la fecha va una sola vez, en el subtitulo de la columna) y ahi
-// mismo viven los botones de editar/borrar. Ya no hay "agregar linea" libre:
-// lo que entra/sale de verdad nace de una accion real (ver EntregaAction /
-// RecepcionActions mas abajo), nunca de texto suelto.
 // Fila de total/balance: mismo lugar que una linea real, con su propia
 // etiqueta en DETALLES ("Total entregado", "Total recibido", "Merma total")
 // y un color distinto segun el tipo -- un total no es lo mismo que una
 // merma, no deben leerse igual.
-type TotalRow = { label: string; quantity: number; unit: string; kind: "total" | "merma" };
+type TotalRow = ActaSideTotal;
 
-function ActaDocSide({
-  title,
-  lines,
-  fecha,
-  responsable,
-  onError,
-  actions,
-  footer,
-  totalRows,
-  notice,
-}: {
-  title: string;
-  lines: ActaLine[];
-  fecha: string | null;
-  responsable: string;
-  onError: (message: string) => void;
-  actions?: React.ReactNode;
-  footer?: React.ReactNode;
-  totalRows?: TotalRow[];
-  notice?: { phase: ActaRightPhase; productos: string };
-}) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editLabel, setEditLabel] = useState("");
-  const [editQuantity, setEditQuantity] = useState("");
-  const [editUnit, setEditUnit] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-
-  function startEdit(line: ActaLine) {
-    setEditingId(line.id);
-    setEditLabel(line.label);
-    setEditQuantity(line.quantity);
-    setEditUnit(line.unit_code);
-  }
-
-  async function saveEdit(lineId: string) {
-    if (!editLabel.trim() || !editQuantity || Number(editQuantity) <= 0 || !editUnit.trim()) {
-      onError("Completa detalle, cantidad y unidad de la linea.");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await updateActaLine(lineId, {
-        label: editLabel.trim(),
-        quantity: editQuantity,
-        unit_code: editUnit.trim(),
-      });
-      setEditingId(null);
-    } catch (nextError) {
-      onError(nextError instanceof Error ? nextError.message : "No se pudo editar la linea.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleDelete(lineId: string) {
-    setIsSaving(true);
-    try {
-      await deleteActaLine(lineId);
-    } catch (nextError) {
-      onError(nextError instanceof Error ? nextError.message : "No se pudo borrar la linea.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  const totals = totalRows ?? [];
-  const blankCount = Math.max(0, MIN_ROWS - lines.length - totals.length);
-
-  return (
-    <section className="opCol actaDocCol">
-      <div className="opColHead">
-        {title}
-        {fecha ? (
-          <span className="opColSub"> · {formatDocDate(fecha) || DASH} · {responsable || DASH}</span>
-        ) : (
-          <span className="opColSubPending">
-            <Info aria-hidden="true" size={12} /> Pendiente
-          </span>
-        )}
-      </div>
-      {notice && notice.phase === "SOLO_PRODUCTO" ? (
-        <div className="opColNotice">
-          <strong>Producto resultante</strong>
-          <span>{notice.productos}</span>
-        </div>
-      ) : (
-      <table className="opTable">
-        <thead>
-          <tr>
-            <th className="opThFecha">FECHA</th>
-            <th className="opThGramos">CANTIDAD</th>
-            <th>DETALLES</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line) =>
-            editingId === line.id ? (
-              <tr key={line.id}>
-                <td> </td>
-                <td className="opTdGramos">
-                  <span className="actaDocInputs">
-                    <input
-                      className="field"
-                      min="0"
-                      onChange={(e) => setEditQuantity(e.target.value)}
-                      step="0.0001"
-                      style={{ width: 84 }}
-                      type="number"
-                      value={editQuantity}
-                    />
-                    <input
-                      className="field"
-                      onChange={(e) => setEditUnit(e.target.value)}
-                      style={{ width: 40 }}
-                      value={editUnit}
-                    />
-                  </span>
-                </td>
-                <td>
-                  <span className="actaDocInputs">
-                    <input
-                      className="field"
-                      onChange={(e) => setEditLabel(e.target.value)}
-                      style={{ flex: 1 }}
-                      value={editLabel}
-                    />
-                    <button aria-label="Guardar" className="iconOnlyButton" disabled={isSaving} onClick={() => void saveEdit(line.id)} type="button">
-                      <Check aria-hidden="true" size={14} />
-                    </button>
-                    <button aria-label="Cancelar" className="iconOnlyButton" disabled={isSaving} onClick={() => setEditingId(null)} type="button">
-                      <X aria-hidden="true" size={14} />
-                    </button>
-                  </span>
-                </td>
-              </tr>
-            ) : (
-              <tr className="actaDocRow" key={line.id}>
-                <td> </td>
-                <td className="opTdGramos">
-                  {formatGramos(Number(line.quantity))} {line.unit_code}
-                </td>
-                <td>
-                  <span className="actaDocDetail">
-                    <span>{line.label}</span>
-                    {line.source === "MANUAL" ? (
-                      <span className="actaDocRowActions">
-                        <button aria-label={`Editar ${line.label}`} className="iconOnlyButton" disabled={isSaving} onClick={() => startEdit(line)} type="button">
-                          <Pencil aria-hidden="true" size={12} />
-                        </button>
-                        <button
-                          aria-label={`Borrar ${line.label}`}
-                          className="iconOnlyButton dangerIconButton"
-                          disabled={isSaving}
-                          onClick={() => void handleDelete(line.id)}
-                          type="button"
-                        >
-                          <Trash2 aria-hidden="true" size={12} />
-                        </button>
-                      </span>
-                    ) : null}
-                  </span>
-                </td>
-              </tr>
-            )
-          )}
-          {totals.map((row, i) => (
-            <tr
-              className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
-              key={`acta-total-${i}`}
-            >
-              <td> </td>
-              <td className="opTdGramos">{formatGramos(row.quantity)} {row.unit}</td>
-              <td>{row.label}</td>
-            </tr>
-          ))}
-          {Array.from({ length: blankCount }).map((_, i) => (
-            <tr key={`acta-blank-${i}`}>
-              <td> </td>
-              <td className="opTdGramos"> </td>
-              <td> </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      )}
-      {actions}
-      {footer}
-    </section>
-  );
+// ActaLine -> ActaSideLine: unica conversion de forma antes de pasarle los
+// datos al mismo componente ActaSide que usa Documentos (acta-side.tsx). Solo
+// las lineas MANUAL son editables/borrables a mano.
+function toSideLines(lines: ActaLine[]): ActaSideLine[] {
+  return lines.map((line) => ({
+    kind: "row",
+    id: line.id,
+    label: line.label,
+    quantity: line.quantity,
+    unit_code: line.unit_code,
+    editable: line.source === "MANUAL",
+  }));
 }
 
 // Lado Entrega: nada de texto libre — lo que entra a la orden mientras esta
@@ -671,7 +492,7 @@ export function ActaView({
               </header>
 
               <div className="opBody">
-                <ActaDocSide
+                <ActaSide
                   actions={
                     <EntregaAction
                       materialItems={materialItems}
@@ -681,18 +502,22 @@ export function ActaView({
                     />
                   }
                   fecha={run.materials_approved_at}
-                  lines={entrega}
+                  lines={toSideLines(entrega)}
+                  onDeleteLine={(lineId) => deleteActaLine(lineId)}
+                  onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
                   onError={flagError}
                   responsable={run.materials_approved_by_name ?? DASH}
                   title="ENTREGADO"
                   totalRows={entregaTotalRows}
                 />
                 <div className="opDivider" aria-hidden="true" />
-                <ActaDocSide
+                <ActaSide
                   fecha={run.received_at}
                   footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
-                  lines={recepcion}
+                  lines={toSideLines(recepcion)}
                   notice={{ phase: recepcionPhase, productos: productosResultantes }}
+                  onDeleteLine={(lineId) => deleteActaLine(lineId)}
+                  onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
                   onError={flagError}
                   responsable={run.received_by_name ?? DASH}
                   title="RECIBIDO"

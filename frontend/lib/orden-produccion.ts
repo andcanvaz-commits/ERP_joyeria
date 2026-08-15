@@ -1,22 +1,20 @@
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
-/** Una fila de la tabla CANTIDAD / DETALLES del comprobante: cada una lleva su
- * propia unidad (g, und, ml…). */
-export type DocRow = { gramos: number; unidad: string; detalle: string };
-
-export type DocSide = {
-  fecha: string | null;
-  responsable: string;
-  rows: DocRow[];
-};
+// Tipos compartidos por el UNICO componente que renderiza una columna del
+// certificado/acta (components/production/acta-side.tsx), usado tanto por
+// Documentos (family, solo lectura) como por Ver Acta (un run, editable) --
+// viven aca (no en acta-side.tsx) para que ninguno de los dos importe del
+// otro en circulo.
+export type ActaSideLine =
+  | { kind: "row"; id: string; label: string; quantity: string; unit_code: string; editable: boolean }
+  | { kind: "group"; fecha: string | null; responsable: string };
 
 // Fila de total/balance: mismo lugar que una fila real, con su propia
 // etiqueta ("Total entregado", "Total recibido", "Merma total") y un color
-// distinto segun el tipo -- misma logica y misma pinta que la vista editable
-// del acta (acta-view.tsx), para que el certificado impreso y el editable no
-// se contradigan.
-export type DocTotalRow = { label: string; gramos: number; unidad: string; kind: "total" | "merma" };
+// distinto segun el tipo -- un total no es lo mismo que una merma, no deben
+// leerse igual.
+export type ActaSideTotal = { label: string; quantity: number; unit: string; kind: "total" | "merma" };
 
 export type OrdenProduccionModel = {
   folio: string;
@@ -25,10 +23,14 @@ export type OrdenProduccionModel = {
   cantidadUnidad: string;
   categoria: string;
   responsableProduccion: string;
-  entrega: DocSide[];
-  recepcion: DocSide[];
-  entregaTotalRows: DocTotalRow[];
-  recepcionTotalRows: DocTotalRow[];
+  entregaLines: ActaSideLine[];
+  entregaFecha: string | null;
+  entregaResponsable: string;
+  recepcionLines: ActaSideLine[];
+  recepcionFecha: string | null;
+  recepcionResponsable: string;
+  entregaTotalRows: ActaSideTotal[];
+  recepcionTotalRows: ActaSideTotal[];
   cancelada: boolean;
   recepcionPhase: ActaRightPhase;
   productosResultantes: string;
@@ -130,86 +132,127 @@ export function getRunFamily(runs: ProductionRun[], run: ProductionRun): Product
     .sort((a, b) => (a.production_code ?? "").localeCompare(b.production_code ?? ""));
 }
 
+/** Filas ENTREGA de un run: historicas (event_lines) tienen precedencia, si
+ * no la acta persistida (acta_lines) -- misma fuente y mismo orden que Ver
+ * Acta, sin filtrar por source (PLAN incluido: es "la parte de entrega" que
+ * el certificado muestra desde el principio, antes de aprobar). */
+function entregaRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "row" }>[] {
+  const eventLines = (run.event_lines ?? []).filter((line) => line.side === "ENTREGA");
+  if (eventLines.length > 0) {
+    return eventLines.map((line, i) => ({
+      kind: "row" as const,
+      id: `${run.id}-ent-ev-${i}`,
+      label: line.detalle ?? "",
+      quantity: line.gramos,
+      unit_code: line.unidad,
+      editable: false,
+    }));
+  }
+  return (run.acta_lines ?? [])
+    .filter((line) => line.side === "ENTREGA")
+    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
+}
+
+/** Filas RECEPCION de un run -- misma fuente que Ver Acta (acta_lines sin
+ * filtrar, PLAN incluido: si el evento se muestra es porque ya paso algo
+ * real, ver recepcionHasData; una vez ahi, las mismas filas que ve Ver Acta,
+ * planeadas o no). */
+function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "row" }>[] {
+  const eventLines = (run.event_lines ?? []).filter((line) => line.side === "RECEPCION");
+  if (eventLines.length > 0) {
+    return eventLines.map((line, i) => ({
+      kind: "row" as const,
+      id: `${run.id}-rec-ev-${i}`,
+      label: line.detalle ?? "",
+      quantity: line.gramos,
+      unit_code: line.unidad,
+      editable: false,
+    }));
+  }
+  return (run.acta_lines ?? [])
+    .filter((line) => line.side === "RECEPCION")
+    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
+}
+
+/** Mismo criterio que actaRightPhase para CONSTRUYENDO: recepcion real
+ * (linea no-PLAN, evento historico, recepcion final) o una etapa que pesa ya
+ * termino (aunque sin devolucion todavia). Sin esto, un pesaje sin devolucion
+ * dejaba el evento de recepcion sin empujar y el certificado divergia de Ver
+ * Acta, que ya mostraba fila por fila con la misma condicion. */
+function recepcionHasData(run: ProductionRun, familyHasWeighedStage: boolean): boolean {
+  if ((run.event_lines ?? []).some((line) => line.side === "RECEPCION")) return true;
+  if (run.received_at !== null) return true;
+  if (familyHasWeighedStage) return true;
+  return (run.acta_lines ?? []).some((line) => line.side === "RECEPCION" && line.source !== "PLAN");
+}
+
+/** Arma un lado (ENTREGA o RECEPCION) para toda la familia: un solo header
+ * (fecha/responsable) + filas planas cuando solo un miembro tiene datos de
+ * ese lado -- el caso normal, sin split -- para que se vea IGUAL que Ver
+ * Acta (que solo conoce un run). Con 2+ miembros con datos (split real) se
+ * agrupa cada uno bajo su propia fecha/responsable, unico caso donde
+ * Documentos necesita algo que Ver Acta no. */
+function buildSide(
+  family: ProductionRun[],
+  pick: (run: ProductionRun) => { hasData: boolean; fecha: string | null; responsable: string; rows: Extract<ActaSideLine, { kind: "row" }>[] }
+): { lines: ActaSideLine[]; fecha: string | null; responsable: string } {
+  const withData = family.map(pick).filter((entry) => entry.hasData);
+  if (withData.length === 0) return { lines: [], fecha: null, responsable: DASH };
+  if (withData.length === 1) {
+    const [only] = withData;
+    return { lines: only.rows, fecha: only.fecha, responsable: only.responsable };
+  }
+  const lines: ActaSideLine[] = [];
+  for (const entry of withData) {
+    lines.push({ kind: "group", fecha: entry.fecha, responsable: entry.responsable });
+    lines.push(...entry.rows);
+  }
+  return { lines, fecha: null, responsable: DASH };
+}
+
 /** Construye el modelo del comprobante "Orden de Producción" desde una
  * familia completa (folio raiz + hijas de split, o un solo run si nunca se
- * partio). Un evento de ENTREGA/RECEPCION por cada miembro que la tenga. */
+ * partio). Misma forma (ActaSideLine[]) y mismo componente (ActaSide) que
+ * usa Ver Acta -- para una familia sin split (el caso normal) el resultado
+ * es identico a lo que Ver Acta mostraria para ese unico run. */
 export function buildOrdenProduccion(
   family: ProductionRun[],
   itemNames: Map<string, string>
 ): OrdenProduccionModel {
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
   const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name;
-
-  const entrega: DocSide[] = [];
-  const recepcion: DocSide[] = [];
   const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
-  // Misma condicion que dispara CONSTRUYENDO en actaRightPhase: una etapa que
-  // pesa y termina cuenta como avance real de RECEPCION aunque todavia no
-  // haya devolucion ni recepcion final -- sin esto, un pesaje sin devolucion
-  // dejaba el evento de recepcion sin empujar y el certificado divergia de
-  // Ver Acta (que ya mostraba fila por fila con la misma condicion).
   const familyHasWeighedStage = family
     .flatMap((run) => run.stages)
     .some((s) => s.requires_weighing && s.status === "FINALIZADA");
 
-  for (const run of family) {
-    const entregaLines = (run.event_lines ?? []).filter((line) => line.side === "ENTREGA");
-    const entregaActaLines = (run.acta_lines ?? []).filter((line) => line.side === "ENTREGA");
-    // Igual que Ver Acta: las lineas ENTREGA (materia prima/insumos/
-    // complementos, sembradas PLAN al crear la orden) se muestran de una,
-    // sin esperar la aprobacion -- es "la parte de entrega" que el
-    // certificado si debe traer desde el principio. Esperar a
-    // materials_approved_at dejaba el certificado sin desglose (solo con el
-    // total, una vez que ese total tambien se gateo por aprobacion).
-    if (entregaLines.length > 0 || entregaActaLines.length > 0) {
-      const rows: DocRow[] =
-        entregaLines.length > 0
-          ? entregaLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
-          : entregaActaLines.map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
-      entrega.push({
-        fecha: run.materials_approved_at,
-        responsable: run.materials_approved_by_name ?? DASH,
-        rows
-      });
-    }
+  const entregaSide = buildSide(family, (run) => ({
+    hasData: entregaRowsForRun(run).length > 0,
+    fecha: run.materials_approved_at,
+    responsable: run.materials_approved_by_name ?? DASH,
+    rows: entregaRowsForRun(run),
+  }));
 
-    const recepcionLines = (run.event_lines ?? []).filter((line) => line.side === "RECEPCION");
-    const recepcionActaLines = (run.acta_lines ?? []).filter((line) => line.side === "RECEPCION");
-    // Mismo criterio que actaRightPhase: una linea PLAN (producto resultante
-    // planeado) no es avance real. Esperar a received_at para recien mostrar
-    // algo dejaba el certificado en "solo totales" mientras ya habia
-    // devoluciones/merma real -- Ver Acta ya las mostraba de una (bug
-    // reportado: Documentos no se veia igual que Ver Acta).
-    const hasRealRecepcionActivity = recepcionActaLines.some((line) => line.source !== "PLAN");
-    if (recepcionLines.length > 0 || hasRealRecepcionActivity || run.received_at !== null || familyHasWeighedStage) {
-      const rows: DocRow[] =
-        recepcionLines.length > 0
-          ? recepcionLines.map((line) => ({ gramos: num(line.gramos), unidad: line.unidad, detalle: line.detalle ?? "" }))
-          : recepcionActaLines.map((line) => ({ gramos: num(line.quantity), unidad: line.unit_code, detalle: line.label }));
-      recepcion.push({
-        fecha: run.received_at,
-        responsable: run.received_by_name ?? DASH,
-        rows
-      });
-    }
-  }
+  const recepcionSide = buildSide(family, (run) => ({
+    hasData: recepcionHasData(run, familyHasWeighedStage),
+    fecha: run.received_at,
+    responsable: run.received_by_name ?? DASH,
+    rows: recepcionRowsForRun(run),
+  }));
 
   // Totales entregado/recibido/merma: misma logica que la vista editable del
   // acta (acta-view.tsx computeBalanceTotals) -- los gramos que entraron a
   // producir no quedan fijos, se actualizan segun la merma real registrada
   // (stage.waste_weight de cada etapa de cada miembro de la familia), no
-  // segun ninguna linea de la acta (ni "Merma etapa X" ni el producto
-  // resultante, que nace con la cantidad PLANEADA y nunca se corrige
-  // despues del pesaje). No aplica a familias historicas (event_lines,
-  // migradas de papel): esas no necesariamente reconciliaban.
+  // segun ninguna linea de la acta. No aplica a familias historicas
+  // (event_lines, migradas de papel): esas no necesariamente reconciliaban.
+  // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
+  // siembra al crear la orden, asi que sumar por item_id sin chequear
+  // aprobacion daba un total desde el dia 1.
   const rawUnit = root.raw_material_unit_code;
   const rawMaterialId = root.raw_material_item_id;
-  const entregaTotalRows: DocTotalRow[] = [];
-  const recepcionTotalRows: DocTotalRow[] = [];
-  // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
-  // siembra al crear la orden, asi que sumar por item_id sin este chequeo
-  // daba un "Total entregado"/"Total recibido" desde el dia 1, antes de que
-  // inventario aprobara nada.
+  const entregaTotalRows: ActaSideTotal[] = [];
+  const recepcionTotalRows: ActaSideTotal[] = [];
   if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
     const entregaTotal = family
       .flatMap((run) => run.acta_lines ?? [])
@@ -219,17 +262,14 @@ export function buildOrdenProduccion(
       const mermaAcumulada = family
         .flatMap((run) => run.stages)
         .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
-      entregaTotalRows.push({ label: "Total entregado", gramos: entregaTotal, unidad: rawUnit, kind: "total" });
-      recepcionTotalRows.push({ label: "Total recibido", gramos: entregaTotal - mermaAcumulada, unidad: rawUnit, kind: "total" });
+      entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
+      recepcionTotalRows.push({ label: "Total recibido", quantity: entregaTotal - mermaAcumulada, unit: rawUnit, kind: "total" });
       // "Al final": es UNA sola acta para toda la familia (padre + hijas de
       // split) -- la merma total recien tiene sentido cuando TODAS las
-      // corridas activas terminaron su ultima etapa, no apenas una. Antes
-      // se disparaba con que UNA sola corrida tuviera finished_at, y una
-      // familia con una pierna aun EN_PROCESO mostraba "perdido" todo lo que
-      // esa pierna simplemente no habia entregado todavia (bug reportado).
+      // corridas activas terminaron su ultima etapa, no apenas una.
       const allFinished = family.every((run) => run.finished_at !== null || run.status === "CANCELADA");
       if (allFinished) {
-        recepcionTotalRows.push({ label: "Merma total", gramos: mermaAcumulada, unidad: rawUnit, kind: "merma" });
+        recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit: rawUnit, kind: "merma" });
       }
     }
   }
@@ -256,8 +296,12 @@ export function buildOrdenProduccion(
     cantidadUnidad: root.raw_material_unit_code,
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
-    entrega,
-    recepcion,
+    entregaLines: entregaSide.lines,
+    entregaFecha: entregaSide.fecha,
+    entregaResponsable: entregaSide.responsable,
+    recepcionLines: recepcionSide.lines,
+    recepcionFecha: recepcionSide.fecha,
+    recepcionResponsable: recepcionSide.responsable,
     entregaTotalRows,
     recepcionTotalRows,
     cancelada: family.every((run) => run.status === "CANCELADA"),
