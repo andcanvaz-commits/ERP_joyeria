@@ -5,22 +5,30 @@ import type { InventoryItem } from "@/types/inventory";
  * propia unidad (g, und, ml…). */
 export type DocRow = { gramos: number; unidad: string; detalle: string };
 
-// Sin subtotal/total: las filas pueden mezclar unidades (g, und, ml…) y una
-// suma única no tendría sentido.
 export type DocSide = {
   fecha: string | null;
   responsable: string;
   rows: DocRow[];
 };
 
+// Fila de total/balance: mismo lugar que una fila real, con su propia
+// etiqueta ("Total entregado", "Total recibido", "Merma total") y un color
+// distinto segun el tipo -- misma logica y misma pinta que la vista editable
+// del acta (acta-view.tsx), para que el certificado impreso y el editable no
+// se contradigan.
+export type DocTotalRow = { label: string; gramos: number; unidad: string; kind: "total" | "merma" };
+
 export type OrdenProduccionModel = {
   folio: string;
   procesoNombre: string;
   cantidad: number | null;
+  cantidadUnidad: string;
   categoria: string;
   responsableProduccion: string;
   entrega: DocSide[];
   recepcion: DocSide[];
+  entregaTotalRows: DocTotalRow[];
+  recepcionTotalRows: DocTotalRow[];
   cancelada: boolean;
 };
 
@@ -118,14 +126,53 @@ export function buildOrdenProduccion(
     }
   }
 
+  // Totales entregado/recibido/merma: misma logica que la vista editable del
+  // acta (acta-view.tsx computeBalanceTotals) -- los gramos que entraron a
+  // producir no quedan fijos, se actualizan segun la merma real registrada
+  // (stage.waste_weight de cada etapa de cada miembro de la familia), no
+  // segun ninguna linea de la acta (ni "Merma etapa X" ni el producto
+  // resultante, que nace con la cantidad PLANEADA y nunca se corrige
+  // despues del pesaje). No aplica a familias historicas (event_lines,
+  // migradas de papel): esas no necesariamente reconciliaban.
+  const rawUnit = root.raw_material_unit_code;
+  const rawMaterialId = root.raw_material_item_id;
+  const entregaTotalRows: DocTotalRow[] = [];
+  const recepcionTotalRows: DocTotalRow[] = [];
+  if (!isHistorical && rawUnit && rawMaterialId) {
+    const entregaTotal = family
+      .flatMap((run) => run.acta_lines ?? [])
+      .filter((line) => line.side === "ENTREGA" && line.item_id === rawMaterialId)
+      .reduce((sum, line) => sum + num(line.quantity), 0);
+    if (entregaTotal > 0) {
+      const mermaAcumulada = family
+        .flatMap((run) => run.stages)
+        .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+      entregaTotalRows.push({ label: "Total entregado", gramos: entregaTotal, unidad: rawUnit, kind: "total" });
+      recepcionTotalRows.push({ label: "Total recibido", gramos: entregaTotal - mermaAcumulada, unidad: rawUnit, kind: "total" });
+      // "Al final": es UNA sola acta para toda la familia (padre + hijas de
+      // split) -- la merma total recien tiene sentido cuando TODAS las
+      // corridas activas terminaron su ultima etapa, no apenas una. Antes
+      // se disparaba con que UNA sola corrida tuviera finished_at, y una
+      // familia con una pierna aun EN_PROCESO mostraba "perdido" todo lo que
+      // esa pierna simplemente no habia entregado todavia (bug reportado).
+      const allFinished = family.every((run) => run.finished_at !== null || run.status === "CANCELADA");
+      if (allFinished) {
+        recepcionTotalRows.push({ label: "Merma total", gramos: mermaAcumulada, unidad: rawUnit, kind: "merma" });
+      }
+    }
+  }
+
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
     procesoNombre: root.process_name,
     cantidad: isHistorical ? null : family.reduce((total, run) => total + num(run.quantity), 0),
+    cantidadUnidad: root.raw_material_unit_code,
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entrega,
     recepcion,
+    entregaTotalRows,
+    recepcionTotalRows,
     cancelada: family.every((run) => run.status === "CANCELADA")
   };
 }

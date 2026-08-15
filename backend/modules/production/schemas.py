@@ -156,7 +156,7 @@ class MaterialRejectPayload(BaseModel):
 class RunCancelPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 class ReceiveFinishedProductPayload(BaseModel):
@@ -208,6 +208,10 @@ class StageWeightEdit(BaseModel):
 
     initial_weight: Decimal | None = Field(default=None, ge=0)
     final_weight: Decimal = Field(ge=0)
+    # Igual que ProductionRunStageFinish.justification: solo se usa (y solo
+    # hace falta) cuando el peso corregido deja la merma de la etapa por
+    # encima del limite del proceso -- ver edit_stage_weight.
+    justification: str | None = Field(default=None, max_length=1000)
 
 
 class StageDecisionRead(BaseModel):

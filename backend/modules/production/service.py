@@ -646,7 +646,13 @@ class ProductionService:
             if product.product_type_id:
                 product_type = product_types.get(product.product_type_id)
                 label = product_type.name if product_type else "Producto"
-                product_unit = "und"
+                # ProductType no define su propia unidad (el material/unidad se
+                # decide en produccion, ver docstring del modelo) -- el
+                # resultante hereda la unidad de la materia prima de ESTA
+                # orden. Antes quedaba fijo en "und" sin importar que la orden
+                # fuera en gramos, y una orden de 1g de materia prima terminaba
+                # mostrando "1 und" del producto en vez de "1 g" (bug reportado).
+                product_unit = unit_code
             else:
                 target_item = self.repository.session.get(InventoryItem, product.target_item_id)
                 label = target_item.name if target_item else "Producto"
@@ -1312,13 +1318,15 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(request.run)
 
-    def cancel_run(self, run_id: UUID, current_user: CurrentUser, reason: str) -> ProductionRunRead:
+    def cancel_run(self, run_id: UUID, current_user: CurrentUser, reason: str | None) -> ProductionRunRead:
         """Cancela una orden por error (etapa aceptada por equivocacion, dato mal
         tipeado, etc.): libera cualquier reserva y devuelve al inventario todo lo
         que la orden ya consumio (materia prima, insumos, complementos). No borra
         la fila -- igual criterio que InventoryService.delete_item: una orden con
         movimientos no se borra, se cancela, para no perder la trazabilidad del
-        error ni romper actas/reportes que ya la referencian."""
+        error ni romper actas/reportes que ya la referencian. El motivo es
+        opcional -- no toda cancelacion tiene (o necesita) una explicacion."""
+        reason = (reason or "").strip() or None
         run = self.repository.get_run(run_id)
         if run is None:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
@@ -1354,12 +1362,15 @@ class ProductionService:
             self.inventory_service.reverse_production_consumption(
                 run.id,
                 current_user.id,
-                reason=f"Reversion por cancelacion de orden {run.production_code or run.id}. {reason}",
+                reason=(
+                    f"Reversion por cancelacion de orden {run.production_code or run.id}."
+                    + (f" {reason}" if reason else "")
+                ),
             )
 
         run.status = ProductionRunStatus.CANCELLED
         run.rejected_by_user_id = current_user.id
-        run.rejection_reason = reason.strip()
+        run.rejection_reason = reason
         run.rejected_at = datetime.utcnow()
         for complement in run.complements:
             if complement.status == ComplementRequestStatus.PENDING:
@@ -1473,9 +1484,16 @@ class ProductionService:
             # adicional pedido dos veces) son UN insumo con mas cantidad, no
             # dos filas separadas -- asi el acta y el picker de "Entregar
             # material" ven el total real disponible.
+            #
+            # Los complementos (run.complements) tambien generan su propio
+            # movimiento CONSUMO_PRODUCCION al aprobarse (ver approve_materials)
+            # -- sin excluirlos aqui, ese mismo movimiento aparecia OTRA VEZ
+            # como si fuera un insumo aparte: la misma cantidad, dos filas, en
+            # el picker de "Entregar material" (bug reportado).
+            complement_item_ids = {c.item_id for c in run.complements}
             totals: dict = {}
             for m in by_run.get(run.id, []):
-                if m.item_id == run.raw_material_item_id:
+                if m.item_id == run.raw_material_item_id or m.item_id in complement_item_ids:
                     continue
                 entry = totals.setdefault(m.item_id, {"quantity": Decimal("0"), "unit_code": m.unit_code})
                 entry["quantity"] += m.quantity
@@ -1692,6 +1710,13 @@ class ProductionService:
         line = self.repository.get_acta_line(line_id)
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
+        if payload.quantity is not None and line.side == ActaLineSide.RECEPCION and line.item_id is not None:
+            cap = self._acta_line_max_quantity(line)
+            if cap is not None and payload.quantity > cap:
+                raise ProductionDomainError(
+                    f"La cantidad ({payload.quantity} {line.unit_code}) supera lo que en realidad "
+                    f"se entrego para este material ({cap} {line.unit_code})."
+                )
         if payload.label is not None:
             line.label = payload.label.strip()
         if payload.quantity is not None:
@@ -1702,6 +1727,43 @@ class ProductionService:
             line.note = payload.note.strip() or None
         self.repository.flush()
         return self._read_with_names(line.run)
+
+    def _acta_line_max_quantity(self, line: ProductionRunActaLine) -> Decimal | None:
+        """Techo real para editar una linea RECEPCION ligada a un item (uso o
+        devolucion de insumo/complemento): no puede quedar, sumada a las demas
+        lineas RECEPCION del mismo item, por encima de lo que de verdad se le
+        entrego a la orden. Materia prima queda fuera -- esa se corrige por
+        edit_stage_weight, que ya tiene su propia regla. Si el item no es un
+        complemento ni un insumo conocido de esta orden, no hay techo (linea
+        libre, sin identidad de inventario real detras)."""
+        run = line.run
+        if line.item_id == run.raw_material_item_id:
+            return None
+        other_logged = sum(
+            (
+                other.quantity
+                for other in run.acta_lines
+                if other.id != line.id and other.side == line.side and other.item_id == line.item_id
+            ),
+            Decimal("0"),
+        )
+        complement = next((c for c in run.complements if c.item_id == line.item_id), None)
+        if complement is not None:
+            return max(Decimal("0"), complement.quantity - other_logged)
+
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryMovement
+
+        delivered = self.repository.session.execute(
+            select(InventoryMovement.quantity).where(
+                InventoryMovement.movement_type == "CONSUMO_PRODUCCION",
+                InventoryMovement.reference_id == run.id,
+                InventoryMovement.item_id == line.item_id,
+            )
+        ).scalars().all()
+        if not delivered:
+            return None
+        return max(Decimal("0"), sum(delivered, Decimal("0")) - other_logged)
 
     def delete_acta_line(self, line_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         """Borra una linea agregada a mano. Las lineas planeadas o generadas
@@ -1907,6 +1969,30 @@ class ProductionService:
         if not stage.requires_weighing:
             raise ProductionDomainError("Esta etapa no registra peso.")
 
+        reference = self._previous_stage_weight(run, stage)
+        if reference is not None and reference > 0 and payload.final_weight > reference:
+            raise ProductionDomainError(
+                f"El peso corregido ({payload.final_weight} {run.raw_material_unit_code}) no puede ser "
+                f"mayor que el material que entro a la etapa ({reference} {run.raw_material_unit_code})."
+            )
+
+        # Mismo criterio que finish_stage: si la correccion deja la merma de
+        # la etapa por encima del limite del proceso, queda registrada como
+        # decision (weight_based=True) -- no un aviso pasivo que se olvida al
+        # cerrar la ventana, sino el mismo rastro que deja el flujo normal
+        # cuando se "pasa igualmente" una etapa fuera de condicion.
+        if reference is not None and reference > 0:
+            loss_percent = (reference - payload.final_weight) / reference * Decimal("100")
+            if loss_percent > run.waste_limit_percent:
+                self._record_decision(
+                    run, stage, "APPROVED",
+                    (payload.justification or "").strip() or (
+                        f"Correccion de peso: {loss_percent:.2f}% de merma supera el limite "
+                        f"{run.waste_limit_percent:.2f}%."
+                    ),
+                    True, payload.final_weight, None, current_user, len(stage.decisions) + 1,
+                )
+
         if payload.initial_weight is not None:
             stage.initial_weight = payload.initial_weight
         stage.final_weight = payload.final_weight
@@ -1953,8 +2039,10 @@ class ProductionService:
                 if run.total_required_material
                 else Decimal("0")
             )
-            if ordered:
-                run.actual_finished_weight = ordered[-1].final_weight
+            # Mismo criterio que _finish_run: cantidad menos la merma total,
+            # no el final_weight crudo de la ultima etapa (puede no pesar).
+            if run.total_required_material is not None:
+                run.actual_finished_weight = run.total_required_material - total_waste
 
     def _sync_stage_waste_acta_line(self, run: ProductionRun, stage: ProductionRunStage) -> None:
         """Mantiene en linea la fila AUTO de merma de esta etapa en la acta
@@ -2194,7 +2282,6 @@ class ProductionService:
     def _finish_run(self, run: ProductionRun, final_weight: Decimal | None) -> None:
         run.status = ProductionRunStatus.PENDING_RECEPTION
         run.finished_at = datetime.utcnow()
-        run.actual_finished_weight = final_weight
         # Merma total = suma de la merma registrada en cada fase.
         # El % se calcula sobre la materia prima total que entró a la orden.
         total_waste = sum(
@@ -2206,6 +2293,18 @@ class ProductionService:
             total_waste / run.total_required_material * Decimal("100")
             if run.total_required_material
             else Decimal("0")
+        )
+        # Peso real = cantidad menos la merma, SIEMPRE -- no el final_weight
+        # crudo de "cualquiera haya sido la ultima etapa en terminar". Si esa
+        # ultima etapa no pesa (ej. un control/ensamble despues de la etapa
+        # que si pesa), final_weight llega None y el peso real quedaba en 0
+        # aunque una etapa anterior si hubiera registrado un pesaje real
+        # (bug reportado). total_waste ya suma la merma de TODAS las etapas
+        # pesadas, sin importar cual termino ultimo.
+        run.actual_finished_weight = (
+            run.total_required_material - total_waste
+            if run.total_required_material is not None
+            else final_weight
         )
 
         # ENSAMBLAR siempre queda pendiente de definir a mano, aunque exista

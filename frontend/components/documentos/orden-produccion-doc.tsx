@@ -1,4 +1,4 @@
-import { DocSide, OrdenProduccionModel, formatDocDate, formatGramos } from "@/lib/orden-produccion";
+import { DocSide, DocTotalRow, OrdenProduccionModel, formatDocDate, formatGramos } from "@/lib/orden-produccion";
 
 export type DocMode = "entrega" | "recepcion" | "completo";
 
@@ -13,11 +13,13 @@ type DisplayLine =
 function SideColumn({
   events,
   title,
-  dataClass
+  dataClass,
+  totalRows
 }: {
   events: DocSide[];
   title: string;
   dataClass: string;
+  totalRows?: DocTotalRow[];
 }) {
   // Un solo evento (caso normal, sin split): fecha/responsable van en el
   // subtitulo de la columna, no como fila de tabla — no tiene sentido
@@ -37,10 +39,9 @@ function SideColumn({
       lines.push({ kind: "row", row });
     }
   }
+  const totals = totalRows ?? [];
   const rowCount = lines.filter((line) => line.kind === "row").length;
-  for (let i = rowCount; i < MIN_ROWS; i += 1) {
-    lines.push({ kind: "row", row: null });
-  }
+  const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length);
 
   return (
     <section className="opCol">
@@ -79,6 +80,23 @@ function SideColumn({
               </tr>
             )
           )}
+          {totals.map((row, index) => (
+            <tr
+              className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
+              key={`total-${index}`}
+            >
+              <td> </td>
+              <td className="opTdGramos"><span className={dataClass}>{formatGramos(row.gramos)} {row.unidad}</span></td>
+              <td><span className={dataClass}>{row.label}</span></td>
+            </tr>
+          ))}
+          {Array.from({ length: blankCount }).map((_, index) => (
+            <tr key={`blank-${index}`}>
+              <td> </td>
+              <td className="opTdGramos"> </td>
+              <td> </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </section>
@@ -103,13 +121,13 @@ export function OrdenProduccionDoc({
 
         <div className="opResponsable">
           RESPONSABLE PRODUCCIÓN: <span>{model.responsableProduccion}</span>
-          {model.cantidad !== null ? <span className="opCantidad">Cantidad: {model.cantidad}</span> : null}
+          {model.cantidad !== null ? <span className="opCantidad">Cantidad: {model.cantidad} {model.cantidadUnidad}</span> : null}
         </div>
 
         <div className="opBody">
-          <SideColumn events={model.entrega} title="ENTREGADO" dataClass="opEntregaData" />
+          <SideColumn dataClass="opEntregaData" events={model.entrega} title="ENTREGADO" totalRows={model.entregaTotalRows} />
           <div className="opDivider" aria-hidden="true" />
-          <SideColumn events={model.recepcion} title="RECIBIDO" dataClass="opRecepcionData" />
+          <SideColumn dataClass="opRecepcionData" events={model.recepcion} title="RECIBIDO" totalRows={model.recepcionTotalRows} />
         </div>
 
         {model.cancelada ? <div className="opStamp opStampCancel">CANCELADO</div> : null}

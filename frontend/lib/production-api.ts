@@ -101,10 +101,10 @@ export function rejectProductionRunMaterials(runId: string, reason?: string | nu
   });
 }
 
-export function cancelProductionRun(runId: string, reason: string) {
+export function cancelProductionRun(runId: string, reason?: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/cancel`, {
     method: "POST",
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify({ reason: reason?.trim() || null }),
   });
 }
 
@@ -173,7 +173,7 @@ export function finishProductionRunStage(
 
 export function editProductionRunStageWeight(
   stageId: string,
-  payload: { initial_weight?: string | null; final_weight: string },
+  payload: { initial_weight?: string | null; final_weight: string; justification?: string | null },
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/stages/${stageId}/edit-weight`, {
     method: "POST",

@@ -22,6 +22,12 @@ type Complement = NonNullable<ProductionRun["complements"]>[number];
 // mismo viven los botones de editar/borrar. Ya no hay "agregar linea" libre:
 // lo que entra/sale de verdad nace de una accion real (ver EntregaAction /
 // RecepcionActions mas abajo), nunca de texto suelto.
+// Fila de total/balance: mismo lugar que una linea real, con su propia
+// etiqueta en DETALLES ("Total entregado", "Total recibido", "Merma total")
+// y un color distinto segun el tipo -- un total no es lo mismo que una
+// merma, no deben leerse igual.
+type TotalRow = { label: string; quantity: number; unit: string; kind: "total" | "merma" };
+
 function ActaDocSide({
   title,
   lines,
@@ -30,6 +36,7 @@ function ActaDocSide({
   onError,
   actions,
   footer,
+  totalRows,
 }: {
   title: string;
   lines: ActaLine[];
@@ -38,6 +45,7 @@ function ActaDocSide({
   onError: (message: string) => void;
   actions?: React.ReactNode;
   footer?: React.ReactNode;
+  totalRows?: TotalRow[];
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
@@ -83,7 +91,8 @@ function ActaDocSide({
     }
   }
 
-  const blankCount = Math.max(0, MIN_ROWS - lines.length);
+  const totals = totalRows ?? [];
+  const blankCount = Math.max(0, MIN_ROWS - lines.length - totals.length);
 
   return (
     <section className="opCol actaDocCol">
@@ -111,14 +120,14 @@ function ActaDocSide({
                       min="0"
                       onChange={(e) => setEditQuantity(e.target.value)}
                       step="0.0001"
-                      style={{ width: 64 }}
+                      style={{ width: 84 }}
                       type="number"
                       value={editQuantity}
                     />
                     <input
                       className="field"
                       onChange={(e) => setEditUnit(e.target.value)}
-                      style={{ width: 44 }}
+                      style={{ width: 40 }}
                       value={editUnit}
                     />
                   </span>
@@ -170,6 +179,16 @@ function ActaDocSide({
               </tr>
             )
           )}
+          {totals.map((row, i) => (
+            <tr
+              className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
+              key={`acta-total-${i}`}
+            >
+              <td> </td>
+              <td className="opTdGramos">{formatGramos(row.quantity)} {row.unit}</td>
+              <td>{row.label}</td>
+            </tr>
+          ))}
           {Array.from({ length: blankCount }).map((_, i) => (
             <tr key={`acta-blank-${i}`}>
               <td> </td>
@@ -204,8 +223,8 @@ function EntregaAction({
   const [pendingItem, setPendingItem] = useState<InventoryItem | null>(null);
   const [quantity, setQuantity] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  // Igual que EntregarMaterialAction: el error tiene que aparecer en esta
-  // misma ventana, no en un banner lejos de donde el usuario esta mirando.
+  // El error tiene que aparecer en esta misma ventana, no en un banner
+  // lejos de donde el usuario esta mirando.
   const [localError, setLocalError] = useState<string | null>(null);
 
   if (run.status !== "EN_PROCESO") return null;
@@ -298,10 +317,191 @@ export function returnableComplements(run: ProductionRun): Array<Complement & { 
 }
 
 // Lado Recepcion: la materia prima ya se reconcilia sola con la merma por
-// etapa. Lo que falta es el sobrante de complementos — se aprueba y se
-// descuenta entero al aprobar materiales (approve_materials), pero el
-// ensamble puede no haber usado todo (ej. 100 "bolas 2.5" aprobadas, 80
-// ensambladas, 20 sobran) — esas se devuelven a inventario aqui.
+// etapa. Lo que falta es el sobrante de complementos e insumos — se
+// aprueban/entregan enteros al aprobar materiales (approve_materials), pero
+// el proceso puede no haber usado todo (ej. 100 "bolas 2.5" aprobadas, 80
+// ensambladas, 20 sobran). Un solo boton, una sola lista: se elige el
+// material y se anota cuanto sobro. Si es un complemento, "sobrante" significa que
+// vuelve de verdad a inventario (returnComplement, movimiento real); si es
+// un insumo no hay circuito de devolucion fisica establecido, asi que queda
+// como linea MANUAL en la acta (registro de que no se uso, sin mover stock).
+// Antes esto eran DOS botones separados ("Devolver sobrante" / "Entregar
+// material") con listas casi identicas -- confundia mas de lo que ayudaba.
+type ReturnCandidate =
+  | { kind: "complemento"; id: string; label: string; unit_code: string; available: number }
+  | { kind: "insumo"; id: string; item_id: string; label: string; unit_code: string; available: number };
+
+// `available` es el tope real: no se puede anotar/devolver mas de lo que de
+// verdad se entrego/aprobo — ya se resta lo que ya se registro antes en el
+// acta para ese mismo item (por identidad real, no por texto: dos items
+// distintos pueden llamarse igual).
+export function buildReturnCandidates(run: ProductionRun): ReturnCandidate[] {
+  const complementRows: ReturnCandidate[] = returnableComplements(run).map((c) => ({
+    kind: "complemento",
+    id: c.id,
+    label: c.name ?? "Complemento",
+    unit_code: c.unit_code,
+    available: c.remaining,
+  }));
+
+  const recepcion = (run.acta_lines ?? []).filter((line) => line.side === "RECEPCION");
+  const alreadyLogged = (itemId: string) =>
+    recepcion.filter((line) => line.item_id === itemId).reduce((sum, line) => sum + Number(line.quantity), 0);
+  const supplyRows: ReturnCandidate[] = (run.supply_consumptions ?? [])
+    .map((s) => ({
+      kind: "insumo" as const,
+      id: s.item_id,
+      item_id: s.item_id,
+      label: s.name,
+      unit_code: s.unit_code,
+      available: Number(s.quantity) - alreadyLogged(s.item_id),
+    }))
+    .filter((candidate) => candidate.available > 0.0001);
+
+  return [...complementRows, ...supplyRows];
+}
+
+// Contenido puro (sin boton ni ventana propia): lista de candidatos +
+// formulario de cantidad. Se usa DENTRO de la ventana del picker que abre
+// RecepcionActions, y tambien directo -- sin boton intermedio ni ventana
+// anidada -- en el paso automatico al terminar la produccion
+// (production-dashboard.tsx): ahi ya se sabe que hay sobrante por devolver,
+// pedirle al usuario que ademas haga clic en un boton para verlo es un paso
+// de mas.
+export function ReturnCandidatesForm({
+  run,
+  onChanged,
+  onError,
+  onSuccess,
+}: {
+  run: ProductionRun;
+  onChanged: () => void;
+  onError: (message: string) => void;
+  onSuccess?: (message: string) => void;
+}) {
+  const [pendingCandidate, setPendingCandidate] = useState<ReturnCandidate | null>(null);
+  const [quantity, setQuantity] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const candidates = buildReturnCandidates(run);
+
+  if (candidates.length === 0) return null;
+
+  async function handleConfirm() {
+    if (!pendingCandidate) return;
+    if (!quantity || Number(quantity) <= 0) {
+      setLocalError("Indica cuanto sobro.");
+      return;
+    }
+    if (Number(quantity) > pendingCandidate.available + 0.0001) {
+      setLocalError(`Solo hay ${formatGramos(pendingCandidate.available)} ${pendingCandidate.unit_code} de "${pendingCandidate.label}" sin registrar.`);
+      return;
+    }
+    setLocalError(null);
+    setIsSaving(true);
+    try {
+      if (pendingCandidate.kind === "complemento") {
+        await returnComplement(pendingCandidate.id, quantity);
+      } else {
+        await addActaLine(run.id, {
+          side: "RECEPCION",
+          label: pendingCandidate.label,
+          quantity,
+          unit_code: pendingCandidate.unit_code,
+          item_id: pendingCandidate.item_id,
+        });
+      }
+      setPendingCandidate(null);
+      setQuantity("");
+      onChanged();
+      onSuccess?.("Sobrante devuelto a inventario.");
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "No se pudo registrar el sobrante.";
+      setLocalError(message);
+      onError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {localError ? (
+        <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)", marginTop: 10 }}>
+          {localError}
+        </div>
+      ) : null}
+
+      {pendingCandidate ? (
+        <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 10 }}>
+          <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+            {pendingCandidate.label} · sobran {formatGramos(pendingCandidate.available)} {pendingCandidate.unit_code}
+          </div>
+          <input
+            aria-label="Cantidad a devolver"
+            autoFocus
+            className="field"
+            max={pendingCandidate.available}
+            min="0.0001"
+            onChange={(e) => {
+              setQuantity(e.target.value);
+              setLocalError(null);
+            }}
+            placeholder={pendingCandidate.unit_code}
+            step="0.0001"
+            style={{ width: 110 }}
+            type="number"
+            value={quantity}
+          />
+          <button
+            className="button"
+            disabled={isSaving}
+            onClick={() => {
+              setPendingCandidate(null);
+              setQuantity("");
+              setLocalError(null);
+            }}
+            type="button"
+          >
+            Elegir otro
+          </button>
+          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleConfirm()} type="button">
+            Devolver
+          </button>
+        </div>
+      ) : (
+        <div className="tableWrap" style={{ marginTop: 10 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Material</th>
+                <th className="num">Sobrante</th>
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((candidate) => (
+                <tr
+                  key={`${candidate.kind}-${candidate.id}`}
+                  onClick={() => {
+                    setPendingCandidate(candidate);
+                    setQuantity(String(candidate.available));
+                    setLocalError(null);
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  <td>{candidate.label}</td>
+                  <td className="num">{formatGramos(candidate.available)} {candidate.unit_code}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function RecepcionActions({
   run,
   onChanged,
@@ -313,268 +513,30 @@ export function RecepcionActions({
   onError: (message: string) => void;
   onSuccess?: (message: string) => void;
 }) {
-  const [returningId, setReturningId] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-
-  const returnable = returnableComplements(run);
-
-  if (returnable.length === 0) return null;
-
-  function startReturn(complement: Complement & { remaining: number }) {
-    setReturningId(complement.id);
-    setQuantity(String(complement.remaining));
-  }
-
-  async function handleReturn(complementId: string) {
-    if (!quantity || Number(quantity) <= 0) {
-      onError("Indica cuanto se devuelve.");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await returnComplement(complementId, quantity);
-      setReturningId(null);
-      onChanged();
-      onSuccess?.("Sobrante devuelto a inventario.");
-    } catch (nextError) {
-      onError(nextError instanceof Error ? nextError.message : "No se pudo devolver el sobrante.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  return (
-    <div className="actaDocAction actaDocReturns">
-      <span className="actaDocActionLabel">Sobrante de complementos por devolver</span>
-      {returnable.map((complement) => (
-        <div className="actaDocActionForm" key={complement.id}>
-          <span style={{ flex: 1, minWidth: 120 }}>
-            {complement.name ?? "Complemento"} · sobran {formatGramos(complement.remaining)} {complement.unit_code}
-          </span>
-          {returningId === complement.id ? (
-            <>
-              <input
-                aria-label="Cantidad a devolver"
-                className="field"
-                max={complement.remaining}
-                min="0.0001"
-                onChange={(e) => setQuantity(e.target.value)}
-                step="0.0001"
-                style={{ width: 90 }}
-                type="number"
-                value={quantity}
-              />
-              <button className="button" disabled={isSaving} onClick={() => setReturningId(null)} type="button">
-                Cancelar
-              </button>
-              <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleReturn(complement.id)} type="button">
-                Devolver
-              </button>
-            </>
-          ) : (
-            <button className="button" onClick={() => startReturn(complement)} type="button">
-              <Undo2 aria-hidden="true" size={14} />
-              Devolver sobrante
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-type UsageCandidate = { key: string; item_id: string; label: string; unit_code: string; available: number };
-
-// Materia prima ya se reconcilia sola con la merma por etapa: solo entran
-// aqui complementos e insumos (lo que "se uso" sin que el sistema calcule
-// automaticamente cuando). `available` es el tope real: no se puede anotar
-// mas uso del que de verdad se entrego/aprobo — ya se resta lo que ya se
-// registro antes en el acta para ese mismo item (por identidad real, no por
-// texto: dos items distintos pueden llamarse igual).
-function buildUsageCandidates(run: ProductionRun): UsageCandidate[] {
-  const recepcion = (run.acta_lines ?? []).filter((line) => line.side === "RECEPCION");
-  const alreadyLogged = (itemId: string) =>
-    recepcion.filter((line) => line.item_id === itemId).reduce((sum, line) => sum + Number(line.quantity), 0);
-
-  const supplies = (run.supply_consumptions ?? []).map((s) => ({
-    key: `supply:${s.item_id}`,
-    item_id: s.item_id,
-    label: s.name,
-    unit_code: s.unit_code,
-    available: Number(s.quantity) - alreadyLogged(s.item_id),
-  }));
-  const complements = (run.complements ?? [])
-    .filter((c) => c.status === "APROBADA")
-    .map((c) => {
-      const delivered = Number(c.quantity) - Number(c.used_quantity ?? 0) - Number(c.returned_quantity ?? 0);
-      return {
-        key: `complement:${c.item_id}`,
-        item_id: c.item_id,
-        label: c.name ?? "Complemento",
-        unit_code: c.unit_code,
-        available: delivered - alreadyLogged(c.item_id),
-      };
-    });
-  return [...supplies, ...complements].filter((candidate) => candidate.available > 0.0001);
-}
-
-// Lado Recepcion, segunda accion: complementos/insumos que de verdad se
-// usaron en el proceso pero el sistema no calcula automaticamente cuando
-// (a diferencia de la merma de materia prima, que es automatica etapa por
-// etapa). Elegis uno de la ventana y anotas la cantidad a mano — queda como
-// linea MANUAL de la acta, editable/borrable despues.
-function EntregarMaterialAction({
-  run,
-  onChanged,
-  onSuccess,
-}: {
-  run: ProductionRun;
-  onChanged: () => void;
-  onSuccess: (message: string) => void;
-}) {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const [pendingItem, setPendingItem] = useState<UsageCandidate | null>(null);
-  const [quantity, setQuantity] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  // Error local a esta ventana: la validacion (o el fallo de guardado) tiene
-  // que aparecer aqui mismo, junto al campo que hay que corregir -- no en el
-  // banner de arriba del acta, que queda fuera de la vista y no deja claro
-  // que la ventana sigue abierta esperando el valor correcto.
-  const [localError, setLocalError] = useState<string | null>(null);
 
-  const candidates = buildUsageCandidates(run);
-  if (candidates.length === 0) return null;
-
-  function closePicker() {
-    setIsPickerOpen(false);
-    setPendingItem(null);
-    setQuantity("");
-    setLocalError(null);
-  }
-
-  async function handleSubmit() {
-    if (!pendingItem || !quantity || Number(quantity) <= 0) {
-      setLocalError("Elige que se uso y su cantidad.");
-      return;
-    }
-    if (Number(quantity) > pendingItem.available + 0.0001) {
-      setLocalError(
-        `Solo hay ${formatGramos(pendingItem.available)} ${pendingItem.unit_code} de "${pendingItem.label}" sin registrar.`,
-      );
-      return;
-    }
-    setLocalError(null);
-    setIsSaving(true);
-    try {
-      await addActaLine(run.id, {
-        side: "RECEPCION",
-        label: pendingItem.label,
-        quantity,
-        unit_code: pendingItem.unit_code,
-        item_id: pendingItem.item_id,
-      });
-      closePicker();
-      onChanged();
-      onSuccess("Uso registrado en el acta.");
-    } catch (nextError) {
-      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo registrar el uso.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
+  if (buildReturnCandidates(run).length === 0) return null;
 
   return (
     <div className="actaDocAction">
       <button className="actaDocAddRow" onClick={() => setIsPickerOpen(true)} type="button">
-        <Plus aria-hidden="true" size={13} />
-        Entregar material
+        <Undo2 aria-hidden="true" size={13} />
+        Devolver sobrante
       </button>
 
       {isPickerOpen ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Entregar material">
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Devolver sobrante">
           <section className="modalWindow">
             <div className="modalHeader">
               <div>
-                <h2>Entregar material</h2>
-                <p>Complementos e insumos de esta orden que el sistema no calcula solo — elige uno y anota cuanto se uso.</p>
+                <h2>Devolver sobrante</h2>
+                <p>Complementos e insumos de esta orden que sobraron sin usar — elige uno y cuanto se devuelve.</p>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closePicker} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsPickerOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-
-            {localError ? (
-              <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)", marginTop: 10 }}>
-                {localError}
-              </div>
-            ) : null}
-
-            {pendingItem ? (
-              <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 10 }}>
-                <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
-                  {pendingItem.label} · disponible {formatGramos(pendingItem.available)} {pendingItem.unit_code}
-                </div>
-                <input
-                  aria-label="Cantidad"
-                  autoFocus
-                  className="field"
-                  max={pendingItem.available}
-                  min="0.0001"
-                  onChange={(e) => {
-                    setQuantity(e.target.value);
-                    setLocalError(null);
-                  }}
-                  placeholder={pendingItem.unit_code}
-                  step="0.0001"
-                  style={{ width: 110 }}
-                  type="number"
-                  value={quantity}
-                />
-                <button
-                  className="button"
-                  disabled={isSaving}
-                  onClick={() => {
-                    setPendingItem(null);
-                    setQuantity("");
-                    setLocalError(null);
-                  }}
-                  type="button"
-                >
-                  Elegir otro
-                </button>
-                <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleSubmit()} type="button">
-                  Registrar
-                </button>
-              </div>
-            ) : (
-              <div className="tableWrap" style={{ marginTop: 10 }}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Material</th>
-                      <th className="num">Disponible</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {candidates.map((item) => (
-                      <tr
-                        key={item.key}
-                        onClick={() => {
-                          setPendingItem(item);
-                          setQuantity("");
-                          setLocalError(null);
-                        }}
-                        style={{ cursor: "pointer" }}
-                      >
-                        <td>{item.label}</td>
-                        <td className="num">{formatGramos(item.available)} {item.unit_code}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <ReturnCandidatesForm onChanged={onChanged} onError={onError} onSuccess={onSuccess} run={run} />
           </section>
         </div>
       ) : null}
@@ -582,59 +544,42 @@ function EntregarMaterialAction({
   );
 }
 
-// Balance de materia prima: lo unico que se puede reconciliar con un simple
-// resta, porque entra y sale en la MISMA unidad todo el tiempo (insumos y
-// complementos son pools aparte, con sus propias unidades — no se suman
-// aqui). Entregada (PLAN + material adicional aprobado de la propia materia
-// prima) menos la merma de cada etapa tiene que dar el peso final recibido;
-// si no da, algo quedo sin registrar.
-function MateriaPrimaBalance({ run }: { run: ProductionRun }) {
-  const rawMaterialId = run.raw_material_item_id;
-  if (!rawMaterialId) return null;
-  const lines = run.acta_lines ?? [];
-  const entregada = lines
-    .filter((l) => l.side === "ENTREGA" && l.item_id === rawMaterialId)
-    .reduce((sum, l) => sum + Number(l.quantity), 0);
-  const merma = lines
-    .filter((l) => l.side === "RECEPCION" && l.item_id === rawMaterialId && l.label.startsWith("Merma etapa"))
-    .reduce((sum, l) => sum + Number(l.quantity), 0);
-  if (entregada <= 0) return null;
-  const pesoFinalLine = lines.find(
-    (l) => l.side === "RECEPCION" && l.item_id === rawMaterialId && l.label === "Peso final recibido",
-  );
-  const pesoFinal = pesoFinalLine ? Number(pesoFinalLine.quantity) : null;
-  const esperado = entregada - merma;
-  const unit = run.raw_material_unit_code;
-  const diff = pesoFinal !== null ? esperado - pesoFinal : null;
-  const reconciles = diff !== null && Math.abs(diff) < 0.01;
+// Merma total, como fila del propio certificado (no una caja aparte): los
+// gramos que entraron a producir NO quedan fijos -- se actualizan segun la
+// merma que se va registrando. Por eso la fuente de la merma no es ninguna
+// linea de la acta (ni "Merma etapa X" ni el producto resultante, que nace
+// con la cantidad PLANEADA al crear la orden y nunca se corrige despues del
+// pesaje real): es `stage.waste_weight`, el mismo numero que ya mantiene al
+// dia finish_stage/_recompute_stage_waste_chain etapa por etapa, y que se
+// convierte en run.waste_weight cuando la orden termina. Recibido = entregado
+// menos esa merma acumulada; nunca una segunda cuenta aparte que termine
+// restando (o sumando) la merma dos veces.
+function sumByItem(lines: ActaLine[], itemId: string): number {
+  return lines.filter((l) => l.item_id === itemId).reduce((sum, l) => sum + Number(l.quantity), 0);
+}
 
-  return (
-    <div className="actaBalance">
-      <span className="opColSub">BALANCE DE MATERIA PRIMA</span>
-      <div className="actaBalanceRow">
-        <span>Entregada</span>
-        <strong>{formatGramos(entregada)} {unit}</strong>
-      </div>
-      <div className="actaBalanceRow">
-        <span>Merma</span>
-        <strong>{formatGramos(merma)} {unit}</strong>
-      </div>
-      <div className="actaBalanceRow">
-        <span>Peso final recibido</span>
-        <strong>{pesoFinal !== null ? `${formatGramos(pesoFinal)} ${unit}` : "aun sin pesar"}</strong>
-      </div>
-      {diff !== null ? (
-        <div className={`actaBalanceRow actaBalanceCheck${reconciles ? "" : " actaBalanceMismatch"}`}>
-          <span>{reconciles ? "Cuadra" : "No cuadra"}</span>
-          <strong>
-            {reconciles
-              ? `${formatGramos(esperado)} ${unit}`
-              : `esperado ${formatGramos(esperado)} ${unit} · diferencia ${formatGramos(Math.abs(diff))} ${unit}`}
-          </strong>
-        </div>
-      ) : null}
-    </div>
-  );
+function computeBalanceTotals(run: ProductionRun): { entregaTotalRows: TotalRow[]; recepcionTotalRows: TotalRow[] } {
+  const unit = run.raw_material_unit_code;
+  const rawMaterialId = run.raw_material_item_id;
+  if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  const lines = run.acta_lines ?? [];
+  const entregaTotal = sumByItem(lines.filter((l) => l.side === "ENTREGA"), rawMaterialId);
+  if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  const mermaAcumulada = run.stages.reduce((sum, stage) => sum + Number(stage.waste_weight ?? 0), 0);
+  const recepcionTotalRows: TotalRow[] = [
+    { label: "Total recibido", quantity: entregaTotal - mermaAcumulada, unit, kind: "total" },
+  ];
+  // La fila de merma total solo tiene sentido "al final": finished_at queda
+  // seteado en _finish_run sin importar si hubo o no una etapa que pese.
+  // Antes de eso el proceso sigue en curso -- lo que "falta" en recibido no
+  // es merma todavia, es simplemente material que aun no paso por una etapa.
+  if (run.finished_at !== null) {
+    recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit, kind: "merma" });
+  }
+  return {
+    entregaTotalRows: [{ label: "Total entregado", quantity: entregaTotal, unit, kind: "total" }],
+    recepcionTotalRows,
+  };
 }
 
 export function ActaView({
@@ -653,6 +598,7 @@ export function ActaView({
   const lines = run.acta_lines ?? [];
   const entrega = lines.filter((line) => line.side === "ENTREGA");
   const recepcion = lines.filter((line) => line.side === "RECEPCION");
+  const { entregaTotalRows, recepcionTotalRows } = computeBalanceTotals(run);
 
   function flagSuccess(message: string) {
     setError(null);
@@ -711,24 +657,19 @@ export function ActaView({
                   onError={flagError}
                   responsable={run.materials_approved_by_name ?? DASH}
                   title="ENTREGADO"
+                  totalRows={entregaTotalRows}
                 />
                 <div className="opDivider" aria-hidden="true" />
                 <ActaDocSide
                   fecha={run.received_at}
-                  footer={
-                    <>
-                      <RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />
-                      <EntregarMaterialAction onChanged={onChanged} onSuccess={flagSuccess} run={run} />
-                    </>
-                  }
+                  footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
                   lines={recepcion}
                   onError={flagError}
                   responsable={run.received_by_name ?? DASH}
                   title="RECIBIDO"
+                  totalRows={recepcionTotalRows}
                 />
               </div>
-
-              <MateriaPrimaBalance run={run} />
             </article>
           </div>
         </div>

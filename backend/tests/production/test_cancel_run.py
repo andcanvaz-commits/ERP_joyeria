@@ -104,6 +104,22 @@ def test_cancel_from_pending_reception_restores_stock(
     assert run.rejection_reason == "La etapa se acepto por error, hay que rehacerla"
 
 
+def test_cancel_accepts_no_reason(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """El motivo es opcional -- no toda cancelacion tiene (o necesita) una
+    explicacion. Cubre tanto None como cadena vacia/solo espacios."""
+    raw_material.current_stock = Decimal("1000")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+
+    result = production_service.cancel_run(run_read.id, current_user, None)
+
+    assert result.status == "CANCELADA"
+    run = production_service.repository.get_run(run_read.id)
+    assert run.rejection_reason is None
+
+
 def test_cancel_rejects_a_received_run(
     db_session, production_service, current_user, weighed_process, raw_material, target_complement
 ):

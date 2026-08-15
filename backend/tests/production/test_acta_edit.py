@@ -111,3 +111,42 @@ def test_delete_rejects_plan_line(
 def test_update_missing_line_raises_not_found(production_service, current_user):
     with pytest.raises(ProductionNotFoundError):
         production_service.update_acta_line(uuid.uuid4(), ActaLineUpdate(quantity=Decimal("1")), current_user)
+
+
+def test_update_recepcion_line_rejects_quantity_above_what_the_item_delivered(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Bug reportado: se entregaron 9 de un insumo, se anoto un uso de 8 en el
+    acta (RECEPCION, MANUAL), y editar esa linea a 25 no debia dejar pasar --
+    nunca se entrego tanto de ese insumo a la orden."""
+    from backend.modules.inventory.models import InventoryItem, InventoryMovement
+
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo test", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("0"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    db_session.add(
+        InventoryMovement(
+            item_id=supply.id, movement_type="CONSUMO_PRODUCCION", quantity=Decimal("9"),
+            unit_code="und", reason="test", reference_type="production_run", reference_id=run.id,
+        )
+    )
+    db_session.flush()
+
+    run_read = production_service.add_acta_line(
+        run.id,
+        ActaLineCreate(side="RECEPCION", label="Insumo test", quantity=Decimal("8"), unit_code="und", item_id=supply.id),
+        current_user,
+    )
+    line_id = [line for line in run_read.acta_lines if line.item_id == supply.id][0].id
+
+    with pytest.raises(ProductionDomainError, match="supera lo que en realidad"):
+        production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("25")), current_user)
+
+    # 9 es el techo real (lo unico que entro): si cabe.
+    updated = production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("9")), current_user)
+    edited = next(line for line in updated.acta_lines if line.id == line_id)
+    assert edited.quantity == Decimal("9")

@@ -4752,6 +4752,27 @@ textarea:disabled {
   letter-spacing: 0.5px;
 }
 
+/* Total (entregado/recibido) vs merma: no son lo mismo, no deben leerse
+   igual -- oro para una suma, rojo para lo que se perdió. */
+.opSubtotalRowTotal td {
+  background: #f3e9d6;
+}
+
+.opSubtotalRowTotal td.opTdGramos,
+.opSubtotalRowTotal td:last-child {
+  color: var(--gold-deep);
+}
+
+.opSubtotalRowMerma td {
+  background: #fbeae7;
+  border-top-color: var(--danger, #b42318);
+}
+
+.opSubtotalRowMerma td.opTdGramos,
+.opSubtotalRowMerma td:last-child {
+  color: var(--danger, #b42318);
+}
+
 .opTotal {
   text-align: right;
   font-weight: 800;
@@ -4849,6 +4870,20 @@ textarea:disabled {
   border-radius: 4px;
 }
 
+/* El spinner nativo de type=number se comia el ancho del valor en una
+   columna ya angosta (22% del documento) -- se oculta y se le da el
+   espacio completo al numero. */
+.actaDocInputs input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.actaDocInputs input[type="number"]::-webkit-outer-spin-button,
+.actaDocInputs input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .actaDocAddRow {
   display: inline-flex;
   align-items: center;
@@ -4867,55 +4902,10 @@ textarea:disabled {
   opacity: 1;
 }
 
-.actaBalance {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 2px solid var(--doc-ink);
-  display: grid;
-  gap: 4px;
-}
-
-.actaBalanceRow {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.actaBalanceCheck {
-  margin-top: 4px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--doc-line);
-  font-weight: 800;
-}
-
-.actaBalanceMismatch {
-  color: var(--danger, #b42318);
-}
-
 .actaDocAction {
   display: grid;
   gap: 6px;
   margin-top: 8px;
-}
-
-.actaDocReturns {
-  border-top: 1px dashed var(--doc-line);
-  padding-top: 8px;
-}
-
-.actaDocActionLabel {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--doc-ink-strong);
-}
-
-.actaDocActionForm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
 }
 
 /* Documento para imprimir. `.wasteReportPrint` era el nombre original (solo

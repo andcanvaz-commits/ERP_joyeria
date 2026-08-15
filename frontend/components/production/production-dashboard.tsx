@@ -12,7 +12,7 @@ import { ComplementsManager } from "@/components/mantenimiento/complements-manag
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { CreateOrderWizard } from "@/components/production/create-order-wizard";
-import { ActaView, RecepcionActions, returnableComplements } from "@/components/production/acta-view";
+import { ActaView, ReturnCandidatesForm, buildReturnCandidates } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
@@ -62,7 +62,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
-import { groupRunFamilies } from "@/lib/orden-produccion";
+import { getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 import { useCountUp } from "@/hooks/use-count-up";
 
@@ -588,6 +588,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setPostFinishReturnRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
   }, [runs]);
 
+  // Si ya no queda nada por devolver (se devolvio todo dentro de esta misma
+  // ventana), el paso 1 del ritual automatico no tiene mas sentido -- sigue
+  // solo al paso 2 (acta) en vez de quedar con la ventana vacia esperando un
+  // clic en "Continuar".
+  useEffect(() => {
+    if (postFinishReturnRun && buildReturnCandidates(postFinishReturnRun).length === 0) {
+      continueFromReturnStep();
+    }
+  }, [postFinishReturnRun]);
+
   useEffect(() => {
     setSelectedProcessId((current) => current || processes.find((process) => process.is_active)?.id || "");
   }, [processes]);
@@ -946,14 +956,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   async function handleCancelRun(run: ProductionRun, reason: string) {
-    if (!reason.trim()) {
-      setError("Indica el motivo de la cancelación.");
-      return;
-    }
     setError(null);
     setIsCancellingRun(true);
     try {
-      await cancelProductionRun(run.id, reason.trim());
+      await cancelProductionRun(run.id, reason.trim() || undefined);
       setCancelRun(null);
       setSuccess(`Orden ${run.production_code ?? ""} cancelada. Inventario fue restaurado.`.trim());
       closeRunStagesModal();
@@ -975,16 +981,29 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setEditWeightValue("");
   }
 
-  async function handleSaveStageWeight(stage: ProductionRunStage) {
-    const value = editWeightValue.trim();
-    if (!value) {
-      setError("Ingresa el peso corregido.");
-      return;
+  // Correccion de peso fuera de condicion (merma > limite): mismo patron que
+  // approveStage en el flujo normal -- un modal de confirmacion con botones,
+  // nunca un guardado silencioso. Al confirmar, el backend deja el mismo
+  // rastro que "pasar igualmente" una etapa (ProductionRunStageDecision,
+  // weight_based=True) -- ver edit_stage_weight.
+  function stageWeightEditFailsCondition(stage: ProductionRunStage, current: number): { fails: boolean; reason: string } {
+    const reference = stageReferenceWeight(stage);
+    const limit = Number(selectedRunForStages?.waste_limit_percent ?? 0);
+    if (!(reference > 0) || !Number.isFinite(current) || current < 0 || current > reference) {
+      return { fails: false, reason: "" };
     }
+    const loss = ((reference - current) / reference) * 100;
+    if (loss > limit) {
+      return { fails: true, reason: `La correccion implica una pérdida de ${loss.toFixed(2)}% (supera el límite ${limit.toFixed(2)}%).` };
+    }
+    return { fails: false, reason: "" };
+  }
+
+  async function saveStageWeight(stage: ProductionRunStage, value: string, justification?: string) {
     setError(null);
     setIsSavingStageWeight(true);
     try {
-      await editProductionRunStageWeight(stage.id, { final_weight: value });
+      await editProductionRunStageWeight(stage.id, { final_weight: value, justification: justification ?? null });
       setSuccess("Peso corregido.");
       closeEditStageWeight();
       await reload();
@@ -993,6 +1012,26 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     } finally {
       setIsSavingStageWeight(false);
     }
+  }
+
+  async function handleSaveStageWeight(stage: ProductionRunStage) {
+    const value = editWeightValue.trim();
+    if (!value) {
+      setError("Ingresa el peso corregido.");
+      return;
+    }
+    const check = stageWeightEditFailsCondition(stage, Number(value));
+    if (check.fails) {
+      showConfirm(
+        "Peso fuera de la condición",
+        `${check.reason} ¿Deseas guardar la corrección igualmente? Quedará registrado.`,
+        () => void saveStageWeight(stage, value, check.reason),
+        false,
+        "Guardar igualmente"
+      );
+      return;
+    }
+    await saveStageWeight(stage, value);
   }
 
   function openStatsModal(run: ProductionRun) {
@@ -1426,17 +1465,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       );
       await reload();
       if (updatedRun.status === "PENDIENTE_RECEPCION") {
-        // Última fase terminada: se cierra el detalle de etapas. Antes del
-        // resumen/reporte de merma de siempre, el ritual automatico pasa
-        // primero por sobrante de complementos por devolver (si hay) y
-        // despues por la acta, para que quede todo al dia antes de recibir.
+        // Última fase terminada: se cierra el detalle de etapas.
         setSelectedRunForStages(null);
         setSuccess("Producción finalizada. Pendiente de recepción en inventario.");
-        if (returnableComplements(updatedRun).length > 0) {
-          setPostFinishReturnRun(updatedRun);
-        } else {
-          setIsPostFinishActa(true);
-          setActaRun(updatedRun);
+        // Es UNA sola acta por familia (padre + hijas de split): el ritual
+        // automatico (devolver sobrante -> acta) solo tiene sentido cuando
+        // la ULTIMA pierna termina. Si otra pierna de la misma orden sigue
+        // EN_PROCESO, la acta de esta corrida por si sola esta incompleta
+        // (le falta lo que la otra pierna todavia no entrego/recibio) --
+        // mostrarla ahi confunde mas de lo que ayuda (bug reportado).
+        const nextRuns = await listProductionRuns();
+        const family = getRunFamily(nextRuns, updatedRun);
+        const familyFinished = family.every(
+          (member) => member.finished_at !== null || member.status === "CANCELADA"
+        );
+        if (familyFinished) {
+          if (buildReturnCandidates(updatedRun).length > 0) {
+            setPostFinishReturnRun(updatedRun);
+          } else {
+            setIsPostFinishActa(true);
+            setActaRun(updatedRun);
+          }
         }
         return;
       }
@@ -2331,7 +2380,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           )}
                           {root.process_name}
                         </strong>
-                        <span>{numericText(root.quantity)} unidades · Merma: {percentText(root.waste_percent)}% · Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}</span>
+                        <span>{numericText(root.quantity)} {root.raw_material_unit_code} · Merma: {percentText(root.waste_percent)}% · Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}</span>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
                         {isSplit ? (
@@ -2856,7 +2905,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {selectedRunForStages.process_name}
                 </h2>
                 <p>
-                  {numericText(selectedRunForStages.quantity)} {Number(selectedRunForStages.quantity) === 1 ? "unidad" : "unidades"}
+                  {numericText(selectedRunForStages.quantity)} {selectedRunForStages.raw_material_unit_code}
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -3018,6 +3067,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             type="number"
                             value={editWeightValue}
                           />
+                          {(() => {
+                            const reference = stageReferenceWeight(stage);
+                            const current = Number(editWeightValue);
+                            if (!(reference > 0) || !Number.isFinite(current) || editWeightValue.trim() === "") return null;
+                            if (current > reference) {
+                              return (
+                                <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)" }}>
+                                  El peso no puede superar el material que entró a esta etapa ({numericText(reference)} {selectedRunForStages.raw_material_unit_code}).
+                                </div>
+                              );
+                            }
+                            const check = stageWeightEditFailsCondition(stage, current);
+                            if (check.fails) {
+                              return (
+                                <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)" }}>
+                                  ⚠ {check.reason} Al guardar se pedirá confirmación y quedará registrado.
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                           <div className="modalActions">
                             <button className="button" onClick={closeEditStageWeight} type="button">
                               Cancelar
@@ -3226,13 +3296,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
             </div>
             <label className="fieldGroup">
-              <span>Motivo de la cancelación</span>
+              <span>Motivo de la cancelación (opcional)</span>
               <textarea
                 className="field textarea"
                 maxLength={1000}
                 onChange={(event) => setCancelRunReason(event.target.value)}
                 rows={3}
-                required
                 value={cancelRunReason}
               />
             </label>
@@ -3244,7 +3313,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <button className="button" onClick={() => setCancelRun(null)} type="button">
                 Volver
               </button>
-              <button className="button buttonDanger" disabled={isCancellingRun || !cancelRunReason.trim()} type="submit">
+              <button className="button buttonDanger" disabled={isCancellingRun} type="submit">
                 {isCancellingRun ? "Cancelando" : "Cancelar orden"}
               </button>
             </div>
@@ -3298,7 +3367,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>{selectedStatsRun.process_name}</h2>
-                <p>{numericText(selectedStatsRun.quantity)} unidades</p>
+                <p>{numericText(selectedStatsRun.quantity)} {selectedStatsRun.raw_material_unit_code}</p>
               </div>
               {/* Producción finalizada: el producto ya no se edita aquí (el
                   plan se cambia solo mientras la orden sigue en proceso). */}
@@ -3372,7 +3441,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   {printingWasteRun.production_code ?? printingWasteRun.process_name} · {printingWasteRun.process_name}
                 </h2>
                 <p>
-                  {numericText(printingWasteRun.quantity)} unidades · Estado: {runStatusLabel(printingWasteRun.status)}
+                  {numericText(printingWasteRun.quantity)} {printingWasteRun.raw_material_unit_code} · Estado: {runStatusLabel(printingWasteRun.status)}
                   {printingWasteRun.finished_at ? ` · Finalizó: ${timeLabel(printingWasteRun.finished_at)}` : ""}
                 </p>
                 <div className="userPreviewGrid">
@@ -4101,9 +4170,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div>
                 <h2>Sobrante por devolver</h2>
                 <p>
-                  {postFinishReturnRun.production_code ?? postFinishReturnRun.process_name} quedo con complementos
-                  aprobados que no se usaron enteros. Devolvelos ahora o segui — es opcional, se puede hacer despues
-                  desde la acta.
+                  {postFinishReturnRun.production_code ?? postFinishReturnRun.process_name} quedó con complementos
+                  o insumos que no se usaron enteros. Devuélvelos ahora o continúa — es opcional, se puede hacer
+                  después desde la acta.
                 </p>
               </div>
               <button
@@ -4115,7 +4184,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            <RecepcionActions onChanged={() => void reload()} onError={setError} run={postFinishReturnRun} />
+            <ReturnCandidatesForm onChanged={() => void reload()} onError={setError} run={postFinishReturnRun} />
             <div className="modalActions">
               <button className="button buttonPrimary" onClick={() => continueFromReturnStep()} type="button">
                 Continuar

@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Printer, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
+import { listInventoryItems } from "@/lib/inventory-api";
 import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
+import { ActaView } from "@/components/production/acta-view";
 import type { ProductionRun } from "@/types/production";
 
 const STATUS_LABELS: Record<ProductionRun["status"], string> = {
@@ -115,7 +117,17 @@ function RunSummaryRows({ run }: { run: ProductionRun }) {
  * (modalHeader + userPreviewGrid + RunStageSummaryTable), no cards anidadas:
  * antes apilaba 3 KPIs grandes y 4 paneles con su propio titulo, lo que
  * obligaba a un scroll larguisimo y no se parecia a ninguna otra ficha. */
-function RunDetail({ run, onClose, onPrint }: { run: ProductionRun; onClose: () => void; onPrint: () => void }) {
+function RunDetail({
+  run,
+  onClose,
+  onPrint,
+  onViewActa,
+}: {
+  run: ProductionRun;
+  onClose: () => void;
+  onPrint: () => void;
+  onViewActa: () => void;
+}) {
   return (
     <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de solicitud">
       <section className="modalWindow processViewWindow">
@@ -138,6 +150,9 @@ function RunDetail({ run, onClose, onPrint }: { run: ProductionRun; onClose: () 
         <RunStageSummaryTable run={run} />
 
         <div className="modalActions">
+          <button className="button" onClick={onViewActa} type="button">
+            Ver acta
+          </button>
           <button className="button buttonPrimary" onClick={onPrint} type="button">
             <Printer aria-hidden="true" size={14} />
             Imprimir
@@ -149,7 +164,9 @@ function RunDetail({ run, onClose, onPrint }: { run: ProductionRun; onClose: () 
 }
 
 export function SolicitudesView() {
+  const queryClient = useQueryClient();
   const [selectedRun, setSelectedRun] = useState<ProductionRun | null>(null);
+  const [actaRun, setActaRun] = useState<ProductionRun | null>(null);
   // Impresion: el documento se monta en un portal fuera del arbol de la app
   // (@media print oculta todo menos .printArea) y se dispara window.print()
   // tras un tick, para que el navegador alcance a pintarlo. Mismo patron que
@@ -177,11 +194,24 @@ export function SolicitudesView() {
     queryKey: ["solicitudes"],
     queryFn: listProductionRuns,
   });
+  // Solo se pide cuando de verdad se necesita (abrir el acta): esta pantalla
+  // normalmente no toca inventario para nada mas.
+  const { data: materialItems = [] } = useQuery({
+    queryKey: ["inventory-items-all"],
+    queryFn: () => listInventoryItems(),
+    enabled: actaRun !== null,
+  });
 
   const role = currentUser ? normalizeRole(currentUser.role) : null;
   const userId = currentUser?.id ?? null;
   const isLoading = isLoadingUser || isLoadingRuns;
   const error = queryError instanceof Error ? queryError.message : null;
+
+  // El acta es editable: si queda abierta mientras se guarda un cambio,
+  // tiene que reflejar la orden fresca, no la foto de cuando se abrio.
+  useEffect(() => {
+    setActaRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
+  }, [runs]);
 
   const myRuns = useMemo(() => runs.filter((run) => run.created_by_user_id === userId), [runs, userId]);
   const respondedRuns = useMemo(() => runs.filter((run) => run.status !== "PENDIENTE_INVENTARIO"), [runs]);
@@ -342,7 +372,17 @@ export function SolicitudesView() {
         <RunDetail
           onClose={() => setSelectedRun(null)}
           onPrint={() => setPrintingRun(selectedRun)}
+          onViewActa={() => setActaRun(selectedRun)}
           run={selectedRun}
+        />
+      ) : null}
+
+      {actaRun ? (
+        <ActaView
+          materialItems={materialItems}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ["solicitudes"] })}
+          onClose={() => setActaRun(null)}
+          run={actaRun}
         />
       ) : null}
 

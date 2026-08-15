@@ -253,6 +253,94 @@ def test_edit_rejects_when_stage_does_not_require_weighing(
         production_service.edit_stage_weight(stage.id, StageWeightEdit(final_weight=Decimal("1")), current_user)
 
 
+def test_edit_rejects_weight_above_material_that_entered_the_stage(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    """Un peso corregido mayor al material que entro a la etapa es error de
+    captura (el material no puede crecer) -- misma regla que finish_stage."""
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 100, "95"
+    )
+    stage = run.stages[0]
+
+    with pytest.raises(ProductionDomainError, match="no puede ser"):
+        production_service.edit_stage_weight(
+            stage.id, StageWeightEdit(final_weight=Decimal("105")), current_user
+        )
+
+    db_session.refresh(stage)
+    assert stage.final_weight == Decimal("95")  # sin cambios, la correccion se rechazo
+
+
+def test_edit_cascades_rejects_weight_above_previous_finished_stage(
+    db_session, production_service, current_user, two_stage_weighed_process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run = _run_with_two_finished_stages(
+        production_service, current_user, two_stage_weighed_process, raw_material, target_complement, 100, "90", "80"
+    )
+    stage1, stage2 = sorted(run.stages, key=lambda s: s.stage_order)
+
+    # Pulido (stage2) no puede corregirse a mas de lo que salio de fundicion (90).
+    with pytest.raises(ProductionDomainError, match="no puede ser"):
+        production_service.edit_stage_weight(
+            stage2.id, StageWeightEdit(final_weight=Decimal("91")), current_user
+        )
+
+
+def test_edit_records_a_decision_when_correction_overruns_waste_limit(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    """Mismo rastro que el flujo normal (finish_stage 'pasar igualmente' una
+    etapa fuera de condicion): si la correccion deja la merma de la etapa por
+    encima del limite del proceso, no es un aviso pasivo -- queda una
+    ProductionRunStageDecision (weight_based=True)."""
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    # 100g requeridos, termina en 95g -> 5% de merma (dentro del limite 100%).
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 100, "95"
+    )
+    run.waste_limit_percent = Decimal("10")
+    db_session.flush()
+    stage = run.stages[0]
+    assert stage.decisions == []
+
+    # Corrige a 85g -> 15% de merma, supera el limite de 10% recien seteado.
+    production_service.edit_stage_weight(
+        stage.id, StageWeightEdit(final_weight=Decimal("85"), justification="Repesaje: bascula mal calibrada"),
+        current_user,
+    )
+
+    db_session.refresh(stage)
+    assert len(stage.decisions) == 1
+    decision = stage.decisions[0]
+    assert decision.decision == "APPROVED"
+    assert decision.weight_based is True
+    assert decision.final_weight == Decimal("85")
+    assert decision.justification == "Repesaje: bascula mal calibrada"
+
+
+def test_edit_within_waste_limit_does_not_record_a_decision(
+    db_session, production_service, current_user, weighed_process, raw_material, target_complement
+):
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+    run = _run_to_pending_reception(
+        production_service, current_user, weighed_process, raw_material, target_complement, 100, "95"
+    )
+    stage = run.stages[0]
+
+    # weighed_process.waste_limit_percent es 100: 90g (10% de merma) no supera nada.
+    production_service.edit_stage_weight(stage.id, StageWeightEdit(final_weight=Decimal("90")), current_user)
+
+    db_session.refresh(stage)
+    assert stage.decisions == []
+
+
 def test_edit_unknown_stage_raises_not_found(production_service, current_user):
     import uuid
 

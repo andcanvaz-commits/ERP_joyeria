@@ -113,6 +113,11 @@ def test_create_run_seeds_entrega_lines_for_stage_ingredients_and_complements(
 def test_create_run_seeds_recepcion_line_for_product_type(
     db_session, production_service, current_user, process, raw_material
 ):
+    """ProductType no define su propia unidad (el material/unidad se decide
+    en produccion): el resultante hereda la unidad de la materia prima de
+    ESTA orden -- una orden en gramos produce gramos, no "unidades" fijas sin
+    relacion con lo que de verdad se peso (bug reportado: 1g de materia
+    prima terminaba mostrando "1 und" del producto en el acta)."""
     from backend.modules.product_types.models import ProductType
 
     product_type = ProductType(
@@ -137,5 +142,5 @@ def test_create_run_seeds_recepcion_line_for_product_type(
     recepcion = [line for line in run.acta_lines if line.side == ActaLineSide.RECEPCION]
     assert len(recepcion) == 1
     assert recepcion[0].label == product_type.name
-    assert recepcion[0].unit_code == "und"
+    assert recepcion[0].unit_code == raw_material.unit_code
     assert recepcion[0].quantity == Decimal("5")

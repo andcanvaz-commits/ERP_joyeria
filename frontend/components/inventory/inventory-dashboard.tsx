@@ -9,6 +9,7 @@ import { openableProps, stopClick } from "@/lib/a11y";
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
 import { buildItemNameMap, buildOrdenProduccion, canPrintRecepcion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
+import { ActaView } from "@/components/production/acta-view";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { ToastNotice } from "@/components/ui/toast-notice";
@@ -549,6 +550,10 @@ export function InventoryDashboard() {
   const [rejectReason, setRejectReason] = useState("");
   // Detalle de un rechazo ya registrado (desde movimientos/historial).
   const [rejectionInfoRun, setRejectionInfoRun] = useState<ProductionRun | null>(null);
+  // Acta editable de una orden -- misma ventana que en Producción, disponible
+  // aqui tambien: Inventario aprueba/recibe y necesita poder ver/editar el
+  // mismo certificado sin cambiar de pantalla.
+  const [actaRun, setActaRun] = useState<ProductionRun | null>(null);
   // Ensamble de piezas de productos terminados en un producto nuevo.
   const [isCombineOpen, setIsCombineOpen] = useState(false);
   // Piezas elegidas por ventana de catálogo; cantidad individual por pieza
@@ -674,6 +679,12 @@ export function InventoryDashboard() {
   const movements = data?.movements ?? [];
   const users = data?.users ?? [];
   const productionRuns = data?.runs ?? [];
+  // El acta es editable: si queda abierta mientras se guarda un cambio (o el
+  // refetch periodico trae datos nuevos), tiene que reflejar la orden fresca,
+  // no la foto de cuando se abrio -- mismo patron que production-dashboard.tsx.
+  useEffect(() => {
+    setActaRun((current) => (current ? productionRuns.find((run) => run.id === current.id) ?? null : current));
+  }, [productionRuns]);
   // Folio de cualquier corrida -> folio raiz de su orden. Movimientos viejos
   // guardaron el folio de la parte especifica, no el de la orden completa.
   const rootCodeByCode = useMemo(() => {
@@ -1085,20 +1096,6 @@ export function InventoryDashboard() {
     void handleApproveMaterials(run);
   }
 
-  // Cuanto queda pendiente en la bandeja de Solicitudes (materia prima +
-  // recepcion + material adicional): si llega a 0 tras una accion, la
-  // bandeja se cierra sola. Corridas historicas migradas (event_lines) se
-  // excluyen porque pueden quedar en PENDIENTE_RECEPCION para siempre.
-  function countRemainingSolicitudes(runs: ProductionRun[]): number {
-    const materialsAndReception = runs.filter(
-      (r) => r.status === "PENDIENTE_INVENTARIO" || (r.status === "PENDIENTE_RECEPCION" && (r.event_lines ?? []).length === 0)
-    ).length;
-    const additionalMaterial = runs
-      .filter((r) => r.status === "EN_PROCESO")
-      .reduce((total, r) => total + (r.additional_materials ?? []).filter((req) => req.status === "PENDIENTE").length, 0);
-    return materialsAndReception + additionalMaterial;
-  }
-
   async function handleApproveMaterials(run: ProductionRun) {
     setError(null);
     setIsSavingProduction(true);
@@ -1111,9 +1108,6 @@ export function InventoryDashboard() {
           ? `Salida aprobada para ${updated.production_code}. ${splitChild.production_code} queda a la espera de más material.`
           : "Salida de materia prima aprobada."
       );
-      if (countRemainingSolicitudes(nextRuns) === 0) {
-        setIsSolicitudesOpen(false);
-      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1136,10 +1130,6 @@ export function InventoryDashboard() {
       await rejectProductionRunMaterials(run.id, reason);
       setRejectRun(null);
       setSuccess("Solicitud rechazada. La orden fue cancelada.");
-      const nextRuns = await listProductionRuns();
-      if (countRemainingSolicitudes(nextRuns) === 0) {
-        setIsSolicitudesOpen(false);
-      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1178,9 +1168,6 @@ export function InventoryDashboard() {
       const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId, wasteItemName);
       setSuccess("Producto terminado recibido en inventario.");
       const nextRuns = await listProductionRuns();
-      if (countRemainingSolicitudes(nextRuns) === 0) {
-        setIsSolicitudesOpen(false);
-      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1201,10 +1188,6 @@ export function InventoryDashboard() {
     try {
       await approveAdditionalMaterial(requestId);
       setSuccess("Material adicional aprobado.");
-      const nextRuns = await listProductionRuns();
-      if (countRemainingSolicitudes(nextRuns) === 0) {
-        setIsSolicitudesOpen(false);
-      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1221,10 +1204,6 @@ export function InventoryDashboard() {
     try {
       await rejectAdditionalMaterial(requestId);
       setSuccess("Solicitud de material adicional rechazada.");
-      const nextRuns = await listProductionRuns();
-      if (countRemainingSolicitudes(nextRuns) === 0) {
-        setIsSolicitudesOpen(false);
-      }
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
@@ -1448,6 +1427,18 @@ export function InventoryDashboard() {
       .filter((request) => request.status === "PENDIENTE")
       .map((request) => ({ run, request })),
   );
+  const totalPendingSolicitudes =
+    pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length;
+  // La bandeja se cierra sola apenas queda en 0, sin importar que la vacio:
+  // una accion adentro del modal, el refetch periodico (10s) o el refetch al
+  // volver a la pestana. Antes esto se checaba a mano despues de cada accion
+  // con un fetch aparte -- se quedaba abierta si el conteo llegaba a 0 por
+  // cualquier otro camino (ver bug reportado).
+  useEffect(() => {
+    if (isSolicitudesOpen && totalPendingSolicitudes === 0) {
+      setIsSolicitudesOpen(false);
+    }
+  }, [isSolicitudesOpen, totalPendingSolicitudes]);
   // Órdenes tras aplicar los filtros de fecha y estado (pestañas de procesos).
   const receivedRunsFiltered = receivedRuns.filter(
     (run) => (orderStatusFilter === "TODOS" || run.status === orderStatusFilter) && withinDateRange(run.received_at),
@@ -3613,7 +3604,7 @@ export function InventoryDashboard() {
                   {Number(partialConfirm.preview.covered_qty) > 0 ? (
                     <>
                       Solo cubre {numericText(partialConfirm.preview.covered_qty)} de{" "}
-                      {numericText(partialConfirm.preview.target_qty)} unidades de la orden{" "}
+                      {numericText(partialConfirm.preview.target_qty)} {partialConfirm.run.unit_code} de la orden{" "}
                       {partialConfirm.run.production_code ?? partialConfirm.run.run_id}.
                     </>
                   ) : (
@@ -3660,7 +3651,7 @@ export function InventoryDashboard() {
                     Arrancar con lo que alcanza
                   </button>
                   <small style={{ color: "var(--muted)" }}>
-                    Consume el material ahora, arranca {numericText(partialConfirm.preview.covered_qty)} unidades
+                    Consume el material ahora, arranca {numericText(partialConfirm.preview.covered_qty)} {partialConfirm.run.unit_code}
                     y el resto queda como una orden nueva esperando material.
                   </small>
                 </div>
@@ -4002,6 +3993,11 @@ export function InventoryDashboard() {
               </span>
               <span><strong>Motivo</strong>{rejectionInfoRun.rejection_reason || "Sin motivo registrado"}</span>
             </div>
+            <div className="modalActions">
+              <button className="button" onClick={() => setActaRun(rejectionInfoRun)} type="button">
+                Ver acta
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
@@ -4023,6 +4019,11 @@ export function InventoryDashboard() {
               <span><strong>Cuándo</strong>{productionTimeLabel(receptionInfoRun.received_at)}</span>
               <span><strong>Cantidad</strong>{numericText(receptionInfoRun.quantity)} {receptionInfoRun.raw_material_unit_code}</span>
               <span><strong>Peso final</strong>{(() => { const weight = runFinalWeight(receptionInfoRun); return weight ? `${numericText(String(weight))} g` : "—"; })()}</span>
+            </div>
+            <div className="modalActions">
+              <button className="button" onClick={() => setActaRun(receptionInfoRun)} type="button">
+                Ver acta
+              </button>
             </div>
           </section>
         </div>
@@ -5104,7 +5105,7 @@ export function InventoryDashboard() {
             <div className="modalHeader">
               <div>
                 <h2>Solicitudes de produccion</h2>
-                <p>{pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length} solicitudes pendientes</p>
+                <p>{totalPendingSolicitudes} solicitudes pendientes</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsSolicitudesOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -5148,15 +5149,20 @@ export function InventoryDashboard() {
                           </button>
                         </div>
                       </div>
-                      <button
-                        className="solicitudCardToggle"
-                        onClick={() => setExpandedSolicitudId(expandedSolicitudId === run.id ? null : run.id)}
-                        type="button"
-                        aria-label="Ver detalle"
-                      >
-                        <Eye aria-hidden="true" size={14} />
-                        {expandedSolicitudId === run.id ? "Ocultar detalle" : "Ver detalle"}
-                      </button>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <button
+                          className="solicitudCardToggle"
+                          onClick={() => setExpandedSolicitudId(expandedSolicitudId === run.id ? null : run.id)}
+                          type="button"
+                          aria-label="Ver detalle"
+                        >
+                          <Eye aria-hidden="true" size={14} />
+                          {expandedSolicitudId === run.id ? "Ocultar detalle" : "Ver detalle"}
+                        </button>
+                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
+                          Ver acta
+                        </button>
+                      </div>
                       {expandedSolicitudId === run.id ? (
                         <div className="solicitudCardDetail">
                           <div className="solicitudDetailItem">
@@ -5211,15 +5217,20 @@ export function InventoryDashboard() {
                           Recibir
                         </button>
                       </div>
-                      <button
-                        className="solicitudCardToggle"
-                        onClick={() => setExpandedSolicitudId(expandedSolicitudId === `recv-${run.id}` ? null : `recv-${run.id}`)}
-                        type="button"
-                        aria-label="Ver detalle"
-                      >
-                        <Eye aria-hidden="true" size={14} />
-                        {expandedSolicitudId === `recv-${run.id}` ? "Ocultar detalle" : "Ver detalle"}
-                      </button>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <button
+                          className="solicitudCardToggle"
+                          onClick={() => setExpandedSolicitudId(expandedSolicitudId === `recv-${run.id}` ? null : `recv-${run.id}`)}
+                          type="button"
+                          aria-label="Ver detalle"
+                        >
+                          <Eye aria-hidden="true" size={14} />
+                          {expandedSolicitudId === `recv-${run.id}` ? "Ocultar detalle" : "Ver detalle"}
+                        </button>
+                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
+                          Ver acta
+                        </button>
+                      </div>
                       {expandedSolicitudId === `recv-${run.id}` ? (
                         <div className="solicitudCardDetail">
                           <div className="solicitudDetailItem">
@@ -5310,8 +5321,8 @@ export function InventoryDashboard() {
               <div>
                 <h2>Stock insuficiente{approveSplitConfirm.run.production_code ? ` para ${approveSplitConfirm.run.production_code}` : ""}</h2>
                 <p>
-                  Solo hay {approveSplitConfirm.coveredQty} de {approveSplitConfirm.requiredQty} unidades de{" "}
-                  {approveSplitConfirm.materialName} ({approveSplitConfirm.unitCode}).
+                  Solo hay {approveSplitConfirm.coveredQty} de {approveSplitConfirm.requiredQty} {approveSplitConfirm.unitCode} de{" "}
+                  {approveSplitConfirm.materialName}.
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setApproveSplitConfirm(null)} type="button">
@@ -5319,7 +5330,7 @@ export function InventoryDashboard() {
               </button>
             </div>
             <p style={{ margin: "8px 0 0" }}>
-              ¿Aprobar la parte cubierta? Las {approveSplitConfirm.missingQty} unidades restantes pasarán a una
+              ¿Aprobar la parte cubierta? Los {approveSplitConfirm.missingQty} {approveSplitConfirm.unitCode} restantes pasarán a una
               nueva orden a la espera de más material.
             </p>
             <div className="modalActions">
@@ -5400,6 +5411,15 @@ export function InventoryDashboard() {
             </div>
           </section>
         </div>
+      ) : null}
+
+      {actaRun ? (
+        <ActaView
+          materialItems={items}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ["inventory"] })}
+          onClose={() => setActaRun(null)}
+          run={actaRun}
+        />
       ) : null}
     </div>
   );
