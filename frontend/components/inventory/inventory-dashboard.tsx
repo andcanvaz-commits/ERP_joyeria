@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, History, Inbox, Minus, Pencil, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
+import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FileText, FlaskConical, History, Inbox, Minus, Pencil, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -5149,7 +5149,11 @@ export function InventoryDashboard() {
                           </button>
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
+                          <FileText aria-hidden="true" size={14} />
+                          Ver acta
+                        </button>
                         <button
                           className="solicitudCardToggle"
                           onClick={() => setExpandedSolicitudId(expandedSolicitudId === run.id ? null : run.id)}
@@ -5158,9 +5162,6 @@ export function InventoryDashboard() {
                         >
                           <Eye aria-hidden="true" size={14} />
                           {expandedSolicitudId === run.id ? "Ocultar detalle" : "Ver detalle"}
-                        </button>
-                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
-                          Ver acta
                         </button>
                       </div>
                       {expandedSolicitudId === run.id ? (
@@ -5217,7 +5218,11 @@ export function InventoryDashboard() {
                           Recibir
                         </button>
                       </div>
-                      <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
+                          <FileText aria-hidden="true" size={14} />
+                          Ver acta
+                        </button>
                         <button
                           className="solicitudCardToggle"
                           onClick={() => setExpandedSolicitudId(expandedSolicitudId === `recv-${run.id}` ? null : `recv-${run.id}`)}
@@ -5226,9 +5231,6 @@ export function InventoryDashboard() {
                         >
                           <Eye aria-hidden="true" size={14} />
                           {expandedSolicitudId === `recv-${run.id}` ? "Ocultar detalle" : "Ver detalle"}
-                        </button>
-                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
-                          Ver acta
                         </button>
                       </div>
                       {expandedSolicitudId === `recv-${run.id}` ? (
