@@ -30,7 +30,6 @@ export type OrdenProduccionModel = {
   entregaTotalRows: ActaSideTotal[];
   recepcionTotalRows: ActaSideTotal[];
   cancelada: boolean;
-  recepcionPhase: ActaRightPhase;
   productosResultantes: string;
 };
 
@@ -40,29 +39,6 @@ function num(value: string | null | undefined): number {
   if (value === null || value === undefined || value === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-export type ActaRightPhase = "SOLO_PRODUCTO" | "CONSTRUYENDO";
-
-/** Fase del lado RECIBIDO del certificado/acta. La aprobacion de inventario
- * es del lado ENTREGA, no de RECEPCION -- sin aprobar todavia, RECEPCION no
- * lleva ningun aviso especial, se queda en blanco (CONSTRUYENDO con tabla
- * vacia, igual que siempre). Solo cuando ya se aprobo y todavia no hay avance
- * real (ninguna etapa que pesa termino, sin devoluciones) tiene sentido un
- * aviso: que producto sera el resultante. Una etapa que pesa y termina en 0%
- * de merma cuenta como avance real -- no es "merma > 0" lo que dispara
- * CONSTRUYENDO, es que de verdad se peso algo. */
-export function actaRightPhase(params: {
-  approved: boolean;
-  stages: Array<{ requires_weighing: boolean; status: string }>;
-  hasRecepcionLines: boolean;
-}): ActaRightPhase {
-  if (!params.approved) return "CONSTRUYENDO";
-  const hasWeighedStage = params.stages.some(
-    (s) => s.requires_weighing && s.status === "FINALIZADA"
-  );
-  if (hasWeighedStage || params.hasRecepcionLines) return "CONSTRUYENDO";
-  return "SOLO_PRODUCTO";
 }
 
 function formatQty(value: number): string {
@@ -150,7 +126,6 @@ export type RunActaSides = {
   recepcionResponsable: string;
   entregaTotalRows: ActaSideTotal[];
   recepcionTotalRows: ActaSideTotal[];
-  recepcionPhase: ActaRightPhase;
   productosResultantes: string;
 };
 
@@ -171,11 +146,6 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" }));
 
   const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run);
-  const recepcionPhase = actaRightPhase({
-    approved: run.materials_approved_at !== null,
-    stages: run.stages,
-    hasRecepcionLines: recepcionLines.length > 0,
-  });
   const productosResultantes = formatProductosResultantes(run.products ?? [], run.raw_material_unit_code);
 
   return {
@@ -187,7 +157,6 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     recepcionResponsable: run.received_by_name ?? DASH,
     entregaTotalRows,
     recepcionTotalRows,
-    recepcionPhase,
     productosResultantes,
   };
 }
@@ -273,8 +242,8 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
     .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
 }
 
-/** Mismo criterio que actaRightPhase para CONSTRUYENDO: recepcion real
- * (linea no-PLAN, evento historico, recepcion final) o una etapa que pesa ya
+/** ¿Este run tiene avance real del lado RECIBIDO? Recepcion real (linea
+ * no-PLAN, evento historico, recepcion final) o una etapa que pesa ya
  * termino (aunque sin devolucion todavia). Sin esto, un pesaje sin devolucion
  * dejaba el evento de recepcion sin empujar y el certificado divergia de Ver
  * Acta, que ya mostraba fila por fila con la misma condicion. */
@@ -341,7 +310,6 @@ export function buildOrdenProduccion(
       entregaTotalRows: sides.entregaTotalRows,
       recepcionTotalRows: sides.recepcionTotalRows,
       cancelada: root.status === "CANCELADA",
-      recepcionPhase: sides.recepcionPhase,
       productosResultantes: sides.productosResultantes,
     };
   }
@@ -402,17 +370,6 @@ export function buildOrdenProduccion(
     }
   }
 
-  const recepcionPhase: ActaRightPhase = isHistorical
-    ? "CONSTRUYENDO"
-    : actaRightPhase({
-        approved: canPrintEntrega(family),
-        stages: family.flatMap((run) => run.stages),
-        // La linea RECEPCION "PLAN" (producto resultante planeado) se siembra
-        // al crear la orden -- no es avance real, no debe disparar CONSTRUYENDO.
-        hasRecepcionLines: family.some((run) =>
-          (run.acta_lines ?? []).some((line) => line.side === "RECEPCION" && line.source !== "PLAN")
-        ),
-      });
   const productosResultantes = formatProductosResultantes(
     family.flatMap((run) => run.products ?? []),
     root.raw_material_unit_code
@@ -432,7 +389,6 @@ export function buildOrdenProduccion(
     entregaTotalRows,
     recepcionTotalRows,
     cancelada: family.every((run) => run.status === "CANCELADA"),
-    recepcionPhase,
     productosResultantes
   };
 }

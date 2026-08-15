@@ -27,7 +27,6 @@ export function OrdenProduccionDoc({
 
         <div className="opResponsable">
           RESPONSABLE PRODUCCIÓN: <span>{model.responsableProduccion}</span>
-          <span className="opCantidad">Producto: {model.productosResultantes}</span>
         </div>
 
         <div className="opBody">
@@ -44,7 +43,7 @@ export function OrdenProduccionDoc({
             dataClass="opRecepcionData"
             fecha={model.recepcionFecha}
             lines={model.recepcionLines}
-            notice={{ phase: model.recepcionPhase, productos: model.productosResultantes }}
+            notice={{ productos: model.productosResultantes }}
             responsable={model.recepcionResponsable}
             title="RECIBIDO"
             totalRows={model.recepcionTotalRows}

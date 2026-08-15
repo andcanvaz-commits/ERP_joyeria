@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Check, Info, Pencil, Trash2, X } from "lucide-react";
 import {
-  ActaRightPhase,
   ActaSideLine,
   ActaSideTotal,
   formatDocDate,
@@ -45,7 +44,12 @@ export function ActaSide({
   fecha: string | null;
   responsable: string;
   totalRows?: ActaSideTotal[];
-  notice?: { phase: ActaRightPhase; productos: string };
+  // Nombre + cantidad PLANEADA del producto resultante -- fija desde que se
+  // crea la orden, nunca recalculada. Sale como primera fila del lado
+  // RECIBIDO, siempre (haya o no avance real todavia): antes vivia en un
+  // "aviso" que remplazaba la tabla entera mientras no hubiera avance y
+  // desaparecia apenas empezaba a haberlo, dejando esa info huerfana.
+  notice?: { productos: string };
   // Clase de visibilidad para impresion selectiva (opEntregaData/
   // opRecepcionData en orden-produccion-doc.tsx); ausente en Ver Acta, que no
   // imprime por seccion.
@@ -99,7 +103,8 @@ export function ActaSide({
   const totals = totalRows ?? [];
   const hasGroups = lines.some((line) => line.kind === "group");
   const rowCount = lines.filter((line) => line.kind === "row").length;
-  const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length);
+  const productoRowCount = notice ? 1 : 0;
+  const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length - productoRowCount);
   const wrap = (node: React.ReactNode) => (dataClass ? <span className={dataClass}>{node}</span> : node);
 
   return (
@@ -114,27 +119,27 @@ export function ActaSide({
           </span>
         )}
       </div>
-      {notice && notice.phase === "SOLO_PRODUCTO" ? (
-        <div className="opColNotice">
-          {wrap(
-            <>
-              <strong>Producto resultante</strong>
-              <br />
-              {notice.productos}
-            </>
-          )}
-        </div>
-      ) : (
-        <table className="opTable">
-          <thead>
-            <tr>
-              <th className="opThFecha">FECHA</th>
-              <th className="opThGramos">CANTIDAD</th>
-              <th>DETALLES</th>
+      <table className="opTable">
+        <thead>
+          <tr>
+            <th className="opThFecha">FECHA</th>
+            <th className="opThGramos">CANTIDAD</th>
+            <th>DETALLES</th>
+          </tr>
+        </thead>
+        <tbody>
+          {notice ? (
+            <tr className="opGroupRow opProductoRow">
+              <td colSpan={3}>
+                {wrap(
+                  <>
+                    <strong>Producto:</strong> {notice.productos}
+                  </>
+                )}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {lines.map((line, index) =>
+          ) : null}
+          {lines.map((line, index) =>
               line.kind === "group" ? (
                 <tr className="opGroupRow" key={`group-${index}`}>
                   <td colSpan={3}>
@@ -237,7 +242,6 @@ export function ActaSide({
             ))}
           </tbody>
         </table>
-      )}
       {actions}
       {footer}
     </section>

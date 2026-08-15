@@ -415,7 +415,6 @@ export function ActaView({
 
               <div className="opResponsable">
                 RESPONSABLE PRODUCCIÓN: <span>{run.created_by_name ?? DASH}</span>
-                <span className="opCantidad">Producto: {sides.productosResultantes}</span>
               </div>
 
               <div className="opBody">
@@ -442,7 +441,7 @@ export function ActaView({
                   fecha={sides.recepcionFecha}
                   footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
                   lines={sides.recepcionLines}
-                  notice={{ phase: sides.recepcionPhase, productos: sides.productosResultantes }}
+                  notice={{ productos: sides.productosResultantes }}
                   onDeleteLine={(lineId) => deleteActaLine(lineId)}
                   onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
                   onError={flagError}
