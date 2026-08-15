@@ -3604,17 +3604,19 @@ export function InventoryDashboard() {
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              {partialConfirm.preview.shortages.map((shortage, index) => (
+                <div key={index} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
+                  <span style={{ color: "var(--muted)" }}>
+                    <strong>{shortage.name}</strong>
+                    {shortage.is_complement ? " (complemento/insumo de la receta)" : ""}: quedan{" "}
+                    {numericText(shortage.available)} {shortage.unit} disponibles, cada unidad necesita{" "}
+                    {numericText(shortage.needed)} {shortage.unit}.
+                  </span>
+                </div>
+              ))}
+            </div>
             <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
-              <div style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
-                <span style={{ color: "var(--muted)" }}>
-                  Lo que limita es <strong>{partialConfirm.preview.limiting_name}</strong>
-                  {partialConfirm.preview.limiting_is_complement ? " (complemento de la receta)" : ""}:
-                  quedan {numericText(partialConfirm.preview.limiting_available)}{" "}
-                  {partialConfirm.preview.limiting_unit} disponibles y cada unidad necesita{" "}
-                  {numericText(partialConfirm.preview.limiting_required_per_unit)}{" "}
-                  {partialConfirm.preview.limiting_unit}.
-                </span>
-              </div>
 
               {/* Con cobertura 0 no se ofrece arrancar: el backend lo
                   rechazaria (no hay ni una unidad completa que producir) y
