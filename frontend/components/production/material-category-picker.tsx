@@ -185,7 +185,7 @@ export function MaterialCategoryPicker({
                 setSearch(event.target.value);
                 setDrillType(null);
               }}
-              placeholder="Buscar por nombre o SKU..."
+              placeholder="Buscar por nombre o código..."
               style={{ marginTop: 10 }}
               type="text"
               value={search}

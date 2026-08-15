@@ -2355,7 +2355,7 @@ export function InventoryDashboard() {
               <input
                 className="field searchField"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar por nombre, tipo, SKU, ley, descripción o estado"
+                placeholder="Buscar por nombre, tipo, código, ley, descripción o estado"
                 value={search}
               />
               <button
