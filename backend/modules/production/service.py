@@ -895,7 +895,12 @@ class ProductionService:
         def available_of(item) -> Decimal:
             return item.current_stock - reserved_by_others.get(item.id, Decimal("0"))
 
-        raw_needed = run.total_required_material
+        # target_qty puede ser menor que run.quantity (destinar parcial): el
+        # resto de recursos (complementos, insumos de etapa) se evalua contra
+        # esa MISMA fraccion, para que el preview refleje exactamente lo que
+        # _split_run_for_partial_material haria si se procede.
+        ratio = target_qty / run.quantity if run.quantity > 0 else Decimal("1")
+        raw_needed = target_qty
         raw_available = available_of(raw_material)
         fraction = Decimal("1")
         coverage = _MaterialCoverage(
@@ -942,14 +947,14 @@ class ProductionService:
             item = self.repository.session.get(InventoryItem, complement.item_id)
             if item is None:
                 raise ProductionDomainError("Un complemento solicitado ya no existe en inventario.")
-            consider(item.name, item.unit_code, available_of(item), complement.quantity)
+            consider(item.name, item.unit_code, available_of(item), complement.quantity * ratio)
 
         for stage in run.stages:
             for ingredient in stage.ingredients:
                 item = self.repository.session.get(InventoryItem, ingredient.inventory_item_id)
                 if item is None:
                     raise ProductionDomainError("Un insumo solicitado ya no existe en inventario.")
-                consider(item.name, item.unit_code, available_of(item), ingredient.quantity)
+                consider(item.name, item.unit_code, available_of(item), ingredient.quantity * ratio)
 
         coverage.covered_qty = max(Decimal("0"), min(target_qty, raw_needed * fraction))
         return coverage
