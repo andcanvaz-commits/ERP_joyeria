@@ -598,9 +598,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }, [postFinishReturnRun]);
 
-  useEffect(() => {
-    setSelectedProcessId((current) => current || processes.find((process) => process.is_active)?.id || "");
-  }, [processes]);
 
   // Cambiar el material con un producto ya elegido en ENSAMBLAR: la clave de
   // receta depende del material, así que hay que volver a resolverla.
@@ -630,7 +627,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setConfirmDialog({ title, message, onConfirm, isDanger, confirmLabel });
   }
   const activeProcesses = processes.filter((process) => process.is_active);
-  const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? activeProcesses[0] ?? null;
+  const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? null;
   const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
   // Insumos configurados en las etapas activas del proceso elegido: se piden
   // obligatorios al crear la orden, igual que los complementos.
@@ -647,11 +644,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // nada (mejor mostrar de más que ocultar sin poder saberlo).
   const orderMaterialCode = materialCodeForItem(selectedMaterial, catalogSegments);
 
-  useEffect(() => {
-    // Cualquier materia prima del inventario sirve para cualquier proceso:
-    // se sugiere la primera de la lista, pero se respeta cualquiera ya elegida.
-    setSelectedMaterialId((current) => current || (rawMaterials[0]?.id ?? ""));
-  }, [selectedProcess]);
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
   // Ordenes migradas del Excel historico (event_lines no vacio) no son
