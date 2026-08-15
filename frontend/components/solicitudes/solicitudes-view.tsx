@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Printer, X } from "lucide-react";
+import { Eye, FileText, Printer, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
@@ -231,11 +231,16 @@ export function SolicitudesView() {
     );
   }
 
-  function detailButton(run: ProductionRun) {
+  function rowActions(run: ProductionRun) {
     return (
-      <button className="button" onClick={() => setSelectedRun(run)} type="button">
-        <Eye aria-hidden="true" size={16} /> Ver mas
-      </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+        <button className="button" onClick={() => setActaRun(run)} type="button">
+          <FileText aria-hidden="true" size={14} /> Ver acta
+        </button>
+        <button className="button" onClick={() => setSelectedRun(run)} type="button">
+          <Eye aria-hidden="true" size={16} /> Ver mas
+        </button>
+      </div>
     );
   }
 
@@ -271,7 +276,7 @@ export function SolicitudesView() {
                     <td>{num(run.total_required_material)} {run.raw_material_unit_code}</td>
                     <td><span className="statusBadge">{STATUS_LABELS[run.status]}</span></td>
                     <td>{dateTimeLabel(run.requested_at)}</td>
-                    <td>{detailButton(run)}</td>
+                    <td>{rowActions(run)}</td>
                   </tr>
                 ))}
                 {myRuns.length === 0 ? (
@@ -312,7 +317,7 @@ export function SolicitudesView() {
                       <td>{num(run.quantity)}</td>
                       <td>{run.actual_finished_weight ? num(run.actual_finished_weight) : "-"}</td>
                       <td>{dateTimeLabel(run.finished_at)}</td>
-                      <td>{detailButton(run)}</td>
+                      <td>{rowActions(run)}</td>
                     </tr>
                   ))}
                   {pendingReception.length === 0 ? (
@@ -355,7 +360,7 @@ export function SolicitudesView() {
                           ? run.rejected_by_name ?? "-"
                           : run.materials_approved_by_name ?? "-"}
                       </td>
-                      <td>{detailButton(run)}</td>
+                      <td>{rowActions(run)}</td>
                     </tr>
                   ))}
                   {respondedRuns.length === 0 ? (
