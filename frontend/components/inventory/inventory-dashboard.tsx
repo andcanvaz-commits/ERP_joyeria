@@ -473,8 +473,10 @@ export function InventoryDashboard() {
   // parte cubierta (el resto queda esperando material) o cancela.
   const [approveSplitConfirm, setApproveSplitConfirm] = useState<{
     run: ProductionRun;
-    materialName: string;
-    unitCode: string;
+    // Todos los recursos con stock insuficiente, no solo el mas corto -- una
+    // orden puede quedar corta de materia prima Y de un complemento a la vez
+    // (bug reportado: el aviso solo mencionaba uno).
+    shortages: Array<{ name: string; unitCode: string; available: string; needed: string }>;
     coveredQty: string;
     requiredQty: string;
     missingQty: string;
@@ -1051,17 +1053,25 @@ export function InventoryDashboard() {
 
   function handleApproveClick(run: ProductionRun) {
     // Mismo criterio que el backend (_compute_coverage): la fraccion mas
-    // corta entre materia prima y cada complemento pedido manda (los
-    // insumos por etapa quedan afuera de este preview porque el frontend no
-    // los recibe en el listado de corridas).
+    // corta entre materia prima y cada complemento pedido manda cuanto se
+    // cubre (los insumos por etapa quedan afuera de este preview porque el
+    // frontend no los recibe en el listado de corridas). A diferencia del
+    // backend, aca se juntan TODOS los recursos que no alcanzan -- no solo
+    // el mas corto -- para que el aviso los liste todos, no solo uno.
     const requiredQty = Number(run.quantity);
     let fraction = 1;
-    let limitingItem = items.find((it) => it.id === run.raw_material_item_id) ?? null;
-    let limitingUnit = run.raw_material_unit_code;
+    const shortages: Array<{ name: string; unitCode: string; available: string; needed: string }> = [];
 
-    const rawStock = limitingItem ? Number(limitingItem.current_stock) : 0;
+    const rawItem = items.find((it) => it.id === run.raw_material_item_id) ?? null;
+    const rawStock = rawItem ? Number(rawItem.current_stock) : 0;
     if (requiredQty > 0 && rawStock < requiredQty) {
       fraction = Math.max(0, rawStock / requiredQty);
+      shortages.push({
+        name: rawItem?.name ?? "Materia prima",
+        unitCode: run.raw_material_unit_code,
+        available: numericText(String(rawStock)),
+        needed: numericText(run.quantity),
+      });
     }
 
     for (const complement of run.complements ?? []) {
@@ -1072,21 +1082,22 @@ export function InventoryDashboard() {
       const stock = Number(complementItem.current_stock);
       if (needed > 0 && stock < needed) {
         const candidate = Math.max(0, stock / needed);
-        if (candidate < fraction) {
-          fraction = candidate;
-          limitingItem = complementItem;
-          limitingUnit = complement.unit_code;
-        }
+        if (candidate < fraction) fraction = candidate;
+        shortages.push({
+          name: complementItem.name,
+          unitCode: complement.unit_code,
+          available: numericText(String(stock)),
+          needed: numericText(complement.quantity),
+        });
       }
     }
 
     const coveredQty = Math.max(0, Math.min(requiredQty, requiredQty * fraction));
 
-    if (limitingItem && coveredQty > 0 && coveredQty < requiredQty) {
+    if (shortages.length > 0 && coveredQty > 0 && coveredQty < requiredQty) {
       setApproveSplitConfirm({
         run,
-        materialName: limitingItem.name,
-        unitCode: limitingUnit,
+        shortages,
         coveredQty: numericText(String(coveredQty)),
         requiredQty: numericText(run.quantity),
         missingQty: numericText(String(requiredQty - coveredQty)),
@@ -5323,17 +5334,27 @@ export function InventoryDashboard() {
               <div>
                 <h2>Stock insuficiente{approveSplitConfirm.run.production_code ? ` para ${approveSplitConfirm.run.production_code}` : ""}</h2>
                 <p>
-                  Solo hay {approveSplitConfirm.coveredQty} de {approveSplitConfirm.requiredQty} {approveSplitConfirm.unitCode} de{" "}
-                  {approveSplitConfirm.materialName}.
+                  Solo hay {approveSplitConfirm.coveredQty} de {approveSplitConfirm.requiredQty}{" "}
+                  {approveSplitConfirm.run.raw_material_unit_code} cubiertos.
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setApproveSplitConfirm(null)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              {approveSplitConfirm.shortages.map((shortage, index) => (
+                <div key={index} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
+                  <span style={{ color: "var(--muted)" }}>
+                    <strong>{shortage.name}</strong>: quedan {shortage.available} {shortage.unitCode} disponibles, se
+                    necesitan {shortage.needed} {shortage.unitCode}.
+                  </span>
+                </div>
+              ))}
+            </div>
             <p style={{ margin: "8px 0 0" }}>
-              ¿Aprobar la parte cubierta? Los {approveSplitConfirm.missingQty} {approveSplitConfirm.unitCode} restantes pasarán a una
-              nueva orden a la espera de más material.
+              ¿Aprobar la parte cubierta? Los {approveSplitConfirm.missingQty} {approveSplitConfirm.run.raw_material_unit_code} restantes
+              pasarán a una nueva orden a la espera de más material.
             </p>
             <div className="modalActions">
               <button className="button" onClick={() => setApproveSplitConfirm(null)} type="button">
