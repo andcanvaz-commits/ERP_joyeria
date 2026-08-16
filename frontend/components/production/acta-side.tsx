@@ -28,7 +28,6 @@ export function ActaSide({
   fecha,
   responsable,
   totalRows,
-  notice,
   dataClass,
   actions,
   footer,
@@ -44,12 +43,6 @@ export function ActaSide({
   fecha: string | null;
   responsable: string;
   totalRows?: ActaSideTotal[];
-  // Nombre + cantidad PLANEADA del producto resultante -- fija desde que se
-  // crea la orden, nunca recalculada. Sale como primera fila del lado
-  // RECIBIDO, siempre (haya o no avance real todavia): antes vivia en un
-  // "aviso" que remplazaba la tabla entera mientras no hubiera avance y
-  // desaparecia apenas empezaba a haberlo, dejando esa info huerfana.
-  notice?: { productos: string };
   // Clase de visibilidad para impresion selectiva (opEntregaData/
   // opRecepcionData en orden-produccion-doc.tsx); ausente en Ver Acta, que no
   // imprime por seccion.
@@ -103,8 +96,7 @@ export function ActaSide({
   const totals = totalRows ?? [];
   const hasGroups = lines.some((line) => line.kind === "group");
   const rowCount = lines.filter((line) => line.kind === "row").length;
-  const productoRowCount = notice ? 1 : 0;
-  const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length - productoRowCount);
+  const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length);
   const wrap = (node: React.ReactNode) => (dataClass ? <span className={dataClass}>{node}</span> : node);
 
   return (
@@ -128,17 +120,6 @@ export function ActaSide({
           </tr>
         </thead>
         <tbody>
-          {notice ? (
-            <tr className="opGroupRow opProductoRow">
-              <td colSpan={3}>
-                {wrap(
-                  <>
-                    <strong>Producto:</strong> {notice.productos}
-                  </>
-                )}
-              </td>
-            </tr>
-          ) : null}
           {lines.map((line, index) =>
               line.kind === "group" ? (
                 <tr className="opGroupRow" key={`group-${index}`}>

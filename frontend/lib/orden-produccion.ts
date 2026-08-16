@@ -30,7 +30,6 @@ export type OrdenProduccionModel = {
   entregaTotalRows: ActaSideTotal[];
   recepcionTotalRows: ActaSideTotal[];
   cancelada: boolean;
-  productosResultantes: string;
 };
 
 const DASH = "—"; // —
@@ -41,23 +40,39 @@ function num(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatQty(value: number): string {
-  return value.toLocaleString("es-EC", { maximumFractionDigits: 4 });
+/** Productos resultantes de UNA corrida con la cantidad REAL producida, no
+ * la planeada -- vacio mientras la corrida sigue en curso (`finished_at`
+ * null): el lado RECIBIDO no debe adelantar un numero que todavia no se
+ * sabe. Al terminar, `run.actual_finished_weight` (peso real = entregado
+ * menos merma real, ver `_finish_run` en backend/modules/production/service.py)
+ * se reparte entre las lineas de producto declaradas en la MISMA proporcion
+ * que se planearon -- si una corrida declaro dos productos 70/30, el peso
+ * real tambien se reparte 70/30, igual que hace `_split_run_for_partial_material`
+ * al partir una orden. */
+function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["products"]> {
+  if (run.finished_at === null || run.actual_finished_weight === null || run.actual_finished_weight === undefined) {
+    return [];
+  }
+  const products = run.products ?? [];
+  const plannedTotal = products.reduce((sum, p) => sum + num(p.quantity), 0);
+  if (plannedTotal <= 0) return [];
+  const ratio = Number(run.actual_finished_weight) / plannedTotal;
+  return products.map((p) => ({ ...p, quantity: String(num(p.quantity) * ratio) }));
 }
 
-/** "Anillo Filigrana (5 und) · Cadena Barbada (3 und)" -- mismo formato que
- * RunSummaryRows en solicitudes-view.tsx. Agrupa por identidad real
- * (product_type_id / target_item_id), no por nombre, para no fusionar dos
- * productos distintos que compartan texto. */
-export function formatProductosResultantes(
+/** Convierte productos (ya con cantidad REAL, ver `realProductsForRun`) en
+ * filas normales del lado RECIBIDO -- mismo formato que cualquier otra fila
+ * (cantidad en su propia columna), no un aviso aparte con estilo distinto:
+ * antes vivian en un bloque de texto fusionado ("Producto: X (400g) · Y
+ * (100g)") que ademas mostraba el plan fijo desde el dia 1 -- Rodrigo:
+ * "esa parte del acta debe estar vacia hasta que no se acabe...ahi si
+ * aparece en la fila la cantidad exacta de lo que se produjo". Agrupa por
+ * identidad real (product_type_id / target_item_id), no por nombre, para no
+ * fusionar dos productos distintos que compartan texto. */
+function productoRealLines(
   products: NonNullable<ProductionRun["products"]>,
-  // Unidad de la orden (raw_material_unit_code) -- el resultante hereda esa
-  // unidad cuando su propia unit_code no viene (product_type_id sin unidad
-  // propia; ver create_run en backend/modules/production/service.py, mismo
-  // criterio). Nunca "und" inventado: todo en este sistema se pesa, no se
-  // cuenta, salvo que la orden misma sea por unidad.
   fallbackUnit: string
-): string {
+): Extract<ActaSideLine, { kind: "row" }>[] {
   const merged = new Map<string, { label: string; quantity: number; unit: string }>();
   for (const p of products) {
     const key = p.product_type_id ?? p.target_item_id ?? p.product_name ?? "—";
@@ -69,10 +84,14 @@ export function formatProductosResultantes(
       merged.set(key, { label: p.product_name ?? "—", quantity: qty, unit: p.unit_code || fallbackUnit });
     }
   }
-  if (merged.size === 0) return "—";
-  return [...merged.values()]
-    .map((p) => `${p.label} (${formatQty(p.quantity)} ${p.unit})`)
-    .join(" · ");
+  return [...merged.entries()].map(([key, p]) => ({
+    kind: "row" as const,
+    id: `producto-real-${key}`,
+    label: `Producto: ${p.label}`,
+    quantity: String(p.quantity),
+    unit_code: p.unit,
+    editable: false,
+  }));
 }
 
 function sumByItem(lines: NonNullable<ProductionRun["acta_lines"]>, itemId: string): number {
@@ -126,7 +145,6 @@ export type RunActaSides = {
   recepcionResponsable: string;
   entregaTotalRows: ActaSideTotal[];
   recepcionTotalRows: ActaSideTotal[];
-  productosResultantes: string;
 };
 
 /** El acta completa de UN run: filas, totales y fase -- FUENTE UNICA para
@@ -140,13 +158,16 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" }));
   // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
   // crear la orden) no es un recibo real -- se queda fuera de las filas
-  // mostradas, esa info ya la da el aviso "Producto resultante".
-  const recepcionLines: ActaSideLine[] = lines
-    .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN")
-    .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" }));
+  // mostradas; el producto resultante REAL se antepone abajo, vacio
+  // mientras la corrida sigue en curso (ver productoRealLines).
+  const recepcionLines: ActaSideLine[] = [
+    ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code),
+    ...lines
+      .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN")
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" })),
+  ];
 
   const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run);
-  const productosResultantes = formatProductosResultantes(run.products ?? [], run.raw_material_unit_code);
 
   return {
     entregaLines,
@@ -157,7 +178,6 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     recepcionResponsable: run.received_by_name ?? DASH,
     entregaTotalRows,
     recepcionTotalRows,
-    productosResultantes,
   };
 }
 
@@ -310,7 +330,6 @@ export function buildOrdenProduccion(
       entregaTotalRows: sides.entregaTotalRows,
       recepcionTotalRows: sides.recepcionTotalRows,
       cancelada: root.status === "CANCELADA",
-      productosResultantes: sides.productosResultantes,
     };
   }
 
@@ -331,7 +350,6 @@ export function buildOrdenProduccion(
     entregaTotalRows: sides.entregaTotalRows,
     recepcionTotalRows: sides.recepcionTotalRows,
     cancelada: family.every((run) => run.status === "CANCELADA"),
-    productosResultantes: sides.productosResultantes,
   };
 }
 
@@ -398,21 +416,24 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
     }
   }
 
-  const productosResultantes = formatProductosResultantes(
-    family.flatMap((run) => run.products ?? []),
-    root.raw_material_unit_code
-  );
+  // Solo aporta cada corrida que ya termino (realProductsForRun devuelve
+  // vacio mientras sigue en curso) -- si el padre ya acabo y la hija sigue
+  // ESPERANDO_MATERIAL, la familia muestra unicamente lo real del padre, no
+  // el plan completo de ambos.
+  const recepcionLines: ActaSideLine[] = [
+    ...productoRealLines(family.flatMap((run) => realProductsForRun(run)), root.raw_material_unit_code),
+    ...recepcionSide.lines,
+  ];
 
   return {
     entregaLines: entregaSide.lines,
     entregaFecha: entregaSide.fecha,
     entregaResponsable: entregaSide.responsable,
-    recepcionLines: recepcionSide.lines,
+    recepcionLines,
     recepcionFecha: recepcionSide.fecha,
     recepcionResponsable: recepcionSide.responsable,
     entregaTotalRows,
     recepcionTotalRows,
-    productosResultantes,
   };
 }
 

@@ -456,7 +456,6 @@ export function ActaView({
                   fecha={sides.recepcionFecha}
                   footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
                   lines={sides.recepcionLines}
-                  notice={{ productos: sides.productosResultantes }}
                   onDeleteLine={(lineId) => deleteActaLine(lineId)}
                   onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
                   onError={flagError}

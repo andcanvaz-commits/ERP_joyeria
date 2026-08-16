@@ -43,7 +43,6 @@ export function OrdenProduccionDoc({
             dataClass="opRecepcionData"
             fecha={model.recepcionFecha}
             lines={model.recepcionLines}
-            notice={{ productos: model.productosResultantes }}
             responsable={model.recepcionResponsable}
             title="RECIBIDO"
             totalRows={model.recepcionTotalRows}
