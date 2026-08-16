@@ -10,6 +10,7 @@ from backend.modules.inventory.service import (
     InventoryNotFoundError,
     InventoryService,
 )
+from backend.modules.shared.formatting import format_qty
 from backend.modules.production.models import (
     ActaLineSide,
     ActaLineSource,
@@ -204,8 +205,8 @@ class _MaterialCoverage:
         )
         return (
             f"Stock insuficiente de '{self.limiting_name}'{origin}: disponible "
-            f"{self.limiting_available} {self.limiting_unit}, se requieren "
-            f"{self.limiting_required_per_unit} {self.limiting_unit}."
+            f"{format_qty(self.limiting_available)} {self.limiting_unit}, se requieren "
+            f"{format_qty(self.limiting_required_per_unit)} {self.limiting_unit}."
         )
 
 
@@ -1920,8 +1921,8 @@ class ProductionService:
             cap = self._acta_line_max_quantity(line)
             if cap is not None and payload.quantity > cap:
                 raise ProductionDomainError(
-                    f"La cantidad ({payload.quantity} {line.unit_code}) supera lo que en realidad "
-                    f"se entrego para este material ({cap} {line.unit_code})."
+                    f"La cantidad ({format_qty(payload.quantity)} {line.unit_code}) supera lo que en realidad "
+                    f"se entrego para este material ({format_qty(cap)} {line.unit_code})."
                 )
         if payload.label is not None:
             line.label = payload.label.strip()
@@ -2036,8 +2037,8 @@ class ProductionService:
             reference = self._previous_stage_weight(run, stage)
             if reference is not None and reference > 0 and payload.final_weight > reference:
                 raise ProductionDomainError(
-                    f"El peso final ({payload.final_weight} {run.raw_material_unit_code}) no puede ser "
-                    f"mayor que el material en proceso ({reference} {run.raw_material_unit_code})."
+                    f"El peso final ({format_qty(payload.final_weight)} {run.raw_material_unit_code}) no puede ser "
+                    f"mayor que el material en proceso ({format_qty(reference)} {run.raw_material_unit_code})."
                 )
 
         weight_based = False
@@ -2178,8 +2179,8 @@ class ProductionService:
         reference = self._previous_stage_weight(run, stage)
         if reference is not None and reference > 0 and payload.final_weight > reference:
             raise ProductionDomainError(
-                f"El peso corregido ({payload.final_weight} {run.raw_material_unit_code}) no puede ser "
-                f"mayor que el material que entro a la etapa ({reference} {run.raw_material_unit_code})."
+                f"El peso corregido ({format_qty(payload.final_weight)} {run.raw_material_unit_code}) no puede ser "
+                f"mayor que el material que entro a la etapa ({format_qty(reference)} {run.raw_material_unit_code})."
             )
 
         # Mismo criterio que finish_stage: si la correccion deja la merma de
