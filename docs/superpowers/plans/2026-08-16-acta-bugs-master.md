@@ -30,7 +30,7 @@ completo y testeado antes de pasar al siguiente:
       — el más aislado, cero riesgo de UX, toca solo backend.
 - [x] **2. [Notificaciones con estilo ToastNotice](2026-08-16-notificaciones-toast.md)**
       — solo frontend, mismo componente que ya usa el resto del sistema.
-- [ ] **3. [Totales del acta (Total entregado/recibido)](2026-08-16-acta-totales.md)**
+- [x] **3. [Totales del acta (Total entregado/recibido)](2026-08-16-acta-totales.md)**
       — un solo archivo (`orden-produccion.ts`), lógica pura, bien acotado.
 - [ ] **4. [Modal "Sobrante por devolver" al finalizar](2026-08-16-modal-sobrante-devolver.md)**
       — el de mayor impacto funcional (afecta inventario real vía
