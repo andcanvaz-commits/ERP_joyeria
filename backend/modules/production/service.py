@@ -2819,6 +2819,17 @@ class ProductionService:
             assembly_note = " + ".join(
                 names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
             )
+            # Lo devuelto (Rodrigo, 2026-08-16: "si se devuelven 5g de
+            # dijes, el producto final pesa 100g + 5g, no 100g + 10g") resta
+            # ACA tambien -- mismo criterio "usado = aprobado - devuelto"
+            # que return_complement y returnableComplements, para que el
+            # peso real del lote en inventario no cuente material que ya
+            # volvio al estante.
+            returned_by_item: dict = {}
+            for complement in run.complements:
+                returned_by_item[complement.item_id] = (
+                    returned_by_item.get(complement.item_id, Decimal("0")) + complement.returned_quantity
+                )
             # El ensamblado pesa lote + complementos: si el complemento se
             # mide en gramos, suma su cantidad total; si es por unidad con
             # peso_por_unidad conocido, suma cantidad x peso; sin dato de
@@ -2828,10 +2839,13 @@ class ProductionService:
                 item = complements.get(entry.complement_item_id)
                 if item is None:
                     continue
+                net_quantity = max(
+                    Decimal("0"), entry.quantity - returned_by_item.get(entry.complement_item_id, Decimal("0"))
+                )
                 if item.unit_code == "g":
-                    extra_grams += entry.quantity
+                    extra_grams += net_quantity
                 elif item.weight_per_unit:
-                    extra_grams += entry.quantity * item.weight_per_unit
+                    extra_grams += net_quantity * item.weight_per_unit
             if run.quantity and extra_grams > 0:
                 extra_grams_per_unit = extra_grams / run.quantity
         for product in run.products:

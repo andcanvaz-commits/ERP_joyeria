@@ -18,6 +18,7 @@ from backend.modules.production.schemas import (
     RunProductCreate,
 )
 from backend.modules.production.service import ProductionDomainError
+from backend.modules.inventory.models import InventoryItem
 
 
 def test_finish_run_auto_applies_assembly_from_approved_complements(
@@ -199,3 +200,63 @@ def test_return_complement_still_caps_at_approved_minus_returned(
         production_service.return_complement(
             complement_id, ComplementReturnCreate(quantity=Decimal("6")), current_user
         )
+
+
+def test_receive_extra_grams_discounts_returned_complement(
+    db_session, production_service, current_user, process, raw_material, complement_item, catalog_finished_item,
+):
+    """Rodrigo (2026-08-16): 100g de plata + 10g de dijes -- si se
+    devuelven 5g de dijes ANTES de recibir, el producto final debe pesar
+    100g + 5g, no 100g + 10g. extra_grams_per_unit hoy suma
+    assembly_items[].quantity (el 100% marcado por el ensamble automatico),
+    sin restar complement.returned_quantity -- mismo patron de bug que
+    return_complement (Task 1) y returnableComplements (Task 2), en un
+    tercer lugar que tambien necesita 'usado = aprobado - devuelto'."""
+    raw_material.current_stock = Decimal("1000")
+    complement_item.current_stock = Decimal("1000")
+    complement_item.weight_per_unit = Decimal("1")
+    # La suite corre contra una base de datos real ya poblada (ver
+    # CLAUDE.md / conftest.py: db_session abre una transaccion real y hace
+    # rollback, no hay sqlite ni base en memoria) con segmentos MATERIAL ya
+    # existentes. convert_lot_to_product solo reusa `catalog_finished_item`
+    # si su product_code[0] y material_type calzan EXACTO con el material
+    # que arma para el lote (material_code + texto); si no, crea otra fila
+    # nueva. Se fija aca el mismo material_code que va a resolver
+    # `match_material_code` para el texto del raw_material, para apuntar la
+    # conversion a `catalog_finished_item` en vez de a una fila nueva.
+    material_code = production_service.inventory_service.match_material_code(raw_material.name)
+    catalog_finished_item.material_type = raw_material.name
+    catalog_finished_item.product_code = material_code + catalog_finished_item.product_code[1:]
+    db_session.flush()
+
+    payload = ProductionRunCreate(
+        process_id=process.id,
+        raw_material_item_id=raw_material.id,
+        quantity=Decimal("100"),
+        assembly_mode="ENSAMBLAR",
+        products=[RunProductCreate(target_item_id=catalog_finished_item.id, quantity=Decimal("100"))],
+        complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("10"))],
+    )
+    run_read = production_service.create_run(payload, current_user)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+    run = production_service.repository.get_run(run_read.id)
+    finished = production_service.finish_stage(
+        run.stages[0].id, ProductionRunStageFinish(final_weight=Decimal("100")), current_user
+    )
+    # El ensamble automatico marco los 10 aprobados como "usados".
+    assert finished.assembly_items[0].quantity == Decimal("10")
+
+    complement_id = finished.complements[0].id
+    production_service.return_complement(
+        complement_id, ComplementReturnCreate(quantity=Decimal("5")), current_user
+    )
+
+    production_service.receive_finished_product(run.id, current_user)
+
+    target = db_session.get(InventoryItem, catalog_finished_item.id)
+    # weight_per_unit de la orden = total_required_material(100) / quantity(100) = 1 g/und.
+    # extra_grams_per_unit correcto = (10 aprobado - 5 devuelto) / 100 = 0.05 g/und.
+    # peso total por unidad = 1 + 0.05 = 1.05 -> 100 unidades convertidas = 105g.
+    # Con el bug (sin restar lo devuelto): 1 + 0.10 = 1.10 -> 110g.
+    assert target.current_stock == Decimal("105")
