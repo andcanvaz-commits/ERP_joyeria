@@ -82,6 +82,7 @@ function EntregaAction({
           error={localError}
           items={materialItems}
           onClose={closePicker}
+          onDismissError={() => setLocalError(null)}
           onSelect={(item) => {
             setPendingItem(item);
             setQuantity("");

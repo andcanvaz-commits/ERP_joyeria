@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { listComplementTypes } from "@/lib/inventory-api";
 import { Pager, usePagination } from "@/components/shared/pager";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import type { InventoryItem, InventoryItemType } from "@/types/inventory";
 
 const PAGE_SIZE = 10;
@@ -36,6 +37,7 @@ export function MaterialCategoryPicker({
   onClose,
   quantityStep,
   error,
+  onDismissError,
 }: {
   title: string;
   description?: string;
@@ -63,6 +65,10 @@ export function MaterialCategoryPicker({
   // (la ventana se queda abierta esperando el valor correcto), no en un
   // banner lejano fuera de la vista.
   error?: string | null;
+  // Como limpiar `error` cuando el usuario cierra el aviso a mano -- si no
+  // viene, el boton de cerrar del aviso no hace nada (el caller sigue
+  // controlando `error` por su cuenta, ej. lo limpia solo al reintentar).
+  onDismissError?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<InventoryItemType>(allowedTypes[0]);
   const [search, setSearch] = useState("");
@@ -129,8 +135,8 @@ export function MaterialCategoryPicker({
         </div>
 
         {error ? (
-          <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)", marginTop: 10 }}>
-            {error}
+          <div className="toastStack" aria-live="polite" style={{ marginTop: 10 }}>
+            <ToastNotice kind="error" message={error} onClose={() => onDismissError?.()} compact />
           </div>
         ) : null}
 
