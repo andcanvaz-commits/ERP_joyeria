@@ -26,7 +26,7 @@ devuelto`, siempre, sin importar en qué momento se registra la devolución.
 Ordenado de menor a mayor riesgo/alcance — cada uno es independiente,
 completo y testeado antes de pasar al siguiente:
 
-- [ ] **1. [Formato de decimales en errores](2026-08-16-formato-decimales-errores.md)**
+- [x] **1. [Formato de decimales en errores](2026-08-16-formato-decimales-errores.md)**
       — el más aislado, cero riesgo de UX, toca solo backend.
 - [ ] **2. [Notificaciones con estilo ToastNotice](2026-08-16-notificaciones-toast.md)**
       — solo frontend, mismo componente que ya usa el resto del sistema.
