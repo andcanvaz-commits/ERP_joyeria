@@ -120,12 +120,19 @@ function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal
   if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
 
   const mermaAcumulada = run.stages.reduce((sum, stage) => sum + num(stage.waste_weight), 0);
-  const productoReal = productoRealLines(realProductsForRun(run), unit).reduce((sum, l) => sum + num(l.quantity), 0);
-  const recepcionRowsInUnit = sumLinesByUnit(
-    lines.filter((l) => l.side === "RECEPCION" && l.source !== "PLAN"),
+  // "Total recibido" = entregado - merma - devoluciones -- identidad
+  // algebraica equivalente a "producto_real + usado" (usado = aprobado -
+  // devuelto), la regla que Rodrigo confirmo (2026-08-16). Las lineas de
+  // devolucion de complemento/insumo se distinguen de las de merma por
+  // etapa / "Peso final recibido" por item_id: estas dos ultimas siempre
+  // llevan el item_id de la MATERIA PRIMA (ya estan implicitas en
+  // entregaTotal - merma), las devoluciones llevan el item_id del
+  // complemento/insumo devuelto.
+  const devolucionesTotal = sumLinesByUnit(
+    lines.filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.item_id !== rawMaterialId),
     unit
   );
-  const recepcionTotal = productoReal + recepcionRowsInUnit;
+  const recepcionTotal = entregaTotal - mermaAcumulada - devolucionesTotal;
 
   const recepcionTotalRows: ActaSideTotal[] = [
     { label: "Total recibido", quantity: recepcionTotal, unit, kind: "total" },
@@ -408,17 +415,19 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
       const mermaAcumulada = family
         .flatMap((run) => run.stages)
         .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
-      const familyProductoReal = productoRealLines(familyRealProducts, rawUnit).reduce(
-        (sum, l) => sum + num(l.quantity), 0
-      );
-      const familyRecepcionInUnit = sumLinesByUnit(
-        familyAllLines.filter((line) => line.side === "RECEPCION" && line.source !== "PLAN"),
+      // Misma regla que computeRunTotals (arriba): entregado - merma -
+      // devoluciones, no producto_real + devuelto -- ver el comentario
+      // largo al inicio de este Task en el plan para la prueba algebraica.
+      const familyDevolucionesInUnit = sumLinesByUnit(
+        familyAllLines.filter(
+          (line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.item_id !== rawMaterialId
+        ),
         rawUnit
       );
       entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
       recepcionTotalRows.push({
         label: "Total recibido",
-        quantity: familyProductoReal + familyRecepcionInUnit,
+        quantity: entregaTotal - mermaAcumulada - familyDevolucionesInUnit,
         unit: rawUnit,
         kind: "total",
       });
