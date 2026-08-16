@@ -6,6 +6,7 @@ import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplemen
 import { buildFamilyActaSides, buildRunActaSides, formatGramos } from "@/lib/orden-produccion";
 import { ActaSide } from "@/components/production/acta-side";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
@@ -408,14 +409,10 @@ export function ActaView({
           </button>
         </div>
 
-        {error ? (
-          <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)" }}>
-            {error}
-          </div>
-        ) : null}
-        {success ? (
-          <div className="processFlowCallout" style={{ color: "var(--success, #1a7f37)" }}>
-            {success}
+        {error || success ? (
+          <div className="toastStack" aria-live="polite" aria-atomic="true">
+            {error ? <ToastNotice key={error} kind="error" message={error} onClose={() => setError(null)} compact /> : null}
+            {success ? <ToastNotice key={success} kind="success" message={success} onClose={() => setSuccess(null)} compact /> : null}
           </div>
         ) : null}
 
