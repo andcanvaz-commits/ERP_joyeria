@@ -32,7 +32,7 @@ completo y testeado antes de pasar al siguiente:
       — solo frontend, mismo componente que ya usa el resto del sistema.
 - [x] **3. [Totales del acta (Total entregado/recibido)](2026-08-16-acta-totales.md)**
       — un solo archivo (`orden-produccion.ts`), lógica pura, bien acotado.
-- [ ] **4. [Modal "Sobrante por devolver" al finalizar](2026-08-16-modal-sobrante-devolver.md)**
+- [x] **4. [Modal "Sobrante por devolver" al finalizar](2026-08-16-modal-sobrante-devolver.md)** (código completo; su verificación manual E2E queda pendiente de Rodrigo)
       — el de mayor impacto funcional (afecta inventario real vía
       `return_complement`), se deja al final con la cabeza más fresca.
 
