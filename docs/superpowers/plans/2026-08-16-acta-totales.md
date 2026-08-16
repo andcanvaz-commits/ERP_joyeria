@@ -358,7 +358,276 @@ EOF
 
 ---
 
-### Task 3: Verificación final del plan
+### Task 3: "Total recibido" resta devoluciones del entregado, no las suma al producto
+
+> Agregado tras reporte real de Rodrigo (2026-08-16, orden OP-2026-0045):
+> entregó 400g materia prima + 400g complemento (Total entregado 800g,
+> correcto), devolvió 200 del complemento, merma de etapa 0,10g. El acta
+> mostró "Total recibido: 600,00g" -- Rodrigo esperaba 599,90g. Causa: la
+> formula de Task 1/2 sumaba `producto_real + fila_devolucion +
+> fila_merma_etapa` -- la merma se contaba DOS veces (una ya implicita en
+> `producto_real`, que nace de `actual_finished_weight` neto de merma, y
+> otra vez sumando la fila "Merma Etapa 2"). Ademas, confirmado
+> explicitamente por Rodrigo: el lado recibido debe sumar lo REALMENTE
+> USADO de cada complemento/insumo devuelto (aprobado - devuelto), no el
+> monto devuelto en si -- con devolucion simetrica (200 de 400, uso 200)
+> ambas lecturas casualmente dan el mismo numero, por eso el reporte no lo
+> distinguia solo; se confirmo con Rodrigo usando un caso hipotetico
+> asimetrico (devolver 150 de 400 -> uso 250) antes de escribir este fix.
+>
+> La formula que cumple TODO a la vez (merma fuera del total, y
+> devoluciones descontadas como "usado", no sumadas como "devuelto") es una
+> identidad algebraica:
+>
+> ```text
+> Total entregado - merma - devoluciones
+>   = (materia_prima_entregada + complementos_entregados) - merma - devuelto
+>   = (materia_prima_entregada - merma) + (complementos_entregados - devuelto)
+>   = producto_real + usado
+> ```
+>
+> Restar las devoluciones del `entregaTotal` (en vez de sumarlas al
+> `producto_real`) da matematicamente el mismo resultado que "producto_real
+> + usado", para CUALQUIER split (simetrico o no) -- y de paso ya no hace
+> falta seguir sumando "producto_real" ni las filas de merma dentro del
+> calculo del total en absoluto: alcanza con `entregaTotal - merma -
+> devoluciones`, todos numeros que ya se calculan.
+>
+> Falta distinguir "linea de devolucion real" (complemento/insumo, hay que
+> restarla) de "linea de merma por etapa" o "Peso final recibido" (materia
+> prima, NO hay que restarla -- esas dos ya estan implicitas en
+> `entregaTotal - merma`). La senal robusta -- ninguna es por texto de
+> label, que es fragil -- es `item_id`: las lineas de merma por etapa y
+> "Peso final recibido" siempre llevan `item_id === rawMaterialId` (la
+> materia prima); las devoluciones de complemento/insumo llevan el
+> `item_id` de ESE complemento/insumo, nunca el de la materia prima.
+
+**Files:**
+- Modify: `frontend/lib/orden-produccion.ts:109-144` (`computeRunTotals`)
+- Modify: `frontend/lib/orden-produccion.ts:391-433` (bloque de totales en `buildFamilyActaSides`)
+
+**Interfaces:**
+- Ninguna nueva. `productoRealLines`/`realProductsForRun` siguen usandose
+  para las FILAS mostradas (`recepcionLines`), solo dejan de usarse para
+  calcular el TOTAL.
+
+- [ ] **Step 1: Escribir el test que falla — reproduce el reporte real de Rodrigo**
+
+Este proyecto no tiene test runner de frontend (confirmado en planes
+anteriores). En su lugar, agregar un caso de verificacion manual EXACTO al
+reporte real, para correrlo en el navegador en el Step 5 -- y de forma
+inmediata, verificar la funcion a mano con un script node/ts-node si esta
+disponible en el contenedor `web`, o razonando la aritmetica linea por
+linea contra el codigo actual, ANTES de tocar nada, para confirmar que hoy
+da 600,00 y no 599,90 (documentarlo en el reporte).
+
+- [ ] **Step 2: Ubicar el código actual de `computeRunTotals`**
+
+```ts
+function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
+  const unit = run.raw_material_unit_code;
+  const rawMaterialId = run.raw_material_item_id;
+  if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  if (run.materials_approved_at === null) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  const lines = run.acta_lines ?? [];
+  const entregaTotal = sumLinesByUnit(lines.filter((l) => l.side === "ENTREGA"), unit);
+  if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
+
+  const mermaAcumulada = run.stages.reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+  const productoReal = productoRealLines(realProductsForRun(run), unit).reduce((sum, l) => sum + num(l.quantity), 0);
+  const recepcionRowsInUnit = sumLinesByUnit(
+    lines.filter((l) => l.side === "RECEPCION" && l.source !== "PLAN"),
+    unit
+  );
+  const recepcionTotal = productoReal + recepcionRowsInUnit;
+
+  const recepcionTotalRows: ActaSideTotal[] = [
+    { label: "Total recibido", quantity: recepcionTotal, unit, kind: "total" },
+  ];
+  if (run.finished_at !== null) {
+    recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit, kind: "merma" });
+  }
+  return {
+    entregaTotalRows: [{ label: "Total entregado", quantity: entregaTotal, unit, kind: "total" }],
+    recepcionTotalRows,
+  };
+}
+```
+
+- [ ] **Step 3: Reemplazar**
+
+```ts
+function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
+  const unit = run.raw_material_unit_code;
+  const rawMaterialId = run.raw_material_item_id;
+  if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  if (run.materials_approved_at === null) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  const lines = run.acta_lines ?? [];
+  const entregaTotal = sumLinesByUnit(lines.filter((l) => l.side === "ENTREGA"), unit);
+  if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
+
+  const mermaAcumulada = run.stages.reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+  // "Total recibido" = entregado - merma - devoluciones -- identidad
+  // algebraica equivalente a "producto_real + usado" (usado = aprobado -
+  // devuelto), la regla que Rodrigo confirmo (2026-08-16). Las lineas de
+  // devolucion de complemento/insumo se distinguen de las de merma por
+  // etapa / "Peso final recibido" por item_id: estas dos ultimas siempre
+  // llevan el item_id de la MATERIA PRIMA (ya estan implicitas en
+  // entregaTotal - merma), las devoluciones llevan el item_id del
+  // complemento/insumo devuelto.
+  const devolucionesTotal = sumLinesByUnit(
+    lines.filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.item_id !== rawMaterialId),
+    unit
+  );
+  const recepcionTotal = entregaTotal - mermaAcumulada - devolucionesTotal;
+
+  const recepcionTotalRows: ActaSideTotal[] = [
+    { label: "Total recibido", quantity: recepcionTotal, unit, kind: "total" },
+  ];
+  if (run.finished_at !== null) {
+    recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit, kind: "merma" });
+  }
+  return {
+    entregaTotalRows: [{ label: "Total entregado", quantity: entregaTotal, unit, kind: "total" }],
+    recepcionTotalRows,
+  };
+}
+```
+
+- [ ] **Step 4: Mismo cambio en `buildFamilyActaSides`**
+
+Ubicar el bloque de totales dentro de `buildFamilyActaSides` (linea
+391-433):
+
+```ts
+  const rawUnit = root.raw_material_unit_code;
+  const rawMaterialId = root.raw_material_item_id;
+  const familyRealProducts = family.flatMap((run) => realProductsForRun(run));
+  const entregaTotalRows: ActaSideTotal[] = [];
+  const recepcionTotalRows: ActaSideTotal[] = [];
+  if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
+    const familyAllLines = family.flatMap((run) => run.acta_lines ?? []);
+    const entregaTotal = sumLinesByUnit(familyAllLines.filter((line) => line.side === "ENTREGA"), rawUnit);
+    if (entregaTotal > 0) {
+      const mermaAcumulada = family
+        .flatMap((run) => run.stages)
+        .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+      const familyProductoReal = productoRealLines(familyRealProducts, rawUnit).reduce(
+        (sum, l) => sum + num(l.quantity), 0
+      );
+      const familyRecepcionInUnit = sumLinesByUnit(
+        familyAllLines.filter((line) => line.side === "RECEPCION" && line.source !== "PLAN"),
+        rawUnit
+      );
+      entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
+      recepcionTotalRows.push({
+        label: "Total recibido",
+        quantity: familyProductoReal + familyRecepcionInUnit,
+        unit: rawUnit,
+        kind: "total",
+      });
+      const allFinished = family.every((run) => run.finished_at !== null || run.status === "CANCELADA");
+      if (allFinished) {
+        recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit: rawUnit, kind: "merma" });
+      }
+    }
+  }
+```
+
+Reemplazar por:
+
+```ts
+  const rawUnit = root.raw_material_unit_code;
+  const rawMaterialId = root.raw_material_item_id;
+  const familyRealProducts = family.flatMap((run) => realProductsForRun(run));
+  const entregaTotalRows: ActaSideTotal[] = [];
+  const recepcionTotalRows: ActaSideTotal[] = [];
+  if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
+    const familyAllLines = family.flatMap((run) => run.acta_lines ?? []);
+    const entregaTotal = sumLinesByUnit(familyAllLines.filter((line) => line.side === "ENTREGA"), rawUnit);
+    if (entregaTotal > 0) {
+      const mermaAcumulada = family
+        .flatMap((run) => run.stages)
+        .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+      // Misma regla que computeRunTotals (arriba): entregado - merma -
+      // devoluciones, no producto_real + devuelto -- ver el comentario
+      // largo al inicio de este Task en el plan para la prueba algebraica.
+      const familyDevolucionesInUnit = sumLinesByUnit(
+        familyAllLines.filter(
+          (line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.item_id !== rawMaterialId
+        ),
+        rawUnit
+      );
+      entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
+      recepcionTotalRows.push({
+        label: "Total recibido",
+        quantity: entregaTotal - mermaAcumulada - familyDevolucionesInUnit,
+        unit: rawUnit,
+        kind: "total",
+      });
+      const allFinished = family.every((run) => run.finished_at !== null || run.status === "CANCELADA");
+      if (allFinished) {
+        recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit: rawUnit, kind: "merma" });
+      }
+    }
+  }
+```
+
+(`familyRealProducts` sigue existiendo y usandose mas abajo, en
+`recepcionLines` -- no tocar esa parte, solo el bloque de totales de
+arriba.)
+
+- [ ] **Step 5: Type-check**
+
+Run: `docker-compose exec web npm run build`
+Expected: `Compiled successfully`.
+
+- [ ] **Step 6: Verificación manual — caso real de Rodrigo (OP-2026-0045)**
+
+En el navegador: reproducir el caso exacto (materia prima + complemento en
+la misma unidad, aprobar, entregar/registrar una devolucion parcial de
+complemento, alguna merma de etapa) y confirmar:
+- "Total recibido" = Total entregado − Merma total − lo devuelto (NO
+  productoReal + fila_devolucion + fila_merma).
+- Con los numeros del reporte (entregado 800, merma 0,10, devuelto 200):
+  Total recibido debe dar **599,90**, no 600,00.
+- Repetir con una devolucion asimetrica si es posible (ej. aprobar 400,
+  devolver 150) y confirmar que el total refleja "aprobado - devuelto"
+  (250 usado), no el monto devuelto (150) -- son numeros distintos en ese
+  caso, a diferencia del reporte original donde coincidian.
+- Repetir en una orden con split (familia) para confirmar el mismo
+  comportamiento en Documentos.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add frontend/lib/orden-produccion.ts
+git commit -m "$(cat <<'EOF'
+fix(production): Total recibido resta devoluciones del entregado, no las suma
+
+Bug reportado por Rodrigo con datos reales (OP-2026-0045): "Total
+recibido" sumaba producto_real + fila_devolucion + fila_merma_etapa --
+la merma se contaba dos veces (una ya implicita en producto_real, neto
+de merma, y otra vez via la fila "Merma Etapa 2"). Ademas confirmado
+por Rodrigo: el lado recibido debe reflejar "aprobado - devuelto"
+(usado), no el monto devuelto en si -- con split simetrico ambas
+lecturas coinciden por casualidad, con split asimetrico no.
+
+Nueva formula: Total recibido = Total entregado - merma - devoluciones,
+identidad algebraica equivalente a "producto_real + usado" para
+cualquier split. Las devoluciones se identifican por item_id distinto
+al de la materia prima (nunca por texto de label), asi no se confunden
+con las lineas de merma por etapa o "Peso final recibido", que llevan
+el item_id de la materia prima y ya estan implicitas en entregado-merma.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 4: Verificación final del plan
 
 - [ ] **Step 1: Build completo**
 
