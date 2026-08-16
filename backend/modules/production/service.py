@@ -1193,6 +1193,15 @@ class ProductionService:
             )
         except InventoryDomainError as exc:
             raise ProductionDomainError(str(exc)) from exc
+        # El acta debe reflejar lo que de verdad se acaba de aprobar, no el
+        # monto pre-split que sembro create_run (ver _sync_entrega_acta_line).
+        self._sync_entrega_acta_line(
+            run,
+            item_id=run.raw_material_item_id,
+            label=raw_material.name,
+            quantity=run.total_required_material,
+            unit_code=raw_material.unit_code,
+        )
         # Insumos configurados por etapa: se entregan junto con la materia
         # prima (cantidad declarada al crear ESTA orden) y quedan como un
         # movimiento por insumo. Se lee de la corrida (run.stages), no del
@@ -1213,6 +1222,14 @@ class ProductionService:
                     )
                 except InventoryDomainError as exc:
                     raise ProductionDomainError(f"Insumo '{supply_name}': {exc}") from exc
+                self._sync_entrega_acta_line(
+                    run,
+                    item_id=ingredient.inventory_item_id,
+                    label=supply_name,
+                    quantity=ingredient.quantity,
+                    unit_code=ingredient.unit_code,
+                    stage_id=stage.id,
+                )
         # Complementos solicitados en la orden: se aprueban y descuentan junto
         # con la materia prima. Si falta stock, toda la aprobacion se revierte.
         from backend.modules.inventory.models import InventoryItem as _InventoryItem
@@ -1237,6 +1254,13 @@ class ProductionService:
             complement.status = ComplementRequestStatus.APPROVED
             complement.approved_by_user_id = current_user.id
             complement.approved_at = now
+            self._sync_entrega_acta_line(
+                run,
+                item_id=complement.item_id,
+                label=item_name,
+                quantity=complement.quantity,
+                unit_code=complement.unit_code,
+            )
         run.status = ProductionRunStatus.MATERIALS_APPROVED
         run.materials_approved_at = datetime.utcnow()
         run.materials_approved_by_user_id = current_user.id
@@ -1752,6 +1776,51 @@ class ProductionService:
                 )
                 for line in run.acta_lines
             ]
+
+    def _sync_entrega_acta_line(
+        self,
+        run: ProductionRun,
+        *,
+        item_id: UUID,
+        label: str,
+        quantity: Decimal,
+        unit_code: str,
+        stage_id: UUID | None = None,
+    ) -> None:
+        """Fija (no suma) la cantidad ENTREGA de `item_id` a lo que de verdad
+        se aprobo/consumio en approve_materials. La linea PLAN que sembro
+        create_run trae el monto pedido ANTES de saber si la orden se iba a
+        partir por falta de stock -- si hubo split, esa linea se queda
+        mostrando el pedido completo para siempre salvo que algo la corrija
+        aca. La corrida hija ni siquiera tiene una linea (create_run solo
+        corre para la raiz), asi que para ella esto crea la primera. Se
+        empareja tambien por stage_id (no solo item_id): un mismo insumo
+        puede estar configurado en dos etapas distintas de la misma corrida,
+        y son dos lineas legitimas, no una a fusionar."""
+        existing = next(
+            (
+                line
+                for line in run.acta_lines
+                if line.side == ActaLineSide.ENTREGA and line.item_id == item_id and line.stage_id == stage_id
+            ),
+            None,
+        )
+        if existing is not None:
+            existing.quantity = quantity
+            return
+        line_order = sum(1 for line in run.acta_lines if line.side == ActaLineSide.ENTREGA)
+        run.acta_lines.append(
+            ProductionRunActaLine(
+                side=ActaLineSide.ENTREGA,
+                stage_id=stage_id,
+                label=label,
+                quantity=quantity,
+                unit_code=unit_code,
+                item_id=item_id,
+                source=ActaLineSource.AUTO,
+                line_order=line_order,
+            )
+        )
 
     def _add_or_merge_acta_line(
         self,

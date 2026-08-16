@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from backend.modules.production.models import ProductionProcessStageIngredient, ProductionRunStatus
+from backend.modules.production.models import ActaLineSide, ProductionProcessStageIngredient, ProductionRunStatus
 from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate, RunStageIngredientCreate
 from backend.modules.production.service import ProductionDomainError
 
@@ -209,3 +209,57 @@ def test_approve_materials_raises_when_stock_covers_zero(
 
     run = production_service.repository.get_run(run_read.id)
     assert run.status == "PENDIENTE_INVENTARIO"
+
+
+def test_approve_materials_syncs_entrega_acta_line_to_covered_quantity(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """El acta del padre debe mostrar lo que de verdad se le aprobo (60g),
+    no el monto pre-split que sembro create_run (100g) -- si no, el
+    certificado dice que ya se entrego el pedido completo aunque la hija
+    siga ESPERANDO_MATERIAL sin haber recibido nada todavia."""
+    raw_material.current_stock = Decimal("60")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, "100")
+
+    approved = production_service.approve_materials(run_read.id, current_user)
+    run = production_service.repository.get_run(approved.id)
+
+    entrega_line = next(
+        line for line in run.acta_lines
+        if line.side == ActaLineSide.ENTREGA and line.item_id == raw_material.id
+    )
+    assert entrega_line.quantity == Decimal("60")
+
+
+def test_allocate_material_creates_entrega_acta_line_for_child(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """La hija nace del split sin ninguna linea ENTREGA propia (create_run
+    solo corre para el padre). Cuando por fin recibe su material via
+    allocate_material, el acta tiene que ganar esa linea -- si no, la hija
+    queda entregada de verdad (stock consumido) pero el certificado sigue
+    mostrando su lado ENTREGA vacio para siempre."""
+    raw_material.current_stock = Decimal("60")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, "100")
+    approved = production_service.approve_materials(run_read.id, current_user)
+    child = next(
+        r for r in production_service.repository.list_runs()
+        if r.parent_run_id == approved.id
+    )
+    assert not any(
+        line.side == ActaLineSide.ENTREGA and line.item_id == raw_material.id
+        for line in child.acta_lines
+    )
+
+    raw_material.current_stock = Decimal("40")
+    db_session.flush()
+    production_service.allocate_material(child.id, Decimal("40"), current_user)
+    child = production_service.repository.get_run(child.id)
+
+    entrega_line = next(
+        line for line in child.acta_lines
+        if line.side == ActaLineSide.ENTREGA and line.item_id == raw_material.id
+    )
+    assert entrega_line.quantity == Decimal("40")
