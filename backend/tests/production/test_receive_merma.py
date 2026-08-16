@@ -4,6 +4,7 @@ import pytest
 
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import (
+    ActaLineSide,
     ProductionProcess,
     ProductionProcessStage,
 )
@@ -85,6 +86,39 @@ def test_receive_with_waste_creates_waste_item_and_posts_ingreso_produccion(
     assert movements[0].quantity == Decimal("5")
     assert movements[0].reference_type == "production_run"
     assert movements[0].reference_id == run.id
+
+
+def test_waste_acta_line_label_avoids_repeating_etapa(
+    db_session, production_service, current_user, raw_material, target_complement
+):
+    """Rodrigo reporto "Merma etapa ETAPA 2" repetida -- no eran dos filas
+    duplicadas, era la palabra "etapa" repetida en el texto porque el nombre
+    de la etapa (dato libre del proceso) ya empieza con "Etapa"."""
+    proc = ProductionProcess(
+        name="Cadenas etapa test",
+        waste_limit_percent=Decimal("100"),
+        is_active=True,
+        stages=[
+            ProductionProcessStage(
+                name="Etapa 2", stage_type="PROCESS", stage_order=1, is_active=True,
+                requires_weighing=True,
+            )
+        ],
+    )
+    db_session.add(proc)
+    db_session.flush()
+    raw_material.current_stock = Decimal("2000")
+    db_session.flush()
+
+    run = _run_to_pending_reception(
+        production_service, current_user, proc, raw_material, target_complement, 100, "95"
+    )
+
+    waste_line = next(
+        line for line in run.acta_lines
+        if line.side == ActaLineSide.RECEPCION and line.stage_id == run.stages[0].id
+    )
+    assert waste_line.label == "Merma Etapa 2"
 
 
 def test_receive_reuses_same_waste_item_across_runs_of_same_process(

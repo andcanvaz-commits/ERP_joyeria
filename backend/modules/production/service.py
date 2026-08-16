@@ -149,6 +149,16 @@ def _stage_code_for(stage_name: str, run_seq: int, stage_order: int) -> str:
     return f"{prefix}-OP{run_seq:04d}-{stage_order:02d}"
 
 
+def _waste_line_label(stage_name: str) -> str:
+    """Etiqueta de la fila de merma por etapa. `stage_name` es dato libre del
+    proceso (no hardcodeado): si el admin ya nombro la etapa "Etapa 2", no
+    hay que anteponer otra vez "etapa" (salia "Merma etapa Etapa 2" -- bug
+    reportado por Rodrigo, la palabra se repetia)."""
+    if stage_name.strip().lower().startswith("etapa"):
+        return f"Merma {stage_name}"
+    return f"Merma etapa {stage_name}"
+
+
 @dataclass
 class _ResourceShortage:
     """Un recurso puntual (materia prima, complemento o insumo de etapa) que
@@ -2116,7 +2126,7 @@ class ProductionService:
                         ProductionRunActaLine(
                             side=ActaLineSide.RECEPCION,
                             stage_id=stage.id,
-                            label=f"Merma etapa {stage.stage_name}",
+                            label=_waste_line_label(stage.stage_name),
                             quantity=loss,
                             unit_code=run.raw_material_unit_code,
                             item_id=run.raw_material_item_id,
@@ -2268,7 +2278,7 @@ class ProductionService:
             ProductionRunActaLine(
                 side=ActaLineSide.RECEPCION,
                 stage_id=stage.id,
-                label=f"Merma etapa {stage.stage_name}",
+                label=_waste_line_label(stage.stage_name),
                 quantity=loss,
                 unit_code=run.raw_material_unit_code,
                 item_id=run.raw_material_item_id,
