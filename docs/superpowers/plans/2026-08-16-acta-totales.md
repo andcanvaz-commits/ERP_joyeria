@@ -195,7 +195,170 @@ EOF
 
 ---
 
-### Task 2: Verificación final del plan
+### Task 2: `buildFamilyActaSides` — mismo fix para órdenes divididas (split)
+
+> Agregado durante la ejecución del plan: `buildFamilyActaSides` (usada
+> cuando una orden se partió en `-B`/`-C`, ver `groupRunFamilies`/
+> `getRunFamily`) resultó tener su PROPIA copia del cálculo de totales,
+> independiente de `computeRunTotals` — el Task 1 no la tocaba y por lo
+> tanto el bug seguía vivo para órdenes con split. Mismo fix, generalizado a
+> sumar sobre todos los miembros de la familia en vez de un solo run.
+
+**Files:**
+- Modify: `frontend/lib/orden-produccion.ts:391-424`
+
+**Interfaces:**
+- Consumes: `sumLinesByUnit` (agregada en Task 1, módulo-level, ya en este
+  mismo archivo — no reimplementar), `productoRealLines`, `realProductsForRun`,
+  `canPrintEntrega`, `num` (todas ya definidas en este archivo).
+
+- [ ] **Step 1: Ubicar el bloque actual dentro de `buildFamilyActaSides`**
+
+```ts
+  // Totales entregado/recibido/merma para la familia completa: misma logica
+  // que computeRunTotals (arriba) pero sumando todos los miembros -- los
+  // gramos que entraron a producir no quedan fijos, se actualizan segun la
+  // merma real registrada
+  // (stage.waste_weight de cada etapa de cada miembro de la familia), no
+  // segun ninguna linea de la acta. No aplica a familias historicas
+  // (event_lines, migradas de papel): esas no necesariamente reconciliaban.
+  // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
+  // siembra al crear la orden, asi que sumar por item_id sin chequear
+  // aprobacion daba un total desde el dia 1.
+  const rawUnit = root.raw_material_unit_code;
+  const rawMaterialId = root.raw_material_item_id;
+  const entregaTotalRows: ActaSideTotal[] = [];
+  const recepcionTotalRows: ActaSideTotal[] = [];
+  if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
+    const entregaTotal = family
+      .flatMap((run) => run.acta_lines ?? [])
+      .filter((line) => line.side === "ENTREGA" && line.item_id === rawMaterialId)
+      .reduce((sum, line) => sum + num(line.quantity), 0);
+    if (entregaTotal > 0) {
+      const mermaAcumulada = family
+        .flatMap((run) => run.stages)
+        .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+      entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
+      recepcionTotalRows.push({ label: "Total recibido", quantity: entregaTotal - mermaAcumulada, unit: rawUnit, kind: "total" });
+      // "Al final": es UNA sola acta para toda la familia (padre + hijas de
+      // split) -- la merma total recien tiene sentido cuando TODAS las
+      // corridas activas terminaron su ultima etapa, no apenas una.
+      const allFinished = family.every((run) => run.finished_at !== null || run.status === "CANCELADA");
+      if (allFinished) {
+        recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit: rawUnit, kind: "merma" });
+      }
+    }
+  }
+
+  // Solo aporta cada corrida que ya termino (realProductsForRun devuelve
+  // vacio mientras sigue en curso) -- si el padre ya acabo y la hija sigue
+  // ESPERANDO_MATERIAL, la familia muestra unicamente lo real del padre, no
+  // el plan completo de ambos.
+  const recepcionLines: ActaSideLine[] = [
+    ...productoRealLines(family.flatMap((run) => realProductsForRun(run)), root.raw_material_unit_code),
+    ...recepcionSide.lines,
+  ];
+```
+
+- [ ] **Step 2: Reemplazar**
+
+```ts
+  // Totales entregado/recibido/merma para la familia completa: misma logica
+  // que computeRunTotals (arriba, sumLinesByUnit) pero sumando las lineas de
+  // TODOS los miembros -- los gramos que entraron a producir no quedan
+  // fijos, se actualizan segun la merma real registrada (stage.waste_weight
+  // de cada etapa de cada miembro), no segun ninguna linea de la acta. No
+  // aplica a familias historicas (event_lines, migradas de papel): esas no
+  // necesariamente reconciliaban. Sin aprobar todavia no hay total que
+  // mostrar -- la materia prima PLAN se siembra al crear la orden.
+  const rawUnit = root.raw_material_unit_code;
+  const rawMaterialId = root.raw_material_item_id;
+  const familyRealProducts = family.flatMap((run) => realProductsForRun(run));
+  const entregaTotalRows: ActaSideTotal[] = [];
+  const recepcionTotalRows: ActaSideTotal[] = [];
+  if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
+    const familyAllLines = family.flatMap((run) => run.acta_lines ?? []);
+    const entregaTotal = sumLinesByUnit(familyAllLines.filter((line) => line.side === "ENTREGA"), rawUnit);
+    if (entregaTotal > 0) {
+      const mermaAcumulada = family
+        .flatMap((run) => run.stages)
+        .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+      const familyProductoReal = productoRealLines(familyRealProducts, rawUnit).reduce(
+        (sum, l) => sum + num(l.quantity), 0
+      );
+      const familyRecepcionInUnit = sumLinesByUnit(
+        familyAllLines.filter((line) => line.side === "RECEPCION" && line.source !== "PLAN"),
+        rawUnit
+      );
+      entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
+      recepcionTotalRows.push({
+        label: "Total recibido",
+        quantity: familyProductoReal + familyRecepcionInUnit,
+        unit: rawUnit,
+        kind: "total",
+      });
+      // "Al final": es UNA sola acta para toda la familia (padre + hijas de
+      // split) -- la merma total recien tiene sentido cuando TODAS las
+      // corridas activas terminaron su ultima etapa, no apenas una.
+      const allFinished = family.every((run) => run.finished_at !== null || run.status === "CANCELADA");
+      if (allFinished) {
+        recepcionTotalRows.push({ label: "Merma total", quantity: mermaAcumulada, unit: rawUnit, kind: "merma" });
+      }
+    }
+  }
+
+  // Solo aporta cada corrida que ya termino (realProductsForRun devuelve
+  // vacio mientras sigue en curso) -- si el padre ya acabo y la hija sigue
+  // ESPERANDO_MATERIAL, la familia muestra unicamente lo real del padre, no
+  // el plan completo de ambos.
+  const recepcionLines: ActaSideLine[] = [
+    ...productoRealLines(familyRealProducts, root.raw_material_unit_code),
+    ...recepcionSide.lines,
+  ];
+```
+
+(Nota: `familyRealProducts` se calcula una sola vez y se reutiliza en el
+bloque de totales y en `recepcionLines` — antes `family.flatMap((run) =>
+realProductsForRun(run))` se llamaba dos veces con el mismo resultado.)
+
+- [ ] **Step 3: Type-check**
+
+Run: `docker-compose exec web npm run build`
+Expected: `Compiled successfully`.
+
+- [ ] **Step 4: Verificación manual — caso de orden dividida**
+
+En el navegador: abrir Producción → una orden que se haya partido por falta
+de stock (folio raíz + sufijo `-B`, ver `OP-2026-XXXX-B` en la lista) donde
+tanto el padre como la hija tengan materia prima + complemento entregados.
+Abrir "Ver Acta" desde cualquiera de las dos corridas (debe mostrar la
+familia sumada, encabezado con el folio raíz) y confirmar que "Total
+entregado" suma materia prima + complemento de AMBAS corridas, no solo la
+materia prima. Repetir en Documentos para la misma orden (debe coincidir
+exactamente con Ver Acta).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add frontend/lib/orden-produccion.ts
+git commit -m "$(cat <<'EOF'
+fix(production): totales del acta tambien se arreglan para ordenes con split
+
+buildFamilyActaSides (familias con split, folio raiz + -B/-C) tenia su
+propia copia del calculo de totales, independiente de computeRunTotals
+-- el fix anterior (mismo bug, orden sin split) no la cubria. Mismo
+fix generalizado: suma por unidad sobre las lineas de TODOS los
+miembros de la familia, no solo la materia prima de cada corrida por
+separado.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 3: Verificación final del plan
 
 - [ ] **Step 1: Build completo**
 
