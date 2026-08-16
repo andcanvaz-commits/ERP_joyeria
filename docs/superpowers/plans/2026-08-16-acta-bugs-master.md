@@ -28,7 +28,7 @@ completo y testeado antes de pasar al siguiente:
 
 - [x] **1. [Formato de decimales en errores](2026-08-16-formato-decimales-errores.md)**
       — el más aislado, cero riesgo de UX, toca solo backend.
-- [ ] **2. [Notificaciones con estilo ToastNotice](2026-08-16-notificaciones-toast.md)**
+- [x] **2. [Notificaciones con estilo ToastNotice](2026-08-16-notificaciones-toast.md)**
       — solo frontend, mismo componente que ya usa el resto del sistema.
 - [ ] **3. [Totales del acta (Total entregado/recibido)](2026-08-16-acta-totales.md)**
       — un solo archivo (`orden-produccion.ts`), lógica pura, bien acotado.
