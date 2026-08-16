@@ -114,15 +114,19 @@ function EntregaAction({
   );
 }
 
-// Complementos aprobados con sobrante por devolver (aprobado - usado en
-// ensamble - ya devuelto > 0). Se usa tanto dentro de la acta como en el
-// paso automatico al terminar la produccion (ver production-dashboard.tsx).
+// Complementos aprobados con sobrante por devolver (aprobado - devuelto >
+// 0). Se usa tanto dentro de la acta como en el paso automatico al terminar
+// la produccion (ver production-dashboard.tsx). Nada se marca "usado" de
+// forma independiente (decision de Rodrigo, 2026-08-16): used_quantity
+// viene del ensamble automatico, que al terminar la corrida marca el 100%
+// de lo aprobado como usado -- si eso restara aqui, remaining quedaria en 0
+// justo cuando el usuario recien puede declarar el sobrante.
 export function returnableComplements(run: ProductionRun): Array<Complement & { remaining: number }> {
   return (run.complements ?? [])
     .filter((c) => c.status === "APROBADA")
     .map((c) => ({
       ...c,
-      remaining: Number(c.quantity) - Number(c.used_quantity ?? 0) - Number(c.returned_quantity ?? 0),
+      remaining: Number(c.quantity) - Number(c.returned_quantity ?? 0),
     }))
     .filter((c) => c.remaining > 0.0001);
 }
