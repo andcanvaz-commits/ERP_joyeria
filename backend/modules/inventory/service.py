@@ -375,9 +375,9 @@ class InventoryService(InventoryIntegrationPort):
             reserved = self.reserved_stock(item.id)
             if reserved > 0 and next_stock < reserved:
                 raise InventoryDomainError(
-                    f"Hay {reserved} {item.unit_code} de '{item.name}' reservados para "
+                    f"Hay {format_qty(reserved)} {item.unit_code} de '{item.name}' reservados para "
                     f"ordenes de produccion en espera. Disponible para esta salida: "
-                    f"{item.current_stock - reserved} {item.unit_code}. "
+                    f"{format_qty(item.current_stock - reserved)} {item.unit_code}. "
                     "Libera la reserva desde la orden si necesitas usar ese stock."
                 )
 

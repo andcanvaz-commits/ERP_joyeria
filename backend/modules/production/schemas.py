@@ -317,10 +317,16 @@ class RunComplementRead(BaseModel):
     status: str
     # Cuanto de lo aprobado ya se devolvio a inventario por sobrante.
     returned_quantity: Decimal = Decimal("0")
-    # Cuanto de lo aprobado se uso de verdad en el ensamble (suma de
-    # run.assembly_items para este item) — no viene del ORM, lo llena
-    # ProductionService._attach_plan_names. quantity - used - returned es lo
-    # que todavia se puede devolver.
+    # Informativo unicamente: cuanto de lo aprobado ya consumio el ensamble
+    # automatico (suma de run.assembly_items para este item) — no viene del
+    # ORM, lo llena ProductionService._attach_plan_names. NO se usa para
+    # calcular cuanto se puede devolver: esa regla es siempre
+    # `quantity - returned_quantity` (ver return_complement en
+    # production/service.py), sin importar lo que el ensamble haya marcado
+    # como usado. Ojo: hoy used_quantity tampoco baja cuando se registra una
+    # devolucion despues de que el ensamble ya corrio
+    # (_approved_complement_totals no resta returned_quantity) — es una
+    # limitacion conocida y deliberadamente diferida, no algo a corregir aqui.
     used_quantity: Decimal = Decimal("0")
 
 

@@ -2430,10 +2430,12 @@ class ProductionService:
         self, complement_id: UUID, payload: ComplementReturnCreate, current_user: CurrentUser
     ) -> ProductionRunRead:
         """Devuelve a inventario el sobrante de un complemento aprobado: se
-        desconto entero al aprobar (approve_materials), pero el ensamble puede
-        no haber usado todo (ej. 100 'bolas 2.5' aprobadas, 80 ensambladas,
-        20 sobran). Genera un movimiento DEVOLUCION_PRODUCCION real y una
-        linea AUTO en la acta, lado RECEPCION."""
+        desconto entero al aprobar (approve_materials). El sobrante devuelto
+        se calcula siempre como `quantity - returned_quantity` (lo aprobado
+        menos lo ya devuelto), sin importar lo que el ensamble haya marcado
+        como usado (`assembly_items`) ni en que momento del proceso se
+        registre la devolucion. Genera un movimiento DEVOLUCION_PRODUCCION
+        real y una linea AUTO en la acta, lado RECEPCION."""
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para devolver el sobrante.")
         complement = self.repository.get_complement_request(complement_id)
@@ -2570,8 +2572,8 @@ class ProductionService:
                 )
             if line.quantity > approved[line.complement_item_id]:
                 raise ProductionDomainError(
-                    f"Complemento '{item_name}': el ensamble necesita {line.quantity} y la orden solo "
-                    f"tiene {approved[line.complement_item_id]} aprobados."
+                    f"Complemento '{item_name}': el ensamble necesita {format_qty(line.quantity)} y la orden solo "
+                    f"tiene {format_qty(approved[line.complement_item_id])} aprobados."
                 )
 
         run.assembly_items = [
@@ -2898,7 +2900,15 @@ class ProductionService:
                 lot_code=run.production_code,
             )
 
-        if run.actual_finished_weight is not None:
+        # Con productos declarados (run.products), productoRealLines en el
+        # frontend (frontend/lib/orden-produccion.ts) ya reconstruye este
+        # mismo peso a partir de actual_finished_weight repartido entre los
+        # productos -- esta linea AUTO quedaria duplicando el numero en
+        # "Total recibido" (bug encontrado en review final, commits
+        # d3c2787..7b4b2ef). Solo aporta valor para ordenes SIN productos
+        # declarados (viejas/sin plan de resultantes), donde es el unico
+        # registro del peso recibido.
+        if run.actual_finished_weight is not None and not run.products:
             recepcion_count = sum(1 for line in run.acta_lines if line.side == ActaLineSide.RECEPCION)
             run.acta_lines.append(
                 ProductionRunActaLine(

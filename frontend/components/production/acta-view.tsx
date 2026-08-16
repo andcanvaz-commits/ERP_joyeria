@@ -233,7 +233,6 @@ export function ReturnCandidatesForm({
       onSuccess?.("Sobrante devuelto a inventario.");
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "No se pudo registrar el sobrante.";
-      setLocalError(message);
       onError(message);
     } finally {
       setIsSaving(false);
