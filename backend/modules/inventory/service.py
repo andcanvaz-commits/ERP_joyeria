@@ -25,6 +25,7 @@ from backend.modules.shared.contracts.inventory import (
     InventoryIntegrationPort,
     ProductionMaterialRequirement,
 )
+from backend.modules.shared.formatting import format_qty
 
 
 def _resolve_user_names(session, user_ids: list) -> dict:
@@ -248,7 +249,7 @@ class InventoryService(InventoryIntegrationPort):
         move_quantity = quantity if quantity is not None else movement.quantity
         if move_quantity > source_item.current_stock:
             raise InventoryDomainError(
-                f"Solo quedan {source_item.current_stock} {source_item.unit_code} de "
+                f"Solo quedan {format_qty(source_item.current_stock)} {source_item.unit_code} de "
                 f'"{source_item.name}" para reclasificar.'
             )
 
