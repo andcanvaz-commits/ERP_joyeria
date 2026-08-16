@@ -4249,9 +4249,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div>
                 <h2>Sobrante por devolver</h2>
                 <p>
-                  {postFinishReturnRun.production_code ?? postFinishReturnRun.process_name} quedó con complementos
-                  o insumos que no se usaron enteros. Devuélvelos ahora o continúa — es opcional, se puede hacer
-                  después desde la acta.
+                  Revisa y devuelve los complementos o insumos de sobra de{" "}
+                  {postFinishReturnRun.production_code ?? postFinishReturnRun.process_name}. Es opcional, se puede
+                  hacer después desde la acta.
                 </p>
               </div>
               <button
