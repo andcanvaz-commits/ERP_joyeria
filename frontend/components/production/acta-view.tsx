@@ -238,8 +238,8 @@ export function ReturnCandidatesForm({
   return (
     <>
       {localError ? (
-        <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)", marginTop: 10 }}>
-          {localError}
+        <div className="toastStack" aria-live="polite" style={{ marginTop: 10 }}>
+          <ToastNotice kind="error" message={localError} onClose={() => setLocalError(null)} compact />
         </div>
       ) : null}
 
