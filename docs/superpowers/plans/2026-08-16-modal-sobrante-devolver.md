@@ -357,7 +357,209 @@ EOF
 
 ---
 
-### Task 4: Verificación manual end-to-end del flujo completo
+### Task 4: Peso del lote recibido descuenta lo devuelto
+
+> Agregado tras confirmar con Rodrigo (2026-08-16): la receta de ensamble
+> (`AssemblyRecipe`) ya no maneja pesos, no hay que tocarla. Pero el PESO
+> DEL LOTE recibido si debe descontar la devolucion -- ejemplo suyo: 100g de
+> plata + 10g de dijes para cadenas; si se devuelven 5g de dijes, el
+> producto final pesa 100g + 5g, no 100g + 10g. Hoy `extra_grams_per_unit`
+> en `receive_finished_product` usa `run.assembly_items[].quantity` (el
+> 100% que el ensamble marco), sin restar `complement.returned_quantity` --
+> mismo patron de bug que las Tasks 1 y 2 de este plan, en un tercer lugar
+> que tambien lee esa cantidad.
+
+**Files:**
+- Modify: `backend/modules/production/service.py:2806-2835` (bloque de
+  `extra_grams` dentro de `receive_finished_product`)
+- Test: `backend/tests/production/test_assembly_auto_apply.py`
+
+**Interfaces:**
+- Ninguna nueva.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+Numeros calcados del ejemplo de Rodrigo (100g materia prima, complemento a
+1g/unidad, 10 aprobadas, 5 devueltas -> peso extra real = 5g, no 10g).
+Agregar a `backend/tests/production/test_assembly_auto_apply.py`:
+
+```python
+from backend.modules.inventory.models import InventoryItem
+from backend.modules.production.schemas import ComplementReturnCreate
+
+
+def test_receive_extra_grams_discounts_returned_complement(
+    db_session, production_service, current_user, process, raw_material, complement_item, catalog_finished_item,
+):
+    """Rodrigo (2026-08-16): 100g de plata + 10g de dijes -- si se
+    devuelven 5g de dijes ANTES de recibir, el producto final debe pesar
+    100g + 5g, no 100g + 10g. extra_grams_per_unit hoy suma
+    assembly_items[].quantity (el 100% marcado por el ensamble automatico),
+    sin restar complement.returned_quantity -- mismo patron de bug que
+    return_complement (Task 1) y returnableComplements (Task 2), en un
+    tercer lugar que tambien necesita 'usado = aprobado - devuelto'."""
+    raw_material.current_stock = Decimal("1000")
+    complement_item.current_stock = Decimal("1000")
+    complement_item.weight_per_unit = Decimal("1")
+    db_session.flush()
+
+    payload = ProductionRunCreate(
+        process_id=process.id,
+        raw_material_item_id=raw_material.id,
+        quantity=Decimal("100"),
+        assembly_mode="ENSAMBLAR",
+        products=[RunProductCreate(target_item_id=catalog_finished_item.id, quantity=Decimal("100"))],
+        complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("10"))],
+    )
+    run_read = production_service.create_run(payload, current_user)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+    run = production_service.repository.get_run(run_read.id)
+    finished = production_service.finish_stage(
+        run.stages[0].id, ProductionRunStageFinish(final_weight=Decimal("100")), current_user
+    )
+    # El ensamble automatico marco los 10 aprobados como "usados".
+    assert finished.assembly_items[0].quantity == Decimal("10")
+
+    complement_id = finished.complements[0].id
+    production_service.return_complement(
+        complement_id, ComplementReturnCreate(quantity=Decimal("5")), current_user
+    )
+
+    production_service.receive_finished_product(run.id, current_user)
+
+    target = db_session.get(InventoryItem, catalog_finished_item.id)
+    # weight_per_unit de la orden = total_required_material(100) / quantity(100) = 1 g/und.
+    # extra_grams_per_unit correcto = (10 aprobado - 5 devuelto) / 100 = 0.05 g/und.
+    # peso total por unidad = 1 + 0.05 = 1.05 -> 100 unidades convertidas = 105g.
+    # Con el bug (sin restar lo devuelto): 1 + 0.10 = 1.10 -> 110g.
+    assert target.current_stock == Decimal("105")
+```
+
+- [ ] **Step 2: Correr y confirmar que falla**
+
+Run: `docker-compose exec api pytest backend/tests/production/test_assembly_auto_apply.py::test_receive_extra_grams_discounts_returned_complement -v`
+Expected: FAIL -- `assert Decimal('110') == Decimal('105')` (o el valor que
+resulte; el punto es que da MAS de 105, porque hoy no resta lo devuelto).
+
+- [ ] **Step 3: Implementar**
+
+Ubicar en `backend/modules/production/service.py` (linea 2806-2835):
+
+```python
+        assembly_note = None
+        extra_grams_per_unit = None
+        if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_items:
+            from sqlalchemy import select
+
+            item_ids = [entry.complement_item_id for entry in run.assembly_items]
+            rows = self.repository.session.execute(
+                select(InventoryItem).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            complements = {row[0].id: row[0] for row in rows}
+            names = {item_id: item.name for item_id, item in complements.items()}
+            assembly_note = " + ".join(
+                names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
+            )
+            # El ensamblado pesa lote + complementos: si el complemento se
+            # mide en gramos, suma su cantidad total; si es por unidad con
+            # peso_por_unidad conocido, suma cantidad x peso; sin dato de
+            # peso no se inventa, no aporta.
+            extra_grams = Decimal("0")
+            for entry in run.assembly_items:
+                item = complements.get(entry.complement_item_id)
+                if item is None:
+                    continue
+                if item.unit_code == "g":
+                    extra_grams += entry.quantity
+                elif item.weight_per_unit:
+                    extra_grams += entry.quantity * item.weight_per_unit
+            if run.quantity and extra_grams > 0:
+```
+
+Reemplazar por:
+
+```python
+        assembly_note = None
+        extra_grams_per_unit = None
+        if run.assembly_mode == AssemblyMode.ASSEMBLE and run.assembly_items:
+            from sqlalchemy import select
+
+            item_ids = [entry.complement_item_id for entry in run.assembly_items]
+            rows = self.repository.session.execute(
+                select(InventoryItem).where(InventoryItem.id.in_(item_ids))
+            ).all()
+            complements = {row[0].id: row[0] for row in rows}
+            names = {item_id: item.name for item_id, item in complements.items()}
+            assembly_note = " + ".join(
+                names.get(entry.complement_item_id, "complemento") for entry in run.assembly_items
+            )
+            # Lo devuelto (Rodrigo, 2026-08-16: "si se devuelven 5g de
+            # dijes, el producto final pesa 100g + 5g, no 100g + 10g") resta
+            # ACA tambien -- mismo criterio "usado = aprobado - devuelto"
+            # que return_complement y returnableComplements, para que el
+            # peso real del lote en inventario no cuente material que ya
+            # volvio al estante.
+            returned_by_item: dict = {}
+            for complement in run.complements:
+                returned_by_item[complement.item_id] = (
+                    returned_by_item.get(complement.item_id, Decimal("0")) + complement.returned_quantity
+                )
+            # El ensamblado pesa lote + complementos: si el complemento se
+            # mide en gramos, suma su cantidad total; si es por unidad con
+            # peso_por_unidad conocido, suma cantidad x peso; sin dato de
+            # peso no se inventa, no aporta.
+            extra_grams = Decimal("0")
+            for entry in run.assembly_items:
+                item = complements.get(entry.complement_item_id)
+                if item is None:
+                    continue
+                net_quantity = max(
+                    Decimal("0"), entry.quantity - returned_by_item.get(entry.complement_item_id, Decimal("0"))
+                )
+                if item.unit_code == "g":
+                    extra_grams += net_quantity
+                elif item.weight_per_unit:
+                    extra_grams += net_quantity * item.weight_per_unit
+            if run.quantity and extra_grams > 0:
+```
+
+(El resto del bloque, desde el siguiente `extra_grams_per_unit = ...` en
+adelante, no cambia.)
+
+- [ ] **Step 4: Correr y confirmar que pasa**
+
+Run: `docker-compose exec api pytest backend/tests/production/test_assembly_auto_apply.py -v`
+Expected: PASS (el nuevo test + los ya existentes en ese archivo).
+
+- [ ] **Step 5: Correr toda la suite de producción**
+
+Run: `docker-compose exec api pytest backend/tests/production -q`
+Expected: todos en verde.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/modules/production/service.py backend/tests/production/test_assembly_auto_apply.py
+git commit -m "$(cat <<'EOF'
+fix(production): peso del lote recibido descuenta el complemento devuelto
+
+extra_grams_per_unit (receive_finished_product) sumaba el 100% de
+run.assembly_items sin restar complement.returned_quantity -- mismo
+patron de bug que return_complement y returnableComplements (tasks
+anteriores de este plan), en un tercer lugar que lee la misma
+cantidad. Confirmado con Rodrigo: si se devuelven 5g de un complemento
+de 10g aprobados, el producto final debe pesar +5g, no +10g. Mismo
+criterio "usado = aprobado - devuelto" aplicado aca tambien.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 5: Verificación manual end-to-end del flujo completo
 
 - [ ] **Step 1: Suite backend completa**
 
