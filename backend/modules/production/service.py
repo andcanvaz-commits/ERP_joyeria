@@ -2443,14 +2443,10 @@ class ProductionService:
             raise ProductionDomainError("Solo se puede devolver un complemento ya aprobado (descontado de inventario).")
 
         run = complement.run
-        used = sum(
-            (item.quantity for item in run.assembly_items if item.complement_item_id == complement.item_id),
-            Decimal("0"),
-        )
-        remaining = complement.quantity - used - complement.returned_quantity
+        remaining = complement.quantity - complement.returned_quantity
         if payload.quantity > remaining:
             raise ProductionDomainError(
-                f"Solo quedan {remaining} {complement.unit_code} de sobrante para devolver."
+                f"Solo quedan {format_qty(remaining)} {complement.unit_code} de sobrante para devolver."
             )
 
         from backend.modules.inventory.models import InventoryItem

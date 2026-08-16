@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 
 from backend.modules.production.schemas import (
+    ComplementReturnCreate,
     ProductionRunCreate,
     ProductionRunStageFinish,
     RunAssemblyDefine,
@@ -125,4 +126,76 @@ def test_define_run_assembly_still_works_as_manual_correction(
             run_read.id,
             RunAssemblyDefine(items=[RunAssemblyLineCreate(complement_item_id=complement_item.id, quantity=Decimal("5"))]),
             current_user,
+        )
+
+
+def test_return_complement_ignores_what_assembly_marked_as_used(
+    db_session, production_service, current_user, process, raw_material, complement_item, catalog_finished_item,
+):
+    """Rodrigo (2026-08-16): nada se marca 'usado' de forma independiente --
+    usado = aprobado - devuelto, siempre. _auto_apply_assembly marca el 100%
+    de lo aprobado como assembly_items al terminar la corrida (ver el test
+    de arriba); si esa marca restara en 'remaining', devolver cualquier cosa
+    despues de terminar la produccion seria imposible (remaining ya en 0)."""
+    raw_material.current_stock = Decimal("1000")
+    complement_item.current_stock = Decimal("1000")
+    db_session.flush()
+
+    payload = ProductionRunCreate(
+        process_id=process.id,
+        raw_material_item_id=raw_material.id,
+        quantity=Decimal("100"),
+        assembly_mode="ENSAMBLAR",
+        products=[RunProductCreate(target_item_id=catalog_finished_item.id, quantity=Decimal("100"))],
+        complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("5"))],
+    )
+    run_read = production_service.create_run(payload, current_user)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+    run = production_service.repository.get_run(run_read.id)
+
+    finished = production_service.finish_stage(
+        run.stages[0].id, ProductionRunStageFinish(final_weight=Decimal("95")), current_user
+    )
+    # El ensamble automatico ya marco los 5 aprobados como "usados".
+    assert finished.assembly_items[0].quantity == Decimal("5")
+
+    complement_id = finished.complements[0].id
+    updated = production_service.return_complement(
+        complement_id, ComplementReturnCreate(quantity=Decimal("2")), current_user
+    )
+
+    returned_complement = next(c for c in updated.complements if c.id == complement_id)
+    assert returned_complement.returned_quantity == Decimal("2")
+
+
+def test_return_complement_still_caps_at_approved_minus_returned(
+    db_session, production_service, current_user, process, raw_material, complement_item, catalog_finished_item,
+):
+    """El tope sigue existiendo -- solo deja de contar lo 'usado' por el
+    ensamble. No se puede devolver mas de lo aprobado menos lo ya devuelto."""
+    raw_material.current_stock = Decimal("1000")
+    complement_item.current_stock = Decimal("1000")
+    db_session.flush()
+
+    payload = ProductionRunCreate(
+        process_id=process.id,
+        raw_material_item_id=raw_material.id,
+        quantity=Decimal("100"),
+        assembly_mode="ENSAMBLAR",
+        products=[RunProductCreate(target_item_id=catalog_finished_item.id, quantity=Decimal("100"))],
+        complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("5"))],
+    )
+    run_read = production_service.create_run(payload, current_user)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+    run = production_service.repository.get_run(run_read.id)
+    finished = production_service.finish_stage(
+        run.stages[0].id, ProductionRunStageFinish(final_weight=Decimal("95")), current_user
+    )
+    complement_id = finished.complements[0].id
+
+    with pytest.raises(ProductionDomainError, match="Solo quedan 5"):
+        production_service.return_complement(
+            complement_id, ComplementReturnCreate(quantity=Decimal("6")), current_user
         )
