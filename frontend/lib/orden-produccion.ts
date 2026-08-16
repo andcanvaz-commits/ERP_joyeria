@@ -94,34 +94,41 @@ function productoRealLines(
   }));
 }
 
-function sumByItem(lines: NonNullable<ProductionRun["acta_lines"]>, itemId: string): number {
-  return lines.filter((l) => l.item_id === itemId).reduce((sum, l) => sum + num(l.quantity), 0);
+function sumLinesByUnit(lines: Array<{ unit_code: string; quantity: string }>, unit: string): number {
+  return lines.filter((l) => l.unit_code === unit).reduce((sum, l) => sum + num(l.quantity), 0);
 }
 
-// Merma total, como fila del propio certificado (no una caja aparte): los
-// gramos que entraron a producir NO quedan fijos -- se actualizan segun la
-// merma que se va registrando. Por eso la fuente de la merma no es ninguna
-// linea de la acta (ni "Merma etapa X" ni el producto resultante, que nace
-// con la cantidad PLANEADA al crear la orden y nunca se corrige despues del
-// pesaje real): es `stage.waste_weight`, el mismo numero que ya mantiene al
-// dia finish_stage/_recompute_stage_waste_chain etapa por etapa. Recibido =
-// entregado menos esa merma acumulada; nunca una segunda cuenta aparte que
-// termine restando (o sumando) la merma dos veces.
+// Los totales son la suma LITERAL de lo que ya se muestra en cada lado del
+// certificado, filtrado a la unidad de la materia prima -- igual que el
+// subtotal de cualquier recibo, no una formula aparte que pueda divergir de
+// las filas de arriba (bug reportado: "Total entregado" solo sumaba la
+// materia prima e ignoraba un complemento en la misma unidad -- 400g+405g
+// mostraba 400g). "Total recibido" suma el producto real + las filas RECEPCION
+// no-PLAN (devoluciones, merma por etapa) en esa unidad -- por eso SI cambia
+// al registrar una devolucion (antes no dependia de eso, se veia "quemado").
 function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
   const unit = run.raw_material_unit_code;
   const rawMaterialId = run.raw_material_item_id;
   if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
   // Sin aprobar todavia no hay total que mostrar -- la materia prima PLAN se
-  // siembra al crear la orden, asi que sumar por item_id sin este chequeo
-  // daba un "Total entregado"/"Total recibido" desde el dia 1, antes de que
+  // siembra al crear la orden, asi que sumar sin este chequeo daba un
+  // "Total entregado"/"Total recibido" desde el dia 1, antes de que
   // inventario aprobara nada.
   if (run.materials_approved_at === null) return { entregaTotalRows: [], recepcionTotalRows: [] };
   const lines = run.acta_lines ?? [];
-  const entregaTotal = sumByItem(lines.filter((l) => l.side === "ENTREGA"), rawMaterialId);
+  const entregaTotal = sumLinesByUnit(lines.filter((l) => l.side === "ENTREGA"), unit);
   if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
+
   const mermaAcumulada = run.stages.reduce((sum, stage) => sum + num(stage.waste_weight), 0);
+  const productoReal = productoRealLines(realProductsForRun(run), unit).reduce((sum, l) => sum + num(l.quantity), 0);
+  const recepcionRowsInUnit = sumLinesByUnit(
+    lines.filter((l) => l.side === "RECEPCION" && l.source !== "PLAN"),
+    unit
+  );
+  const recepcionTotal = productoReal + recepcionRowsInUnit;
+
   const recepcionTotalRows: ActaSideTotal[] = [
-    { label: "Total recibido", quantity: entregaTotal - mermaAcumulada, unit, kind: "total" },
+    { label: "Total recibido", quantity: recepcionTotal, unit, kind: "total" },
   ];
   // La fila de merma total solo tiene sentido "al final": finished_at queda
   // seteado en _finish_run sin importar si hubo o no una etapa que pese.
