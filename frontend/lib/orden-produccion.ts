@@ -96,7 +96,15 @@ function productoRealLines(
     if (existing) {
       existing.quantity += qty;
     } else {
-      merged.set(key, { label: p.product_name ?? "—", quantity: qty, unit: p.unit_code || fallbackUnit });
+      // El peso distribuido (actual_finished_weight / plannedTotal, ver
+      // realProductsForRun) SIEMPRE esta en la unidad de la materia
+      // prima, sin importar la unidad propia del producto planeado
+      // (target_item_id puede apuntar a un item en "und") -- usar la
+      // unidad del producto aca rotulaba mal el peso ("399,90 und") y,
+      // desde que sumRowsByUnit filtra por unidad exacta (Task 5 de este
+      // plan), esa fila quedaba afuera de "Total recibido" por completo
+      // (bug encontrado en review, quedaba en 0,00 g).
+      merged.set(key, { label: p.product_name ?? "—", quantity: qty, unit: fallbackUnit });
     }
   }
   return [...merged.entries()].map(([key, p]) => ({
@@ -296,7 +304,9 @@ function recepcionHasData(run: ProductionRun, familyHasWeighedStage: boolean): b
   if ((run.event_lines ?? []).some((line) => line.side === "RECEPCION")) return true;
   if (run.received_at !== null) return true;
   if (familyHasWeighedStage) return true;
-  return (run.acta_lines ?? []).some((line) => line.side === "RECEPCION" && line.source !== "PLAN");
+  return (run.acta_lines ?? []).some(
+    (line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null
+  );
 }
 
 /** Arma un lado (ENTREGA o RECEPCION) para toda la familia: un solo header
