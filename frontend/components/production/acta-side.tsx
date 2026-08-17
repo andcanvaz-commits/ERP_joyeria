@@ -49,11 +49,12 @@ export function ActaSide({
   dataClass?: string;
   actions?: React.ReactNode;
   footer?: React.ReactNode;
-  onEditLine?: (lineId: string, patch: { label: string; quantity: string; unit_code: string }) => Promise<unknown> | void;
+  onEditLine?: (lineId: string, patch: { label?: string; quantity: string; unit_code?: string }) => Promise<unknown> | void;
   onDeleteLine?: (lineId: string) => Promise<unknown> | void;
   onError?: (message: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState<string>("MANUAL");
   const [editLabel, setEditLabel] = useState("");
   const [editQuantity, setEditQuantity] = useState("");
   const [editUnit, setEditUnit] = useState("");
@@ -61,19 +62,27 @@ export function ActaSide({
 
   function startEdit(line: Extract<ActaSideLine, { kind: "row" }>) {
     setEditingId(line.id);
+    setEditingSource(line.source);
     setEditLabel(line.label);
     setEditQuantity(line.quantity);
     setEditUnit(line.unit_code);
   }
 
   async function saveEdit(lineId: string) {
-    if (!editLabel.trim() || !editQuantity || Number(editQuantity) <= 0 || !editUnit.trim()) {
+    if (!editQuantity || Number(editQuantity) <= 0) {
+      onError?.("Indica la cantidad de la linea.");
+      return;
+    }
+    if (editingSource !== "ADMIN_STOCK" && (!editLabel.trim() || !editUnit.trim())) {
       onError?.("Completa detalle, cantidad y unidad de la linea.");
       return;
     }
     setIsSaving(true);
     try {
-      await onEditLine?.(lineId, { label: editLabel.trim(), quantity: editQuantity, unit_code: editUnit.trim() });
+      const patch = editingSource === "ADMIN_STOCK"
+        ? { quantity: editQuantity }
+        : { label: editLabel.trim(), quantity: editQuantity, unit_code: editUnit.trim() };
+      await onEditLine?.(lineId, patch);
       setEditingId(null);
     } catch (nextError) {
       onError?.(nextError instanceof Error ? nextError.message : "No se pudo editar la linea.");
@@ -145,22 +154,30 @@ export function ActaSide({
                         type="number"
                         value={editQuantity}
                       />
-                      <input
-                        className="field"
-                        onChange={(e) => setEditUnit(e.target.value)}
-                        style={{ width: 40 }}
-                        value={editUnit}
-                      />
+                      {editingSource === "ADMIN_STOCK" ? (
+                        <span>{editUnit}</span>
+                      ) : (
+                        <input
+                          className="field"
+                          onChange={(e) => setEditUnit(e.target.value)}
+                          style={{ width: 40 }}
+                          value={editUnit}
+                        />
+                      )}
                     </span>
                   </td>
                   <td>
                     <span className="actaDocInputs">
-                      <input
-                        className="field"
-                        onChange={(e) => setEditLabel(e.target.value)}
-                        style={{ flex: 1 }}
-                        value={editLabel}
-                      />
+                      {editingSource === "ADMIN_STOCK" ? (
+                        <span style={{ flex: 1 }}>{editLabel}</span>
+                      ) : (
+                        <input
+                          className="field"
+                          onChange={(e) => setEditLabel(e.target.value)}
+                          style={{ flex: 1 }}
+                          value={editLabel}
+                        />
+                      )}
                       <button aria-label="Guardar" className="iconOnlyButton" disabled={isSaving} onClick={() => void saveEdit(line.id)} type="button">
                         <Check aria-hidden="true" size={14} />
                       </button>
