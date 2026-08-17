@@ -627,7 +627,168 @@ EOF
 
 ---
 
-### Task 4: Verificación final del plan
+### Task 4: Peso del producto en ENSAMBLAR suma el complemento usado
+
+> Agregado tras reporte real de Rodrigo (2026-08-16, misma orden
+> OP-2026-0045, ENSAMBLAR): entrego 400g materia prima + 400g complemento,
+> mermo 0,10g, devolvio 200g de complemento. "Producto: ARETES TEST" mostro
+> 399,90g (solo materia prima neta de merma) -- Rodrigo espera 599,90g,
+> porque el complemento se COMBINA fisicamente en la pieza en modo
+> ENSAMBLAR (su propio ejemplo de sesion: "100g de plata + dijes, el
+> producto final pesa la plata mas los dijes que SI se usaron").
+>
+> Formula confirmada por Rodrigo, textual: **"el peso del producto final es
+> igual al peso inicial menos la merma mas la cantidad usada en los
+> ensambles, que es igual a lo ingresado si no se devolvio nada, y si si
+> [se devolvio] es igual al total menos la devolucion."** Y explicitamente
+> **sin conversion por unidad/peso_por_unidad** -- rechazo esa idea de
+> plano ("NO HAY NADA POR UNIDAD... SOLAMENTE LO SUMAS Y PUNTO"): el
+> complemento ya viene en la misma unidad que la materia prima (gramos en
+> este caso), se suma directo.
+>
+> A diferencia de las Tasks 1-3 (que tocaban DOS funciones,
+> `computeRunTotals` y el bloque de `buildFamilyActaSides`), este fix es
+> UN solo lugar: `realProductsForRun`, que ya es la fuente compartida que
+> ambas funciones consumen (`buildRunActaSides` para una corrida sola,
+> `buildFamilyActaSides` para familias con split) -- arreglarla ahi cubre
+> los dos casos sin duplicar logica.
+>
+> ENSAMBLAR siempre tiene EXACTAMENTE 1 producto declarado (`create_run`
+> lo valida: `if len(products) != 1... "En modo ensamblar el plan es un
+> solo producto"`, `backend/modules/production/service.py:313-317`) -- no
+> hace falta repartir el peso del complemento entre varios productos, va
+> entero a esa unica fila. No toca nada del lado ASIGNAR (los complementos
+> ahi son piezas asignadas aparte, no se combinan en el peso del
+> producto).
+>
+> No hace falta tocar el backend: `run.complements` (con `quantity`,
+> `returned_quantity`, `unit_code`, `status`) ya llega al frontend
+> completo (`frontend/types/production/index.ts:142-155`) -- alcanza con
+> sumar `quantity - returned_quantity` de los complementos APROBADOS cuya
+> unidad coincida con la de la materia prima.
+
+**Files:**
+- Modify: `frontend/lib/orden-produccion.ts:43-61` (`realProductsForRun`)
+
+**Interfaces:**
+- Ninguna nueva. Mismo tipo de retorno
+  (`NonNullable<ProductionRun["products"]>`).
+
+- [ ] **Step 1: Ubicar el código actual**
+
+```ts
+/** Productos resultantes de UNA corrida con la cantidad REAL producida, no
+ * la planeada -- vacio mientras la corrida sigue en curso (`finished_at`
+ * null): el lado RECIBIDO no debe adelantar un numero que todavia no se
+ * sabe. Al terminar, `run.actual_finished_weight` (peso real = entregado
+ * menos merma real, ver `_finish_run` en backend/modules/production/service.py)
+ * se reparte entre las lineas de producto declaradas en la MISMA proporcion
+ * que se planearon -- si una corrida declaro dos productos 70/30, el peso
+ * real tambien se reparte 70/30, igual que hace `_split_run_for_partial_material`
+ * al partir una orden. */
+function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["products"]> {
+  if (run.finished_at === null || run.actual_finished_weight === null || run.actual_finished_weight === undefined) {
+    return [];
+  }
+  const products = run.products ?? [];
+  const plannedTotal = products.reduce((sum, p) => sum + num(p.quantity), 0);
+  if (plannedTotal <= 0) return [];
+  const ratio = Number(run.actual_finished_weight) / plannedTotal;
+  return products.map((p) => ({ ...p, quantity: String(num(p.quantity) * ratio) }));
+}
+```
+
+- [ ] **Step 2: Reemplazar**
+
+```ts
+/** Productos resultantes de UNA corrida con la cantidad REAL producida, no
+ * la planeada -- vacio mientras la corrida sigue en curso (`finished_at`
+ * null): el lado RECIBIDO no debe adelantar un numero que todavia no se
+ * sabe. Al terminar, `run.actual_finished_weight` (peso real = entregado
+ * menos merma real, ver `_finish_run` en backend/modules/production/service.py)
+ * se reparte entre las lineas de producto declaradas en la MISMA proporcion
+ * que se planearon -- si una corrida declaro dos productos 70/30, el peso
+ * real tambien se reparte 70/30, igual que hace `_split_run_for_partial_material`
+ * al partir una orden. En ENSAMBLAR (siempre 1 solo producto, create_run
+ * lo exige) el peso de la pieza no es solo materia prima: se le suma lo
+ * que de verdad se incorporo de cada complemento aprobado -- aprobado
+ * menos devuelto, en la misma unidad de la materia prima, sin conversion
+ * de peso por unidad (Rodrigo, 2026-08-16: "sin nada por unidad, sumas y
+ * punto"). Si nada se devolvio, usado = todo lo aprobado. */
+function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["products"]> {
+  if (run.finished_at === null || run.actual_finished_weight === null || run.actual_finished_weight === undefined) {
+    return [];
+  }
+  const products = run.products ?? [];
+  const plannedTotal = products.reduce((sum, p) => sum + num(p.quantity), 0);
+  if (plannedTotal <= 0) return [];
+  const ratio = Number(run.actual_finished_weight) / plannedTotal;
+  const scaled = products.map((p) => ({ ...p, quantity: String(num(p.quantity) * ratio) }));
+  if (run.assembly_mode === "ENSAMBLAR" && scaled.length === 1) {
+    const unit = run.raw_material_unit_code;
+    const complementWeight = (run.complements ?? [])
+      .filter((c) => c.status === "APROBADA" && c.unit_code === unit)
+      .reduce((sum, c) => sum + (num(c.quantity) - num(c.returned_quantity ?? 0)), 0);
+    if (complementWeight > 0) {
+      scaled[0] = { ...scaled[0], quantity: String(num(scaled[0].quantity) + complementWeight) };
+    }
+  }
+  return scaled;
+}
+```
+
+- [ ] **Step 3: Type-check**
+
+Run: `docker-compose exec web npm run build`
+Expected: `Compiled successfully`.
+
+- [ ] **Step 4: Verificación aritmética a mano — caso real OP-2026-0045**
+
+Antes de tocar el codigo (o inmediatamente despues, comparando), confirmar
+en el reporte:
+- Materia prima entregada 400g, merma 0,10g -> peso base = 399,90g
+  (`actual_finished_weight`, sin cambios).
+- Complemento aprobado 400g, devuelto 200g -> `complementWeight` = 200.
+- `scaled[0].quantity` final = 399,90 + 200 = **599,90** (antes de este
+  fix daba 399,90 a secas).
+- Confirmar que "Total recibido" (arreglado en la Task 3) sigue dando
+  599,90 tambien -- por construccion algebraica coincide en este caso
+  (con 1 solo producto y sin insumos de por medio), no es casualidad ni
+  hace falta que este fix toque esa formula.
+
+- [ ] **Step 5: Verificación manual en navegador**
+
+Abrir Ver Acta de una orden ENSAMBLAR con complemento parcialmente
+devuelto (la misma OP-2026-0045 si sigue disponible, o una nueva
+equivalente) y confirmar que "Producto: X" muestra el peso combinado
+(materia prima neta + complemento usado), no solo la materia prima.
+Confirmar tambien que una orden ASIGNAR con complemento NO cambia (el
+complemento sigue sin sumarse al producto ahi).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/lib/orden-produccion.ts
+git commit -m "$(cat <<'EOF'
+fix(production): peso del producto en ENSAMBLAR suma el complemento usado
+
+realProductsForRun solo repartia actual_finished_weight (materia
+prima neta de merma) entre los productos declarados -- en ENSAMBLAR el
+complemento se combina fisicamente en la pieza y su peso nunca se
+sumaba: "Producto: ARETES TEST" mostraba 399,90g en vez de 599,90g
+(materia prima 399,90 + complemento usado 200, con 400 aprobados y 200
+devueltos). Formula confirmada por Rodrigo, sin conversion por unidad:
+usado = aprobado - devuelto, directo. Un solo cambio cubre corridas
+sueltas y familias con split porque ambas comparten esta funcion.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 5: Verificación final del plan
 
 - [ ] **Step 1: Build completo**
 
