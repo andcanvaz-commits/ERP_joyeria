@@ -1,0 +1,188 @@
+"use client";
+
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
+import { addAdminActaLine } from "@/lib/production-api";
+import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
+import { listUnits } from "@/lib/units-api";
+import type { InventoryItem, InventoryItemType } from "@/types/inventory";
+
+const ADMIN_PICKER_TYPES: InventoryItemType[] = [
+  "RAW_MATERIAL",
+  "SUPPLY",
+  "COMPLEMENT",
+  "WASTE",
+  "FINISHED_PRODUCT",
+];
+
+// Boton "+" solo-admin en la acta: elegir un item real de inventario (mueve
+// stock de inmediato, sin aprobacion) o escribir algo a mano con una unidad
+// de una lista (nunca mueve stock). La busqueda del picker YA hace de
+// "reconocer coincidencia" -- si el admin no encuentra el item ahi, pasa al
+// formulario manual con el link de abajo.
+export function AdminAddActaLineControl({
+  side,
+  runId,
+  items,
+  isAdmin,
+  onChanged,
+  onError,
+  onSuccess,
+}: {
+  side: "ENTREGA" | "RECEPCION";
+  runId: string;
+  items: InventoryItem[];
+  isAdmin: boolean;
+  onChanged: () => void;
+  onError: (message: string) => void;
+  onSuccess: (message: string) => void;
+}) {
+  const [mode, setMode] = useState<"closed" | "search" | "manual">("closed");
+  const [pendingItem, setPendingItem] = useState<InventoryItem | null>(null);
+  const [quantity, setQuantity] = useState("");
+  const [manualLabel, setManualLabel] = useState("");
+  const [manualUnit, setManualUnit] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits, enabled: mode === "manual" });
+
+  if (!isAdmin) return null;
+
+  function reset() {
+    setMode("closed");
+    setPendingItem(null);
+    setQuantity("");
+    setManualLabel("");
+    setManualUnit("");
+    setLocalError(null);
+  }
+
+  async function submitLinked() {
+    if (!pendingItem || !quantity || Number(quantity) <= 0) {
+      setLocalError("Elige el item y su cantidad.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await addAdminActaLine(runId, { side, item_id: pendingItem.id, quantity });
+      reset();
+      onChanged();
+      onSuccess("Linea agregada: se descontó/sumó del inventario real.");
+    } catch (nextError) {
+      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo agregar la linea.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function submitManual() {
+    if (!manualLabel.trim() || !quantity || Number(quantity) <= 0 || !manualUnit) {
+      setLocalError("Completa detalle, cantidad y unidad.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await addAdminActaLine(runId, { side, label: manualLabel.trim(), quantity, unit_code: manualUnit });
+      reset();
+      onChanged();
+      onSuccess("Linea agregada. No se descontó del inventario (es texto libre).");
+    } catch (nextError) {
+      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo agregar la linea.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  if (mode === "closed") {
+    return (
+      <div className="actaDocAction">
+        <button className="actaDocAddRow" onClick={() => setMode("search")} type="button">
+          <Plus aria-hidden="true" size={13} />
+          Agregar línea (admin)
+        </button>
+      </div>
+    );
+  }
+
+  if (mode === "manual") {
+    return (
+      <div className="actaDocAction">
+        <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 10 }}>
+          <input
+            aria-label="Detalle"
+            className="field"
+            onChange={(e) => setManualLabel(e.target.value)}
+            placeholder="Detalle"
+            style={{ flex: 1 }}
+            type="text"
+            value={manualLabel}
+          />
+          <input
+            aria-label="Cantidad"
+            className="field"
+            min="0.0001"
+            onChange={(e) => setQuantity(e.target.value)}
+            step="0.0001"
+            style={{ width: 100 }}
+            type="number"
+            value={quantity}
+          />
+          <select aria-label="Unidad" className="field" onChange={(e) => setManualUnit(e.target.value)} style={{ width: 90 }} value={manualUnit}>
+            <option value="">Unidad...</option>
+            {units.filter((u) => u.is_active).map((u) => (
+              <option key={u.id} value={u.code}>{u.label}</option>
+            ))}
+          </select>
+          <button className="button" disabled={isSaving} onClick={reset} type="button">Cancelar</button>
+          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void submitManual()} type="button">Agregar</button>
+        </div>
+        <p className="panelText">Esta línea no descuenta del inventario real.</p>
+        {localError ? <p className="panelText" style={{ color: "var(--danger, #b3261e)" }}>{localError}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="actaDocAction">
+      <MaterialCategoryPicker
+        allowedTypes={ADMIN_PICKER_TYPES}
+        description="Busca el item real que se pasó registrar. Si no lo encuentras, escríbelo a mano."
+        error={localError}
+        items={items}
+        onClose={reset}
+        onDismissError={() => setLocalError(null)}
+        onSelect={(item) => {
+          setPendingItem(item);
+          setQuantity("");
+          setLocalError(null);
+        }}
+        quantityStep={
+          pendingItem
+            ? {
+                confirmLabel: "Agregar y mover inventario",
+                isSaving,
+                item: pendingItem,
+                onBack: () => {
+                  setPendingItem(null);
+                  setLocalError(null);
+                },
+                onConfirm: () => void submitLinked(),
+                onQuantityChange: (value) => {
+                  setQuantity(value);
+                  setLocalError(null);
+                },
+                quantity,
+              }
+            : undefined
+        }
+        title="Agregar línea de acta"
+      />
+      {!pendingItem ? (
+        <button className="actaDocAddRow" onClick={() => { setMode("manual"); setLocalError(null); }} style={{ marginTop: 8 }} type="button">
+          No lo encuentro, escribir a mano
+        </button>
+      ) : null}
+    </div>
+  );
+}
