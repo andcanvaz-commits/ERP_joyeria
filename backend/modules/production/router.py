@@ -11,6 +11,7 @@ from backend.modules.production.schemas import (
     ActaLineCreate,
     ActaLineUpdate,
     AdditionalMaterialRequestCreate,
+    AdminActaLineCreate,
     AllocateMaterialPayload,
     AllocationPreviewRead,
     AssemblyRecipeRead,
@@ -80,6 +81,7 @@ ADMIN_ONLY_PRODUCTION_PERMISSIONS = {
     # abajo para estos dos permisos puntuales.
     "production.runs.delete": "Solo el administrador puede cancelar una orden de produccion.",
     "production.processes.delete": "Solo el administrador puede eliminar un proceso.",
+    "production.acta-lines.admin-stock": "Solo el administrador puede agregar una linea de acta enlazada a inventario o de texto libre desde este boton.",
 }
 
 
@@ -499,6 +501,22 @@ def add_acta_line(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.add_acta_line(run_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/acta-lines/admin", response_model=ProductionRunRead)
+def add_admin_acta_line(
+    run_id: UUID,
+    payload: AdminActaLineCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.acta-lines.admin-stock")
+    try:
+        return service.add_admin_acta_line(run_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
