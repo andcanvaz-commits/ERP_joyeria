@@ -98,14 +98,14 @@ function sumLinesByUnit(lines: Array<{ unit_code: string; quantity: string }>, u
   return lines.filter((l) => l.unit_code === unit).reduce((sum, l) => sum + num(l.quantity), 0);
 }
 
-// Los totales son la suma LITERAL de lo que ya se muestra en cada lado del
-// certificado, filtrado a la unidad de la materia prima -- igual que el
-// subtotal de cualquier recibo, no una formula aparte que pueda divergir de
-// las filas de arriba (bug reportado: "Total entregado" solo sumaba la
-// materia prima e ignoraba un complemento en la misma unidad -- 400g+405g
-// mostraba 400g). "Total recibido" suma el producto real + las filas RECEPCION
-// no-PLAN (devoluciones, merma por etapa) en esa unidad -- por eso SI cambia
-// al registrar una devolucion (antes no dependia de eso, se veia "quemado").
+// "Total entregado" es la suma LITERAL de las lineas ENTREGA en la unidad
+// de la materia prima -- igual que el subtotal de cualquier recibo, no una
+// formula aparte que pueda divergir de las filas de arriba (bug reportado:
+// antes solo sumaba la materia prima e ignoraba un complemento en la misma
+// unidad -- 400g+405g mostraba 400g). "Total recibido" NO suma las filas
+// de recepcion -- resta las devoluciones del entregado (ver el comentario
+// junto a `devolucionesTotal` mas abajo, misma logica que repite
+// buildFamilyActaSides para la familia completa).
 function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
   const unit = run.raw_material_unit_code;
   const rawMaterialId = run.raw_material_item_id;
@@ -416,8 +416,9 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
         .flatMap((run) => run.stages)
         .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
       // Misma regla que computeRunTotals (arriba): entregado - merma -
-      // devoluciones, no producto_real + devuelto -- ver el comentario
-      // largo al inicio de este Task en el plan para la prueba algebraica.
+      // devoluciones, no producto_real + devuelto -- devolucionesTotal ahi
+      // arriba tiene la explicacion completa (item_id distinto al de la
+      // materia prima = devolucion real, no merma ni "Peso final recibido").
       const familyDevolucionesInUnit = sumLinesByUnit(
         familyAllLines.filter(
           (line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.item_id !== rawMaterialId
