@@ -68,9 +68,11 @@ export function AdminAddActaLineControl({
       await addAdminActaLine(runId, { side, item_id: pendingItem.id, quantity });
       reset();
       onChanged();
-      onSuccess("Linea agregada: se descontó/sumó del inventario real.");
+      onSuccess("Línea agregada: se descontó/sumó del inventario real.");
     } catch (nextError) {
-      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo agregar la linea.");
+      const message = nextError instanceof Error ? nextError.message : "No se pudo agregar la línea.";
+      setLocalError(message);
+      onError(message);
     } finally {
       setIsSaving(false);
     }
@@ -86,9 +88,11 @@ export function AdminAddActaLineControl({
       await addAdminActaLine(runId, { side, label: manualLabel.trim(), quantity, unit_code: manualUnit });
       reset();
       onChanged();
-      onSuccess("Linea agregada. No se descontó del inventario (es texto libre).");
+      onSuccess("Línea agregada. No se descontó del inventario (es texto libre).");
     } catch (nextError) {
-      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo agregar la linea.");
+      const message = nextError instanceof Error ? nextError.message : "No se pudo agregar la línea.";
+      setLocalError(message);
+      onError(message);
     } finally {
       setIsSaving(false);
     }
