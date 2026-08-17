@@ -7,7 +7,7 @@ import type { InventoryItem } from "@/types/inventory";
 // viven aca (no en acta-side.tsx) para que ninguno de los dos importe del
 // otro en circulo.
 export type ActaSideLine =
-  | { kind: "row"; id: string; label: string; quantity: string; unit_code: string; editable: boolean }
+  | { kind: "row"; id: string; label: string; quantity: string; unit_code: string; editable: boolean; source: string }
   | { kind: "group"; fecha: string | null; responsable: string };
 
 // Fila de total/balance: mismo lugar que una fila real, con su propia
@@ -114,6 +114,7 @@ function productoRealLines(
     quantity: String(p.quantity),
     unit_code: p.unit,
     editable: false,
+    source: "AUTO",
   }));
 }
 
@@ -185,7 +186,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   const lines = run.acta_lines ?? [];
   const entregaLines: ActaSideLine[] = lines
     .filter((l) => l.side === "ENTREGA")
-    .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" }));
+    .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source }));
   // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
   // crear la orden) no es un recibo real -- se queda fuera de las filas
   // mostradas; el producto resultante REAL se antepone abajo, vacio
@@ -197,7 +198,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code),
     ...lines
       .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.stage_id == null)
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" })),
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source })),
   ];
 
   const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run, entregaLines, recepcionLines);
@@ -265,11 +266,12 @@ function entregaRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "r
       quantity: line.gramos,
       unit_code: line.unidad,
       editable: false,
+      source: "AUTO",
     }));
   }
   return (run.acta_lines ?? [])
     .filter((line) => line.side === "ENTREGA")
-    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
+    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source }));
 }
 
 /** Filas RECEPCION de un run -- misma fuente que Ver Acta, y mismo filtro: la
@@ -288,11 +290,12 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
       quantity: line.gramos,
       unit_code: line.unidad,
       editable: false,
+      source: "AUTO",
     }));
   }
   return (run.acta_lines ?? [])
     .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null)
-    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
+    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source }));
 }
 
 /** ¿Este run tiene avance real del lado RECIBIDO? Recepcion real (linea

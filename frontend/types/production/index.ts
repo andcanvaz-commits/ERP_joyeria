@@ -189,7 +189,7 @@ export type ProductionRun = {
     // permite distinguir materia prima de insumos/complementos aunque
     // coincidan en nombre, y sumar/reconciliar por item real.
     item_id?: string | null;
-    source: "PLAN" | "AUTO" | "MANUAL";
+    source: "PLAN" | "AUTO" | "MANUAL" | "ADMIN_STOCK";
     stage_id?: string | null;
     stage_name?: string | null;
     note?: string | null;
