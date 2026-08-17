@@ -48,7 +48,12 @@ function num(value: string | null | undefined): number {
  * se reparte entre las lineas de producto declaradas en la MISMA proporcion
  * que se planearon -- si una corrida declaro dos productos 70/30, el peso
  * real tambien se reparte 70/30, igual que hace `_split_run_for_partial_material`
- * al partir una orden. */
+ * al partir una orden. En ENSAMBLAR (siempre 1 solo producto, create_run
+ * lo exige) el peso de la pieza no es solo materia prima: se le suma lo
+ * que de verdad se incorporo de cada complemento aprobado -- aprobado
+ * menos devuelto, en la misma unidad de la materia prima, sin conversion
+ * de peso por unidad (Rodrigo, 2026-08-16: "sin nada por unidad, sumas y
+ * punto"). Si nada se devolvio, usado = todo lo aprobado. */
 function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["products"]> {
   if (run.finished_at === null || run.actual_finished_weight === null || run.actual_finished_weight === undefined) {
     return [];
@@ -57,7 +62,17 @@ function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["prod
   const plannedTotal = products.reduce((sum, p) => sum + num(p.quantity), 0);
   if (plannedTotal <= 0) return [];
   const ratio = Number(run.actual_finished_weight) / plannedTotal;
-  return products.map((p) => ({ ...p, quantity: String(num(p.quantity) * ratio) }));
+  const scaled = products.map((p) => ({ ...p, quantity: String(num(p.quantity) * ratio) }));
+  if (run.assembly_mode === "ENSAMBLAR" && scaled.length === 1) {
+    const unit = run.raw_material_unit_code;
+    const complementWeight = (run.complements ?? [])
+      .filter((c) => c.status === "APROBADA" && c.unit_code === unit)
+      .reduce((sum, c) => sum + (num(c.quantity) - num(c.returned_quantity)), 0);
+    if (complementWeight > 0) {
+      scaled[0] = { ...scaled[0], quantity: String(num(scaled[0].quantity) + complementWeight) };
+    }
+  }
+  return scaled;
 }
 
 /** Convierte productos (ya con cantidad REAL, ver `realProductsForRun`) en
