@@ -109,19 +109,25 @@ function productoRealLines(
   }));
 }
 
-function sumLinesByUnit(lines: Array<{ unit_code: string; quantity: string }>, unit: string): number {
-  return lines.filter((l) => l.unit_code === unit).reduce((sum, l) => sum + num(l.quantity), 0);
+function sumRowsByUnit(lines: ActaSideLine[], unit: string): number {
+  return lines
+    .filter((l): l is Extract<ActaSideLine, { kind: "row" }> => l.kind === "row" && l.unit_code === unit)
+    .reduce((sum, l) => sum + num(l.quantity), 0);
 }
 
-// "Total entregado" es la suma LITERAL de las lineas ENTREGA en la unidad
-// de la materia prima -- igual que el subtotal de cualquier recibo, no una
-// formula aparte que pueda divergir de las filas de arriba (bug reportado:
-// antes solo sumaba la materia prima e ignoraba un complemento en la misma
-// unidad -- 400g+405g mostraba 400g). "Total recibido" NO suma las filas
-// de recepcion -- resta las devoluciones del entregado (ver el comentario
-// junto a `devolucionesTotal` mas abajo, misma logica que repite
-// buildFamilyActaSides para la familia completa).
-function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
+// Los totales son la suma LITERAL de las filas que YA se muestran
+// (entregaLines/recepcionLines, construidas por el caller) -- ni una
+// formula de "entregado - merma - devoluciones" ni "producto + filas"
+// calculada aparte, para que el total nunca pueda desincronizarse de lo
+// impreso (fue la causa raiz de tres correcciones seguidas de este plan).
+// "Merma Etapa X" no aparece en recepcionLines (se filtra al armarlas, ver
+// buildRunActaSides/recepcionRowsForRun) -- por eso no hace falta
+// excluirla aca: sumar recepcionLines tal cual ya da el numero correcto.
+function computeRunTotals(
+  run: ProductionRun,
+  entregaLines: ActaSideLine[],
+  recepcionLines: ActaSideLine[]
+): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
   const unit = run.raw_material_unit_code;
   const rawMaterialId = run.raw_material_item_id;
   if (!unit || !rawMaterialId) return { entregaTotalRows: [], recepcionTotalRows: [] };
@@ -130,24 +136,11 @@ function computeRunTotals(run: ProductionRun): { entregaTotalRows: ActaSideTotal
   // "Total entregado"/"Total recibido" desde el dia 1, antes de que
   // inventario aprobara nada.
   if (run.materials_approved_at === null) return { entregaTotalRows: [], recepcionTotalRows: [] };
-  const lines = run.acta_lines ?? [];
-  const entregaTotal = sumLinesByUnit(lines.filter((l) => l.side === "ENTREGA"), unit);
+  const entregaTotal = sumRowsByUnit(entregaLines, unit);
   if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
 
   const mermaAcumulada = run.stages.reduce((sum, stage) => sum + num(stage.waste_weight), 0);
-  // "Total recibido" = entregado - merma - devoluciones -- identidad
-  // algebraica equivalente a "producto_real + usado" (usado = aprobado -
-  // devuelto), la regla que Rodrigo confirmo (2026-08-16). Las lineas de
-  // devolucion de complemento/insumo se distinguen de las de merma por
-  // etapa / "Peso final recibido" por item_id: estas dos ultimas siempre
-  // llevan el item_id de la MATERIA PRIMA (ya estan implicitas en
-  // entregaTotal - merma), las devoluciones llevan el item_id del
-  // complemento/insumo devuelto.
-  const devolucionesTotal = sumLinesByUnit(
-    lines.filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.item_id !== rawMaterialId),
-    unit
-  );
-  const recepcionTotal = entregaTotal - mermaAcumulada - devolucionesTotal;
+  const recepcionTotal = sumRowsByUnit(recepcionLines, unit);
 
   const recepcionTotalRows: ActaSideTotal[] = [
     { label: "Total recibido", quantity: recepcionTotal, unit, kind: "total" },
@@ -188,15 +181,18 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
   // crear la orden) no es un recibo real -- se queda fuera de las filas
   // mostradas; el producto resultante REAL se antepone abajo, vacio
-  // mientras la corrida sigue en curso (ver productoRealLines).
+  // mientras la corrida sigue en curso (ver productoRealLines). Las de
+  // merma por etapa (stage_id != null) tampoco se muestran como fila --
+  // solo "Merma total" (Rodrigo, 2026-08-16: la de arriba estaba
+  // repetida con la de abajo).
   const recepcionLines: ActaSideLine[] = [
     ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code),
     ...lines
-      .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN")
+      .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.stage_id == null)
       .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" })),
   ];
 
-  const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run);
+  const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run, entregaLines, recepcionLines);
 
   return {
     entregaLines,
@@ -287,7 +283,7 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
     }));
   }
   return (run.acta_lines ?? [])
-    .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN")
+    .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null)
     .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: false }));
 }
 
@@ -410,43 +406,35 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
     rows: recepcionRowsForRun(run),
   }));
 
-  // Totales entregado/recibido/merma para la familia completa: misma logica
-  // que computeRunTotals (arriba, sumLinesByUnit) pero sumando las lineas de
-  // TODOS los miembros -- los gramos que entraron a producir no quedan
-  // fijos, se actualizan segun la merma real registrada (stage.waste_weight
-  // de cada etapa de cada miembro), no segun ninguna linea de la acta. No
-  // aplica a familias historicas (event_lines, migradas de papel): esas no
-  // necesariamente reconciliaban. Sin aprobar todavia no hay total que
-  // mostrar -- la materia prima PLAN se siembra al crear la orden.
   const rawUnit = root.raw_material_unit_code;
   const rawMaterialId = root.raw_material_item_id;
   const familyRealProducts = family.flatMap((run) => realProductsForRun(run));
+  // Solo aporta cada corrida que ya termino (realProductsForRun devuelve
+  // vacio mientras sigue en curso) -- si el padre ya acabo y la hija sigue
+  // ESPERANDO_MATERIAL, la familia muestra unicamente lo real del padre, no
+  // el plan completo de ambos.
+  const recepcionLines: ActaSideLine[] = [
+    ...productoRealLines(familyRealProducts, root.raw_material_unit_code),
+    ...recepcionSide.lines,
+  ];
+
+  // Totales entregado/recibido/merma para la familia completa: suma
+  // LITERAL de las filas YA construidas arriba (entregaSide.lines,
+  // recepcionLines) -- mismo criterio que computeRunTotals, para que el
+  // total nunca pueda desincronizarse de lo impreso. No aplica a familias
+  // historicas (event_lines, migradas de papel): esas no necesariamente
+  // reconciliaban. Sin aprobar todavia no hay total que mostrar.
   const entregaTotalRows: ActaSideTotal[] = [];
   const recepcionTotalRows: ActaSideTotal[] = [];
   if (!isHistorical && rawUnit && rawMaterialId && canPrintEntrega(family)) {
-    const familyAllLines = family.flatMap((run) => run.acta_lines ?? []);
-    const entregaTotal = sumLinesByUnit(familyAllLines.filter((line) => line.side === "ENTREGA"), rawUnit);
+    const entregaTotal = sumRowsByUnit(entregaSide.lines, rawUnit);
     if (entregaTotal > 0) {
       const mermaAcumulada = family
         .flatMap((run) => run.stages)
         .reduce((sum, stage) => sum + num(stage.waste_weight), 0);
-      // Misma regla que computeRunTotals (arriba): entregado - merma -
-      // devoluciones, no producto_real + devuelto -- devolucionesTotal ahi
-      // arriba tiene la explicacion completa (item_id distinto al de la
-      // materia prima = devolucion real, no merma ni "Peso final recibido").
-      const familyDevolucionesInUnit = sumLinesByUnit(
-        familyAllLines.filter(
-          (line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.item_id !== rawMaterialId
-        ),
-        rawUnit
-      );
+      const recepcionTotal = sumRowsByUnit(recepcionLines, rawUnit);
       entregaTotalRows.push({ label: "Total entregado", quantity: entregaTotal, unit: rawUnit, kind: "total" });
-      recepcionTotalRows.push({
-        label: "Total recibido",
-        quantity: entregaTotal - mermaAcumulada - familyDevolucionesInUnit,
-        unit: rawUnit,
-        kind: "total",
-      });
+      recepcionTotalRows.push({ label: "Total recibido", quantity: recepcionTotal, unit: rawUnit, kind: "total" });
       // "Al final": es UNA sola acta para toda la familia (padre + hijas de
       // split) -- la merma total recien tiene sentido cuando TODAS las
       // corridas activas terminaron su ultima etapa, no apenas una.
@@ -456,15 +444,6 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
       }
     }
   }
-
-  // Solo aporta cada corrida que ya termino (realProductsForRun devuelve
-  // vacio mientras sigue en curso) -- si el padre ya acabo y la hija sigue
-  // ESPERANDO_MATERIAL, la familia muestra unicamente lo real del padre, no
-  // el plan completo de ambos.
-  const recepcionLines: ActaSideLine[] = [
-    ...productoRealLines(familyRealProducts, root.raw_material_unit_code),
-    ...recepcionSide.lines,
-  ];
 
   return {
     entregaLines: entregaSide.lines,
