@@ -232,6 +232,13 @@ export function addActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCI
   });
 }
 
+export function addAdminActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; item_id?: string | null; label?: string | null; quantity: string; unit_code?: string | null; note?: string | null }) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/acta-lines/admin`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function updateActaLine(lineId: string, payload: { label?: string; quantity?: string; unit_code?: string; note?: string | null }) {
   return apiRequest<ProductionRun>(`/api/production/runs/acta-lines/${lineId}`, {
     method: "PUT",
