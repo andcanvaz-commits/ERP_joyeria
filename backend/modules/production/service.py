@@ -43,6 +43,7 @@ from backend.modules.production.schemas import (
     ActaLineUpdate,
     AdditionalMaterialRequestCreate,
     AdditionalMaterialRequestRead,
+    AdminActaLineCreate,
     AssemblyRecipeItemRead,
     AssemblyRecipeRead,
     AssemblyRecipeUpsert,
@@ -1890,6 +1891,114 @@ class ProductionService:
                 created_by_user_id=created_by_user_id,
             )
         )
+
+    def _apply_admin_acta_line_delta(
+        self, line: ProductionRunActaLine, new_quantity: Decimal, current_user: CurrentUser
+    ) -> None:
+        """Aplica solo la diferencia entre lo que ya se movio para esta linea
+        y `new_quantity` -- nunca edita un movimiento existente (todo cambio
+        de stock nace de un InventoryMovement nuevo). Se usa al crear la
+        linea (new_quantity = cantidad completa, nada movido todavia), al
+        editar su cantidad, y al borrarla (new_quantity = 0, revierte el
+        neto). No hace nada si la linea no tiene item_id (linea libre)."""
+        if line.item_id is None:
+            return
+        increase_type = "CONSUMO_PRODUCCION" if line.side == ActaLineSide.ENTREGA else "DEVOLUCION_PRODUCCION"
+        decrease_type = "DEVOLUCION_PRODUCCION" if line.side == ActaLineSide.ENTREGA else "CONSUMO_PRODUCCION"
+
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryMovement
+
+        moved = self.repository.session.execute(
+            select(InventoryMovement.movement_type, InventoryMovement.quantity).where(
+                InventoryMovement.reference_type == "production_run_acta_line",
+                InventoryMovement.reference_id == line.id,
+            )
+        ).all()
+        net_so_far = sum(
+            (qty if mtype == increase_type else -qty for mtype, qty in moved), Decimal("0")
+        )
+        delta = new_quantity - net_so_far
+        if delta == 0:
+            return
+        movement_type = increase_type if delta > 0 else decrease_type
+        run = line.run
+        try:
+            self.inventory_service.create_movement(
+                InventoryMovementCreate(
+                    item_id=line.item_id,
+                    movement_type=movement_type,
+                    quantity=abs(delta),
+                    reason=f"Ajuste manual de administrador en acta: {line.label}.",
+                    reference_type="production_run_acta_line",
+                    reference_id=line.id,
+                ),
+                user_id=current_user.id,
+                lot_code=run.production_code or run.root_production_code,
+            )
+        except InventoryDomainError as exc:
+            raise ProductionDomainError(f"'{line.label}': {exc}") from exc
+
+    def add_admin_acta_line(
+        self, run_id: UUID, payload: AdminActaLineCreate, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        """Boton de admin en la acta: agrega una linea en cualquier momento
+        del proceso, con o sin item real de inventario. Con item_id mueve
+        stock real de inmediato (sin aprobacion, ver
+        _apply_admin_acta_line_delta); sin item_id es una linea libre igual
+        que las MANUAL de siempre (nunca mueve stock). No reusa
+        _add_or_merge_acta_line a proposito: cada correccion de admin es su
+        propia fila, nunca se fusiona con una linea PLAN/AUTO existente del
+        mismo item (eso le heredaria un source que no se puede borrar)."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.event_lines:
+            raise ProductionDomainError(
+                "Esta orden ya tiene su acta cargada desde papel; no se pueden agregar lineas nuevas por este flujo."
+            )
+
+        if payload.item_id is None:
+            if not payload.label or not payload.unit_code:
+                raise ProductionDomainError("Escribe el detalle y la unidad de la linea.")
+            line = ProductionRunActaLine(
+                side=payload.side,
+                label=payload.label.strip(),
+                quantity=payload.quantity,
+                unit_code=payload.unit_code.strip(),
+                item_id=None,
+                source=ActaLineSource.MANUAL,
+                line_order=sum(1 for l in run.acta_lines if l.side == payload.side),
+                note=(payload.note or "").strip() or None,
+                created_by_user_id=current_user.id,
+            )
+            run.acta_lines.append(line)
+            self.repository.flush()
+            return self._read_with_names(run)
+
+        from backend.modules.inventory.models import InventoryItem
+
+        item = self.repository.session.get(InventoryItem, payload.item_id)
+        if item is None:
+            raise ProductionNotFoundError("Item de inventario no encontrado.")
+
+        line = ProductionRunActaLine(
+            side=payload.side,
+            label=item.name,
+            quantity=Decimal("0"),
+            unit_code=item.unit_code,
+            item_id=item.id,
+            source=ActaLineSource.ADMIN_STOCK,
+            line_order=sum(1 for l in run.acta_lines if l.side == payload.side),
+            note=(payload.note or "").strip() or None,
+            created_by_user_id=current_user.id,
+        )
+        run.acta_lines.append(line)
+        self.repository.flush()
+        self._apply_admin_acta_line_delta(line, payload.quantity, current_user)
+        line.quantity = payload.quantity
+        self.repository.flush()
+        return self._read_with_names(run)
 
     def add_acta_line(self, run_id: UUID, payload: ActaLineCreate, current_user: CurrentUser) -> ProductionRunRead:
         """Agrega a mano una linea a la acta -- disponible en cualquier etapa

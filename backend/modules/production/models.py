@@ -142,6 +142,10 @@ class ActaLineSource:
     AUTO = "AUTO"
     # Agregada a mano por un usuario editando el acta.
     MANUAL = "MANUAL"
+    # Agregada por el admin desde el boton "+" de la acta, enlazada a un
+    # InventoryItem real -- a diferencia de MANUAL, esta SI genero un
+    # InventoryMovement real (ver _apply_admin_acta_line_delta en service.py).
+    ADMIN_STOCK = "ADMIN_STOCK"
 
 
 class ProductionRunStageStatus:
