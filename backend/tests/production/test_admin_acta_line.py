@@ -9,7 +9,12 @@ import pytest
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import ActaLineSource
 from backend.modules.production.repository import ProductionProcessRepository
-from backend.modules.production.schemas import AdminActaLineCreate, ProductionRunCreate, RunProductCreate
+from backend.modules.production.schemas import (
+    ActaLineUpdate,
+    AdminActaLineCreate,
+    ProductionRunCreate,
+    RunProductCreate,
+)
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 
 
@@ -169,3 +174,64 @@ def test_add_admin_acta_line_rejects_historical_run(
             run.id, AdminActaLineCreate(side="ENTREGA", label="X", quantity=Decimal("1"), unit_code="g"),
             current_user,
         )
+
+
+def test_update_admin_stock_line_quantity_up_applies_only_delta(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("8")), current_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("42")  # 50 - 5 - 3 (delta), no 50 - 8 dos veces
+
+
+def test_update_admin_stock_line_quantity_down_returns_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("2")), current_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("48")  # 50 - 5 + 3
+
+
+def test_update_admin_stock_line_rejects_label_or_unit_edit(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    with pytest.raises(ProductionDomainError, match="no se editan a mano"):
+        production_service.update_acta_line(line_id, ActaLineUpdate(label="Otro nombre"), current_user)

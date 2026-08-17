@@ -2029,6 +2029,20 @@ class ProductionService:
         line = self.repository.get_acta_line(line_id)
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
+
+        if line.source == ActaLineSource.ADMIN_STOCK:
+            if payload.label is not None or payload.unit_code is not None:
+                raise ProductionDomainError(
+                    "Esta linea esta enlazada a un item de inventario: el detalle y la unidad no se editan a mano."
+                )
+            if payload.quantity is not None:
+                self._apply_admin_acta_line_delta(line, payload.quantity, current_user)
+                line.quantity = payload.quantity
+            if payload.note is not None:
+                line.note = payload.note.strip() or None
+            self.repository.flush()
+            return self._read_with_names(line.run)
+
         if payload.quantity is not None and line.side == ActaLineSide.RECEPCION and line.item_id is not None:
             cap = self._acta_line_max_quantity(line)
             if cap is not None and payload.quantity > cap:
