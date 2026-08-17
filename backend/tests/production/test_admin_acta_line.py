@@ -8,8 +8,9 @@ import pytest
 
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import ActaLineSource
+from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import AdminActaLineCreate, ProductionRunCreate, RunProductCreate
-from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
+from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 
 
 def _create_run(production_service, current_user, process, raw_material, target_complement, quantity="10"):
@@ -112,6 +113,44 @@ def test_add_admin_acta_line_missing_item_raises_not_found(
             AdminActaLineCreate(side="ENTREGA", item_id=uuid.uuid4(), quantity=Decimal("1")),
             current_user,
         )
+
+
+def test_add_admin_acta_line_linked_requires_inventory_service(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """La rama enlazada a un item real necesita inventory_service; la rama de
+    texto libre nunca lo toca, asi que debe seguir funcionando sin el (ver
+    finding de review sobre c512712: guard solo en el call site, no dentro de
+    _apply_admin_acta_line_delta)."""
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo sin inventario", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+
+    service_without_inventory = ProductionService(
+        repository=ProductionProcessRepository(db_session), inventory_service=None,
+    )
+
+    with pytest.raises(ProductionDomainError, match="Inventario no esta disponible"):
+        service_without_inventory.add_admin_acta_line(
+            run.id,
+            AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")),
+            current_user,
+        )
+
+    result = service_without_inventory.add_admin_acta_line(
+        run.id,
+        AdminActaLineCreate(side="ENTREGA", label="Tornillo prestado", quantity=Decimal("2"), unit_code="und"),
+        current_user,
+    )
+
+    lines = [l for l in result.acta_lines if l.source == "MANUAL" and l.label == "Tornillo prestado"]
+    assert len(lines) == 1
+    assert lines[0].item_id is None
+    assert lines[0].quantity == Decimal("2")
 
 
 def test_add_admin_acta_line_rejects_historical_run(

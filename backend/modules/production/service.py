@@ -1976,6 +1976,9 @@ class ProductionService:
             self.repository.flush()
             return self._read_with_names(run)
 
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible para agregar esta linea.")
+
         from backend.modules.inventory.models import InventoryItem
 
         item = self.repository.session.get(InventoryItem, payload.item_id)
