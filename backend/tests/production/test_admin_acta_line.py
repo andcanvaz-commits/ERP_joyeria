@@ -235,3 +235,54 @@ def test_update_admin_stock_line_rejects_label_or_unit_edit(
 
     with pytest.raises(ProductionDomainError, match="no se editan a mano"):
         production_service.update_acta_line(line_id, ActaLineUpdate(label="Otro nombre"), current_user)
+
+
+def test_delete_admin_stock_line_reverts_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    updated = production_service.delete_acta_line(line_id, current_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("50")
+    assert all(l.id != line_id for l in updated.acta_lines)
+
+
+def test_delete_admin_stock_line_blocks_if_stock_insufficient_to_revert(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Linea RECEPCION admin sumo 3 unidades; si ese stock ya se gasto en
+    otro lado, revertir (una SALIDA) dejaria el stock negativo -- debe
+    fallar y la linea debe seguir existiendo."""
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    complement = InventoryItem(
+        item_type="COMPLEMENT", name="Broche olvidado", sku=f"CO-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("10"),
+    )
+    db_session.add(complement)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="RECEPCION", item_id=complement.id, quantity=Decimal("3")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == complement.id][0].id
+    complement.current_stock = Decimal("1")  # se gasto en otro lado despues de sumarse
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError):
+        production_service.delete_acta_line(line_id, current_user)
+
+    db_session.refresh(complement)
+    assert complement.current_stock == Decimal("1")
+    refreshed = production_service.repository.get_acta_line(line_id)
+    assert refreshed is not None

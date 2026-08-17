@@ -2099,14 +2099,18 @@ class ProductionService:
         return max(Decimal("0"), sum(delivered, Decimal("0")) - other_logged)
 
     def delete_acta_line(self, line_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
-        """Borra una linea agregada a mano. Las lineas planeadas o generadas
-        automaticamente por un evento real no se borran -- son el rastro de lo
-        que de verdad paso; si estan mal, se editan, no se esconden."""
+        """Borra una linea agregada a mano (libre o enlazada a inventario).
+        Las lineas planeadas o generadas automaticamente por un evento real
+        no se borran -- son el rastro de lo que de verdad paso; si estan
+        mal, se editan, no se esconden. Si la linea esta enlazada a
+        inventario (ADMIN_STOCK), revierte el stock neto antes de borrarla."""
         line = self.repository.get_acta_line(line_id)
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
-        if line.source != ActaLineSource.MANUAL:
+        if line.source not in (ActaLineSource.MANUAL, ActaLineSource.ADMIN_STOCK):
             raise ProductionDomainError("Solo se pueden borrar lineas agregadas a mano.")
+        if line.source == ActaLineSource.ADMIN_STOCK:
+            self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
         run = line.run
         run.acta_lines.remove(line)
         self.repository.session.delete(line)
