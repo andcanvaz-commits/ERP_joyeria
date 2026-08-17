@@ -450,6 +450,19 @@ class ActaLineUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class AdminActaLineCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    side: Literal["ENTREGA", "RECEPCION"]
+    # Si viene, la linea se enlaza a este item real y mueve inventario. Si es
+    # None, es una linea libre (label/unit_code obligatorios, ver service).
+    item_id: UUID | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=180)
+    quantity: Decimal = Field(gt=0)
+    unit_code: str | None = Field(default=None, min_length=1, max_length=20)
+    note: str | None = Field(default=None, max_length=500)
+
+
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
