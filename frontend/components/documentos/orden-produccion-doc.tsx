@@ -9,12 +9,27 @@ export type DocMode = "entrega" | "recepcion" | "completo";
 // (bug reportado varias veces). dataClass sigue siendo lo unico especifico de
 // impresion (visibilidad selectiva por opMode-entrega/opMode-recepcion, ver
 // globals.css) -- Ver Acta no lo usa porque no imprime por seccion.
+// entregaActions/recepcionFooter/onEditLine/onDeleteLine/onError: opcionales,
+// solo la vista interactiva de Documentos los pasa (el boton de admin y la
+// edicion de sus lineas) -- el portal que imprime de verdad
+// (mode=printingMode) nunca los pasa, para que no salga nada de eso en el
+// papel.
 export function OrdenProduccionDoc({
   model,
-  mode
+  mode,
+  entregaActions,
+  recepcionFooter,
+  onEditLine,
+  onDeleteLine,
+  onError,
 }: {
   model: OrdenProduccionModel;
   mode: DocMode;
+  entregaActions?: React.ReactNode;
+  recepcionFooter?: React.ReactNode;
+  onEditLine?: (lineId: string, patch: { label?: string; quantity: string; unit_code?: string }) => Promise<unknown> | void;
+  onDeleteLine?: (lineId: string) => Promise<unknown> | void;
+  onError?: (message: string) => void;
 }) {
   return (
     <div className={`opDocWrap opMode-${mode}`}>
@@ -31,9 +46,13 @@ export function OrdenProduccionDoc({
 
         <div className="opBody">
           <ActaSide
+            actions={entregaActions}
             dataClass="opEntregaData"
             fecha={model.entregaFecha}
             lines={model.entregaLines}
+            onDeleteLine={onDeleteLine}
+            onEditLine={onEditLine}
+            onError={onError}
             responsable={model.entregaResponsable}
             title="ENTREGADO"
             totalRows={model.entregaTotalRows}
@@ -42,7 +61,11 @@ export function OrdenProduccionDoc({
           <ActaSide
             dataClass="opRecepcionData"
             fecha={model.recepcionFecha}
+            footer={recepcionFooter}
             lines={model.recepcionLines}
+            onDeleteLine={onDeleteLine}
+            onEditLine={onEditLine}
+            onError={onError}
             responsable={model.recepcionResponsable}
             title="RECIBIDO"
             totalRows={model.recepcionTotalRows}

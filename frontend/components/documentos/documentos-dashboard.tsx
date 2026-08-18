@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, ChevronLeft, ChevronRight, FileText, Printer, X } from "lucide-react";
-import { listProductionRuns } from "@/lib/production-api";
+import { addAdminActaLine, deleteActaLine, listProductionRuns, updateActaLine } from "@/lib/production-api";
 import { listInventoryItems } from "@/lib/inventory-api";
+import { getCurrentUser } from "@/lib/auth-api";
 import { openableProps } from "@/lib/a11y";
 import {
   buildItemNameMap,
@@ -18,6 +19,8 @@ import {
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
+import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
+import { ToastNotice } from "@/components/ui/toast-notice";
 import { DocMode, OrdenProduccionDoc } from "./orden-produccion-doc";
 
 const STATUS_LABEL: Record<ProductionRun["status"], string> = {
@@ -47,10 +50,14 @@ function familyStatusText(family: ProductionRun[]): string {
 }
 
 export function DocumentosDashboard() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["documentos"],
     queryFn: fetchDocumentosBundle
   });
+  const { data: currentUser } = useQuery({ queryKey: ["current-user"], queryFn: getCurrentUser });
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "Admin";
+  const [docError, setDocError] = useState<string | null>(null);
+  const [docSuccess, setDocSuccess] = useState<string | null>(null);
   // Una orden rechazada no genera acta: no aparece en Documentos.
   const runs = (data?.runs ?? []).filter((run) => run.status !== "CANCELADA");
   const items = data?.items ?? [];
@@ -203,6 +210,9 @@ export function DocumentosDashboard() {
     () => (selectedFamily ? buildOrdenProduccion(selectedFamily, itemNames) : null),
     [selectedFamily, itemNames]
   );
+  const selectedRootRunId = selectedFamily
+    ? (selectedFamily.find((r) => !r.parent_run_id) ?? selectedFamily[0]).id
+    : null;
 
   useEffect(() => {
     if (!printMode) return;
@@ -316,6 +326,12 @@ export function DocumentosDashboard() {
           <div className="documentosPreview">
             {model && selectedFamily ? (
               <>
+                {docError || docSuccess ? (
+                  <div className="toastStack" aria-live="polite" aria-atomic="true">
+                    {docError ? <ToastNotice key={docError} kind="error" message={docError} onClose={() => setDocError(null)} compact /> : null}
+                    {docSuccess ? <ToastNotice key={docSuccess} kind="success" message={docSuccess} onClose={() => setDocSuccess(null)} compact /> : null}
+                  </div>
+                ) : null}
                 <div className="documentosActions">
                   <button
                     className="button"
@@ -346,7 +362,39 @@ export function DocumentosDashboard() {
                   </button>
                 </div>
                 <div className="documentosPreviewFrame">
-                  <OrdenProduccionDoc model={model} mode="completo" />
+                  <OrdenProduccionDoc
+                    entregaActions={
+                      selectedRootRunId && !isHistoricalFamily(selectedFamily) ? (
+                        <AdminAddActaLineControl
+                          isAdmin={isAdmin}
+                          items={items}
+                          onChanged={() => void refetch()}
+                          onError={setDocError}
+                          onSuccess={setDocSuccess}
+                          runId={selectedRootRunId}
+                          side="ENTREGA"
+                        />
+                      ) : null
+                    }
+                    mode="completo"
+                    model={model}
+                    onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refetch())}
+                    onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refetch())}
+                    onError={setDocError}
+                    recepcionFooter={
+                      selectedRootRunId && !isHistoricalFamily(selectedFamily) ? (
+                        <AdminAddActaLineControl
+                          isAdmin={isAdmin}
+                          items={items}
+                          onChanged={() => void refetch()}
+                          onError={setDocError}
+                          onSuccess={setDocSuccess}
+                          runId={selectedRootRunId}
+                          side="RECEPCION"
+                        />
+                      ) : null
+                    }
+                  />
                 </div>
               </>
             ) : (
