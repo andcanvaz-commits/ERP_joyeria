@@ -1285,6 +1285,7 @@ class ProductionService:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
         if run.status != ProductionRunStatus.PENDING_INVENTORY:
             raise ProductionDomainError("Solo se puede rechazar una orden pendiente de Inventario.")
+        self._revert_admin_stock_lines(run, current_user)
         run.status = ProductionRunStatus.CANCELLED
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = (reason or "").strip() or None
@@ -1432,18 +1433,7 @@ class ProductionService:
                 ),
             )
 
-        # Lineas ADMIN_STOCK mueven stock por su propio rastro
-        # (reference_type="production_run_acta_line"), fuera de
-        # reverse_production_consumption -- una orden cancelada las revierte
-        # a cero igual, sin importar si llego a aprobar materiales (una linea
-        # de admin puede existir en casi cualquier estado de la orden).
-        for line in run.acta_lines:
-            if line.source == ActaLineSource.ADMIN_STOCK and line.item_id is not None:
-                if self.inventory_service is None:
-                    raise ProductionDomainError(
-                        "Inventario no esta disponible para revertir el consumo de esta orden."
-                    )
-                self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
+        self._revert_admin_stock_lines(run, current_user)
 
         run.status = ProductionRunStatus.CANCELLED
         run.rejected_by_user_id = current_user.id
@@ -1457,6 +1447,21 @@ class ProductionService:
             if request.status == ComplementRequestStatus.PENDING:
                 request.status = ComplementRequestStatus.REJECTED
         self._cancel_orphaned_recipe(run)
+
+    def _revert_admin_stock_lines(self, run: ProductionRun, current_user: CurrentUser) -> None:
+        """Lineas ADMIN_STOCK mueven stock por su propio rastro
+        (reference_type="production_run_acta_line"), fuera de
+        reverse_production_consumption -- cualquier camino que cancele la
+        orden las revierte a cero igual, sin importar si llego a aprobar
+        materiales (una linea de admin puede existir en casi cualquier estado
+        de la orden, incluido PENDIENTE_INVENTARIO via reject_materials)."""
+        for line in run.acta_lines:
+            if line.source == ActaLineSource.ADMIN_STOCK and line.item_id is not None:
+                if self.inventory_service is None:
+                    raise ProductionDomainError(
+                        "Inventario no esta disponible para revertir el consumo de esta orden."
+                    )
+                self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
 
     def _cancel_orphaned_recipe(self, run: ProductionRun) -> None:
         """Si esta corrida fue la que CREO una receta de ensamble (nadie mas la
