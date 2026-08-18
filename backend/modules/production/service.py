@@ -1432,6 +1432,19 @@ class ProductionService:
                 ),
             )
 
+        # Lineas ADMIN_STOCK mueven stock por su propio rastro
+        # (reference_type="production_run_acta_line"), fuera de
+        # reverse_production_consumption -- una orden cancelada las revierte
+        # a cero igual, sin importar si llego a aprobar materiales (una linea
+        # de admin puede existir en casi cualquier estado de la orden).
+        for line in run.acta_lines:
+            if line.source == ActaLineSource.ADMIN_STOCK and line.item_id is not None:
+                if self.inventory_service is None:
+                    raise ProductionDomainError(
+                        "Inventario no esta disponible para revertir el consumo de esta orden."
+                    )
+                self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
+
         run.status = ProductionRunStatus.CANCELLED
         run.rejected_by_user_id = current_user.id
         run.rejection_reason = reason
@@ -1813,7 +1826,10 @@ class ProductionService:
             (
                 line
                 for line in run.acta_lines
-                if line.side == ActaLineSide.ENTREGA and line.item_id == item_id and line.stage_id == stage_id
+                if line.side == ActaLineSide.ENTREGA
+                and line.item_id == item_id
+                and line.stage_id == stage_id
+                and line.source != ActaLineSource.ADMIN_STOCK
             ),
             None,
         )
@@ -1861,7 +1877,11 @@ class ProductionService:
         igualmente libres."""
         if item_id is not None:
             existing = next(
-                (line for line in run.acta_lines if line.side == side and line.item_id == item_id),
+                (
+                    line
+                    for line in run.acta_lines
+                    if line.side == side and line.item_id == item_id and line.source != ActaLineSource.ADMIN_STOCK
+                ),
                 None,
             )
         else:
@@ -1869,7 +1889,11 @@ class ProductionService:
                 (
                     line
                     for line in run.acta_lines
-                    if line.side == side and line.item_id is None and line.label == label and line.unit_code == unit_code
+                    if line.side == side
+                    and line.item_id is None
+                    and line.label == label
+                    and line.unit_code == unit_code
+                    and line.source != ActaLineSource.ADMIN_STOCK
                 ),
                 None,
             )
@@ -1923,6 +1947,28 @@ class ProductionService:
             return
         movement_type = increase_type if delta > 0 else decrease_type
         run = line.run
+
+        # CONSUMO_PRODUCCION esta exento del chequeo de reserva dentro de
+        # create_movement (PRODUCTION_MOVEMENTS) porque approve_materials ya
+        # libero la reserva de la propia orden antes de consumir. Esta linea
+        # de admin no libera ninguna reserva -- si la dejamos pasar por esa
+        # exencion, el admin podria comerse en silencio stock que otra orden
+        # ESPERANDO_MATERIAL tiene reservado. Replica aca el mismo chequeo
+        # que create_movement le aplica a cualquier otro movimiento negativo.
+        if movement_type == "CONSUMO_PRODUCCION":
+            from backend.modules.inventory.models import InventoryItem
+
+            item = self.repository.session.get(InventoryItem, line.item_id)
+            if item is not None:
+                reserved = self.inventory_service.reserved_stock(item.id)
+                next_stock = item.current_stock - abs(delta)
+                if reserved > 0 and next_stock < reserved:
+                    raise ProductionDomainError(
+                        f"'{line.label}': hay {format_qty(reserved)} {item.unit_code} de '{item.name}' "
+                        f"reservados para ordenes de produccion en espera. Disponible para esta salida: "
+                        f"{format_qty(item.current_stock - reserved)} {item.unit_code}. "
+                        "Libera la reserva desde la orden si necesitas usar ese stock."
+                    )
         try:
             self.inventory_service.create_movement(
                 InventoryMovementCreate(
@@ -2031,6 +2077,8 @@ class ProductionService:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
 
         if line.source == ActaLineSource.ADMIN_STOCK:
+            if current_user.role not in {"admin", "Admin"}:
+                raise ProductionDomainError("Solo el administrador puede editar una linea enlazada a inventario.")
             if payload.label is not None or payload.unit_code is not None:
                 raise ProductionDomainError(
                     "Esta linea esta enlazada a un item de inventario: el detalle y la unidad no se editan a mano."
@@ -2110,6 +2158,8 @@ class ProductionService:
         if line.source not in (ActaLineSource.MANUAL, ActaLineSource.ADMIN_STOCK):
             raise ProductionDomainError("Solo se pueden borrar lineas agregadas a mano.")
         if line.source == ActaLineSource.ADMIN_STOCK:
+            if current_user.role not in {"admin", "Admin"}:
+                raise ProductionDomainError("Solo el administrador puede borrar una linea enlazada a inventario.")
             self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
         run = line.run
         run.acta_lines.remove(line)

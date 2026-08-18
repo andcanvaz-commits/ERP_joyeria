@@ -378,8 +378,14 @@ export function DocumentosDashboard() {
                     }
                     mode="completo"
                     model={model}
-                    onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refetch())}
-                    onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refetch())}
+                    onDeleteLine={
+                      isAdmin ? (lineId) => deleteActaLine(lineId).then(() => refetch()) : undefined
+                    }
+                    onEditLine={
+                      isAdmin
+                        ? (lineId, patch) => updateActaLine(lineId, patch).then(() => refetch())
+                        : undefined
+                    }
                     onError={setDocError}
                     recepcionFooter={
                       selectedRootRunId && !isHistoricalFamily(selectedFamily) ? (

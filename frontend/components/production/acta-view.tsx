@@ -363,11 +363,11 @@ export function ActaView({
   run,
   family,
   materialItems,
-  // Opcionales: los llamadores de Inventario y Solicitudes todavia no pasan
-  // estas dos props (Task 10 solo cablea el "Ver Acta" de Produccion). Sin
-  // ellas el boton de admin simplemente no aparece ahi (AdminAddActaLineControl
-  // ya retorna null si !isAdmin) -- no es un feature flag, es el default
-  // seguro para llamadores que no se actualizaron todavia.
+  // Opcionales con default seguro: Produccion, Inventario y Solicitudes ya
+  // pasan estas dos props (Task 10b las cableo en los tres). Sin ellas el
+  // boton de admin simplemente no aparece (AdminAddActaLineControl ya
+  // retorna null si !isAdmin) -- el default cubre cualquier llamador nuevo
+  // que todavia no las pase.
   inventoryItems = [],
   isAdmin = false,
   onClose,

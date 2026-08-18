@@ -1,21 +1,55 @@
 """Boton de admin en la acta: agregar una linea libre (nunca mueve stock) o
 enlazada a un item real de inventario (mueve stock de inmediato, sin
-aprobacion). Ver docs/superpowers/specs/2026-08-17-acta-linea-admin-inventario-design.md."""
+aprobacion). Ver docs/superpowers/specs/2026-08-17-acta-linea-admin-inventario-design.md.
+
+Incluye tambien los 4 findings del review final de la rama
+feature/acta-linea-admin-inventario:
+- Fix 1: solo admin puede editar/borrar una linea ADMIN_STOCK
+  (update_acta_line/delete_acta_line), no solo agregarla.
+- Fix 2: el merge por item_id de _add_or_merge_acta_line/_sync_entrega_acta_line
+  nunca puede aterrizar sobre una linea ADMIN_STOCK.
+- Fix 3: cancelar una orden revierte tambien las lineas ADMIN_STOCK.
+- Fix 4: la linea ADMIN_STOCK que consume (ENTREGA) respeta el stock
+  reservado para otras ordenes ESPERANDO_MATERIAL."""
 import uuid
 from decimal import Decimal
 
 import pytest
 
+from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import ActaLineSource
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
+    ActaLineCreate,
     ActaLineUpdate,
+    AdditionalMaterialRequestCreate,
     AdminActaLineCreate,
     ProductionRunCreate,
     RunProductCreate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
+from backend.tests.production.test_additional_material import _in_progress_run
+from backend.tests.production.test_material_reservation import _reserve_partial
+from backend.tests.production.test_material_split import _create_run as _create_plain_run
+
+
+@pytest.fixture()
+def admin_user(db_session) -> CurrentUser:
+    from backend.modules.auth.models import AuthUser
+
+    user_id = uuid.uuid4()
+    auth_user = AuthUser(
+        id=user_id,
+        username="admin_test",
+        email="admin@test.local",
+        password_hash="mock_hashed",
+        role="admin",
+    )
+    db_session.add(auth_user)
+    db_session.flush()
+
+    return CurrentUser(id=user_id, username="admin_test", role="admin", permissions=frozenset())
 
 
 def _create_run(production_service, current_user, process, raw_material, target_complement, quantity="10"):
@@ -177,7 +211,7 @@ def test_add_admin_acta_line_rejects_historical_run(
 
 
 def test_update_admin_stock_line_quantity_up_applies_only_delta(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
 ):
     run = _create_run(production_service, current_user, process, raw_material, target_complement)
     supply = InventoryItem(
@@ -191,14 +225,14 @@ def test_update_admin_stock_line_quantity_up_applies_only_delta(
     )
     line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
 
-    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("8")), current_user)
+    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("8")), admin_user)
 
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("42")  # 50 - 5 - 3 (delta), no 50 - 8 dos veces
 
 
 def test_update_admin_stock_line_quantity_down_returns_stock(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
 ):
     run = _create_run(production_service, current_user, process, raw_material, target_complement)
     supply = InventoryItem(
@@ -212,14 +246,14 @@ def test_update_admin_stock_line_quantity_down_returns_stock(
     )
     line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
 
-    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("2")), current_user)
+    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("2")), admin_user)
 
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("48")  # 50 - 5 + 3
 
 
 def test_update_admin_stock_line_rejects_label_or_unit_edit(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
 ):
     run = _create_run(production_service, current_user, process, raw_material, target_complement)
     supply = InventoryItem(
@@ -234,11 +268,11 @@ def test_update_admin_stock_line_rejects_label_or_unit_edit(
     line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
 
     with pytest.raises(ProductionDomainError, match="no se editan a mano"):
-        production_service.update_acta_line(line_id, ActaLineUpdate(label="Otro nombre"), current_user)
+        production_service.update_acta_line(line_id, ActaLineUpdate(label="Otro nombre"), admin_user)
 
 
 def test_delete_admin_stock_line_reverts_stock(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
 ):
     run = _create_run(production_service, current_user, process, raw_material, target_complement)
     supply = InventoryItem(
@@ -252,7 +286,7 @@ def test_delete_admin_stock_line_reverts_stock(
     )
     line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
 
-    updated = production_service.delete_acta_line(line_id, current_user)
+    updated = production_service.delete_acta_line(line_id, admin_user)
 
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("50")
@@ -260,7 +294,7 @@ def test_delete_admin_stock_line_reverts_stock(
 
 
 def test_delete_admin_stock_line_blocks_if_stock_insufficient_to_revert(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
 ):
     """Linea RECEPCION admin sumo 3 unidades; si ese stock ya se gasto en
     otro lado, revertir (una SALIDA) dejaria el stock negativo -- debe
@@ -280,9 +314,272 @@ def test_delete_admin_stock_line_blocks_if_stock_insufficient_to_revert(
     db_session.flush()
 
     with pytest.raises(ProductionDomainError):
-        production_service.delete_acta_line(line_id, current_user)
+        production_service.delete_acta_line(line_id, admin_user)
 
     db_session.refresh(complement)
     assert complement.current_stock == Decimal("1")
     refreshed = production_service.repository.get_acta_line(line_id)
     assert refreshed is not None
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 (review final): update_acta_line/delete_acta_line solo estaban
+# gateadas por el permiso generico "production.runs.update" -- que tanto
+# Jefe de produccion como Jefe de inventario tienen. Sin este chequeo dentro
+# del service, cualquiera de los dos podia editar/borrar una linea ADMIN_STOCK
+# (mover stock real) sin pasar nunca por el permiso admin-only del boton "+".
+# ---------------------------------------------------------------------------
+
+
+def test_update_admin_stock_line_rejects_non_admin(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    with pytest.raises(ProductionDomainError, match="Solo el administrador"):
+        production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("8")), current_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("45")  # sin tocar: el chequeo corta antes de mover stock
+
+
+def test_delete_admin_stock_line_rejects_non_admin(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    with pytest.raises(ProductionDomainError, match="Solo el administrador"):
+        production_service.delete_acta_line(line_id, current_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("45")
+    refreshed = production_service.repository.get_acta_line(line_id)
+    assert refreshed is not None
+
+
+def test_admin_can_update_and_delete_admin_stock_line(
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    line_id = [l for l in result.acta_lines if l.item_id == supply.id][0].id
+
+    production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("8")), admin_user)
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("42")  # 50 - 5 - 3
+
+    updated = production_service.delete_acta_line(line_id, admin_user)
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("50")
+    assert all(l.id != line_id for l in updated.acta_lines)
+
+
+def test_non_admin_can_still_update_and_delete_a_manual_line(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """No regression: el chequeo admin es solo para ADMIN_STOCK -- una linea
+    MANUAL (libre, nunca movio inventario real) la sigue pudiendo editar y
+    borrar cualquiera con permiso production.runs.update, como siempre."""
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    run_read = production_service.add_acta_line(
+        run.id,
+        ActaLineCreate(side="ENTREGA", label="Tornillo prestado", quantity=Decimal("2"), unit_code="und"),
+        current_user,
+    )
+    line_id = [l for l in run_read.acta_lines if l.label == "Tornillo prestado"][0].id
+
+    updated = production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("3")), current_user)
+    assert [l for l in updated.acta_lines if l.id == line_id][0].quantity == Decimal("3")
+
+    final = production_service.delete_acta_line(line_id, current_user)
+    assert all(l.id != line_id for l in final.acta_lines)
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 (review final): _add_or_merge_acta_line/_sync_entrega_acta_line
+# emparejaban por side+item_id sin filtrar por source -- podian aterrizar
+# sobre una linea ADMIN_STOCK y sumarle cantidad a mano, desincronizandola
+# de lo que el ledger de movimientos realmente sabe que se movio.
+# ---------------------------------------------------------------------------
+
+
+def test_approve_additional_material_does_not_merge_into_admin_stock_line(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _in_progress_run(production_service, current_user, process, raw_material, target_complement)
+    extra_supply = InventoryItem(
+        item_type="SUPPLY", name="Lija extra", sku=f"IN-{uuid.uuid4().hex[:8]}", unit_code="und",
+        current_stock=Decimal("50"),
+    )
+    db_session.add(extra_supply)
+    db_session.flush()
+
+    admin_result = production_service.add_admin_acta_line(
+        run.id,
+        AdminActaLineCreate(side="ENTREGA", item_id=extra_supply.id, quantity=Decimal("5")),
+        current_user,
+    )
+    admin_line = [l for l in admin_result.acta_lines if l.item_id == extra_supply.id][0]
+    assert admin_line.quantity == Decimal("5")
+    assert admin_line.source == "ADMIN_STOCK"
+
+    run_read = production_service.request_additional_material(
+        run.id,
+        AdditionalMaterialRequestCreate(item_id=extra_supply.id, quantity=Decimal("2")),
+        current_user,
+    )
+    request_id = run_read.additional_materials[0].id
+    result = production_service.approve_additional_material(request_id, current_user)
+
+    admin_lines_after = [l for l in result.acta_lines if l.id == admin_line.id]
+    assert len(admin_lines_after) == 1
+    assert admin_lines_after[0].quantity == Decimal("5")  # intacta, no absorbio los 2 nuevos
+
+    same_item_lines = [l for l in result.acta_lines if l.item_id == extra_supply.id]
+    assert len(same_item_lines) == 2  # la ADMIN_STOCK original + una AUTO nueva, no fusionadas
+    auto_lines = [l for l in same_item_lines if l.source == "AUTO"]
+    assert len(auto_lines) == 1
+    assert auto_lines[0].quantity == Decimal("2")
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 (review final, decision de Rodrigo): cancelar una orden con una linea
+# ADMIN_STOCK debe revertir tambien el stock que esa linea movio -- no solo
+# el consumo normal via reverse_production_consumption.
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_run_reverts_admin_stock_line_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("45")
+
+    result = production_service.cancel_run(run.id, current_user, "motivo")
+
+    assert result.status == "CANCELADA"
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("50")
+
+
+def test_cancel_run_reverts_admin_stock_line_even_after_materials_approved(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """La linea ADMIN_STOCK se revierte pase lo que pase con el consumo
+    normal de la orden -- el loop no depende de materials_approved_at."""
+    raw_material.current_stock = Decimal("1000")
+    db_session.flush()
+    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
+    production_service.approve_materials(run_read.id, current_user)
+    production_service.start_run(run_read.id, current_user)
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("900")
+
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo olvidado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("50"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+    production_service.add_admin_acta_line(
+        run_read.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+    )
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("45")
+
+    result = production_service.cancel_run(run_read.id, current_user, "motivo")
+
+    assert result.status == "CANCELADA"
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("1000")  # consumo normal revertido
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("50")  # linea admin tambien revertida
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 (review final, decision de Rodrigo): _apply_admin_acta_line_delta
+# heredaba la exencion de PRODUCTION_MOVEMENTS pensada para
+# consume_material_for_production (que ya libero su propia reserva antes de
+# consumir) -- una linea de admin no libera ninguna reserva, asi que debe
+# respetar el stock reservado para otras ordenes ESPERANDO_MATERIAL.
+# ---------------------------------------------------------------------------
+
+
+def test_admin_stock_line_respects_reserved_stock_for_other_orders(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    waiting_child = _reserve_partial(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    assert waiting_child.reserved_material_quantity == Decimal("25")
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("25")
+
+    other_run = _create_plain_run(production_service, current_user, process, raw_material, target_complement, "5")
+
+    with pytest.raises(ProductionDomainError, match="reservados"):
+        production_service.add_admin_acta_line(
+            other_run.id,
+            AdminActaLineCreate(side="ENTREGA", item_id=raw_material.id, quantity=Decimal("10")),
+            current_user,
+        )
+
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("25")  # nada se movio: se corto antes del movimiento
+
+
+def test_admin_stock_line_allows_consuming_unreserved_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Control positivo: si nada esta reservado, la linea admin consume
+    normal (el chequeo nuevo no rompe el caso sin conflicto)."""
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+
+    result = production_service.add_admin_acta_line(
+        run.id, AdminActaLineCreate(side="ENTREGA", item_id=raw_material.id, quantity=Decimal("10")), current_user,
+    )
+
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("90")
+    lines = [l for l in result.acta_lines if l.item_id == raw_material.id and l.source == "ADMIN_STOCK"]
+    assert len(lines) == 1
