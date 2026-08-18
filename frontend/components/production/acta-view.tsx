@@ -5,6 +5,7 @@ import { Plus, Undo2, X } from "lucide-react";
 import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
 import { buildFamilyActaSides, buildRunActaSides, formatGramos } from "@/lib/orden-produccion";
 import { ActaSide } from "@/components/production/acta-side";
+import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import type { ProductionRun } from "@/types/production";
@@ -362,6 +363,13 @@ export function ActaView({
   run,
   family,
   materialItems,
+  // Opcionales: los llamadores de Inventario y Solicitudes todavia no pasan
+  // estas dos props (Task 10 solo cablea el "Ver Acta" de Produccion). Sin
+  // ellas el boton de admin simplemente no aparece ahi (AdminAddActaLineControl
+  // ya retorna null si !isAdmin) -- no es un feature flag, es el default
+  // seguro para llamadores que no se actualizaron todavia.
+  inventoryItems = [],
+  isAdmin = false,
   onClose,
   onChanged,
 }: {
@@ -374,6 +382,8 @@ export function ActaView({
   // una sola corrida) el comportamiento es el de siempre: acta de un run.
   family?: ProductionRun[];
   materialItems: InventoryItem[];
+  inventoryItems?: InventoryItem[];
+  isAdmin?: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -436,12 +446,23 @@ export function ActaView({
               <div className="opBody">
                 <ActaSide
                   actions={
-                    <EntregaAction
-                      materialItems={materialItems}
-                      onChanged={onChanged}
-                      onSuccess={flagSuccess}
-                      run={run}
-                    />
+                    <>
+                      <EntregaAction
+                        materialItems={materialItems}
+                        onChanged={onChanged}
+                        onSuccess={flagSuccess}
+                        run={run}
+                      />
+                      <AdminAddActaLineControl
+                        isAdmin={isAdmin}
+                        items={inventoryItems}
+                        onChanged={onChanged}
+                        onError={flagError}
+                        onSuccess={flagSuccess}
+                        runId={headerRun.id}
+                        side="ENTREGA"
+                      />
+                    </>
                   }
                   fecha={sides.entregaFecha}
                   lines={sides.entregaLines}
@@ -455,7 +476,20 @@ export function ActaView({
                 <div className="opDivider" aria-hidden="true" />
                 <ActaSide
                   fecha={sides.recepcionFecha}
-                  footer={<RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />}
+                  footer={
+                    <>
+                      <RecepcionActions onChanged={onChanged} onError={flagError} onSuccess={flagSuccess} run={run} />
+                      <AdminAddActaLineControl
+                        isAdmin={isAdmin}
+                        items={inventoryItems}
+                        onChanged={onChanged}
+                        onError={flagError}
+                        onSuccess={flagSuccess}
+                        runId={headerRun.id}
+                        side="RECEPCION"
+                      />
+                    </>
+                  }
                   lines={sides.recepcionLines}
                   onDeleteLine={(lineId) => deleteActaLine(lineId)}
                   onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
