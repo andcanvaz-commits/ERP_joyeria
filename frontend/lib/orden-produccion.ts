@@ -71,8 +71,21 @@ function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["prod
     const complementWeight = (run.complements ?? [])
       .filter((c) => c.status === "APROBADA" && c.unit_code === unit)
       .reduce((sum, c) => sum + (num(c.quantity) - num(c.returned_quantity)), 0);
-    if (complementWeight > 0) {
-      scaled[0] = { ...scaled[0], quantity: String(num(scaled[0].quantity) + complementWeight) };
+    // Lo mismo, pero para material destinado por el boton de admin
+    // (ADMIN_STOCK) en vez del circuito de complementos de ensamble: tambien
+    // se combino fisicamente en la pieza, mismo criterio de suma directa.
+    const adminStockWeight = (run.acta_lines ?? [])
+      .filter(
+        (l) =>
+          l.side === "ENTREGA" &&
+          l.source === "ADMIN_STOCK" &&
+          l.unit_code === unit &&
+          l.item_id !== run.raw_material_item_id
+      )
+      .reduce((sum, l) => sum + num(l.quantity), 0);
+    const extraWeight = complementWeight + adminStockWeight;
+    if (extraWeight > 0) {
+      scaled[0] = { ...scaled[0], quantity: String(num(scaled[0].quantity) + extraWeight) };
     }
   }
   return scaled;
