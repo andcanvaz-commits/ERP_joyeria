@@ -16,11 +16,12 @@ const ADMIN_PICKER_TYPES: InventoryItemType[] = [
   "FINISHED_PRODUCT",
 ];
 
-// Boton "+" solo-admin en la acta: elegir un item real de inventario (mueve
+// Dos botones solo-admin en la acta: elegir un item real de inventario (mueve
 // stock de inmediato, sin aprobacion) o escribir algo a mano con una unidad
-// de una lista (nunca mueve stock). La busqueda del picker YA hace de
-// "reconocer coincidencia" -- si el admin no encuentra el item ahi, pasa al
-// formulario manual con el link de abajo.
+// de una lista (nunca mueve stock). Botones separados, no un link dentro del
+// buscador -- MaterialCategoryPicker es un modal a pantalla completa
+// (position: fixed), un link renderizado como hermano suyo queda tapado por
+// el overlay y nunca se ve (bug real, reportado por Rodrigo probando).
 export function AdminAddActaLineControl({
   side,
   runId,
@@ -100,10 +101,13 @@ export function AdminAddActaLineControl({
 
   if (mode === "closed") {
     return (
-      <div className="actaDocAction">
+      <div className="actaDocAction" style={{ display: "flex", gap: 14 }}>
         <button className="actaDocAddRow" onClick={() => setMode("search")} type="button">
           <Plus aria-hidden="true" size={13} />
           Agregar línea (admin)
+        </button>
+        <button className="actaDocAddRow" onClick={() => setMode("manual")} type="button">
+          Escribir a mano
         </button>
       </div>
     );
@@ -151,7 +155,7 @@ export function AdminAddActaLineControl({
     <div className="actaDocAction">
       <MaterialCategoryPicker
         allowedTypes={ADMIN_PICKER_TYPES}
-        description="Busca el item real que se pasó registrar. Si no lo encuentras, escríbelo a mano."
+        description="Busca el item real que se pasó registrar."
         error={localError}
         items={items}
         onClose={reset}
@@ -182,11 +186,6 @@ export function AdminAddActaLineControl({
         }
         title="Agregar línea de acta"
       />
-      {!pendingItem ? (
-        <button className="actaDocAddRow" onClick={() => { setMode("manual"); setLocalError(null); }} style={{ marginTop: 8 }} type="button">
-          No lo encuentro, escribir a mano
-        </button>
-      ) : null}
     </div>
   );
 }
