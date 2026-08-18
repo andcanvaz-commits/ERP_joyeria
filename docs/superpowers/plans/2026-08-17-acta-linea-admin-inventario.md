@@ -1344,6 +1344,91 @@ git commit -m "feat(production): boton de admin para agregar linea de acta en Ve
 
 ---
 
+### Task 10b: Frontend — mismo botón en Ver Acta desde Inventario y Solicitudes
+
+**Contexto (agregada tras Task 10):** `ActaView` no solo se monta desde
+`production-dashboard.tsx` — también se abre, sin pasar `isAdmin`/
+`inventoryItems`, desde `frontend/components/inventory/inventory-dashboard.tsx`
+(línea ~5475) y `frontend/components/solicitudes/solicitudes-view.tsx` (línea
+~387). El Task 10 dejó esas dos props opcionales (`isAdmin = false`,
+`inventoryItems = []`) para no romper esos dos call sites — correcto para no
+romper el build, pero deja el botón de admin invisible ahí. Rodrigo confirmó
+(2026-08-17) que debe verse en los tres lugares.
+
+**Files:**
+- Modify: `frontend/components/inventory/inventory-dashboard.tsx`
+- Modify: `frontend/components/solicitudes/solicitudes-view.tsx`
+
+**Interfaces:**
+- Consumes: `ActaView`'s `isAdmin`/`inventoryItems` props (ya opcionales, Task 10).
+
+- [ ] **Step 1: `inventory-dashboard.tsx` pasa `isAdmin`/`inventoryItems`**
+
+Este archivo ya calcula `canSeeAudit = currentUser?.role === "admin" ||
+currentUser?.role === "Admin"` (línea ~610) — es el mismo chequeo de admin,
+con otro nombre. Ya tiene `items` (la lista completa de inventario, usada hoy
+en `materialItems={items}` en el `<ActaView>` de la línea ~5475-5481). El
+`<ActaView>` queda:
+
+```tsx
+      {actaRun ? (
+        <ActaView
+          family={getRunFamily(productionRuns, actaRun)}
+          inventoryItems={items}
+          isAdmin={canSeeAudit}
+          materialItems={items}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ["inventory"] })}
+          onClose={() => setActaRun(null)}
+          run={actaRun}
+        />
+      ) : null}
+```
+
+- [ ] **Step 2: `solicitudes-view.tsx` pasa `isAdmin`/`inventoryItems`**
+
+Este archivo ya tiene `currentUser` (línea ~185, `useQuery` con
+`getCurrentUser`) y `materialItems` (línea ~200, `useQuery` con
+`listInventoryItems()` sin argumento — ya trae todos los tipos). No existe
+todavía ninguna variable `isAdmin`/`canSeeAudit` en este archivo — agregar,
+junto a la definición de `role`/`userId` (línea ~206-207):
+
+```typescript
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "Admin";
+```
+
+El `<ActaView>` (línea ~386-394) queda:
+
+```tsx
+      {actaRun ? (
+        <ActaView
+          family={getRunFamily(runs, actaRun)}
+          inventoryItems={materialItems}
+          isAdmin={isAdmin}
+          materialItems={materialItems}
+          onChanged={() => void queryClient.invalidateQueries({ queryKey: ["solicitudes"] })}
+          onClose={() => setActaRun(null)}
+          run={actaRun}
+        />
+      ) : null}
+```
+
+- [ ] **Step 3: Verificar tipos y build**
+
+Run: `docker-compose exec web npx tsc --noEmit -p tsconfig.json`
+Expected: sin errores.
+
+Run: `docker-compose exec web npm run build`
+Expected: build exitoso.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add frontend/components/inventory/inventory-dashboard.tsx frontend/components/solicitudes/solicitudes-view.tsx
+git commit -m "feat(production): boton de admin en Ver Acta tambien desde Inventario y Solicitudes"
+```
+
+---
+
 ### Task 11: Frontend — wiring en Documentos (`orden-produccion-doc.tsx` + `documentos-dashboard.tsx`)
 
 **Files:**
