@@ -5474,6 +5474,8 @@ export function InventoryDashboard() {
       {actaRun ? (
         <ActaView
           family={getRunFamily(productionRuns, actaRun)}
+          inventoryItems={items}
+          isAdmin={canSeeAudit}
           materialItems={items}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ["inventory"] })}
           onClose={() => setActaRun(null)}

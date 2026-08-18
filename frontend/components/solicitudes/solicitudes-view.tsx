@@ -205,6 +205,7 @@ export function SolicitudesView() {
 
   const role = currentUser ? normalizeRole(currentUser.role) : null;
   const userId = currentUser?.id ?? null;
+  const isAdmin = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const isLoading = isLoadingUser || isLoadingRuns;
   const error = queryError instanceof Error ? queryError.message : null;
 
@@ -386,6 +387,8 @@ export function SolicitudesView() {
       {actaRun ? (
         <ActaView
           family={getRunFamily(runs, actaRun)}
+          inventoryItems={materialItems}
+          isAdmin={isAdmin}
           materialItems={materialItems}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ["solicitudes"] })}
           onClose={() => setActaRun(null)}
