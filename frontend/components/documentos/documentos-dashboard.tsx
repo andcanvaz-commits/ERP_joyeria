@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, ChevronLeft, ChevronRight, FileText, Printer, X } from "lucide-react";
-import { addAdminActaLine, deleteActaLine, listProductionRuns, updateActaLine } from "@/lib/production-api";
+import { deleteActaLine, listProductionRuns, updateActaLine } from "@/lib/production-api";
 import { listInventoryItems } from "@/lib/inventory-api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { openableProps } from "@/lib/a11y";

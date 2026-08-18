@@ -200,7 +200,7 @@ export function ActaSide({
                   <td>
                     <span className="actaDocDetail">
                       {wrap(<span>{line.label}</span>)}
-                      {line.editable ? (
+                      {line.editable && (onEditLine || onDeleteLine) ? (
                         <span className="actaDocRowActions">
                           <button aria-label={`Editar ${line.label}`} className="iconOnlyButton" disabled={isSaving} onClick={() => startEdit(line)} type="button">
                             <Pencil aria-hidden="true" size={12} />
