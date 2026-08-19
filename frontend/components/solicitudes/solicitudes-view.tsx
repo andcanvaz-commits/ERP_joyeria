@@ -268,8 +268,11 @@ export function MessagesPanel({
     try {
       await sendMessage(body.trim());
       setBody("");
-      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
+      // Marcar visto ANTES de invalidar: si se invalida primero, el refetch
+      // trae el mensaje recien mandado y el punto de esta misma superficie
+      // prende un instante (con el "visto" todavia viejo) antes de apagarse.
       markMessagesSeen(queryClient, userId, scope);
+      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
     } catch (nextError) {
       setLocalError(nextError instanceof Error ? nextError.message : "No se pudo enviar el mensaje.");
     } finally {
@@ -282,8 +285,8 @@ export function MessagesPanel({
     setIsSaving(true);
     try {
       await replyMessage(messageId, replyBody);
-      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
       markMessagesSeen(queryClient, userId, scope);
+      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
     } catch (nextError) {
       setLocalError(nextError instanceof Error ? nextError.message : "No se pudo responder el mensaje.");
     } finally {
