@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session, selectinload
 from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.messages.models import AdminMessage, AdminMessageReply
 from backend.modules.messages.schemas import AdminMessageCreate, AdminMessageRead, AdminMessageReplyCreate
+
+MessageScope = Literal["solicitudes", "inventario"]
 
 
 class MessageDomainError(ValueError):
@@ -62,11 +65,15 @@ class MessagesService:
         names = _resolve_user_names(self.session, [current_user.id])
         return self._read(message, names)
 
-    def list_messages(self) -> list[AdminMessageRead]:
+    def list_messages(self, scope: MessageScope) -> list[AdminMessageRead]:
+        hidden_column = (
+            AdminMessage.hidden_from_solicitudes if scope == "solicitudes" else AdminMessage.hidden_from_inventario
+        )
         messages = (
             self.session.execute(
                 select(AdminMessage)
                 .options(selectinload(AdminMessage.replies))
+                .where(hidden_column.is_(False))
                 .order_by(AdminMessage.created_at.desc())
             )
             .scalars()
@@ -78,11 +85,16 @@ class MessagesService:
         names = _resolve_user_names(self.session, user_ids)
         return [self._read(m, names) for m in messages]
 
-    def delete_message(self, message_id: UUID) -> None:
+    def delete_message(self, message_id: UUID, scope: MessageScope) -> None:
         message = self.session.get(AdminMessage, message_id)
         if message is None:
             raise MessageNotFoundError("Mensaje no encontrado.")
-        self.session.delete(message)
+        if scope == "solicitudes":
+            message.hidden_from_solicitudes = True
+        else:
+            message.hidden_from_inventario = True
+        if message.hidden_from_solicitudes and message.hidden_from_inventario:
+            self.session.delete(message)
         self.session.flush()
 
     def reply_message(

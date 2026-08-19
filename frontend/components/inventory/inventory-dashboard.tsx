@@ -622,8 +622,8 @@ export function InventoryDashboard() {
   const messagesRole = normalizeRole(currentUser?.role);
   const messagesUserId = currentUser?.id ?? null;
   const { data: inboxMessages = [] } = useQuery({
-    queryKey: ["admin-messages"],
-    queryFn: listMessages,
+    queryKey: ["admin-messages", "inventario"],
+    queryFn: () => listMessages("inventario"),
     enabled: messagesRole === "admin" || messagesRole === "operaciones",
     refetchInterval: 15000,
   });

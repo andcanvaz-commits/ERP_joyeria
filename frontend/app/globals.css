@@ -2351,12 +2351,91 @@ textarea {
    necesita mas espacio que una ficha comun, y aun asi el marco de abajo
    scrollea en horizontal en vez de cortar contenido en pantallas chicas. */
 .actaWindow {
-  width: min(860px, 100%);
+  width: min(1180px, 96vw);
   overflow-y: auto;
 }
 
 .actaDocFrame {
   overflow-x: auto;
+}
+
+/* El acta en pantalla usa las mismas clases que el documento impreso
+   (opDoc/opTable), pensadas para papel: letra chica, filas apretadas.
+   Agrandado SOLO dentro de la ventana del acta (.actaWindow) -- el
+   documento que de verdad se imprime vive en .printArea, un arbol de DOM
+   distinto, asi que esto no le cambia nada al PDF/papel. */
+.actaWindow .opDoc {
+  min-width: 900px;
+  padding: 22px 26px 28px;
+}
+
+.actaWindow .opTitleBar {
+  font-size: 22px;
+  padding: 10px 20px;
+}
+
+.actaWindow .opCategoryBar {
+  font-size: 15px;
+  min-height: 42px;
+}
+
+.actaWindow .opFolio {
+  font-size: 19px;
+}
+
+.actaWindow .opResponsable {
+  font-size: 15px;
+  gap: 14px;
+  margin-top: 16px;
+  padding-bottom: 12px;
+}
+
+.actaWindow .opBody {
+  gap: 22px;
+  margin-top: 18px;
+}
+
+.actaWindow .opColHead {
+  font-size: 16px;
+  padding: 8px 12px;
+}
+
+.actaWindow .opTable {
+  font-size: 15px;
+}
+
+.actaWindow .opTable th {
+  font-size: 13px;
+  padding: 9px 10px;
+}
+
+.actaWindow .opTable td {
+  height: 34px;
+  padding: 9px 10px;
+}
+
+.actaWindow .opSubtotalRow td:last-child {
+  font-size: 13px;
+}
+
+.actaWindow .opTotal {
+  font-size: 16px;
+}
+
+.actaWindow .actaDocRowActions .iconOnlyButton,
+.actaWindow .actaDocInputs .iconOnlyButton {
+  width: 26px;
+  height: 26px;
+}
+
+.actaWindow .actaDocInputs .field {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+.actaWindow .actaDocAddRow {
+  font-size: 13px;
 }
 
 .modalHeader,

@@ -118,9 +118,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // que es "hay que actuar"): junto a Inventario y Comunicados, desaparece en
   // cuanto se abre la bandeja de mensajes en cualquiera de las dos pantallas.
   const userId = currentUser?.id ?? null;
-  const { data: navMessages = [] } = useQuery({
-    queryKey: ["admin-messages"],
-    queryFn: listMessages,
+  // "Solicitudes" (Bandeja de mensajes) e "Inventario" muestran la misma
+  // conversacion pero cada una con su propio ocultamiento (ver
+  // hidden_from_* en el backend): eliminar de una no borra la otra.
+  const { data: navMessagesInventario = [] } = useQuery({
+    queryKey: ["admin-messages", "inventario"],
+    queryFn: () => listMessages("inventario"),
+    enabled: isAuthenticated() && Boolean(currentUser),
+    refetchInterval: 15000,
+  });
+  const { data: navMessagesSolicitudes = [] } = useQuery({
+    queryKey: ["admin-messages", "solicitudes"],
+    queryFn: () => listMessages("solicitudes"),
     enabled: isAuthenticated() && Boolean(currentUser),
     refetchInterval: 15000,
   });
@@ -135,8 +144,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     enabled: Boolean(userId),
   });
   const messageBadges: Record<string, number> = {
-    "/inventario": countUnreadMessages(navMessages, userId, lastSeenInventario),
-    "/solicitudes": countUnreadMessages(navMessages, userId, lastSeenSolicitudes),
+    "/inventario": countUnreadMessages(navMessagesInventario, userId, lastSeenInventario),
+    "/solicitudes": countUnreadMessages(navMessagesSolicitudes, userId, lastSeenSolicitudes),
   };
 
   // Cambio forzado de contrasena temporal: se realiza en la pantalla de login.

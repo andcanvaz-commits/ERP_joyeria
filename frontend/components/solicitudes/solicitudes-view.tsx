@@ -251,8 +251,8 @@ export function MessagesPanel({
   const { confirm, dialog } = useConfirm();
 
   const { data: messages = [] } = useQuery({
-    queryKey: ["admin-messages"],
-    queryFn: listMessages,
+    queryKey: ["admin-messages", scope],
+    queryFn: () => listMessages(scope),
   });
 
   // Mandar o responder desde ACA cuenta como haber visto esta superficie: el
@@ -296,7 +296,7 @@ export function MessagesPanel({
     setLocalError(null);
     setIsSaving(true);
     try {
-      await deleteMessage(messageId);
+      await deleteMessage(messageId, scope);
       await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
     } catch (nextError) {
       setLocalError(nextError instanceof Error ? nextError.message : "No se pudo eliminar el mensaje.");

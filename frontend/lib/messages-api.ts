@@ -1,4 +1,5 @@
 import { apiRequest } from "@/lib/api";
+import type { MessagesScope } from "@/lib/messages-read-state";
 
 export type AdminMessageReply = {
   id: string;
@@ -17,8 +18,11 @@ export type AdminMessage = {
   replies: AdminMessageReply[];
 };
 
-export function listMessages() {
-  return apiRequest<AdminMessage[]>("/api/messages");
+// scope determina que buzon se ve: "solicitudes" (Bandeja de mensajes) e
+// "inventario" son la misma conversacion, pero un mensaje eliminado desde
+// uno sigue visible en el otro (ver hidden_from_* en el backend).
+export function listMessages(scope: MessagesScope) {
+  return apiRequest<AdminMessage[]>(`/api/messages?scope=${scope}`);
 }
 
 export function sendMessage(body: string) {
@@ -35,8 +39,8 @@ export function replyMessage(messageId: string, body: string) {
   });
 }
 
-export function deleteMessage(messageId: string) {
-  return apiRequest<void>(`/api/messages/${messageId}`, {
+export function deleteMessage(messageId: string, scope: MessagesScope) {
+  return apiRequest<void>(`/api/messages/${messageId}?scope=${scope}`, {
     method: "DELETE",
   });
 }

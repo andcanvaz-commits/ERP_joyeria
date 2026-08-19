@@ -1,11 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.modules.auth.dependencies import CurrentUser, get_current_user
 from backend.modules.database.session import SessionLocal
 from backend.modules.messages.schemas import AdminMessageCreate, AdminMessageRead, AdminMessageReplyCreate
-from backend.modules.messages.service import MessageDomainError, MessageNotFoundError, MessagesService
+from backend.modules.messages.service import MessageDomainError, MessageNotFoundError, MessageScope, MessagesService
 
 router = APIRouter()
 
@@ -40,10 +40,11 @@ def _ensure_participant(current_user: CurrentUser) -> None:
 
 @router.get("", response_model=list[AdminMessageRead])
 def list_messages(
+    scope: MessageScope = Query(...),
     current_user: CurrentUser = Depends(get_current_user),
     service: MessagesService = Depends(get_messages_service),
 ) -> list[AdminMessageRead]:
-    return service.list_messages()
+    return service.list_messages(scope)
 
 
 @router.post("", response_model=AdminMessageRead, status_code=status.HTTP_201_CREATED)
@@ -59,12 +60,13 @@ def send_message(
 @router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_message(
     message_id: UUID,
+    scope: MessageScope = Query(...),
     current_user: CurrentUser = Depends(get_current_user),
     service: MessagesService = Depends(get_messages_service),
 ) -> None:
     _ensure_admin(current_user)
     try:
-        service.delete_message(message_id)
+        service.delete_message(message_id, scope)
     except MessageNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
