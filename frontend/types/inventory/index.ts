@@ -12,7 +12,8 @@ export type InventoryMovementType =
   | "CONVERSION_SALIDA"
   | "CONVERSION_ENTRADA"
   | "RECLASIFICACION_SALIDA"
-  | "RECLASIFICACION_ENTRADA";
+  | "RECLASIFICACION_ENTRADA"
+  | "REVERSION_PRODUCCION";
 
 export type InventoryItem = {
   id: string;

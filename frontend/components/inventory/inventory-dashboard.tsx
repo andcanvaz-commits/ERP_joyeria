@@ -104,6 +104,7 @@ const MOVEMENT_TYPES: Array<{ value: InventoryMovementType; label: string }> = [
   { value: "CONVERSION_ENTRADA", label: "Conversion entrada" },
   { value: "RECLASIFICACION_SALIDA", label: "Reclasificacion salida" },
   { value: "RECLASIFICACION_ENTRADA", label: "Reclasificacion entrada" },
+  { value: "REVERSION_PRODUCCION", label: "Reversion por cancelacion" },
 ];
 
 // Estados de orden de produccion para el filtro de las pestañas de procesos.

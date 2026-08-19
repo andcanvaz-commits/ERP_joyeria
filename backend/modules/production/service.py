@@ -451,14 +451,24 @@ class ProductionService:
         # pasaba).
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para revertir el consumo de esta orden.")
-        self.inventory_service.reverse_production_consumption(
-            run.id,
-            current_user.id,
-            reason=(
-                f"Reversion por cancelacion de orden {run.production_code or run.id}."
-                + (f" {reason}" if reason else "")
-            ),
+        revert_reason = (
+            f"Reversion por cancelacion de orden {run.production_code or run.id}."
+            + (f" {reason}" if reason else "")
         )
+        self.inventory_service.reverse_production_consumption(run.id, current_user.id, reason=revert_reason)
+        # Si la orden ya llego a TERMINADA (assign_product convirtio el lote a
+        # producto/complemento del catalogo), tambien hay que deshacer esa
+        # conversion -- si no, cancelar la dejaria "cancelada" en produccion
+        # pero el producto seguiria de alta en inventario como si nada.
+        # No-op si la orden nunca genero un lote. Si el destino ya se movio de
+        # ahi, esto lanza ProductionDomainError (via InventoryDomainError) y
+        # bloquea la cancelacion entera -- ver reverse_finished_product_lot.
+        try:
+            self.inventory_service.reverse_finished_product_lot(run.id, current_user.id, reason=revert_reason)
+        except InventoryDomainError as exc:
+            raise ProductionDomainError(
+                f"No se puede cancelar: {exc} Parte de lo producido ya se movio en inventario."
+            ) from exc
 
         self._revert_admin_stock_lines(run, current_user)
 

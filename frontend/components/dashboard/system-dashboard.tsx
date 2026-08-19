@@ -36,6 +36,7 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   CONVERSION_ENTRADA: "Conversion entrada",
   RECLASIFICACION_SALIDA: "Reclasificacion salida",
   RECLASIFICACION_ENTRADA: "Reclasificacion entrada",
+  REVERSION_PRODUCCION: "Reversion por cancelacion",
 };
 
 const RUN_STATUS_LABELS: Record<ProductionRun["status"], string> = {

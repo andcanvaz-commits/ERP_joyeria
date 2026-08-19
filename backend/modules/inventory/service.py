@@ -498,6 +498,83 @@ class InventoryService(InventoryIntegrationPort):
                 user_id=user_id,
             )
 
+    def reverse_finished_product_lot(self, run_id: UUID, user_id: UUID | None, reason: str) -> None:
+        """Deshace la conversion a producto terminado de una orden TERMINADA
+        para poder cancelarla: cada CONVERSION_SALIDA que salio del lote hacia
+        un producto/complemento del catalogo se revierte (resta del destino,
+        devuelve al lote), y despues se resta del lote lo que el
+        INGRESO_PRODUCCION le habia dado de alta. No-op si la orden nunca
+        llego a generar un lote (nunca se le hizo assign_product).
+
+        Si el destino ya se movio de ahi (vendido, combinado, reconvertido),
+        create_movement rechaza esa resta por dejar el stock en negativo --
+        la cancelacion se bloquea entera en vez de dejar el kardex
+        inconsistente (mismo criterio que el resto del dominio: nunca stock
+        negativo)."""
+        ingreso_movements = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == run_id,
+            )
+        ).scalars().all()
+        if not ingreso_movements:
+            return
+        lot_id = ingreso_movements[0].item_id
+
+        conversions = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.item_id == lot_id,
+                InventoryMovement.movement_type == "CONVERSION_SALIDA",
+                InventoryMovement.reference_type == "lot_conversion",
+            )
+        ).scalars().all()
+        converted_by_target: dict[UUID, Decimal] = {}
+        for movement in conversions:
+            converted_by_target[movement.reference_id] = (
+                converted_by_target.get(movement.reference_id, Decimal("0")) + movement.quantity
+            )
+
+        for target_id, quantity in converted_by_target.items():
+            if quantity <= 0:
+                continue
+            self.create_movement(
+                InventoryMovementCreate(
+                    item_id=target_id,
+                    movement_type="AJUSTE_NEGATIVO",
+                    quantity=quantity,
+                    reason=reason,
+                    reference_type="production_order",
+                    reference_id=run_id,
+                ),
+                user_id=user_id,
+            )
+            self.create_movement(
+                InventoryMovementCreate(
+                    item_id=lot_id,
+                    movement_type="REVERSION_PRODUCCION",
+                    quantity=quantity,
+                    reason=reason,
+                    reference_type="production_order",
+                    reference_id=run_id,
+                ),
+                user_id=user_id,
+            )
+
+        ingreso_total = sum((m.quantity for m in ingreso_movements), Decimal("0"))
+        if ingreso_total > 0:
+            self.create_movement(
+                InventoryMovementCreate(
+                    item_id=lot_id,
+                    movement_type="AJUSTE_NEGATIVO",
+                    quantity=ingreso_total,
+                    reason=reason,
+                    reference_type="production_order",
+                    reference_id=run_id,
+                ),
+                user_id=user_id,
+            )
+
     def list_movements(self, item_id: UUID | None = None) -> list[InventoryMovementRead]:
         movements = self.repository.list_movements(item_id)
         user_names = _resolve_user_names(self.repository.session, [m.created_by for m in movements if m.created_by])
