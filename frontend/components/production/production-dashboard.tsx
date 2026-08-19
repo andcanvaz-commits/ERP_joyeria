@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, Check, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -34,6 +34,7 @@ import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
   addAdminActaLine,
+  allocateStageAttemptMaterial,
   assignProduct,
   cancelProductionRun,
   cancelProductionRunFamily,
@@ -41,13 +42,9 @@ import {
   createProductionOrder,
   deleteActaLine,
   deleteProcess,
-  editProductionRunStageWeight,
-  finishProductionRunStage,
   finishStageAttempt,
   listProcesses,
   listProductionRuns,
-  startProductionRun,
-  startProductionRunWithReserved,
   startStageAttempt,
   updateActaLine,
   updateProcess,
@@ -247,8 +244,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  // Corrida cuya reserva se esta iniciando o liberando (bloquea sus botones).
-  const [reservationRunId, setReservationRunId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
@@ -277,9 +272,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Cantidad a asignar a producto terminado (flujo nuevo, "Asignar a
   // producto terminado", disponible en cualquier momento de la orden).
   const [runQuantity, setRunQuantity] = useState("1");
-  const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
-  const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
-  const [rejectJustification, setRejectJustification] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [cancelRun, setCancelRun] = useState<ProductionRun | null>(null);
@@ -290,9 +282,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [cancelFamilyRuns, setCancelFamilyRuns] = useState<ProductionRun[] | null>(null);
   const [cancelFamilyReason, setCancelFamilyReason] = useState("");
   const [isCancellingFamily, setIsCancellingFamily] = useState(false);
-  const [editingStageId, setEditingStageId] = useState<string | null>(null);
-  const [editWeightValue, setEditWeightValue] = useState("");
-  const [isSavingStageWeight, setIsSavingStageWeight] = useState(false);
   const [showResponsables, setShowResponsables] = useState(false);
   // Modal "Crear orden" del flujo nuevo: solo pide el nombre libre (seccion 4.1).
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
@@ -437,7 +426,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const finishedRuns = runs.filter(
     (run) => (run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA") && (run.event_lines ?? []).length === 0
   );
-  const waitingMaterialRuns = runs.filter((run) => run.status === "ESPERANDO_MATERIAL");
   // Igual que "En proceso": una orden dividida cuenta una sola vez entre las
   // recientes, con boton para ver las demas partes en ventana.
   const recentFinishedFamilies = Array.from(groupRunFamilies(finishedRuns).entries()).slice(0, 3);
@@ -553,17 +541,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   function processRowActions(run: ProductionRun) {
     return (
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-        {run.status === "MATERIALES_APROBADOS" ? (
-          <button
-            className="button buttonPrimary"
-            disabled={isSaving}
-            onClick={() => void handleStartApprovedRun(run)}
-            type="button"
-          >
-            <Play aria-hidden="true" size={14} />
-            Iniciar
-          </button>
-        ) : null}
         {run.status === "EN_PROCESO" ? (
           <button
             className="button buttonPrimary"
@@ -693,14 +670,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setStageModalIndex((i) => (i - 1 + stagesCount) % stagesCount);
   }
 
-  function canManageStage(stage: ProductionRunStage, index: number, stages: ProductionRunStage[]) {
-    if (stage.status === "FINALIZADA" || stage.status === "EN_PROCESO") {
-      return stage.status === "EN_PROCESO";
-    }
-    const previousStages = stages.slice(0, index);
-    return previousStages.every((previousStage) => previousStage.status === "FINALIZADA");
-  }
-
   function openRunStagesModal(run: ProductionRun) {
     // Cierra la ventana de partes si se abrio desde ahi: al terminar de
     // gestionar y cerrar el resumen, debe volver al panel principal, no
@@ -769,69 +738,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     } finally {
       setIsCancellingFamily(false);
     }
-  }
-
-  function openEditStageWeight(stage: ProductionRunStage) {
-    setEditingStageId(stage.id);
-    setEditWeightValue(stage.final_weight != null ? String(stage.final_weight) : "");
-  }
-
-  function closeEditStageWeight() {
-    setEditingStageId(null);
-    setEditWeightValue("");
-  }
-
-  // Correccion de peso fuera de condicion (merma > limite): mismo patron que
-  // approveStage en el flujo normal -- un modal de confirmacion con botones,
-  // nunca un guardado silencioso. Al confirmar, el backend deja el mismo
-  // rastro que "pasar igualmente" una etapa (ProductionRunStageDecision,
-  // weight_based=True) -- ver edit_stage_weight.
-  function stageWeightEditFailsCondition(stage: ProductionRunStage, current: number): { fails: boolean; reason: string } {
-    const reference = stageReferenceWeight(stage);
-    const limit = Number(selectedRunForStages?.waste_limit_percent ?? 0);
-    if (!(reference > 0) || !Number.isFinite(current) || current < 0 || current > reference) {
-      return { fails: false, reason: "" };
-    }
-    const loss = ((reference - current) / reference) * 100;
-    if (loss > limit) {
-      return { fails: true, reason: `La correccion implica una pérdida de ${loss.toFixed(2)}% (supera el límite ${limit.toFixed(2)}%).` };
-    }
-    return { fails: false, reason: "" };
-  }
-
-  async function saveStageWeight(stage: ProductionRunStage, value: string, justification?: string) {
-    setError(null);
-    setIsSavingStageWeight(true);
-    try {
-      await editProductionRunStageWeight(stage.id, { final_weight: value, justification: justification ?? null });
-      setSuccess("Peso corregido.");
-      closeEditStageWeight();
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo corregir el peso.");
-    } finally {
-      setIsSavingStageWeight(false);
-    }
-  }
-
-  async function handleSaveStageWeight(stage: ProductionRunStage) {
-    const value = editWeightValue.trim();
-    if (!value) {
-      setError("Ingresa el peso corregido.");
-      return;
-    }
-    const check = stageWeightEditFailsCondition(stage, Number(value));
-    if (check.fails) {
-      showConfirm(
-        "Peso fuera de la condición",
-        `${check.reason} ¿Deseas guardar la corrección igualmente? Quedará registrado.`,
-        () => void saveStageWeight(stage, value, check.reason),
-        false,
-        "Guardar igualmente"
-      );
-      return;
-    }
-    await saveStageWeight(stage, value);
   }
 
   function openStatsModal(run: ProductionRun) {
@@ -1147,177 +1053,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  async function handleStartApprovedRun(run: ProductionRun) {
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      await startProductionRun(run.id);
-      setSuccess("Produccion iniciada.");
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la produccion.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  /** Reserva completa: recien aqui se consume de verdad y arranca la orden. */
-  async function handleStartReserved(run: ProductionRun) {
-    setError(null);
-    setSuccess(null);
-    setReservationRunId(run.id);
-    try {
-      await startProductionRunWithReserved(run.id);
-      setSuccess(`Produccion iniciada con el material reservado (${run.production_code ?? ""}).`);
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar con lo reservado.");
-    } finally {
-      setReservationRunId(null);
-    }
-  }
-
-
-  async function handleFinishStage(
-    stage: ProductionRunStage,
-    options: { decision?: "APPROVED" | "REJECTED"; justification?: string } = {}
-  ) {
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      const finalWeight = stageWeights[stage.id]?.trim() || null;
-      const updatedRun = await finishProductionRunStage(stage.id, {
-        final_weight: finalWeight,
-        decision: options.decision,
-        justification: options.justification,
-      });
-      setStageWeights((current) => ({ ...current, [stage.id]: "" }));
-      setStageChoice((current) => {
-        const next = { ...current };
-        delete next[stage.id];
-        return next;
-      });
-      setRejectJustification("");
-      setSuccess(
-        options.decision === "REJECTED"
-          ? "Etapa rechazada. La produccion regreso a la etapa correspondiente."
-          : "Etapa registrada correctamente."
-      );
-      await reload();
-      if (updatedRun.status === "PENDIENTE_RECEPCION") {
-        // Última fase terminada: se cierra el detalle de etapas.
-        setSelectedRunForStages(null);
-        setSuccess("Producción finalizada. Pendiente de recepción en inventario.");
-        // Es UNA sola acta por familia (padre + hijas de split): el ritual
-        // automatico (devolver sobrante -> acta) solo tiene sentido cuando
-        // la ULTIMA pierna termina. Si otra pierna de la misma orden sigue
-        // EN_PROCESO, la acta de esta corrida por si sola esta incompleta
-        // (le falta lo que la otra pierna todavia no entrego/recibio) --
-        // mostrarla ahi confunde mas de lo que ayuda (bug reportado).
-        const nextRuns = await listProductionRuns();
-        const family = getRunFamily(nextRuns, updatedRun);
-        const familyFinished = family.every(
-          (member) => member.finished_at !== null || member.status === "CANCELADA"
-        );
-        if (familyFinished) {
-          if (buildReturnCandidates(updatedRun).length > 0) {
-            setPostFinishReturnRun(updatedRun);
-          } else {
-            setIsPostFinishActa(true);
-            setActaRun(updatedRun);
-          }
-        }
-        return;
-      }
-      if (options.decision === "REJECTED") {
-        // Volver en pantalla a la tarjeta de la etapa destino.
-        const targetOrder = stage.rework_target_order ?? (stage.stage_order > 1 ? stage.stage_order - 1 : stage.stage_order);
-        setStageModalDir("left");
-        setStageModalKey((k) => k + 1);
-        setStageModalIndex(Math.max(0, targetOrder - 1));
-      } else if (selectedRunForStages && selectedRunForStages.stages.length > 1) {
-        // Auto-avanzar a la siguiente etapa.
-        const total = selectedRunForStages.stages.length;
-        const next = Math.min(stageModalIndex + 1, total - 1);
-        if (next !== stageModalIndex) {
-          setStageModalDir("right");
-          setStageModalKey((k) => k + 1);
-          setStageModalIndex(next);
-        }
-      }
-    } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : "No se pudo finalizar la etapa.";
-      setError(message);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  function stageRequiresDecision(stage: ProductionRunStage) {
-    return stage.stage_type === "DECISION" || stage.stage_type === "CONTROL" || Boolean(stage.quality_check);
-  }
-
-  // Peso de referencia: el peso final de la etapa pesada anterior, o el material total.
-  function stageReferenceWeight(stage: ProductionRunStage): number {
-    const run = selectedRunForStages;
-    if (!run) return 0;
-    const prior = run.stages
-      .filter((s) => s.stage_order < stage.stage_order && s.final_weight !== null)
-      .sort((a, b) => a.stage_order - b.stage_order);
-    const last = prior[prior.length - 1];
-    if (last?.final_weight) return Number(last.final_weight);
-    return Number(run.total_required_material ?? 0);
-  }
-
-  // ¿El peso registrado incumple la condición (pérdida sobre el límite de merma)?
-  function stageWeightFailsCondition(stage: ProductionRunStage): { fails: boolean; reason: string } {
-    if (!stage.requires_weighing) return { fails: false, reason: "" };
-    const current = Number(stageWeights[stage.id]);
-    const reference = stageReferenceWeight(stage);
-    const limit = Number(selectedRunForStages?.waste_limit_percent ?? 0);
-    if (!(reference > 0) || !Number.isFinite(current) || current < 0) return { fails: false, reason: "" };
-    const loss = ((reference - current) / reference) * 100;
-    if (loss > limit) {
-      return { fails: true, reason: `Peso ${current} implica una pérdida de ${loss.toFixed(2)}% (supera el límite ${limit.toFixed(2)}%).` };
-    }
-    return { fails: false, reason: "" };
-  }
-
-  function selectStageChoice(stage: ProductionRunStage, choice: "PASS" | "REJECT") {
-    if (choice === "REJECT") {
-      setRejectJustification(stageWeightFailsCondition(stage).reason);
-    }
-    setStageChoice((current) => ({ ...current, [stage.id]: choice }));
-  }
-
-  function clearStageChoice(stageId: string) {
-    setStageChoice((current) => {
-      const next = { ...current };
-      delete next[stageId];
-      return next;
-    });
-    setRejectJustification("");
-  }
-
-  // Aprobar/finalizar; si el peso no cumple la condición, confirmar el override.
-  function approveStage(stage: ProductionRunStage, decision?: "APPROVED") {
-    const check = stageWeightFailsCondition(stage);
-    const run = () => void handleFinishStage(stage, decision ? { decision } : {});
-    if (check.fails) {
-      showConfirm(
-        "Peso fuera de la condición",
-        `${check.reason} ¿Deseas pasar la etapa igualmente? Quedará registrado.`,
-        run,
-        false,
-        "Pasar igualmente"
-      );
-      return;
-    }
-    run();
-  }
-
   async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -1458,9 +1193,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   // Contadores animados de la barra de metricas de produccion.
-  const pendingInventoryCount = useCountUp(countOrders(runs.filter((r) => r.status === "PENDIENTE_INVENTARIO")));
-  const waitingMaterialCount = useCountUp(countOrders(waitingMaterialRuns));
-  const approvedMaterialCount = useCountUp(countOrders(approvedMaterialRuns));
+  const waitingMaterialCount = useCountUp(
+    runs.reduce(
+      (total, run) => total + (run.stage_attempts ?? []).filter((a) => a.status === "PENDIENTE_MATERIAL").length,
+      0,
+    ),
+  );
   const inProgressCount = useCountUp(countOrders(inProgressRuns));
   const finishedCount = useCountUp(countOrders(finishedRuns));
 
@@ -1596,23 +1334,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         <>
           {/* Stats bar */}
           <section className="productionStatsRow" aria-label="Metricas de produccion">
-            <div className="productionStatCard">
-              <Clock aria-hidden="true" size={20} />
-              <strong>{pendingInventoryCount}</strong>
-              <span>Esperando inventario</span>
-            </div>
             {waitingMaterialCount > 0 ? (
               <div className="productionStatCard">
                 <Hourglass aria-hidden="true" size={20} />
                 <strong>{waitingMaterialCount}</strong>
-                <span>Esperando material</span>
+                <span>Etapas esperando material</span>
               </div>
             ) : null}
-            <div className="productionStatCard">
-              <CheckCircle2 aria-hidden="true" size={20} />
-              <strong>{approvedMaterialCount}</strong>
-              <span>Listas para iniciar</span>
-            </div>
             <div className="productionStatCard">
               <Play aria-hidden="true" size={20} />
               <strong>{inProgressCount}</strong>
@@ -1753,68 +1481,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               )}
             </article>
           </section>
-
-          {/* Ordenes que un split dejo esperando material: solo lectura aqui,
-              se resuelven desde inventario (ver modal "Destinar material").
-              Sin ordenes esperando, la seccion no se muestra (nada que revisar). */}
-          {waitingMaterialRuns.length > 0 ? (
-            <section className="card panelBody" aria-label="Esperando material">
-              <div className="panelHeader">
-                <div>
-                  <h2 className="panelTitle">Esperando material</h2>
-                  <p className="panelText">{countOrders(waitingMaterialRuns)} {countOrders(waitingMaterialRuns) === 1 ? "orden espera" : "ordenes esperan"} materia prima</p>
-                </div>
-              </div>
-              <div className="productionRunsVertical">
-                {waitingMaterialRuns.map((run) => (
-                  <div className="productionRunListRow" key={run.id}>
-                    <div className="productionRunListRowHead">
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
-                        {run.production_code ? (
-                          <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--primary-strong)", fontWeight: 700, background: "#f3e9d6", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>{run.production_code}</span>
-                        ) : null}
-                        {rootBadge(run)}
-                        <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{run.process_name}</strong>
-                      </div>
-                      <StatusPunch label={runStatusLabel(run.status)} tone={runStatusTone(run.status)} />
-                    </div>
-                    <div className="productionRunListRowMeta">
-                      <span>Faltan {numericText(run.quantity)} {run.raw_material_unit_code}</span>
-                      {/* Reserva: inventario destino stock pero eligio esperar a
-                          completar todo antes de arrancar (5.5/5.6 del handoff). */}
-                      {Number(run.reserved_material_quantity ?? 0) > 0 ? (
-                        <span>
-                          Reservado {numericText(run.reserved_material_quantity ?? "0")} de{" "}
-                          {numericText(run.total_required_material)} {run.raw_material_unit_code}
-                        </span>
-                      ) : null}
-                    </div>
-                    {/* Liberar la reserva es decision de Inventario (fue quien
-                        la creo, desde el modal "Destinar material") -- ese
-                        boton vive ahora en el panel de Solicitudes de
-                        Inventario, no aca (bug reportado: se confundia con
-                        una accion de Produccion). */}
-                    {Number(run.reserved_material_quantity ?? 0) > 0 ? (
-                      <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                        {run.reservation_is_complete ? (
-                          <button
-                            className="button buttonPrimary"
-                            disabled={reservationRunId === run.id}
-                            onClick={() => void handleStartReserved(run)}
-                            type="button"
-                          >
-                            {reservationRunId === run.id ? "Iniciando" : "Iniciar con lo reservado"}
-                          </button>
-                        ) : (
-                          <span className="panelText">Reserva incompleta: falta material para iniciar.</span>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
 
           {/* Procesos: listos para iniciar, en curso y terminados, en un solo lugar. */}
           <section className="card panelBody" aria-label="Procesos">
@@ -2475,7 +2141,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               const stages = selectedRunForStages.stages;
               const safeIndex = stageModalIndex % stages.length;
               const stage = stages[safeIndex];
-              const canManage = canManageStage(stage, safeIndex, stages);
               return (
                 <>
                   <div className="stageCarouselNav">
@@ -2519,40 +2184,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </div>
                     </div>
 
-                    {canManage && stage.status === "EN_PROCESO" && stageRequiresDecision(stage) ? (
-                      <div className="stageChoiceGroup">
-                        <span className="stageChoiceHint">Selecciona una condición para continuar:</span>
-                        <button
-                          className={`stageChoice stageChoiceYes ${stageChoice[stage.id] === "PASS" ? "stageChoiceActive" : ""}`}
-                          onClick={() => selectStageChoice(stage, "PASS")}
-                          type="button"
-                        >
-                          <strong>Sí, cumple</strong>
-                          <span>{stage.quality_check || "La etapa cumple la condición."}</span>
-                        </button>
-                        <button
-                          className={`stageChoice stageChoiceNo ${stageChoice[stage.id] === "REJECT" ? "stageChoiceActive" : ""}`}
-                          onClick={() => selectStageChoice(stage, "REJECT")}
-                          type="button"
-                        >
-                          <strong>No cumple</strong>
-                          <span>{stage.rework_action || "No cumple; el flujo regresa a la etapa indicada."}</span>
-                        </button>
+                    {stage.quality_check ? (
+                      <div className="processFlowCallout processFlowCalloutCheck">
+                        <strong>Control de calidad</strong>{stage.quality_check}
                       </div>
-                    ) : (
-                      <>
-                        {stage.quality_check ? (
-                          <div className="processFlowCallout processFlowCalloutCheck">
-                            <strong>Control de calidad</strong>{stage.quality_check}
-                          </div>
-                        ) : null}
-                        {stage.rework_action ? (
-                          <div className="processFlowCallout processFlowCalloutRework">
-                            <strong>Si no cumple</strong>{stage.rework_action}
-                          </div>
-                        ) : null}
-                      </>
-                    )}
+                    ) : null}
+                    {stage.rework_action ? (
+                      <div className="processFlowCallout processFlowCalloutRework">
+                        <strong>Si no cumple</strong>{stage.rework_action}
+                      </div>
+                    ) : null}
 
 
                     {stage.started_at ? (
@@ -2585,67 +2226,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </div>
                     ) : null}
 
-                    {stage.status === "FINALIZADA" && stage.requires_weighing && canRunBeCancelled(selectedRunForStages) ? (
-                      editingStageId === stage.id ? (
-                        <div className="stageFinishBox">
-                          <input
-                            autoFocus
-                            className="field"
-                            min="0"
-                            onChange={(e) => setEditWeightValue(e.target.value)}
-                            placeholder="Peso corregido"
-                            step="0.0001"
-                            type="number"
-                            value={editWeightValue}
-                          />
-                          {(() => {
-                            const reference = stageReferenceWeight(stage);
-                            const current = Number(editWeightValue);
-                            if (!(reference > 0) || !Number.isFinite(current) || editWeightValue.trim() === "") return null;
-                            if (current > reference) {
-                              return (
-                                <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)" }}>
-                                  El peso no puede superar el material que entró a esta etapa ({numericText(reference)} {selectedRunForStages.raw_material_unit_code}).
-                                </div>
-                              );
-                            }
-                            const check = stageWeightEditFailsCondition(stage, current);
-                            if (check.fails) {
-                              return (
-                                <div className="processFlowCallout" style={{ color: "var(--danger, #b42318)" }}>
-                                  ⚠ {check.reason} Al guardar se pedirá confirmación y quedará registrado.
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                          <div className="modalActions">
-                            <button className="button" onClick={closeEditStageWeight} type="button">
-                              Cancelar
-                            </button>
-                            <button
-                              className="button buttonPrimary"
-                              disabled={isSavingStageWeight}
-                              onClick={() => void handleSaveStageWeight(stage)}
-                              type="button"
-                            >
-                              {isSavingStageWeight ? "Guardando" : "Guardar peso"}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          className="button"
-                          onClick={() => openEditStageWeight(stage)}
-                          style={{ alignSelf: "flex-start" }}
-                          type="button"
-                        >
-                          <Pencil aria-hidden="true" size={14} />
-                          Corregir peso
-                        </button>
-                      )
-                    ) : null}
-
                     {stage.decisions && stage.decisions.length > 0 ? (
                       <div className="stageDecisions">
                         {stage.decisions.map((decision, decisionIndex) => (
@@ -2668,75 +2248,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </div>
                     ) : null}
 
-                    {canManage ? (
-                      <div className="stageFinishBox">
-                        {stage.requires_weighing ? (
-                          <input
-                            className="field"
-                            min="0"
-                            onChange={(e) => setStageWeights((c) => ({ ...c, [stage.id]: e.target.value }))}
-                            placeholder="Peso"
-                            step="0.0001"
-                            type="number"
-                            value={stageWeights[stage.id] ?? ""}
-                          />
-                        ) : null}
-                        {stageRequiresDecision(stage) ? (
-                          stageChoice[stage.id] === "REJECT" ? (
-                            <div className="stageRejectBox">
-                              <textarea
-                                className="stageRejectInput"
-                                onChange={(e) => setRejectJustification(e.target.value)}
-                                placeholder="Justificación (opcional)"
-                                value={rejectJustification}
-                              />
-                              <span className="stageRejectHint">
-                                {stage.rework_target_order
-                                  ? `La producción regresará a la etapa ${stage.rework_target_order}.`
-                                  : "La producción regresará a la etapa anterior."}
-                              </span>
-                              <div style={{ display: "flex", gap: 8 }}>
-                                <button
-                                  className="button"
-                                  disabled={isSaving}
-                                  onClick={() => clearStageChoice(stage.id)}
-                                  style={{ flex: 1 }}
-                                  type="button"
-                                >
-                                  Cancelar
-                                </button>
-                                <button
-                                  className="button buttonDanger"
-                                  disabled={isSaving}
-                                  onClick={() => void handleFinishStage(stage, { decision: "REJECTED", justification: rejectJustification.trim() || undefined })}
-                                  style={{ flex: 1 }}
-                                  type="button"
-                                >
-                                  Confirmar rechazo
-                                </button>
-                              </div>
-                            </div>
-                          ) : stageChoice[stage.id] === "PASS" ? (
-                            <button
-                              className="button buttonPrimary"
-                              disabled={isSaving}
-                              onClick={() => approveStage(stage, "APPROVED")}
-                              type="button"
-                            >
-                              Finalizar etapa
-                            </button>
-                          ) : (
-                            <button className="button" disabled type="button" title="Selecciona una condición arriba">
-                              Selecciona una condición
-                            </button>
-                          )
-                        ) : (
-                          <button className="button buttonPrimary" disabled={isSaving} onClick={() => approveStage(stage)} type="button">
-                            {stage.status === "PENDIENTE" ? "Iniciar y finalizar" : "Finalizar etapa"}
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
                   </div>
 
                   {/* Stats shown only when run is finished */}
