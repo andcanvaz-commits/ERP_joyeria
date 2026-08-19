@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, Check, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -12,6 +12,7 @@ import { ComplementsManager } from "@/components/mantenimiento/complements-manag
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
+import { ActaSide } from "@/components/production/acta-side";
 import { ActaView, ReturnCandidatesForm, buildReturnCandidates } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
@@ -32,11 +33,13 @@ import { listInventoryItems } from "@/lib/inventory-api";
 import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
+  addAdminActaLine,
   assignProduct,
   cancelProductionRun,
   cancelProductionRunFamily,
   createProcess,
   createProductionOrder,
+  deleteActaLine,
   deleteProcess,
   editProductionRunStageWeight,
   finishProductionRunStage,
@@ -46,11 +49,13 @@ import {
   startProductionRun,
   startProductionRunWithReserved,
   startStageAttempt,
+  updateActaLine,
   updateProcess,
   updateProductionRunProducts,
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductChoice, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
+import type { ActaSideLine } from "@/lib/orden-produccion";
 import { CaliperScale } from "@/components/ui/caliper-scale";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
@@ -295,7 +300,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Orden del flujo nuevo cuyo panel de etapas/acta esta abierto.
   const [dynamicOrderRun, setDynamicOrderRun] = useState<ProductionRun | null>(null);
   const [stageResponsableName, setStageResponsableName] = useState("");
+  // Materia prima + cantidad de la etapa que se esta por iniciar: sale
+  // directo como linea ENTREGA del acta apenas se crea el intento (Rodrigo:
+  // "eso sale directo en el entregados del acta").
+  const [isStageMaterialPickerOpen, setIsStageMaterialPickerOpen] = useState(false);
+  const [stagePickerPendingItem, setStagePickerPendingItem] = useState<InventoryItem | null>(null);
+  const [stagePickerQuantity, setStagePickerQuantity] = useState("");
+  const [stageMaterialItem, setStageMaterialItem] = useState<InventoryItem | null>(null);
+  const [stageMaterialQuantity, setStageMaterialQuantity] = useState("");
   const [stageAttemptPeso, setStageAttemptPeso] = useState("");
+  // El motivo de rechazo solo se pide cuando de verdad se va a rechazar (✘):
+  // mientras tanto no hay decision tomada, no tiene sentido mostrarlo.
+  const [isRejectingStage, setIsRejectingStage] = useState(false);
   const [stageAttemptRejectReason, setStageAttemptRejectReason] = useState("");
   // Producto único elegido con los pickers (pieza o tipo de catálogo). "create"
   // ahora alimenta "Asignar a producto terminado" del flujo nuevo (disponible
@@ -1015,6 +1031,19 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
+  function closeStageMaterialPicker() {
+    setIsStageMaterialPickerOpen(false);
+    setStagePickerPendingItem(null);
+    setStagePickerQuantity("");
+  }
+
+  function confirmStageMaterial() {
+    if (!stagePickerPendingItem || !stagePickerQuantity || Number(stagePickerQuantity) <= 0) return;
+    setStageMaterialItem(stagePickerPendingItem);
+    setStageMaterialQuantity(stagePickerQuantity);
+    closeStageMaterialPicker();
+  }
+
   async function handleStartStageAttempt() {
     if (!dynamicOrderRun) return;
     if (!selectedProcessId) {
@@ -1025,17 +1054,32 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Escribe el nombre del responsable.");
       return;
     }
+    if (!stageMaterialItem || !stageMaterialQuantity || Number(stageMaterialQuantity) <= 0) {
+      setError("Elige la materia prima y su cantidad.");
+      return;
+    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
-      const updated = await startStageAttempt(dynamicOrderRun.id, {
+      const started = await startStageAttempt(dynamicOrderRun.id, {
         process_id: selectedProcessId,
         responsable_name: stageResponsableName.trim(),
       });
+      const newAttempt = started.stage_attempts?.find((a) => a.status === "EN_PROCESO");
+      const updated = newAttempt
+        ? await addAdminActaLine(dynamicOrderRun.id, {
+            side: "ENTREGA",
+            item_id: stageMaterialItem.id,
+            quantity: stageMaterialQuantity,
+            stage_attempt_id: newAttempt.id,
+          })
+        : started;
       setDynamicOrderRun(updated);
       setSelectedProcessId("");
       setStageResponsableName("");
+      setStageMaterialItem(null);
+      setStageMaterialQuantity("");
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la etapa.");
@@ -1061,6 +1105,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setDynamicOrderRun(updated);
       setStageAttemptPeso("");
       setStageAttemptRejectReason("");
+      setIsRejectingStage(false);
       setSuccess(decision === "APROBADA" ? "Etapa aprobada." : "Etapa rechazada.");
       await reload();
     } catch (nextError) {
@@ -1966,101 +2011,179 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </div>
               ) : null}
 
-              {runningAttempt ? (
-                <section className="card panelBody" style={{ marginTop: 12 }}>
-                  <div className="panelHeader">
-                    <div>
-                      <h2 className="panelTitle">{runningAttempt.process_name}</h2>
-                      <p className="panelText">{runningAttempt.code} · Responsable: {runningAttempt.responsable_name ?? "—"}</p>
+              {runningAttempt ? (() => {
+                const orderId = dynamicOrderRun.id;
+                async function refreshDynamicOrder() {
+                  await reload();
+                  const fresh = (await listProductionRuns()).find((r) => r.id === orderId);
+                  if (fresh) setDynamicOrderRun(fresh);
+                }
+                const entregaLines: ActaSideLine[] = activeActaLines
+                  .filter((line) => line.side === "ENTREGA")
+                  .map((line) => ({
+                    kind: "row" as const,
+                    id: line.id,
+                    label: line.label,
+                    quantity: line.quantity,
+                    unit_code: line.unit_code,
+                    editable: true,
+                    source: line.source,
+                    fecha: line.created_at,
+                  }));
+                const recepcionLines: ActaSideLine[] = activeActaLines
+                  .filter((line) => line.side === "RECEPCION")
+                  .map((line) => ({
+                    kind: "row" as const,
+                    id: line.id,
+                    label: line.label,
+                    quantity: line.quantity,
+                    unit_code: line.unit_code,
+                    editable: true,
+                    source: line.source,
+                    fecha: line.created_at,
+                  }));
+                const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
+                return (
+                  <section className="card panelBody" style={{ marginTop: 12 }}>
+                    <div className="panelHeader">
+                      <div>
+                        <h2 className="panelTitle">{runningAttempt.process_name}</h2>
+                        <p className="panelText">{runningAttempt.code} · Responsable: {runningAttempt.responsable_name ?? "—"}</p>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="tableWrap">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Detalle</th>
-                          <th className="num">Cantidad</th>
-                          <th>Lado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeActaLines.map((line) => (
-                          <tr key={line.id}>
-                            <td>{line.label}</td>
-                            <td className="num">{numericText(line.quantity)} {line.unit_code}</td>
-                            <td>{line.side === "ENTREGA" ? "Entrega" : "Recepcion"}</td>
-                          </tr>
-                        ))}
-                        {activeActaLines.length === 0 ? (
-                          <tr><td colSpan={3}><div className="emptyState">Sin lineas todavia.</div></td></tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
+                    {/* Misma vista de acta de siempre (ENTREGADO/RECIBIDO), solo que
+                        acotada a las lineas de esta etapa en vez de toda la orden. */}
+                    <div className="actaDocFrame">
+                      <div className="opDocWrap">
+                        <article className="opDoc actaDoc">
+                          <div className="opBody">
+                            <ActaSide
+                              actions={
+                                <AdminAddActaLineControl
+                                  isAdmin
+                                  items={materialItems}
+                                  onChanged={refreshDynamicOrder}
+                                  onError={setError}
+                                  onSuccess={setSuccess}
+                                  runId={dynamicOrderRun.id}
+                                  side="ENTREGA"
+                                  stageAttemptId={runningAttempt.id}
+                                />
+                              }
+                              fecha={runningAttempt.started_at}
+                              lines={entregaLines}
+                              onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
+                              onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
+                              onError={setError}
+                              responsable={runningAttempt.responsable_name ?? "—"}
+                              title="ENTREGADO"
+                            />
+                            <div className="opDivider" aria-hidden="true" />
+                            <ActaSide
+                              actions={
+                                <AdminAddActaLineControl
+                                  isAdmin
+                                  items={materialItems}
+                                  onChanged={refreshDynamicOrder}
+                                  onError={setError}
+                                  onSuccess={setSuccess}
+                                  runId={dynamicOrderRun.id}
+                                  side="RECEPCION"
+                                  stageAttemptId={runningAttempt.id}
+                                />
+                              }
+                              fecha={runningAttempt.finished_at ?? null}
+                              lines={recepcionLines}
+                              onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
+                              onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
+                              onError={setError}
+                              responsable={runningAttempt.finished_by_name ?? "—"}
+                              title="RECIBIDO"
+                            />
+                          </div>
+                        </article>
+                      </div>
+                    </div>
 
-                  <div style={{ display: "flex", gap: 14 }}>
-                    <AdminAddActaLineControl
-                      isAdmin
-                      items={[...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems]}
-                      onChanged={async () => {
-                        await reload();
-                        const fresh = (await listProductionRuns()).find((r) => r.id === dynamicOrderRun.id);
-                        if (fresh) setDynamicOrderRun(fresh);
-                      }}
-                      onError={setError}
-                      onSuccess={setSuccess}
-                      runId={dynamicOrderRun.id}
-                      side="ENTREGA"
-                      stageAttemptId={runningAttempt.id}
-                    />
-                  </div>
-
-                  <label className="fieldGroup" style={{ marginTop: 10 }}>
-                    <span>Peso al finalizar</span>
-                    <input
-                      className="field"
-                      disabled={isSaving}
-                      min="0"
-                      onChange={(event) => setStageAttemptPeso(event.target.value)}
-                      step="0.0001"
-                      style={{ width: 140 }}
-                      type="number"
-                      value={stageAttemptPeso}
-                    />
-                  </label>
-                  <label className="fieldGroup">
-                    <span>Motivo de rechazo (opcional)</span>
-                    <input
-                      className="field"
-                      disabled={isSaving}
-                      maxLength={1000}
-                      onChange={(event) => setStageAttemptRejectReason(event.target.value)}
-                      value={stageAttemptRejectReason}
-                    />
-                  </label>
-                  <div className="modalActions">
-                    <button
-                      aria-label="Rechazar etapa"
-                      className="button dangerIconButton"
-                      disabled={isSaving}
-                      onClick={() => void handleFinishStageAttempt(runningAttempt.id, "RECHAZADA")}
-                      type="button"
-                    >
-                      ✘ Rechazar
-                    </button>
-                    <button
-                      aria-label="Aprobar etapa"
-                      className="button buttonPrimary"
-                      disabled={isSaving}
-                      onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
-                      type="button"
-                    >
-                      ✔ Aprobar
-                    </button>
-                  </div>
-                </section>
-              ) : !isTerminada ? (
+                    <label className="fieldGroup" style={{ marginTop: 10 }}>
+                      <span>Peso al finalizar</span>
+                      <input
+                        className="field"
+                        disabled={isSaving}
+                        min="0"
+                        onChange={(event) => setStageAttemptPeso(event.target.value)}
+                        step="0.0001"
+                        style={{ width: 140 }}
+                        type="number"
+                        value={stageAttemptPeso}
+                      />
+                    </label>
+                    {/* Motivo de rechazo: solo aparece despues de tocar ✘, nunca antes
+                        (Rodrigo: "motivo de rechazo solo debe salir si se pone la x"). */}
+                    {isRejectingStage ? (
+                      <label className="fieldGroup">
+                        <span>Motivo de rechazo (opcional)</span>
+                        <input
+                          autoFocus
+                          className="field"
+                          disabled={isSaving}
+                          maxLength={1000}
+                          onChange={(event) => setStageAttemptRejectReason(event.target.value)}
+                          value={stageAttemptRejectReason}
+                        />
+                      </label>
+                    ) : null}
+                    <div className="modalActions">
+                      {isRejectingStage ? (
+                        <>
+                          <button
+                            className="button"
+                            disabled={isSaving}
+                            onClick={() => {
+                              setIsRejectingStage(false);
+                              setStageAttemptRejectReason("");
+                            }}
+                            type="button"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            aria-label="Confirmar rechazo"
+                            className="iconOnlyButton dangerIconButton"
+                            disabled={isSaving}
+                            onClick={() => void handleFinishStageAttempt(runningAttempt.id, "RECHAZADA")}
+                            type="button"
+                          >
+                            <X aria-hidden="true" size={18} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            aria-label="Rechazar etapa"
+                            className="iconOnlyButton dangerIconButton"
+                            disabled={isSaving}
+                            onClick={() => setIsRejectingStage(true)}
+                            type="button"
+                          >
+                            <X aria-hidden="true" size={18} />
+                          </button>
+                          <button
+                            aria-label="Aprobar etapa"
+                            className="iconOnlyButton successIconButton"
+                            disabled={isSaving}
+                            onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
+                            type="button"
+                          >
+                            <Check aria-hidden="true" size={18} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </section>
+                );
+              })() : !isTerminada ? (
                 <section className="card panelBody" style={{ marginTop: 12 }}>
                   <div className="panelHeader">
                     <div>
@@ -2087,11 +2210,46 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       value={stageResponsableName}
                     />
                   </label>
+                  <label className="fieldGroup">
+                    <span>Materia prima</span>
+                    <button className="button" disabled={isSaving} onClick={() => setIsStageMaterialPickerOpen(true)} type="button">
+                      {stageMaterialItem
+                        ? `${stageMaterialItem.name} · ${numericText(stageMaterialQuantity)} ${stageMaterialItem.unit_code}`
+                        : "Elegir..."}
+                    </button>
+                  </label>
                   <div className="modalActions">
                     <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleStartStageAttempt()} type="button">
                       Iniciar etapa
                     </button>
                   </div>
+
+                  {isStageMaterialPickerOpen ? (
+                    <MaterialCategoryPicker
+                      allowedTypes={["RAW_MATERIAL"]}
+                      description="Elige la materia prima que entra a esta etapa"
+                      items={rawMaterials}
+                      onClose={closeStageMaterialPicker}
+                      onSelect={(item) => {
+                        setStagePickerPendingItem(item);
+                        setStagePickerQuantity("");
+                      }}
+                      quantityStep={
+                        stagePickerPendingItem
+                          ? {
+                              confirmLabel: "Elegir",
+                              isSaving: false,
+                              item: stagePickerPendingItem,
+                              onBack: () => setStagePickerPendingItem(null),
+                              onConfirm: confirmStageMaterial,
+                              onQuantityChange: setStagePickerQuantity,
+                              quantity: stagePickerQuantity,
+                            }
+                          : undefined
+                      }
+                      title="Materia prima de la etapa"
+                    />
+                  ) : null}
                 </section>
               ) : null}
 

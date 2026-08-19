@@ -467,6 +467,12 @@ textarea {
   color: var(--danger);
 }
 
+.successIconButton {
+  border-color: #d9c48f;
+  background: #f5eed9;
+  color: var(--success);
+}
+
 .summaryGrid {
   position: relative;
   z-index: 2;
@@ -4187,6 +4193,12 @@ select {
   border-color: var(--danger);
   background: #fde8e8;
   color: var(--danger);
+}
+
+.successIconButton:hover:not(:disabled) {
+  border-color: var(--success);
+  background: #eee0bb;
+  color: var(--success);
 }
 
 .linkButton:hover {
