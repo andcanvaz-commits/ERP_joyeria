@@ -27,6 +27,7 @@ export function AdminAddActaLineControl({
   runId,
   items,
   isAdmin,
+  stageAttemptId,
   onChanged,
   onError,
   onSuccess,
@@ -35,6 +36,10 @@ export function AdminAddActaLineControl({
   runId: string;
   items: InventoryItem[];
   isAdmin: boolean;
+  // Ligada a un intento de etapa del flujo nuevo (seccion 2.3): cualquiera
+  // del rol fusionado opera el acta directo, ya no es admin-only -- ese gate
+  // sigue aplicando solo al boton "+" viejo (linea de nivel de orden).
+  stageAttemptId?: string;
   onChanged: () => void;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
@@ -48,7 +53,7 @@ export function AdminAddActaLineControl({
   const [localError, setLocalError] = useState<string | null>(null);
   const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits, enabled: mode === "manual" });
 
-  if (!isAdmin) return null;
+  if (!isAdmin && !stageAttemptId) return null;
 
   function reset() {
     setMode("closed");
@@ -66,7 +71,7 @@ export function AdminAddActaLineControl({
     }
     setIsSaving(true);
     try {
-      await addAdminActaLine(runId, { side, item_id: pendingItem.id, quantity });
+      await addAdminActaLine(runId, { side, item_id: pendingItem.id, quantity, stage_attempt_id: stageAttemptId });
       reset();
       onChanged();
       onSuccess("Línea agregada: se descontó/sumó del inventario real.");
@@ -86,7 +91,7 @@ export function AdminAddActaLineControl({
     }
     setIsSaving(true);
     try {
-      await addAdminActaLine(runId, { side, label: manualLabel.trim(), quantity, unit_code: manualUnit });
+      await addAdminActaLine(runId, { side, label: manualLabel.trim(), quantity, unit_code: manualUnit, stage_attempt_id: stageAttemptId });
       reset();
       onChanged();
       onSuccess("Línea agregada. No se descontó del inventario (es texto libre).");

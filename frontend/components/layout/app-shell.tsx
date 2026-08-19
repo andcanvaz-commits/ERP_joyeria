@@ -107,7 +107,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const navBadges: Record<string, number> = {
     "/inventario": invPending,
     "/produccion": prodPending,
-    "/solicitudes": role === "inventario" ? invPending : prodPending,
+    // Rol fusionado: ve las dos secciones de Solicitudes a la vez, asi que el
+    // punto rojo suma ambos pendientes en vez de elegir uno.
+    "/solicitudes": invPending + prodPending,
   };
 
   // Cambio forzado de contrasena temporal: se realiza en la pantalla de login.

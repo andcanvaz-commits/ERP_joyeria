@@ -50,8 +50,12 @@ function aggregate(runs: ProductionRun[]): Aggregate {
 
   const byProcess = new Map<string, ProcessAgg>();
   for (const run of runs) {
-    const entry = byProcess.get(run.process_name) ?? {
-      name: run.process_name,
+    // Ordenes del flujo nuevo no tienen un proceso unico por orden -- se
+    // agrupan por su nombre libre mientras no exista la vista de merma
+    // agregada por proceso (seccion 7).
+    const processKey = run.process_name ?? run.name ?? "Sin proceso";
+    const entry = byProcess.get(processKey) ?? {
+      name: processKey,
       orders: 0,
       units: 0,
       waste: 0,
@@ -66,7 +70,7 @@ function aggregate(runs: ProductionRun[]): Aggregate {
       entry.wastePctSum += pct;
       entry.wastePctCount += 1;
     }
-    byProcess.set(run.process_name, entry);
+    byProcess.set(processKey, entry);
   }
 
   const byStage = new Map<string, number>();

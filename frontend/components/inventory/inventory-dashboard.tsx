@@ -118,6 +118,7 @@ const ORDER_STATUS_OPTIONS: Array<{ value: ProductionRun["status"]; label: strin
   { value: "PENDIENTE_RECEPCION", label: "Pendiente de recepción" },
   { value: "RECIBIDA", label: "Recibida" },
   { value: "CANCELADA", label: "Cancelada" },
+  { value: "TERMINADA", label: "Terminada" },
 ];
 
 // Espeja INVENTORY_REVERT_WINDOW_HOURS del backend (el backend valida siempre).
@@ -608,10 +609,10 @@ export function InventoryDashboard() {
     enabled: isAuthenticated(),
   });
   const canSeeAudit = currentUser?.role === "admin" || currentUser?.role === "Admin";
-  // Revertir la ultima entrada es distinto de ver auditoria/usuarios: el jefe
-  // de inventario tambien puede, igual que el admin (ver INVENTORY_ADMIN_ONLY
-  // en el backend -- inventory.movements.revert no esta ahi).
-  const canRevertEntry = canSeeAudit || currentUser?.role === "Jefe de inventario";
+  // Revertir la ultima entrada es distinto de ver auditoria/usuarios: el rol
+  // fusionado Produccion/Inventario tambien puede, igual que el admin (ver
+  // INVENTORY_ADMIN_ONLY en el backend -- inventory.movements.revert no esta ahi).
+  const canRevertEntry = canSeeAudit || currentUser?.role === "Producción/Inventario";
 
   useEffect(() => {
     if (itemFilter === "ORDENES_TERMINADAS") {
@@ -1275,13 +1276,13 @@ export function InventoryDashboard() {
       setSuccess(`Material destinado a la orden ${run.production_code ?? run.run_id}.`);
       if (splitChild) {
         setSplitNotice({
-          processName: started.process_name,
+          processName: started.process_name ?? "—",
           rootCode: started.root_production_code ?? started.production_code ?? "",
           startedCode: started.production_code ?? "",
           startedQuantity: numericText(started.quantity),
           waitingCode: splitChild.production_code ?? "",
           waitingQuantity: numericText(splitChild.quantity),
-          unit: started.raw_material_unit_code,
+          unit: started.raw_material_unit_code ?? "",
         });
       }
       await queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -3635,7 +3636,7 @@ export function InventoryDashboard() {
                 <div key={index} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
                   <span style={{ color: "var(--muted)" }}>
                     <strong>{shortage.name}</strong>
-                    {shortage.is_complement ? " (complemento/insumo de la receta)" : ""}: quedan{" "}
+                    {shortage.is_complement ? " (insumo de etapa)" : ""}: quedan{" "}
                     {numericText(shortage.available)} {shortage.unit} disponibles, cada unidad necesita{" "}
                     {numericText(shortage.needed)} {shortage.unit}.
                   </span>

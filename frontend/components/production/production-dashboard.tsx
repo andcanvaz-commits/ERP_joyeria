@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, ScrollText, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Clock, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -11,7 +11,7 @@ import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
-import { CreateOrderWizard } from "@/components/production/create-order-wizard";
+import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
 import { ActaView, ReturnCandidatesForm, buildReturnCandidates } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
@@ -29,33 +29,28 @@ import {
   updateUser,
 } from "@/lib/auth-api";
 import { listInventoryItems } from "@/lib/inventory-api";
-import { listCatalogSegments, type CatalogSegment } from "@/lib/catalog-api";
-import { materialCodeForItem } from "@/lib/material-match";
 import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
 import {
+  assignProduct,
   cancelProductionRun,
   cancelProductionRunFamily,
   createProcess,
-  createProductionRun,
-  defineRunAssembly,
-  deleteAssemblyRecipe,
+  createProductionOrder,
   deleteProcess,
   editProductionRunStageWeight,
   finishProductionRunStage,
-  getAssemblyRecipe,
-  listAssemblyRecipeModelKeys,
-  listAssemblyRecipes,
+  finishStageAttempt,
   listProcesses,
   listProductionRuns,
   startProductionRun,
   startProductionRunWithReserved,
+  startStageAttempt,
   updateProcess,
   updateProductionRunProducts,
-  upsertAssemblyRecipe,
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
-import type { AssemblyRecipe, ProductChoice, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
+import type { ProductChoice, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
 import { CaliperScale } from "@/components/ui/caliper-scale";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
@@ -66,31 +61,19 @@ import { getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 import { useCountUp } from "@/hooks/use-count-up";
 
-type StageForm = {
-  name: string;
-  description: string;
-  phaseName: string;
-  stageType: string;
-  qualityCheck: string;
-  reworkAction: string;
-  reworkTargetOrder: string;
-  requiresWeighing: boolean;
-  ingredients: Array<{ inventoryItemId: string; unitCode: string }>;
-};
-
+// Banco de procesos (docs/cambios-sistema-produccion.md seccion 3): un paso
+// suelto reutilizable, sin sub-etapas ni insumos preconfigurados -- eso se
+// agrega suelto por etapa en el acta (mismo mecanismo ADMIN_STOCK/MANUAL).
 type ProcessForm = {
   name: string;
   description: string;
-  wasteLimitPercent: string;
-  stages: StageForm[];
-  // Tipos de producto del catálogo que el proceso puede producir (vacío = todos).
-  productTypeIds: string[];
+  isActive: boolean;
 };
 
 type FormMode = "create" | "edit";
 type UserFormMode = "create" | "edit";
 
-const SYSTEM_ROLES = ["Jefe de producción", "Admin", "Jefe de inventario"];
+const SYSTEM_ROLES = ["Admin", "Producción/Inventario"];
 
 const MATERIAL_TYPE_LABEL: Record<string, string> = {
   RAW_MATERIAL: "Materia prima",
@@ -101,6 +84,8 @@ const MATERIAL_TYPE_LABEL: Record<string, string> = {
 
 const itemTypeLabel = (type: string): string => MATERIAL_TYPE_LABEL[type] ?? type;
 
+// Solo para etiquetar el tipo de etapa de ORDENES VIEJAS (ProductionRunStage,
+// flujo historico) -- el banco de procesos nuevo ya no tiene sub-etapas.
 const STAGE_TYPES: { value: string; label: string }[] = [
   { value: "PROCESS", label: "Proceso" },
   { value: "THERMAL", label: "Proceso térmico" },
@@ -111,24 +96,10 @@ const STAGE_TYPES: { value: string; label: string }[] = [
 const stageTypeLabel = (value: string): string =>
   STAGE_TYPES.find((type) => type.value === value)?.label ?? value;
 
-const emptyStage = (): StageForm => ({
-  name: "",
-  description: "",
-  phaseName: "",
-  stageType: "PROCESS",
-  qualityCheck: "",
-  reworkAction: "",
-  reworkTargetOrder: "",
-  requiresWeighing: false,
-  ingredients: [],
-});
-
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  wasteLimitPercent: "1",
-  stages: [emptyStage()],
-  productTypeIds: [],
+  isActive: true,
 });
 
 const emptyUserForm = () => ({
@@ -138,26 +109,10 @@ const emptyUserForm = () => ({
 });
 
 function processToForm(process: ProductionProcess): ProcessForm {
-  const stages = process.stages.length > 0 ? process.stages : [];
   return {
     name: process.name,
     description: process.description ?? "",
-    wasteLimitPercent: process.waste_limit_percent ?? "1",
-    stages: stages.length > 0 ? stages.map((stage) => ({
-      name: stage.name,
-      description: stage.description ?? "",
-      phaseName: stage.phase_name ?? "",
-      stageType: stage.stage_type ?? "PROCESS",
-      qualityCheck: stage.quality_check ?? "",
-      reworkAction: stage.rework_action ?? "",
-      reworkTargetOrder: stage.rework_target_order ? String(stage.rework_target_order) : "",
-      requiresWeighing: stage.requires_weighing,
-      ingredients: (stage.ingredients ?? []).map((ing) => ({
-        inventoryItemId: String(ing.inventory_item_id),
-        unitCode: "",
-      })),
-    })) : [emptyStage()],
-    productTypeIds: (process.product_type_ids ?? []).map(String),
+    isActive: process.is_active,
   };
 }
 
@@ -192,121 +147,6 @@ const EMPTY_PROCESSES: ProductionProcess[] = [];
 const EMPTY_USERS: ManagedUser[] = [];
 const EMPTY_RUNS: ProductionRun[] = [];
 const EMPTY_RAW_MATERIALS: InventoryItem[] = [];
-const EMPTY_RECIPE_MODEL_KEYS: string[] = [];
-const EMPTY_ASSEMBLY_RECIPES: AssemblyRecipe[] = [];
-const EMPTY_CATALOG_SEGMENTS: CatalogSegment[] = [];
-
-// Indicador de receta en el picker de "Elegir producto" (modo ENSAMBLAR): sin
-// receta muestra el icono apagado; con receta, además de marcarlo, permite
-// ver los complementos al pasar el mouse o al hacer clic (queda fijo hasta
-// volver a hacer clic). Componente a nivel de módulo para no perder el
-// estado de apertura en cada render del picker.
-function RecipeBadgeIcon({ recipe }: { recipe: AssemblyRecipe | null }) {
-  const [open, setOpen] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-
-  if (!recipe) {
-    return (
-      <span
-        title="Sin receta"
-        style={{
-          display: "grid",
-          placeItems: "center",
-          width: 22,
-          height: 22,
-          borderRadius: 999,
-          border: "1px solid var(--muted)",
-        }}
-      >
-        <ScrollText aria-hidden="true" color="var(--muted)" size={13} />
-      </span>
-    );
-  }
-
-  function showPreview() {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (rect) setCoords({ top: rect.bottom + 6, left: Math.max(8, rect.right - 220) });
-    setOpen(true);
-  }
-
-  return (
-    <span style={{ position: "relative", display: "inline-block" }}>
-      <button
-        ref={buttonRef}
-        type="button"
-        title="Con receta · clic para ver vista previa"
-        onMouseEnter={showPreview}
-        onMouseLeave={() => !pinned && setOpen(false)}
-        onClick={(event) => {
-          stopClick(event);
-          setPinned((current) => {
-            const next = !current;
-            if (next) showPreview();
-            else setOpen(false);
-            return next;
-          });
-        }}
-        style={{
-          display: "grid",
-          placeItems: "center",
-          width: 22,
-          height: 22,
-          borderRadius: 999,
-          background: "var(--primary-strong, #b3261e)",
-          border: "none",
-          cursor: "pointer",
-          padding: 0,
-        }}
-      >
-        <ScrollText aria-hidden="true" color="#ffffff" size={13} />
-      </button>
-      {open && coords
-        ? createPortal(
-            <div
-              onClick={stopClick}
-              onMouseEnter={() => setOpen(true)}
-              onMouseLeave={() => !pinned && setOpen(false)}
-              style={{
-                position: "fixed",
-                top: coords.top,
-                left: coords.left,
-                zIndex: 1000,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: "10px 12px",
-                minWidth: 200,
-                maxWidth: 260,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
-              }}
-            >
-              <strong style={{ display: "block", marginBottom: 6, fontSize: 12 }}>Receta de ensamble</strong>
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
-                {recipe.items.map((item) => (
-                  <li
-                    key={item.complement_item_id}
-                    style={{ fontSize: 12, display: "flex", justifyContent: "space-between", gap: 10 }}
-                  >
-                    <span>
-                      {item.name ?? "—"}
-                      {item.material_type ? <span style={{ color: "var(--muted)" }}> · {item.material_type}</span> : null}
-                    </span>
-                    <span style={{ color: "var(--muted)" }}>
-                      {item.quantity}
-                      {item.unit_code ? ` ${item.unit_code}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>,
-            document.body,
-          )
-        : null}
-    </span>
-  );
-}
 
 export function ProductionDashboard({ variant = "production" }: { variant?: "production" | "maintenance" }) {
   const queryClient = useQueryClient();
@@ -378,41 +218,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     refetchInterval: 30000,
     refetchOnWindowFocus: true,
   });
-  // Claves de modelo que ya tienen receta de ensamble: filtra los pickers en
-  // modo ASIGNAR (esos modelos solo se fabrican por ENSAMBLAR) y, en
-  // mantenimiento, el picker de "Crear receta" (solo piezas sin receta aún).
-  const { data: recipeModelKeys = EMPTY_RECIPE_MODEL_KEYS } = useQuery({
-    queryKey: ["assembly-recipe-model-keys"],
-    queryFn: listAssemblyRecipeModelKeys,
-    enabled: Boolean(currentUser),
-  });
-  // Piezas de producto terminado para el picker de "Crear receta" en
-  // mantenimiento (misma queryKey que ProductTypesManager, comparten caché).
-  const { data: finishedProductsList = EMPTY_RAW_MATERIALS } = useQuery({
-    queryKey: ["finished-products"],
-    queryFn: () => listInventoryItems("FINISHED_PRODUCT"),
-    enabled: Boolean(currentUser) && variant === "maintenance",
-  });
-  // Segmentos del catálogo (para resolver el código de material de la
-  // materia prima elegida): la clave de receta ahora incluye el material.
-  // En mantenimiento se usan para decodificar las claves de las recetas.
-  const { data: catalogSegments = EMPTY_CATALOG_SEGMENTS } = useQuery({
-    queryKey: ["catalog-segments"],
-    queryFn: listCatalogSegments,
-    enabled: Boolean(currentUser),
-  });
-  // Recetas completas (con complementos): alimenta la vista de mantenimiento
-  // Y el indicador de receta del picker ENSAMBLAR en Crear orden (variant
-  // "production") -- antes solo se pedia en mantenimiento, asi que ese
-  // indicador SIEMPRE mostraba "Sin receta" fuera de mantenimiento aunque la
-  // receta existiera de verdad (bug reportado: recien se veia la data real
-  // al abrir el panel de definir receta, que consulta aparte y sin ese gate).
-  const { data: assemblyRecipes = EMPTY_ASSEMBLY_RECIPES } = useQuery({
-    queryKey: ["assembly-recipes"],
-    queryFn: listAssemblyRecipes,
-    enabled: Boolean(currentUser),
-  });
-
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
   const users = bundle?.users ?? EMPTY_USERS;
   const runs = bundle?.runs ?? EMPTY_RUNS;
@@ -451,8 +256,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [userForm, setUserForm] = useState(emptyUserForm);
   const [formMode, setFormMode] = useState<FormMode>("create");
   const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
-  const [selectedStageIndex, setSelectedStageIndex] = useState(0);
-  const [isIngredientPickerOpen, setIsIngredientPickerOpen] = useState(false);
   const [viewingProcess, setViewingProcess] = useState<ProductionProcess | null>(null);
   const [viewingUser, setViewingUser] = useState<ManagedUser | null>(null);
   const [generatedCredentials, setGeneratedCredentials] = useState<{
@@ -462,13 +265,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     role: string;
     temporaryPassword: string;
   } | null>(null);
+  // Reutilizado por el flujo nuevo (seccion 4) para elegir el proceso del
+  // banco al iniciar un intento de etapa -- ya no hay wizard de creacion con
+  // proceso+material+insumos de un tiron.
   const [selectedProcessId, setSelectedProcessId] = useState("");
-  const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  // Cantidad a asignar a producto terminado (flujo nuevo, "Asignar a
+  // producto terminado", disponible en cualquier momento de la orden).
   const [runQuantity, setRunQuantity] = useState("1");
-  // Cantidad a usar de cada insumo configurado en las etapas activas del
-  // proceso elegido, tecleada al crear la orden (clave = id de la fila de
-  // configuracion ProductionProcessStageIngredient).
-  const [stageIngredientQuantities, setStageIngredientQuantities] = useState<Record<string, string>>({});
   const [stageWeights, setStageWeights] = useState<Record<string, string>>({});
   const [stageChoice, setStageChoice] = useState<Record<string, "PASS" | "REJECT">>({});
   const [rejectJustification, setRejectJustification] = useState("");
@@ -486,45 +289,25 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [editWeightValue, setEditWeightValue] = useState("");
   const [isSavingStageWeight, setIsSavingStageWeight] = useState(false);
   const [showResponsables, setShowResponsables] = useState(false);
+  // Modal "Crear orden" del flujo nuevo: solo pide el nombre libre (seccion 4.1).
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
-  // Modo de destino del resultante: asignar a una pieza/tipo existente o
-  // ensamblar un único producto final (usa la cantidad de la orden).
-  const [assemblyMode, setAssemblyMode] = useState<"ASIGNAR" | "ENSAMBLAR">("ASIGNAR");
-  // Producto único elegido con los pickers (pieza o tipo de catálogo).
+  const [newOrderName, setNewOrderName] = useState("");
+  // Orden del flujo nuevo cuyo panel de etapas/acta esta abierto.
+  const [dynamicOrderRun, setDynamicOrderRun] = useState<ProductionRun | null>(null);
+  const [stageResponsableName, setStageResponsableName] = useState("");
+  const [stageAttemptPeso, setStageAttemptPeso] = useState("");
+  const [stageAttemptRejectReason, setStageAttemptRejectReason] = useState("");
+  // Producto único elegido con los pickers (pieza o tipo de catálogo). "create"
+  // ahora alimenta "Asignar a producto terminado" del flujo nuevo (disponible
+  // en cualquier momento de la orden, seccion 4.3) -- ya no hay wizard.
   const [orderProduct, setOrderProduct] = useState<ProductChoice | null>(null);
-  // Receta de ensamble del producto elegido en ENSAMBLAR (complementos +
-  // cantidad por unidad); se usa para calcular la solicitud automática. `key`
-  // identifica el producto que la originó (targetItemId o productTypeId) para
-  // no enviar al submit una receta de una selección anterior/obsoleta.
-  const [orderRecipe, setOrderRecipe] = useState<{ key: string; recipe: AssemblyRecipe } | null>(null);
-  // Evita condiciones de carrera: cada búsqueda de receta incrementa este
-  // contador y solo aplica su resultado si sigue siendo la más reciente.
-  const recipeLookupSeq = useRef(0);
-  // Tipo de producto para el que se está definiendo la receta (modal abierta
-  // cuando no es null). Las filas empiezan vacías.
-  const [recipeModalModelKey, setRecipeModalModelKey] = useState<string | null>(null);
-  const [recipeLines, setRecipeLines] = useState<Array<{ itemId: string; label: string; unitCode: string; perUnit: string }>>([]);
-  const [isRecipeComplementPickerOpen, setIsRecipeComplementPickerOpen] = useState(false);
-  // Origen de la modal de receta: "order" = flujo de Crear orden (ENSAMBLAR,
-  // toca orderProduct/orderRecipe); "maintenance" = tile "Crear receta" (no
-  // debe tocar el estado de la orden en curso).
-  const [recipeModalContext, setRecipeModalContext] = useState<"order" | "maintenance">("order");
-  // Picker de pieza abierto desde el tile "Crear receta" de mantenimiento.
-  const [isMaintenanceRecipePickerOpen, setIsMaintenanceRecipePickerOpen] = useState(false);
-  // Modal "Recetas" de mantenimiento: lista las recetas de ensamble existentes.
-  const [isRecipesViewOpen, setIsRecipesViewOpen] = useState(false);
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
   const [editPlanProduct, setEditPlanProduct] = useState<ProductChoice | null>(null);
-  // Orden a la que se le esta definiendo el ensamble (complementos APROBADOS
-  // + cantidad por unidad); se cierra a null tras guardar o cancelar.
-  const [assemblyRun, setAssemblyRun] = useState<ProductionRun | null>(null);
-  const [assemblyLines, setAssemblyLines] = useState<Array<{ itemId: string; perUnit: string }>>([]);
-  // Picker de pieza/tipo abierto: "create" = modal Crear orden, "edit" = modal
-  // Editar producto resultante.
+  // Picker de pieza abierto: "create" = modal Asignar a producto terminado
+  // (flujo nuevo), "edit" = modal Editar producto resultante (flujo viejo).
   const [itemPickerFor, setItemPickerFor] = useState<"create" | "edit" | null>(null);
-  const [typePickerFor, setTypePickerFor] = useState<"create" | "edit" | null>(null);
-  // Pestaña activa del picker de producto en modo ASIGNAR: productos
-  // terminados o complementos (la joyeria fabrica sus propios complementos).
+  // Pestaña activa del picker de producto: productos terminados o
+  // complementos (la joyeria fabrica sus propios complementos).
   const [assignPickerTab, setAssignPickerTab] = useState<"PRODUCTOS" | "COMPLEMENTOS">("PRODUCTOS");
   // Tick por minuto para el tiempo transcurrido de las ordenes en proceso.
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -569,8 +352,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     onConfirm: () => void;
   } | null>(null);
 
-  const selectedStage = form.stages[selectedStageIndex] ?? form.stages[0];
-
   function runFinisherName(run: ProductionRun): string {
     const finished = run.stages.filter((s) => s.finished_at && s.finished_by_name);
     if (finished.length === 0) return "—";
@@ -609,15 +390,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, [postFinishReturnRun]);
 
 
-  // Cambiar el material con un producto ya elegido en ENSAMBLAR: la clave de
-  // receta depende del material, así que hay que volver a resolverla.
-  useEffect(() => {
-    if (assemblyMode === "ENSAMBLAR" && orderProduct) {
-      void loadOrderRecipeForChoice(orderProduct);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMaterialId]);
-
   useEffect(() => {
     if (!error && !success) return;
     const timeout = window.setTimeout(() => {
@@ -637,22 +409,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setConfirmDialog({ title, message, onConfirm, isDanger, confirmLabel });
   }
   const activeProcesses = processes.filter((process) => process.is_active);
+  // Proceso elegido para iniciar un intento de etapa (flujo nuevo, seccion 4.2).
   const selectedProcess = processes.find((process) => process.id === selectedProcessId) ?? null;
-  const selectedMaterial = rawMaterials.find((item) => item.id === selectedMaterialId) ?? null;
-  // Insumos configurados en las etapas activas del proceso elegido: se piden
-  // obligatorios al crear la orden, igual que los complementos.
-  const configuredStageIngredients = (selectedProcess?.stages ?? []).flatMap((stage) =>
-    (stage.ingredients ?? []).map((ing) => ({
-      configId: ing.id,
-      stageName: stage.name,
-      inventoryItemId: ing.inventory_item_id,
-    })),
-  );
-  // Código de material (1 dígito) de la materia prima elegida: la clave de
-  // receta ahora es material+categoria+modelo. Sin material elegido no se
-  // puede saber qué piezas/tipos ya tienen receta, así que no se excluye
-  // nada (mejor mostrar de más que ocultar sin poder saberlo).
-  const orderMaterialCode = materialCodeForItem(selectedMaterial, catalogSegments);
 
   const approvedMaterialRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS");
   const inProgressRuns = runs.filter((run) => run.status === "EN_PROCESO");
@@ -746,6 +504,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       RECIBIDA: "Recibida",
       CANCELADA: "Cancelada",
       ESPERANDO_MATERIAL: "Esperando material",
+      TERMINADA: "Terminada",
     };
     return labels[status] ?? status;
   }
@@ -796,12 +555,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         ) : null}
         {run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA" ? (
           <>
-            {run.assembly_pending ? (
-              <button className="button buttonPrimary" onClick={() => openAssemblyModal(run)} type="button">
-                <Puzzle aria-hidden="true" size={14} />
-                Definir ensamble
-              </button>
-            ) : null}
             {run.status === "PENDIENTE_RECEPCION" ? (
               <button aria-label="Corregir pesos" className="iconOnlyButton" onClick={() => openRunStagesModal(run)} title="Corregir pesos" type="button">
                 <Pencil aria-hidden="true" size={14} />
@@ -825,6 +578,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       RECIBIDA: "done",
       CANCELADA: "danger",
       ESPERANDO_MATERIAL: "warning",
+      TERMINADA: "done",
     };
     return tones[status] ?? "neutral";
   }
@@ -1067,45 +821,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setIsStatsModalOpen(true);
   }
 
-  // Abre "Definir ensamble": semilla de filas desde los complementos APROBADA
-  // de la orden, con "por unidad" vacio para que el jefe de produccion lo llene.
-  function openAssemblyModal(run: ProductionRun) {
-    const approved = (run.complements ?? []).filter((complement) => complement.status === "APROBADA");
-    setAssemblyLines(approved.map((complement) => ({ itemId: complement.item_id, perUnit: "" })));
-    setAssemblyRun(run);
-  }
-
-  function closeAssemblyModal() {
-    setAssemblyRun(null);
-    setAssemblyLines([]);
-  }
-
-  async function handleDefineAssembly() {
-    if (!assemblyRun) return;
-    const lines = assemblyLines.filter((line) => Number(line.perUnit) > 0);
-    if (lines.length === 0) return;
-    if (lines.some((line) => (line.perUnit.split(".")[1]?.length ?? 0) > 4)) {
-      setError("Máximo 4 decimales.");
-      return;
-    }
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      await defineRunAssembly(
-        assemblyRun.id,
-        lines.map((line) => ({ complement_item_id: line.itemId, quantity: line.perUnit })),
-      );
-      setSuccess("Ensamble definido. La receta quedó guardada para el futuro.");
-      closeAssemblyModal();
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo definir el ensamble.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
   function closeStatsModal() {
     setIsStatsModalOpen(false);
     setSelectedStatsRun(null);
@@ -1144,7 +859,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   function openCreateForm() {
     setForm(emptyProcessForm());
-    setSelectedStageIndex(0);
     setFormMode("create");
     setEditingProcessId(null);
     setReturnToProcesses(false);
@@ -1155,7 +869,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
   function openEditForm(process: ProductionProcess) {
     setForm(processToForm(process));
-    setSelectedStageIndex(0);
     setFormMode("edit");
     setEditingProcessId(process.id);
     setReturnToProcesses(true);
@@ -1206,77 +919,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  function addStage() {
-    setForm((current) => {
-      const nextStages = [...current.stages, emptyStage()];
-      setSelectedStageIndex(nextStages.length - 1);
-      return { ...current, stages: nextStages };
-    });
-  }
-
-  function removeCurrentStage() {
-    setForm((current) => {
-      if (current.stages.length === 1) return current;
-      const nextStages = current.stages.filter((_, index) => index !== selectedStageIndex);
-      setSelectedStageIndex((currentIndex) => Math.max(0, Math.min(currentIndex, nextStages.length - 1)));
-      return { ...current, stages: nextStages };
-    });
-  }
-
-  function addStageIngredient(item: InventoryItem) {
-    updateStage({
-      ingredients: [...selectedStage.ingredients, { inventoryItemId: item.id, unitCode: item.unit_code }],
-    });
-    setIsIngredientPickerOpen(false);
-  }
-
-  function updateStage(fieldOrPatch: keyof StageForm | Partial<StageForm>, value?: string | boolean | Array<{ inventoryItemId: string; unitCode: string }>) {
-    setForm((current) => ({
-      ...current,
-      stages: current.stages.map((stage, index) => {
-        if (index !== selectedStageIndex) return stage;
-        if (typeof fieldOrPatch === "string") {
-          return { ...stage, [fieldOrPatch]: value };
-        }
-        return { ...stage, ...fieldOrPatch };
-      }),
-    }));
-  }
-
   function buildPayload() {
     const processName = form.name.trim();
 
     if (!processName) {
       throw new Error("El nombre del proceso es obligatorio.");
     }
-    if (form.stages.some((stage) => !stage.name.trim())) {
-      throw new Error("Todas las etapas agregadas deben tener nombre.");
-    }
 
     return {
       name: processName,
       description: form.description.trim() || null,
-      version: 1,
-      waste_limit_percent: "1",
-      is_active: true,
-      product_type_ids: form.productTypeIds,
-      stages: form.stages.map((stage, index) => ({
-        name: stage.name.trim(),
-        description: stage.description.trim() || null,
-        phase_name: stage.phaseName.trim() || null,
-        stage_type: stage.stageType || "PROCESS",
-        quality_check: stage.qualityCheck.trim() || null,
-        rework_action: stage.reworkAction.trim() || null,
-        rework_target_order: stage.reworkTargetOrder ? Number(stage.reworkTargetOrder) : null,
-        order: index + 1,
-        requires_weighing: stage.requiresWeighing,
-        is_active: true,
-        ingredients: stage.ingredients
-          .filter((ing) => ing.inventoryItemId)
-          .map((ing) => ({
-            inventory_item_id: ing.inventoryItemId,
-          })),
-      })),
+      is_active: form.isActive,
     };
   }
 
@@ -1337,79 +990,108 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return payload;
   }
 
-  async function handleCreateProductionOrder() {
-    if (!selectedProcess) {
-      setError("Selecciona un proceso para producir.");
+  // --- Flujo dinamico de produccion (docs/cambios-sistema-produccion.md seccion 4) ---
+
+  async function handleCreateOrder() {
+    const name = newOrderName.trim();
+    if (!name) {
+      setError("Escribe el nombre de la orden.");
       return;
     }
-    if (!runQuantity || Number(runQuantity) <= 0) {
-      setError("Ingresa una cantidad valida para fabricar.");
-      return;
-    }
-    if (!selectedMaterialId) {
-      setError("Selecciona la materia prima con la que se fabricará esta orden.");
-      return;
-    }
-
-    if (!orderProduct || (!orderProduct.targetItemId && !orderProduct.productTypeId)) {
-      setError(
-        assemblyMode === "ENSAMBLAR"
-          ? "Elige el producto final a ensamblar."
-          : "Elige el producto a fabricar."
-      );
-      return;
-    }
-
-    const missingIngredient = configuredStageIngredients.find(
-      (ing) => !(Number(stageIngredientQuantities[ing.configId]) > 0),
-    );
-    if (missingIngredient) {
-      setError("Ingresa la cantidad de todos los insumos de este proceso.");
-      return;
-    }
-
-    const productsPayload = [productRowToPayload(orderProduct, runQuantity)];
-
-    // ASIGNAR no solicita complementos. ENSAMBLAR usa las cantidades totales
-    // definidas a mano en orderRecipe (formulario editable, ver Task 15) --
-    // nunca se calculan solas multiplicando por la cantidad de la orden.
-    let complementsPayload: Array<{ item_id: string; quantity: string }> = [];
-    if (assemblyMode === "ENSAMBLAR") {
-      const productKey = orderProduct.targetItemId ?? orderProduct.productTypeId;
-      if (!orderRecipe || orderRecipe.key !== productKey || orderRecipe.recipe.items.length === 0) {
-        setError("Este producto necesita complementos definidos para ensamblar.");
-        return;
-      }
-      complementsPayload = orderRecipe.recipe.items.map((item) => ({
-        item_id: item.complement_item_id,
-        quantity: String(Number(item.quantity)),
-      }));
-    }
-
-    const stageIngredientsPayload = configuredStageIngredients.map((ing) => ({
-      process_stage_ingredient_id: ing.configId,
-      quantity: stageIngredientQuantities[ing.configId],
-    }));
-
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
-      await createProductionRun({
-        process_id: selectedProcess.id,
-        quantity: runQuantity,
-        raw_material_item_id: selectedMaterialId,
-        assembly_mode: assemblyMode,
-        products: productsPayload,
-        complements: complementsPayload,
-        stage_ingredients: stageIngredientsPayload,
-      });
-      setSuccess("Orden creada. Inventario debe aprobar la salida de materia prima y complementos.");
+      const created = await createProductionOrder(name);
+      setSuccess("Orden creada.");
       setIsCreateOrderOpen(false);
-      resetCreateOrderState();
+      setNewOrderName("");
+      await reload();
+      setDynamicOrderRun(created);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo crear la orden.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleStartStageAttempt() {
+    if (!dynamicOrderRun) return;
+    if (!selectedProcessId) {
+      setError("Elige el proceso para esta etapa.");
+      return;
+    }
+    if (!stageResponsableName.trim()) {
+      setError("Escribe el nombre del responsable.");
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await startStageAttempt(dynamicOrderRun.id, {
+        process_id: selectedProcessId,
+        responsable_name: stageResponsableName.trim(),
+      });
+      setDynamicOrderRun(updated);
+      setSelectedProcessId("");
+      setStageResponsableName("");
       await reload();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo crear la orden de produccion.");
+      setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la etapa.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleFinishStageAttempt(attemptId: string, decision: "APROBADA" | "RECHAZADA") {
+    if (!stageAttemptPeso || Number(stageAttemptPeso) < 0) {
+      setError("Ingresa el peso al finalizar.");
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await finishStageAttempt(attemptId, {
+        peso_al_finalizar: stageAttemptPeso,
+        decision,
+        rejection_reason: decision === "RECHAZADA" ? stageAttemptRejectReason.trim() || null : null,
+      });
+      setDynamicOrderRun(updated);
+      setStageAttemptPeso("");
+      setStageAttemptRejectReason("");
+      setSuccess(decision === "APROBADA" ? "Etapa aprobada." : "Etapa rechazada.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo terminar la etapa.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleAssignProduct() {
+    if (!dynamicOrderRun) return;
+    if (!orderProduct || (!orderProduct.targetItemId && !orderProduct.productTypeId)) {
+      setError("Elige el producto a asignar.");
+      return;
+    }
+    if (!runQuantity || Number(runQuantity) <= 0) {
+      setError("Ingresa una cantidad valida.");
+      return;
+    }
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await assignProduct(dynamicOrderRun.id, [productRowToPayload(orderProduct, runQuantity)]);
+      setDynamicOrderRun(updated);
+      setOrderProduct(null);
+      setRunQuantity("1");
+      setSuccess("Producto asignado. Orden terminada.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo asignar el producto.");
     } finally {
       setIsSaving(false);
     }
@@ -1707,244 +1389,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  // Control de producto único compartido por la modal Crear orden y la modal
-  // Editar producto resultante: botón "Elegir producto" que abre el picker de
-  // piezas, o "Cambiar" una vez ya hay uno elegido.
-  function renderProductChooser(current: ProductChoice | null, onOpenPicker: () => void) {
-    return (
-      <div className="materialRow">
-        <button
-          className="button"
-          onClick={onOpenPicker}
-          style={{ flex: 1, justifyContent: "flex-start" }}
-          type="button"
-        >
-          {current?.label || "Elegir producto"}
-        </button>
-        {current?.label ? (
-          <button className="button" onClick={onOpenPicker} type="button">
-            Cambiar
-          </button>
-        ) : null}
-      </div>
-    );
-  }
-
-  // Tras elegir producto en modo ENSAMBLAR: consulta su receta. La clave de
-  // receta ahora incluye el material de la orden, así que sin material
-  // elegido no se puede resolver: se avisa y se limpia la selección. Sin
-  // receta y con tipo resoluble, abre la modal para crearla; sin tipo
-  // resoluble, no se puede ensamblar y se limpia la selección.
-  async function loadOrderRecipeForChoice(choice: ProductChoice) {
-    setError(null);
-    if (!selectedMaterialId) {
-      setError("Elige primero el material.");
-      setOrderProduct(null);
-      setOrderRecipe(null);
-      return;
-    }
-    const seq = ++recipeLookupSeq.current;
-    try {
-      const recipe = choice.targetItemId
-        ? await getAssemblyRecipe({ itemId: choice.targetItemId, materialItemId: selectedMaterialId })
-        : await getAssemblyRecipe({ productTypeId: choice.productTypeId, materialItemId: selectedMaterialId });
-
-      if (seq !== recipeLookupSeq.current) return;
-
-      if (!recipe.model_key) {
-        setError("Esta pieza no tiene tipo en el catálogo: usa Asignar.");
-        setOrderProduct(null);
-        setOrderRecipe(null);
-        return;
-      }
-      // Siempre se pide escribir la cantidad de nuevo, aunque ya exista una
-      // receta previa: solo se reusa la LISTA de complementos (cuales hacen
-      // falta), nunca el valor guardado -- Rodrigo: no debe salir con el
-      // ultimo valor, debe salir vacio para llenarlo de nuevo cada vez.
-      setOrderRecipe(null);
-      setRecipeLines(
-        recipe.items.map((item) => ({
-          itemId: item.complement_item_id,
-          label: item.name ?? "Complemento",
-          unitCode: item.unit_code ?? "",
-          perUnit: "",
-        })),
-      );
-      setRecipeModalContext("order");
-      setRecipeModalModelKey(recipe.model_key);
-    } catch (nextError) {
-      if (seq !== recipeLookupSeq.current) return;
-      setError(nextError instanceof Error ? nextError.message : "No se pudo cargar la receta.");
-      setOrderProduct(null);
-      setOrderRecipe(null);
-    }
-  }
-
   // Aplica la selección de un picker (pieza o tipo) al producto único de la
-  // modal correspondiente ("create" = Crear orden, "edit" = Editar producto).
+  // modal correspondiente ("create" = Asignar a producto terminado del flujo
+  // nuevo, "edit" = Editar producto resultante del flujo viejo).
   function applyProductChoice(kind: "create" | "edit", patch: ProductChoice) {
     if (kind === "create") {
       setOrderProduct(patch);
-      setOrderRecipe(null);
-      if (assemblyMode === "ENSAMBLAR") {
-        void loadOrderRecipeForChoice(patch);
-      }
     } else {
       setEditPlanProduct(patch);
     }
   }
 
-  // Abre el picker correcto para el producto de "Crear orden": tipo del
-  // catálogo en ENSAMBLAR (la receta depende del material+tipo, no de una
-  // pieza puntual), pieza/tipo existente en ASIGNAR.
-  function handleOpenProductPicker() {
-    if (assemblyMode === "ENSAMBLAR") {
-      setTypePickerFor("create");
-    } else {
-      setAssignPickerTab("PRODUCTOS");
-      setItemPickerFor("create");
-    }
-  }
-
-  // Cambiar de modo limpia el producto elegido y su receta: en ASIGNAR se
-  // destina a una pieza/tipo existente, en ENSAMBLAR es el producto final que
-  // arrastra la receta de complementos que lo ensambla.
-  function handleAssemblyModeChange(mode: "ASIGNAR" | "ENSAMBLAR") {
-    if (mode === assemblyMode) return;
-    recipeLookupSeq.current += 1;
-    setAssemblyMode(mode);
-    setOrderProduct(null);
-    setOrderRecipe(null);
-    setRecipeModalModelKey(null);
-    setRecipeLines([]);
-  }
-
-  // Cierra la modal de crear orden: limpia producto, modo, cantidad, receta y
-  // pickers abiertos para esa modal. Se usa en éxito y en el botón X.
-  function resetCreateOrderState() {
-    recipeLookupSeq.current += 1;
-    setOrderProduct(null);
-    setAssemblyMode("ASIGNAR");
-    setRunQuantity("1");
-    setStageIngredientQuantities({});
-    setOrderRecipe(null);
-    setRecipeModalModelKey(null);
-    setRecipeLines([]);
-    setIsRecipeComplementPickerOpen(false);
-    setItemPickerFor((current) => (current === "create" ? null : current));
-    setTypePickerFor((current) => (current === "create" ? null : current));
-  }
-
-  // Cierra la modal de receta. clearProduct=true (X/Cancelar): sin receta no
-  // hay ensamble, así que se limpia también la selección de producto — pero
-  // solo si la modal se abrió desde Crear orden; desde mantenimiento no hay
-  // producto de orden que limpiar.
-  function closeRecipeModal(clearProduct: boolean) {
-    setRecipeModalModelKey(null);
-    setRecipeLines([]);
-    setIsRecipeComplementPickerOpen(false);
-    if (clearProduct && recipeModalContext === "order") {
-      setOrderProduct(null);
-      setOrderRecipe(null);
-    }
-    setRecipeModalContext("order");
-  }
-
-  function addRecipeLine(item: InventoryItem) {
-    setRecipeLines((current) => [...current, { itemId: item.id, label: item.name, unitCode: item.unit_code, perUnit: "" }]);
-    setIsRecipeComplementPickerOpen(false);
-  }
-
-  function removeRecipeLine(itemId: string) {
-    setRecipeLines((current) => current.filter((line) => line.itemId !== itemId));
-  }
-
-  function updateRecipeLinePerUnit(itemId: string, value: string) {
-    setRecipeLines((current) =>
-      current.map((line) => (line.itemId === itemId ? { ...line, perUnit: value } : line))
-    );
-  }
-
-  async function handleSaveRecipe() {
-    if (!recipeModalModelKey) return;
-    if (recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))) {
-      setError("Completa la cantidad de todos los complementos (o quita los que sobren).");
-      return;
-    }
-    if (recipeLines.some((line) => (line.perUnit.split(".")[1]?.length ?? 0) > 4)) {
-      setError("Máximo 4 decimales.");
-      return;
-    }
-
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      const saved = await upsertAssemblyRecipe(
-        recipeModalModelKey,
-        recipeLines.map((line) => ({ complement_item_id: line.itemId, quantity: line.perUnit })),
-      );
-      if (recipeModalContext === "order") {
-        const key = orderProduct ? orderProduct.targetItemId ?? orderProduct.productTypeId ?? recipeModalModelKey : recipeModalModelKey;
-        setOrderRecipe({ key, recipe: saved });
-      }
-      setRecipeModalModelKey(null);
-      setRecipeLines([]);
-      setRecipeModalContext("order");
-      setSuccess("Complementos guardados.");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] }),
-        queryClient.invalidateQueries({ queryKey: ["assembly-recipes"] }),
-      ]);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo guardar la receta.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleDeleteRecipe(modelKey: string) {
-    setError(null);
-    setSuccess(null);
-    try {
-      await deleteAssemblyRecipe(modelKey);
-      setSuccess("Receta eliminada.");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["assembly-recipe-model-keys"] }),
-        queryClient.invalidateQueries({ queryKey: ["assembly-recipes"] }),
-      ]);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo eliminar la receta.");
-    }
-  }
-
-  // Describe la clave de una receta (material+categoría+modelo, 7 dígitos):
-  // prefiere la pieza de inventario con ese código de producto; si no hay
-  // pieza, decodifica la clave contra el catálogo de segmentos.
-  function describeRecipeKey(key: string): { product: string; material: string } {
-    const material =
-      catalogSegments.find((segment) => segment.kind === "MATERIAL" && segment.code === key.slice(0, 1))?.label ??
-      `Material ${key.slice(0, 1)}`;
-    const piece = finishedProductsList.find((item) => item.product_code === key);
-    if (piece) {
-      const description = piece.description?.trim();
-      return { product: description ? description : piece.name, material };
-    }
-    const model = catalogSegments.find(
-      (segment) => segment.kind === "MODEL" && segment.parent_code === key.slice(1, 3) && segment.code === key.slice(3),
-    );
-    const category = catalogSegments.find((segment) => segment.kind === "CATEGORY" && segment.code === key.slice(1, 3));
-    return { product: model?.label ?? category?.label ?? key, material };
-  }
-
-  // Ids de tipos permitidos para el CatalogProductPicker según modal (el
-  // proceso/orden declara qué produce; [] = sin restricción, permite crear).
-  // La exclusión de tipos con receta (solo se fabrican por ENSAMBLAR) se
-  // aplica aparte con excludeTypeIds, sin tocar esta semántica.
+  // Ids de tipos permitidos para el CatalogProductPicker según modal. El
+  // flujo nuevo ya no restringe por proceso (el banco de procesos no declara
+  // que tipos produce cada paso) -- sin restriccion, permite elegir cualquiera.
   function allowedTypeIdsForPicker(kind: "create" | "edit"): string[] {
-    return kind === "create"
-      ? selectedProcess?.product_type_ids ?? []
-      : editPlanRun?.allowed_product_type_ids ?? [];
+    return kind === "create" ? [] : editPlanRun?.allowed_product_type_ids ?? [];
   }
 
   // Contadores animados de la barra de metricas de produccion.
@@ -2061,22 +1521,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <Puzzle aria-hidden="true" size={22} />
                 <strong>Complementos</strong>
                 <span>{complementsList.length} complementos creados.</span>
-              </button>
-            </div>
-          </section>
-
-          <section className="maintenanceSection" aria-label="Recetas de ensamble">
-            <h2>Recetas de ensamble</h2>
-            <div className="maintenanceGrid">
-              <button className="maintenanceTile" onClick={() => setIsMaintenanceRecipePickerOpen(true)} type="button">
-                <ScrollText aria-hidden="true" size={22} />
-                <strong>Crear receta</strong>
-                <span>Complementos y cantidad a usar de un producto.</span>
-              </button>
-              <button className="maintenanceTile" onClick={() => setIsRecipesViewOpen(true)} type="button">
-                <FileText aria-hidden="true" size={22} />
-                <strong>Recetas</strong>
-                <span>{assemblyRecipes.length} recetas creadas.</span>
               </button>
             </div>
           </section>
@@ -2315,13 +1759,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     {processFamilies.map(([key, family]) => {
                       const root = family.find((r) => !r.parent_run_id) ?? family[0];
                       const otherParts = family.filter((r) => r.id !== root.id);
+                      const isDynamic = (root.stage_attempts ?? []).length > 0;
                       const rootStage = runCurrentStage(root);
+                      const lastAttempt = isDynamic
+                        ? [...(root.stage_attempts ?? [])].sort((a, b) => b.sequence_order - a.sequence_order)[0]
+                        : null;
+                      const rowClick = isDynamic
+                        ? () => setDynamicOrderRun(root)
+                        : otherParts.length > 0
+                          ? () => setFamilyRuns(family)
+                          : undefined;
                       return (
-                        <tr
-                          key={key}
-                          onClick={otherParts.length > 0 ? () => setFamilyRuns(family) : undefined}
-                          style={otherParts.length > 0 ? { cursor: "pointer" } : undefined}
-                        >
+                        <tr key={key} onClick={rowClick} style={rowClick ? { cursor: "pointer" } : undefined}>
                           <td>
                             {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : "—"}
                             {otherParts.length > 0 ? (
@@ -2330,14 +1779,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                               rootBadge(root)
                             )}
                           </td>
-                          <td>{root.process_name}</td>
-                          <td className="num">{numericText(root.quantity)} {root.raw_material_unit_code}</td>
-                          <td className="num">{numericText(runCurrentWeight(root))} {root.raw_material_unit_code}</td>
-                          <td>{rootStage ? `${rootStage.stage_order}. ${rootStage.stage_name}` : "—"}</td>
+                          <td>{isDynamic ? (root.name ?? root.production_code) : root.process_name}</td>
+                          <td className="num">{isDynamic ? "—" : `${numericText(root.quantity)} ${root.raw_material_unit_code}`}</td>
+                          <td className="num">{isDynamic ? "—" : `${numericText(runCurrentWeight(root))} ${root.raw_material_unit_code}`}</td>
+                          <td>
+                            {isDynamic
+                              ? lastAttempt
+                                ? `${lastAttempt.process_name} (${lastAttempt.attempt_no_for_process})`
+                                : "Sin etapas todavia"
+                              : rootStage
+                                ? `${rootStage.stage_order}. ${rootStage.stage_name}`
+                                : "—"}
+                          </td>
                           <td><StatusPunch label={runStatusLabel(root.status)} tone={runStatusTone(root.status)} /></td>
                           <td>{processRowDate(root)}</td>
                           <td className="num">{processRowWaste(root)}</td>
-                          <td onClick={stopClick}>{processRowActions(root)}</td>
+                          <td onClick={stopClick}>{isDynamic ? null : processRowActions(root)}</td>
                         </tr>
                       );
                     })}
@@ -2399,16 +1856,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           </button>
                         ) : (
                           <>
-                            {root.assembly_pending ? (
-                              <button
-                                className="button buttonPrimary"
-                                onClick={() => openAssemblyModal(root)}
-                                type="button"
-                              >
-                                <Puzzle aria-hidden="true" size={14} />
-                                Definir ensamble
-                              </button>
-                            ) : null}
                             {root.status === "PENDIENTE_RECEPCION" ? (
                               <button aria-label="Corregir pesos" className="iconOnlyButton" onClick={() => openRunStagesModal(root)} title="Corregir pesos" type="button">
                                 <Pencil aria-hidden="true" size={14} />
@@ -2432,145 +1879,272 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </>
       )}
 
-      <CreateOrderWizard
-        isOpen={isCreateOrderOpen}
-        onClose={() => {
-          setIsCreateOrderOpen(false);
-          resetCreateOrderState();
-        }}
-        isSaving={isSaving}
-        onError={setError}
-        processes={activeProcesses}
-        selectedProcessId={selectedProcessId}
-        onSelectProcess={setSelectedProcessId}
-        rawMaterials={rawMaterials}
-        selectedMaterialId={selectedMaterialId}
-        onSelectMaterial={setSelectedMaterialId}
-        selectedMaterial={selectedMaterial}
-        suppliesList={orderSupplyItems}
-        configuredStageIngredients={configuredStageIngredients}
-        stageIngredientQuantities={stageIngredientQuantities}
-        onChangeStageIngredientQuantity={(configId, value) =>
-          setStageIngredientQuantities((current) => ({ ...current, [configId]: value }))
-        }
-        assemblyMode={assemblyMode}
-        onChangeAssemblyMode={handleAssemblyModeChange}
-        orderProduct={orderProduct}
-        renderProductChooser={renderProductChooser}
-        onOpenProductPicker={handleOpenProductPicker}
-        runQuantity={runQuantity}
-        onChangeRunQuantity={setRunQuantity}
-        onSubmit={() => void handleCreateProductionOrder()}
-      />
+      {/* Crear orden (flujo nuevo, seccion 4.1): solo el nombre libre. El
+          proceso/etapa se eligen despues, uno a la vez, desde el panel de la
+          orden recien creada. */}
+      {isCreateOrderOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Crear orden">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Crear orden</h2>
+                <p>Nombre libre -- el proceso se elige despues, etapa por etapa</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCreateOrderOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <label className="fieldGroup">
+              <span>Nombre de la orden</span>
+              <input
+                autoFocus
+                className="field"
+                disabled={isSaving}
+                maxLength={255}
+                onChange={(event) => setNewOrderName(event.target.value)}
+                placeholder="Ej: Cadenas cubanas lote agosto"
+                value={newOrderName}
+              />
+            </label>
+            <div className="modalActions">
+              <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleCreateOrder()} type="button">
+                <Save aria-hidden="true" size={17} />
+                {isSaving ? "Creando" : "Crear orden"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
-      {/* Definir ensamble: combinacion de complementos APROBADOS de la orden.
-          Se guarda como receta a futuro (cantidad total, no por unidad). */}
-      {assemblyRun ? (() => {
-        const approvedComplements = (assemblyRun.complements ?? []).filter((complement) => complement.status === "APROBADA");
-        const hasValidLine = assemblyLines.some((line) => Number(line.perUnit) > 0);
-        const hasExcess = assemblyLines.some((line) => {
-          const qty = Number(line.perUnit);
-          if (!(qty > 0)) return false;
-          const complement = approvedComplements.find((candidate) => candidate.item_id === line.itemId);
-          const approvedQty = complement ? Number(complement.quantity) : 0;
-          return qty > approvedQty;
-        });
-        const canSubmitAssembly = hasValidLine && !hasExcess;
+      {/* Panel de la orden del flujo nuevo: etapas anteriores, etapa activa
+          (acta directa + peso al finalizar + ✔/✘), y "Asignar a producto
+          terminado" disponible en cualquier momento (seccion 4). */}
+      {dynamicOrderRun ? (() => {
+        const runningAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.status === "EN_PROCESO") ?? null;
+        const pastAttempts = (dynamicOrderRun.stage_attempts ?? []).filter((a) => a.id !== runningAttempt?.id);
+        const activeActaLines = runningAttempt
+          ? (dynamicOrderRun.acta_lines ?? []).filter((line) => line.stage_attempt_id === runningAttempt.id)
+          : [];
+        const isTerminada = dynamicOrderRun.status === "TERMINADA" || dynamicOrderRun.status === "CANCELADA";
         return (
-          <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir ensamble">
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Orden">
             <section className="modalWindow processViewWindow">
               <div className="modalHeader">
                 <div>
-                  <h2>Definir ensamble</h2>
-                  <p>{assemblyRun.production_code ?? ""} · fabrica {numericText(assemblyRun.quantity)} {assemblyRun.raw_material_unit_code}</p>
+                  <h2>{dynamicOrderRun.name ?? dynamicOrderRun.production_code}</h2>
+                  <p>{dynamicOrderRun.production_code} · <StatusPunch label={runStatusLabel(dynamicOrderRun.status)} tone={runStatusTone(dynamicOrderRun.status)} /></p>
                 </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeAssemblyModal} type="button">
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setDynamicOrderRun(null)} type="button">
                   <X aria-hidden="true" size={18} />
                 </button>
               </div>
-              {approvedComplements.length > 0 ? (
+
+              {pastAttempts.length > 0 ? (
                 <div className="tableWrap">
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>Complemento</th>
-                        <th className="num">Aprobado</th>
-                        <th className="num">Cantidad a usar</th>
+                        <th>Codigo</th>
+                        <th>Proceso</th>
+                        <th>Responsable</th>
+                        <th>Estado</th>
+                        <th className="num">Merma</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {approvedComplements.map((complement) => {
-                        const line = assemblyLines.find((candidate) => candidate.itemId === complement.item_id);
-                        const qty = line?.perUnit ?? "";
-                        const qtyNumber = Number(qty);
-                        const approvedQty = Number(complement.quantity);
-                        const exceeds = qtyNumber > 0 && qtyNumber > approvedQty;
-                        return (
-                          <tr key={complement.id}>
-                            <td>{complement.name ?? "—"}</td>
-                            <td className="num">{numericText(complement.quantity)} {complement.unit_code}</td>
-                            <td className="num">
-                              <input
-                                aria-label={`Cantidad a usar de ${complement.name ?? "complemento"}`}
-                                className="field"
-                                min="0"
-                                onChange={(event) => {
-                                  const value = event.target.value;
-                                  setAssemblyLines((current) =>
-                                    current.map((candidate) =>
-                                      candidate.itemId === complement.item_id ? { ...candidate, perUnit: value } : candidate,
-                                    ),
-                                  );
-                                }}
-                                step="0.0001"
-                                style={{ width: 90 }}
-                                type="number"
-                                value={qty}
-                              />
-                              {exceeds ? (
-                                <small style={{ display: "block", color: "var(--danger, #c0392b)" }}>
-                                  Supera lo aprobado
-                                </small>
-                              ) : null}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {pastAttempts.map((attempt) => (
+                        <tr key={attempt.id}>
+                          <td>{attempt.code ?? "—"}</td>
+                          <td>{attempt.process_name}</td>
+                          <td>{attempt.responsable_name ?? "—"}</td>
+                          <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : "Rechazada"}</span></td>
+                          <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
-              ) : (
-                <div className="emptyState">Esta orden no tiene complementos aprobados.</div>
-              )}
-              <div className="modalActions">
-                <button
-                  className="button buttonPrimary"
-                  disabled={isSaving || !canSubmitAssembly}
-                  onClick={() => void handleDefineAssembly()}
-                  type="button"
-                >
-                  <Puzzle aria-hidden="true" size={15} />
-                  {isSaving ? "Guardando" : "Definir ensamble"}
-                </button>
-              </div>
+              ) : null}
+
+              {runningAttempt ? (
+                <section className="card panelBody" style={{ marginTop: 12 }}>
+                  <div className="panelHeader">
+                    <div>
+                      <h2 className="panelTitle">{runningAttempt.process_name}</h2>
+                      <p className="panelText">{runningAttempt.code} · Responsable: {runningAttempt.responsable_name ?? "—"}</p>
+                    </div>
+                  </div>
+
+                  <div className="tableWrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Detalle</th>
+                          <th className="num">Cantidad</th>
+                          <th>Lado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeActaLines.map((line) => (
+                          <tr key={line.id}>
+                            <td>{line.label}</td>
+                            <td className="num">{numericText(line.quantity)} {line.unit_code}</td>
+                            <td>{line.side === "ENTREGA" ? "Entrega" : "Recepcion"}</td>
+                          </tr>
+                        ))}
+                        {activeActaLines.length === 0 ? (
+                          <tr><td colSpan={3}><div className="emptyState">Sin lineas todavia.</div></td></tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 14 }}>
+                    <AdminAddActaLineControl
+                      isAdmin
+                      items={[...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems]}
+                      onChanged={async () => {
+                        await reload();
+                        const fresh = (await listProductionRuns()).find((r) => r.id === dynamicOrderRun.id);
+                        if (fresh) setDynamicOrderRun(fresh);
+                      }}
+                      onError={setError}
+                      onSuccess={setSuccess}
+                      runId={dynamicOrderRun.id}
+                      side="ENTREGA"
+                      stageAttemptId={runningAttempt.id}
+                    />
+                  </div>
+
+                  <label className="fieldGroup" style={{ marginTop: 10 }}>
+                    <span>Peso al finalizar</span>
+                    <input
+                      className="field"
+                      disabled={isSaving}
+                      min="0"
+                      onChange={(event) => setStageAttemptPeso(event.target.value)}
+                      step="0.0001"
+                      style={{ width: 140 }}
+                      type="number"
+                      value={stageAttemptPeso}
+                    />
+                  </label>
+                  <label className="fieldGroup">
+                    <span>Motivo de rechazo (opcional)</span>
+                    <input
+                      className="field"
+                      disabled={isSaving}
+                      maxLength={1000}
+                      onChange={(event) => setStageAttemptRejectReason(event.target.value)}
+                      value={stageAttemptRejectReason}
+                    />
+                  </label>
+                  <div className="modalActions">
+                    <button
+                      aria-label="Rechazar etapa"
+                      className="button dangerIconButton"
+                      disabled={isSaving}
+                      onClick={() => void handleFinishStageAttempt(runningAttempt.id, "RECHAZADA")}
+                      type="button"
+                    >
+                      ✘ Rechazar
+                    </button>
+                    <button
+                      aria-label="Aprobar etapa"
+                      className="button buttonPrimary"
+                      disabled={isSaving}
+                      onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
+                      type="button"
+                    >
+                      ✔ Aprobar
+                    </button>
+                  </div>
+                </section>
+              ) : !isTerminada ? (
+                <section className="card panelBody" style={{ marginTop: 12 }}>
+                  <div className="panelHeader">
+                    <div>
+                      <h2 className="panelTitle">Elegir proceso</h2>
+                      <p className="panelText">Banco de procesos</p>
+                    </div>
+                  </div>
+                  <label className="fieldGroup">
+                    <span>Proceso</span>
+                    <select className="field" onChange={(event) => setSelectedProcessId(event.target.value)} value={selectedProcessId}>
+                      <option value="">Elegir...</option>
+                      {activeProcesses.map((process) => (
+                        <option key={process.id} value={process.id}>{process.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="fieldGroup">
+                    <span>Responsable</span>
+                    <input
+                      className="field"
+                      disabled={isSaving}
+                      maxLength={180}
+                      onChange={(event) => setStageResponsableName(event.target.value)}
+                      value={stageResponsableName}
+                    />
+                  </label>
+                  <div className="modalActions">
+                    <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleStartStageAttempt()} type="button">
+                      Iniciar etapa
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
+              {!isTerminada ? (
+                <div className="modalActions" style={{ marginTop: 12 }}>
+                  <button
+                    className="button"
+                    disabled={isSaving}
+                    onClick={() => {
+                      setAssignPickerTab("PRODUCTOS");
+                      setItemPickerFor("create");
+                    }}
+                    type="button"
+                  >
+                    Asignar a producto terminado
+                  </button>
+                </div>
+              ) : null}
+
+              {itemPickerFor === "create" && orderProduct ? (
+                <div className="card panelBody" style={{ marginTop: 12 }}>
+                  <p className="panelText">Producto elegido: {orderProduct.label}</p>
+                  <label className="fieldGroup">
+                    <span>Cantidad</span>
+                    <input
+                      className="field"
+                      min="0.0001"
+                      onChange={(event) => setRunQuantity(event.target.value)}
+                      step="0.0001"
+                      type="number"
+                      value={runQuantity}
+                    />
+                  </label>
+                  <div className="modalActions">
+                    <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleAssignProduct()} type="button">
+                      Confirmar asignacion
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </section>
           </div>
         );
       })() : null}
 
       {/* Picker de pieza terminada (o complemento) para el producto único de
-          la orden (Crear orden o Editar producto). "Crear producto nuevo"
-          pasa al picker de tipo del catálogo, para productos que aún no
-          tienen piezas. En modo ASIGNAR se muestran dos pestañas: productos
+          la orden (Asignar a producto terminado o Editar producto). "Crear
+          producto nuevo" pasa al picker de tipo del catálogo, para productos
+          que aún no tienen piezas. Se muestran dos pestañas: productos
           terminados y complementos (la joyeria fabrica sus propios
-          complementos). En ENSAMBLAR solo productos terminados: las recetas
-          de ensamble no aplican a complementos. */}
+          complementos). */}
       {itemPickerFor ? (() => {
-        const isAssignContext =
-          itemPickerFor === "create"
-            ? assemblyMode === "ASIGNAR"
-            : editPlanRun?.assembly_mode === "ASIGNAR";
-        const tabsBar = isAssignContext ? (
+        const tabsBar = (
           <div className="materialRow" style={{ gap: 8 }}>
             <button
               className={`button${assignPickerTab === "PRODUCTOS" ? " buttonPrimary" : ""}`}
@@ -2587,9 +2161,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               Complementos
             </button>
           </div>
-        ) : null;
+        );
 
-        if (isAssignContext && assignPickerTab === "COMPLEMENTOS") {
+        if (assignPickerTab === "COMPLEMENTOS") {
           return (
             <ComplementPicker
               items={complementItems}
@@ -2604,302 +2178,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           );
         }
 
-        if (isAssignContext) {
-          // ASIGNAR elige el mismo TIPO de producto que ENSAMBLAR (lista
-          // compartida): el material lo pone la orden, no la pieza puntual.
-          return (
-            <CatalogProductPicker
-              allowedTypeIds={allowedTypeIdsForPicker(itemPickerFor)}
-              excludeTypeIds={
-                itemPickerFor === "create" && orderMaterialCode
-                  ? productTypesList
-                      .filter((type) => recipeModelKeys.includes(`${orderMaterialCode}${type.category_code}${type.model_code}`))
-                      .map((type) => type.id)
-                  : undefined
-              }
-              onClose={() => setItemPickerFor(null)}
-              onSelect={(type) => {
-                const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
-                applyProductChoice(itemPickerFor, { productTypeId: type.id, label });
-                setItemPickerFor(null);
-              }}
-              subtitle="Tipos de producto terminado · elige uno"
-              tabs={tabsBar}
-              title="Elegir producto"
-            />
-          );
-        }
-
         return (
-          <FinishedItemPicker
-            items={finishedItems}
+          <CatalogProductPicker
+            allowedTypeIds={allowedTypeIdsForPicker(itemPickerFor)}
             onClose={() => setItemPickerFor(null)}
-            onCreate={() => {
-              setTypePickerFor(itemPickerFor);
+            onSelect={(type) => {
+              const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
+              applyProductChoice(itemPickerFor, { productTypeId: type.id, label });
               setItemPickerFor(null);
             }}
-            onSelect={(item) => {
-              const label = (item.description ?? "").trim() || item.name;
-              applyProductChoice(itemPickerFor, { targetItemId: item.id, label });
-              setItemPickerFor(null);
-            }}
-            requireStock={false}
+            subtitle="Tipos de producto terminado · elige uno"
             tabs={tabsBar}
             title="Elegir producto"
           />
         );
       })() : null}
-
-      {typePickerFor ? (
-        <CatalogProductPicker
-          allowedTypeIds={allowedTypeIdsForPicker(typePickerFor)}
-          excludeTypeIds={
-            assemblyMode === "ASIGNAR" && typePickerFor === "create" && orderMaterialCode
-              ? productTypesList
-                  .filter((type) => recipeModelKeys.includes(`${orderMaterialCode}${type.category_code}${type.model_code}`))
-                  .map((type) => type.id)
-              : undefined
-          }
-          onClose={() => setTypePickerFor(null)}
-          onSelect={(type) => {
-            const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
-            applyProductChoice(typePickerFor, { productTypeId: type.id, label });
-            setTypePickerFor(null);
-          }}
-          rowBadge={
-            assemblyMode === "ENSAMBLAR" && typePickerFor === "create"
-              ? (type) => {
-                  const key = `${orderMaterialCode ?? ""}${type.category_code}${type.model_code}`;
-                  const recipe = assemblyRecipes.find((candidate) => candidate.model_key === key) ?? null;
-                  return <RecipeBadgeIcon recipe={recipe} />;
-                }
-              : undefined
-          }
-          title="Elegir tipo de producto"
-        />
-      ) : null}
-
-      {/* Modal "Recetas" de mantenimiento: lista las recetas de ensamble
-          existentes con sus complementos; Editar abre la modal de receta
-          prellenada con las líneas actuales. */}
-      {isRecipesViewOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Recetas de ensamble">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Recetas de ensamble</h2>
-                <p>Ultima cantidad usada de cada complemento</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsRecipesViewOpen(false)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-
-            {assemblyRecipes.length === 0 ? (
-              <p className="panelText">Aún no hay recetas de ensamble.</p>
-            ) : (
-              <div className="tableWrap">
-                <table className="table tableAuto">
-                  <thead>
-                    <tr>
-                      <th>Código</th>
-                      <th>Producto</th>
-                      <th>Material</th>
-                      <th>Complementos</th>
-                      <th aria-label="Acciones" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assemblyRecipes.map((recipe) => {
-                      const modelKey = recipe.model_key;
-                      if (!modelKey) return null;
-                      const { product, material } = describeRecipeKey(modelKey);
-                      return (
-                        <tr key={modelKey}>
-                          <td>{modelKey}</td>
-                          <td>{product}</td>
-                          <td>{material}</td>
-                          <td>
-                            {recipe.items.map((item) => (
-                              <div key={item.complement_item_id}>
-                                {numericText(item.quantity)} {item.unit_code ?? ""} × {item.name ?? "Complemento"}
-                                {item.material_type ? ` (${item.material_type})` : ""}
-                              </div>
-                            ))}
-                          </td>
-                          <td>
-                            <div style={{ display: "flex", gap: 4 }}>
-                              <button
-                                aria-label={`Editar receta ${modelKey}`}
-                                className="iconOnlyButton"
-                                onClick={() => {
-                                  setIsRecipesViewOpen(false);
-                                  setRecipeModalContext("maintenance");
-                                  setRecipeLines(
-                                    recipe.items.map((item) => ({
-                                      itemId: item.complement_item_id,
-                                      label: item.name ?? "Complemento",
-                                      unitCode: item.unit_code ?? "",
-                                      perUnit: String(Number(item.quantity)),
-                                    })),
-                                  );
-                                  setRecipeModalModelKey(modelKey);
-                                }}
-                                title="Editar receta"
-                                type="button"
-                              >
-                                <Pencil aria-hidden="true" size={16} />
-                              </button>
-                              <button
-                                aria-label={`Eliminar receta ${modelKey}`}
-                                className="iconOnlyButton"
-                                onClick={() =>
-                                  showConfirm(
-                                    "Eliminar receta",
-                                    `¿Eliminar la receta de ${product} (${material})? Esta acción no se puede deshacer.`,
-                                    () => void handleDeleteRecipe(modelKey),
-                                    true,
-                                    "Eliminar",
-                                  )
-                                }
-                                title="Eliminar receta"
-                                type="button"
-                              >
-                                <Trash2 aria-hidden="true" size={16} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-      ) : null}
-
-      {/* Picker de pieza para el tile "Crear receta" de mantenimiento: solo
-          piezas con código completo de 7 dígitos que aún no tienen receta. */}
-      {isMaintenanceRecipePickerOpen ? (
-        <FinishedItemPicker
-          items={finishedProductsList.filter((item) => {
-            const code = item.product_code;
-            return typeof code === "string" && code.length === 7 && !recipeModelKeys.includes(code);
-          })}
-          onClose={() => setIsMaintenanceRecipePickerOpen(false)}
-          onSelect={(item) => {
-            const code = item.product_code;
-            if (!code) return;
-            setRecipeModalContext("maintenance");
-            setRecipeLines([]);
-            setRecipeModalModelKey(code);
-            setIsMaintenanceRecipePickerOpen(false);
-          }}
-          requireStock={false}
-          title="Elegir producto"
-        />
-      ) : null}
-
-      {/* Modal de receta: se abre cuando el tipo elegido en ENSAMBLAR no tiene
-          receta aún, o desde el tile "Crear receta" de mantenimiento. Cerrar
-          (X) también limpia la selección de producto de la orden, pero solo
-          si la modal vino de Crear orden (recipeModalContext === "order"). */}
-      {recipeModalModelKey ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Definir receta">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Definir receta</h2>
-                <p>
-                  {(() => {
-                    const { product, material } = describeRecipeKey(recipeModalModelKey);
-                    return `${product} · ${material} — complementos y cantidad a usar`;
-                  })()}
-                </p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => closeRecipeModal(true)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-
-            {recipeLines.length > 0 ? (
-              <div className="tableWrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Complemento</th>
-                      <th className="num">Cantidad</th>
-                      <th aria-label="Quitar" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recipeLines.map((line) => (
-                      <tr key={line.itemId}>
-                        <td>{line.label}</td>
-                        <td className="num">
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            <input
-                              aria-label={`Cantidad de ${line.label}, en ${line.unitCode || "su unidad"}`}
-                              className="field"
-                              min="0"
-                              onChange={(event) => updateRecipeLinePerUnit(line.itemId, event.target.value)}
-                              step="0.0001"
-                              style={{ width: 90 }}
-                              type="number"
-                              value={line.perUnit}
-                            />
-                            <span style={{ color: "var(--muted)", fontSize: 13 }}>{line.unitCode}</span>
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            aria-label={`Quitar ${line.label}`}
-                            className="iconOnlyButton"
-                            onClick={() => removeRecipeLine(line.itemId)}
-                            type="button"
-                          >
-                            <Trash2 aria-hidden="true" size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="emptyState">Sin complementos agregados.</div>
-            )}
-
-            <div className="modalActions">
-              <button className="button" onClick={() => setIsRecipeComplementPickerOpen(true)} type="button">
-                <Plus aria-hidden="true" size={14} />
-                Elegir complementos
-              </button>
-              <button
-                className="button buttonPrimary"
-                disabled={isSaving || recipeLines.length === 0 || recipeLines.some((line) => !(Number(line.perUnit) > 0))}
-                onClick={() => void handleSaveRecipe()}
-                type="button"
-              >
-                <Save aria-hidden="true" size={15} />
-                {isSaving ? "Guardando" : "Guardar"}
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      {isRecipeComplementPickerOpen ? (
-        <ComplementPicker
-          excludeIds={recipeLines.map((line) => line.itemId)}
-          items={variant === "maintenance" ? complementsList : complementItems}
-          onClose={() => setIsRecipeComplementPickerOpen(false)}
-          onSelect={(item) => addRecipeLine(item)}
-          title="Elegir complementos"
-        />
-      ) : null}
 
       {isRunStagesOpen && selectedRunForStages ? (
         <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true">
@@ -3448,18 +2741,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{selectedStatsRun.process_name}</h2>
                 <p>{numericText(selectedStatsRun.quantity)} {selectedStatsRun.raw_material_unit_code}</p>
               </div>
-              {/* Producción finalizada: el producto ya no se edita aquí (el
-                  plan se cambia solo mientras la orden sigue en proceso). */}
-              {selectedStatsRun.assembly_pending ? (
-                <button
-                  className="button buttonPrimary"
-                  onClick={() => openAssemblyModal(selectedStatsRun)}
-                  type="button"
-                >
-                  <Puzzle aria-hidden="true" size={14} />
-                  Definir ensamble
-                </button>
-              ) : null}
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
@@ -3626,7 +2907,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>{formMode === "edit" ? "Editar proceso" : "Crear proceso"}</h2>
-                <p>Etapa {selectedStageIndex + 1} de {form.stages.length}</p>
+                <p>Banco de procesos -- un paso suelto reutilizable</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeProcessForm} type="button">
                 <X aria-hidden="true" size={18} />
@@ -3655,196 +2936,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               />
             </label>
 
-            <section className="stageSingleWindow">
-              <div className="stageTopActions">
-                <strong>Etapa {selectedStageIndex + 1}</strong>
-                <div className="rowActions">
-                  <button
-                    aria-label="Agregar etapa"
-                    className="iconOnlyButton"
-                    onClick={addStage}
-                    title="Agregar etapa"
-                    type="button"
-                  >
-                    <Plus aria-hidden="true" size={17} />
-                  </button>
-                  {selectedStageIndex > 0 ? (
-                    <button
-                      aria-label="Eliminar etapa"
-                      className="iconOnlyButton dangerIconButton"
-                      onClick={removeCurrentStage}
-                      title="Eliminar etapa"
-                      type="button"
-                    >
-                      <Trash2 aria-hidden="true" size={17} />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="stageNavigator">
-                <button
-                  className="iconOnlyButton stageArrow stageArrowLeft"
-                  disabled={selectedStageIndex === 0}
-                  onClick={() => setSelectedStageIndex((current) => Math.max(0, current - 1))}
-                  type="button"
-                >
-                  <ArrowLeft aria-hidden="true" size={18} />
-                </button>
-                <button
-                  className="iconOnlyButton stageArrow stageArrowRight"
-                  disabled={selectedStageIndex >= form.stages.length - 1}
-                  onClick={() => setSelectedStageIndex((current) => Math.min(form.stages.length - 1, current + 1))}
-                  type="button"
-                >
-                  <ArrowRight aria-hidden="true" size={18} />
-                </button>
-
-                <div className="stageContent">
-                  <label className="fieldGroup">
-                    <span>Nombre</span>
-                    <input
-                      className="field"
-                      disabled={isSaving}
-                      maxLength={180}
-                      onChange={(event) => updateStage("name", event.target.value)}
-                      value={selectedStage.name}
-                    />
-                  </label>
-                  <label className="fieldGroup">
-                    <span>Descripcion</span>
-                    <textarea
-                      className="field textareaCompact"
-                      disabled={isSaving}
-                      maxLength={1000}
-                      onChange={(event) => updateStage("description", event.target.value)}
-                      value={selectedStage.description}
-                    />
-                  </label>
-                  <div className="stageOptions">
-                    <label className="fieldGroup">
-                      <span>Tipo de etapa</span>
-                      <select
-                        className="field"
-                        disabled={isSaving}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          if (value === "DECISION" || value === "CONTROL") {
-                            updateStage("stageType", value);
-                          } else {
-                            updateStage({ stageType: value, qualityCheck: "", reworkAction: "", reworkTargetOrder: "" });
-                          }
-                        }}
-                        value={selectedStage.stageType}
-                      >
-                        {STAGE_TYPES.map((type) => (
-                          <option key={type.value} value={type.value}>
-                            {type.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="fieldGroup">
-                      <span>Fase (opcional)</span>
-                      <input
-                        className="field"
-                        disabled={isSaving}
-                        maxLength={120}
-                        onChange={(event) => updateStage("phaseName", event.target.value)}
-                        placeholder="Ejemplo: Fase 2 - Fabricacion"
-                        value={selectedStage.phaseName}
-                      />
-                    </label>
-                  </div>
-                  {selectedStage.stageType === "DECISION" || selectedStage.stageType === "CONTROL" ? (
-                    <>
-                      <label className="fieldGroup">
-                        <span>Control de calidad / pregunta</span>
-                        <textarea
-                          className="field textareaCompact"
-                          disabled={isSaving}
-                          maxLength={1000}
-                          onChange={(event) => updateStage("qualityCheck", event.target.value)}
-                          placeholder="Ejemplo: ¿El hilo cumple con el grosor requerido?"
-                          value={selectedStage.qualityCheck}
-                        />
-                      </label>
-                      <label className="fieldGroup">
-                        <span>Accion si no cumple / reproceso</span>
-                        <textarea
-                          className="field textareaCompact"
-                          disabled={isSaving}
-                          maxLength={1000}
-                          onChange={(event) => updateStage("reworkAction", event.target.value)}
-                          placeholder="Ejemplo: Si no cumple, regresa a Fundicion para reprocesar."
-                          value={selectedStage.reworkAction}
-                        />
-                      </label>
-                      <label className="fieldGroup">
-                        <span>Volver a esta etapa si se rechaza</span>
-                        <select
-                          className="field"
-                          disabled={isSaving}
-                          onChange={(event) => updateStage("reworkTargetOrder", event.target.value)}
-                          value={selectedStage.reworkTargetOrder}
-                        >
-                          <option value="">Etapa anterior (por defecto)</option>
-                          {form.stages.slice(0, selectedStageIndex).map((earlier, earlierIndex) => (
-                            <option key={earlierIndex} value={String(earlierIndex + 1)}>
-                              {earlierIndex + 1}. {earlier.name.trim() || `Etapa ${earlierIndex + 1}`}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </>
-                  ) : null}
-                  <div className="stageOptions">
-                    <label className="checkControl">
-                      <input
-                        checked={selectedStage.requiresWeighing}
-                        disabled={isSaving}
-                        onChange={(event) => updateStage("requiresWeighing", event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>Requiere pesaje</span>
-                    </label>
-                  </div>
-
-                  {/* Ingredients section */}
-                  <div className="fieldGroup">
-                    <span>Materiales que entran en esta etapa</span>
-                    <div className="ingredientList">
-                      {selectedStage.ingredients.map((ing, ingIndex) => {
-                        const selectedItem = suppliesList.find((m) => m.id === ing.inventoryItemId);
-                        return (
-                          <div key={ingIndex} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <span className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
-                              {selectedItem ? `${selectedItem.name} · ${selectedItem.unit_code}` : ing.inventoryItemId}
-                            </span>
-                            <button
-                              type="button"
-                              className="iconOnlyButton dangerIconButton"
-                              onClick={() => {
-                                updateStage({
-                                  ingredients: selectedStage.ingredients.filter((_, idx) => idx !== ingIndex),
-                                });
-                              }}
-                              aria-label="Quitar material"
-                            >
-                              <X aria-hidden="true" size={14} />
-                            </button>
-                          </div>
-                        );
-                      })}
-                      <button type="button" className="button" onClick={() => setIsIngredientPickerOpen(true)}>
-                        <Plus aria-hidden="true" size={14} />
-                        Agregar material
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
+            <label className="checkboxRow">
+              <input
+                checked={form.isActive}
+                disabled={isSaving}
+                onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>Activo</span>
+            </label>
 
             <div className="modalActions">
               <button className="button buttonPrimary" disabled={isSaving} type="submit">
@@ -3854,18 +2954,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </form>
         </div>
-      ) : null}
-
-      {isIngredientPickerOpen ? (
-        <MaterialCategoryPicker
-          allowedTypes={["SUPPLY"]}
-          excludeIds={selectedStage.ingredients.map((ing) => ing.inventoryItemId)}
-          items={suppliesList}
-          onClose={() => setIsIngredientPickerOpen(false)}
-          onSelect={addStageIngredient}
-          requireStock
-          title="Agregar insumo de la etapa"
-        />
       ) : null}
 
       {dataModal?.type === "units" ? <UnitsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
@@ -3901,7 +2989,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       {process.code ? <span className="orderCodeTag">{process.code}</span> : null}
                       {process.name}
                     </button>
-                    <span>{process.stages.length} etapas</span>
+                    <span>{process.is_active ? "Activo" : "Inactivo"}</span>
                     <div className="rowActions" onClick={stopClick}>
                       <button
                         className="iconTextButton"
@@ -3945,7 +3033,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <h2>{viewingProcess.name}</h2>
                 <p>
                   {viewingProcess.code ? `Proceso ${viewingProcess.code} · ` : ""}
-                  {viewingProcess.stages.length} etapas · v{viewingProcess.version ?? 1}
+                  {viewingProcess.is_active ? "Activo" : "Inactivo"}
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingProcess(null)} type="button">
@@ -3956,66 +3044,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             {viewingProcess.description ? (
               <p className="panelText">{viewingProcess.description}</p>
             ) : null}
-
-            <div className="processFlowInfoBar">
-              <div className="processFlowMeta">
-                <strong>Limite de merma</strong>
-                <span>{viewingProcess.waste_limit_percent ? `${percentText(viewingProcess.waste_limit_percent)}%` : "Sin configurar"}</span>
-              </div>
-            </div>
-
-            <div className="processFlowList">
-              {viewingProcess.stages.map((stage, index) => {
-                const isLast = index === viewingProcess.stages.length - 1;
-                const prevStage = viewingProcess.stages[index - 1];
-                const isFirstInPhase = stage.phase_name && stage.phase_name !== (prevStage?.phase_name ?? null);
-                const stageTypeClass = `processFlowStage${stage.stage_type ?? "PROCESS"}`;
-                const hasMeta = stage.requires_weighing;
-                return (
-                  <div key={stage.id}>
-                    {isFirstInPhase ? (
-                      <div className="processFlowPhaseHeader">
-                        <span className="processFlowPhaseLabel">{stage.phase_name}</span>
-                      </div>
-                    ) : null}
-                    <div className={`processFlowStage ${stageTypeClass}`}>
-                      <div className="processFlowStageHead">
-                        <div className="processFlowStageTitle">
-                          <span className="processFlowStageOrder">{stage.stage_order}</span>
-                          <span className="processFlowStageName">{stage.name}</span>
-                        </div>
-                        <span className="processFlowTypeBadge">{stageTypeLabel(stage.stage_type ?? "PROCESS")}</span>
-                      </div>
-                      {stage.description ? (
-                        <p className="processFlowStageDesc">{stage.description}</p>
-                      ) : null}
-                      {stage.quality_check ? (
-                        <div className="processFlowCallout processFlowCalloutCheck">
-                          <strong>Control de calidad</strong>
-                          {stage.quality_check}
-                        </div>
-                      ) : null}
-                      {stage.rework_action ? (
-                        <div className="processFlowCallout processFlowCalloutRework">
-                          <strong>Si no cumple / reproceso</strong>
-                          {stage.rework_action}
-                        </div>
-                      ) : null}
-                      {hasMeta ? (
-                        <div className="processFlowStageFoot">
-                          {stage.requires_weighing ? <span className="processFlowTag">⚖ Requiere pesaje</span> : null}
-                        </div>
-                      ) : null}
-                    </div>
-                    {!isLast ? (
-                      <div className="processFlowConnector" aria-hidden="true">
-                        <span>↓</span>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
           </section>
         </div>
       ) : null}

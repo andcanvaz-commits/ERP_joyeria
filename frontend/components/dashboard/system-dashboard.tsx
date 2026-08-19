@@ -46,6 +46,7 @@ const RUN_STATUS_LABELS: Record<ProductionRun["status"], string> = {
   RECIBIDA: "Recibida",
   CANCELADA: "Cancelada",
   ESPERANDO_MATERIAL: "Esperando material",
+  TERMINADA: "Terminada",
 };
 
 function numericText(value: string | null) {
@@ -80,10 +81,10 @@ function movementDateLabel(value: string) {
 
 async function fetchDashboardBundle(role: Role) {
   const isAdmin = role === "admin";
-  const showProcesses = isAdmin || role === "produccion";
-  const showInventory = isAdmin || role === "inventario";
+  const showProcesses = isAdmin || role === "operaciones";
+  const showInventory = isAdmin || role === "operaciones";
 
-  const showRuns = isAdmin || role === "produccion";
+  const showRuns = isAdmin || role === "operaciones";
 
   const [processes, runs, users, inventorySummary, inventoryItems, inventoryMovements] = await Promise.all([
     showProcesses ? listProcesses() : Promise.resolve([]),
@@ -134,13 +135,13 @@ export function SystemDashboard() {
   const error = queryError ? (queryError instanceof Error ? queryError.message : "No se pudo cargar el dashboard.") : null;
 
   const isAdmin = role === "admin";
-  const isProduction = role === "produccion";
-  const isInventory = role === "inventario";
+  // Rol fusionado Produccion/Inventario: ve las dos vistas apiladas, no una
+  // sola -- hereda lo que antes veian por separado los dos roles viejos.
+  const isOperations = role === "operaciones";
 
-  const totalStages = useMemo(
-    () => processes.reduce((total, process) => total + process.stages.length, 0),
-    [processes],
-  );
+  // Banco de procesos aplanado (seccion 3): ya no tiene sub-etapas, solo
+  // cuenta cuantos pasos hay en el banco.
+  const activeProcessCount = processes.filter((process) => process.is_active).length;
   const activeRuns = runs.filter((run) => run.status === "MATERIALES_APROBADOS" || run.status === "EN_PROCESO");
   const finishedRuns = runs.filter((run) => run.status === "RECIBIDA");
   const pendingRuns = runs.filter((run) => run.status === "PENDIENTE_INVENTARIO");
@@ -219,7 +220,11 @@ export function SystemDashboard() {
   const movementTypeEntries = Object.entries(movementsByType);
   const runsByProcess = useMemo(() => {
     return runs.reduce<Record<string, number>>((acc, run) => {
-      acc[run.process_name] = (acc[run.process_name] ?? 0) + 1;
+      // Ordenes del flujo nuevo no tienen un proceso unico (cada etapa elige
+      // el suyo) -- se agrupan por nombre libre de la orden mientras no
+      // exista la vista de merma agregada por proceso (seccion 7).
+      const key = run.process_name ?? run.name ?? "Sin proceso";
+      acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     }, {});
   }, [runs]);
@@ -251,7 +256,8 @@ export function SystemDashboard() {
     for (const run of runs) {
       const waste = Number(run.waste_weight) || 0;
       if (waste <= 0) continue;
-      map[run.process_name] = (map[run.process_name] ?? 0) + waste;
+      const key = run.process_name ?? run.name ?? "Sin proceso";
+      map[key] = (map[key] ?? 0) + waste;
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
@@ -400,9 +406,10 @@ export function SystemDashboard() {
     );
   }
 
-  // Dashboard del jefe de produccion.
-  if (isProduction) {
-    return (
+  // Dashboard del rol fusionado Produccion/Inventario -- primera mitad
+  // (lo que antes veia el jefe de produccion).
+  if (isOperations) {
+    const productionSection = (
       <div className="content">
         {error ? <div className="alert alertError">{error}</div> : null}
 
@@ -480,7 +487,7 @@ export function SystemDashboard() {
             <div className="panelHeader">
               <div>
                 <h2 className="panelTitle">Procesos</h2>
-                <p className="panelText">{totalStages} etapas configuradas</p>
+                <p className="panelText">{activeProcessCount} procesos activos</p>
               </div>
             </div>
             <div className="dashboardList">
@@ -488,7 +495,7 @@ export function SystemDashboard() {
                 <div className="dashboardRow" key={process.id}>
                   <div>
                     <strong>{process.name}</strong>
-                    <span>{process.stages.length} etapas</span>
+                    <span>{process.code ?? "—"}</span>
                   </div>
                   <small>{process.is_active ? "Activo" : "Inactivo"}</small>
                 </div>
@@ -574,11 +581,9 @@ export function SystemDashboard() {
         </section>
       </div>
     );
-  }
 
-  // Dashboard del jefe de inventario.
-  if (isInventory) {
-    return (
+    // Segunda mitad -- lo que antes veia el jefe de inventario.
+    const inventorySection = (
       <div className="content">
         {error ? <div className="alert alertError">{error}</div> : null}
 
@@ -659,6 +664,13 @@ export function SystemDashboard() {
           </article>
         </section>
       </div>
+    );
+
+    return (
+      <>
+        {productionSection}
+        {inventorySection}
+      </>
     );
   }
 

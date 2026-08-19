@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Undo2, X } from "lucide-react";
-import { addActaLine, deleteActaLine, requestAdditionalMaterial, returnComplement, updateActaLine } from "@/lib/production-api";
+import { addActaLine, deleteActaLine, requestAdditionalMaterial, updateActaLine } from "@/lib/production-api";
 import { buildFamilyActaSides, buildRunActaSides, formatGramos } from "@/lib/orden-produccion";
 import { ActaSide } from "@/components/production/acta-side";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
@@ -12,8 +12,6 @@ import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
 const DASH = "—";
-
-type Complement = NonNullable<ProductionRun["complements"]>[number];
 
 // Lado Entrega: nada de texto libre — lo que entra a la orden mientras esta
 // EN_PROCESO es una solicitud real a Inventario (mismo circuito y mismo
@@ -115,51 +113,19 @@ function EntregaAction({
   );
 }
 
-// Complementos aprobados con sobrante por devolver (aprobado - devuelto >
-// 0). Se usa tanto dentro de la acta como en el paso automatico al terminar
-// la produccion (ver production-dashboard.tsx). Nada se marca "usado" de
-// forma independiente (decision de Rodrigo, 2026-08-16): used_quantity
-// viene del ensamble automatico, que al terminar la corrida marca el 100%
-// de lo aprobado como usado -- si eso restara aqui, remaining quedaria en 0
-// justo cuando el usuario recien puede declarar el sobrante.
-export function returnableComplements(run: ProductionRun): Array<Complement & { remaining: number }> {
-  return (run.complements ?? [])
-    .filter((c) => c.status === "APROBADA")
-    .map((c) => ({
-      ...c,
-      remaining: Number(c.quantity) - Number(c.returned_quantity ?? 0),
-    }))
-    .filter((c) => c.remaining > 0.0001);
-}
-
 // Lado Recepcion: la materia prima ya se reconcilia sola con la merma por
-// etapa. Lo que falta es el sobrante de complementos e insumos — se
-// aprueban/entregan enteros al aprobar materiales (approve_materials), pero
-// el proceso puede no haber usado todo (ej. 100 "bolas 2.5" aprobadas, 80
-// ensambladas, 20 sobran). Un solo boton, una sola lista: se elige el
-// material y se anota cuanto sobro. Si es un complemento, "sobrante" significa que
-// vuelve de verdad a inventario (returnComplement, movimiento real); si es
-// un insumo no hay circuito de devolucion fisica establecido, asi que queda
-// como linea MANUAL en la acta (registro de que no se uso, sin mover stock).
-// Antes esto eran DOS botones separados ("Devolver sobrante" / "Entregar
-// material") con listas casi identicas -- confundia mas de lo que ayudaba.
-type ReturnCandidate =
-  | { kind: "complemento"; id: string; label: string; unit_code: string; available: number }
-  | { kind: "insumo"; id: string; item_id: string; label: string; unit_code: string; available: number };
+// etapa. Lo que falta es el sobrante de insumos — se aprueban/entregan
+// enteros al aprobar materiales (approve_materials), pero el proceso puede
+// no haber usado todo. No hay circuito de devolucion fisica establecido para
+// insumos, asi que queda como linea MANUAL en la acta (registro de que no se
+// uso, sin mover stock).
+type ReturnCandidate = { kind: "insumo"; id: string; item_id: string; label: string; unit_code: string; available: number };
 
 // `available` es el tope real: no se puede anotar/devolver mas de lo que de
 // verdad se entrego/aprobo — ya se resta lo que ya se registro antes en el
 // acta para ese mismo item (por identidad real, no por texto: dos items
 // distintos pueden llamarse igual).
 export function buildReturnCandidates(run: ProductionRun): ReturnCandidate[] {
-  const complementRows: ReturnCandidate[] = returnableComplements(run).map((c) => ({
-    kind: "complemento",
-    id: c.id,
-    label: c.name ?? "Complemento",
-    unit_code: c.unit_code,
-    available: c.remaining,
-  }));
-
   const recepcion = (run.acta_lines ?? []).filter((line) => line.side === "RECEPCION");
   const alreadyLogged = (itemId: string) =>
     recepcion.filter((line) => line.item_id === itemId).reduce((sum, line) => sum + Number(line.quantity), 0);
@@ -174,7 +140,7 @@ export function buildReturnCandidates(run: ProductionRun): ReturnCandidate[] {
     }))
     .filter((candidate) => candidate.available > 0.0001);
 
-  return [...complementRows, ...supplyRows];
+  return supplyRows;
 }
 
 // Contenido puro (sin boton ni ventana propia): lista de candidatos +
@@ -217,17 +183,13 @@ export function ReturnCandidatesForm({
     setLocalError(null);
     setIsSaving(true);
     try {
-      if (pendingCandidate.kind === "complemento") {
-        await returnComplement(pendingCandidate.id, quantity);
-      } else {
-        await addActaLine(run.id, {
-          side: "RECEPCION",
-          label: pendingCandidate.label,
-          quantity,
-          unit_code: pendingCandidate.unit_code,
-          item_id: pendingCandidate.item_id,
-        });
-      }
+      await addActaLine(run.id, {
+        side: "RECEPCION",
+        label: pendingCandidate.label,
+        quantity,
+        unit_code: pendingCandidate.unit_code,
+        item_id: pendingCandidate.item_id,
+      });
       setPendingCandidate(null);
       setQuantity("");
       onChanged();
@@ -466,8 +428,8 @@ export function ActaView({
                   }
                   fecha={sides.entregaFecha}
                   lines={sides.entregaLines}
-                  onDeleteLine={(lineId) => deleteActaLine(lineId)}
-                  onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
+                  onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => onChanged())}
+                  onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => onChanged())}
                   onError={flagError}
                   responsable={sides.entregaResponsable}
                   title="ENTREGADO"
@@ -491,8 +453,8 @@ export function ActaView({
                     </>
                   }
                   lines={sides.recepcionLines}
-                  onDeleteLine={(lineId) => deleteActaLine(lineId)}
-                  onEditLine={(lineId, patch) => updateActaLine(lineId, patch)}
+                  onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => onChanged())}
+                  onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => onChanged())}
                   onError={flagError}
                   responsable={sides.recepcionResponsable}
                   title="RECIBIDO"

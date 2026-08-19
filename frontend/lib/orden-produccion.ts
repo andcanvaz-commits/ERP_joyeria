@@ -7,7 +7,7 @@ import type { InventoryItem } from "@/types/inventory";
 // viven aca (no en acta-side.tsx) para que ninguno de los dos importe del
 // otro en circulo.
 export type ActaSideLine =
-  | { kind: "row"; id: string; label: string; quantity: string; unit_code: string; editable: boolean; source: string }
+  | { kind: "row"; id: string; label: string; quantity: string; unit_code: string; editable: boolean; source: string; fecha: string | null }
   | { kind: "group"; fecha: string | null; responsable: string };
 
 // Fila de total/balance: mismo lugar que una fila real, con su propia
@@ -40,6 +40,19 @@ function num(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** Filas ordenadas por fecha asc (nulls al final) -- garantiza que fechas
+ * iguales queden contiguas para el rowspan de la columna FECHA en
+ * acta-side.tsx (Fix 1.2). Orden estable: a igual fecha conserva el orden
+ * original (line_order del backend). */
+function sortRowsByFecha<T extends Extract<ActaSideLine, { kind: "row" }>>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    if (a.fecha === b.fecha) return 0;
+    if (a.fecha === null) return 1;
+    if (b.fecha === null) return -1;
+    return a.fecha.localeCompare(b.fecha);
+  });
+}
+
 /** Productos resultantes de UNA corrida con la cantidad REAL producida, no
  * la planeada -- vacio mientras la corrida sigue en curso (`finished_at`
  * null): el lado RECIBIDO no debe adelantar un numero que todavia no se
@@ -48,15 +61,10 @@ function num(value: string | null | undefined): number {
  * se reparte entre las lineas de producto declaradas en la MISMA proporcion
  * que se planearon -- si una corrida declaro dos productos 70/30, el peso
  * real tambien se reparte 70/30, igual que hace `_split_run_for_partial_material`
- * al partir una orden. Si la corrida termina con un solo producto (sea
- * ENSAMBLAR, que siempre tiene uno solo, o ASIGNAR con un solo producto
- * declarado) el peso de la pieza no es solo materia prima: se le suma lo
- * que de verdad se incorporo de cada complemento aprobado -- aprobado
- * menos devuelto, en la misma unidad de la materia prima, sin conversion
- * de peso por unidad (Rodrigo, 2026-08-16: "sin nada por unidad, sumas y
- * punto"; Rodrigo, 2026-08-17: mismo criterio aunque el modo sea ASIGNAR,
- * si de todos modos se destino un complemento a la orden). Si nada se
- * devolvio, usado = todo lo aprobado. */
+ * al partir una orden. Si la corrida termina con un solo producto, el peso
+ * de la pieza no es solo materia prima: se le suma lo que de verdad se
+ * destino por el boton de admin (ADMIN_STOCK) -- se combino fisicamente en
+ * la pieza, mismo criterio de suma directa. */
 function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["products"]> {
   if (run.finished_at === null || run.actual_finished_weight === null || run.actual_finished_weight === undefined) {
     return [];
@@ -68,12 +76,6 @@ function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["prod
   const scaled = products.map((p) => ({ ...p, quantity: String(num(p.quantity) * ratio) }));
   if (scaled.length === 1) {
     const unit = run.raw_material_unit_code;
-    const complementWeight = (run.complements ?? [])
-      .filter((c) => c.status === "APROBADA" && c.unit_code === unit)
-      .reduce((sum, c) => sum + (num(c.quantity) - num(c.returned_quantity)), 0);
-    // Lo mismo, pero para material destinado por el boton de admin
-    // (ADMIN_STOCK) en vez del circuito de complementos de ensamble: tambien
-    // se combino fisicamente en la pieza, mismo criterio de suma directa.
     const adminStockWeight = (run.acta_lines ?? [])
       .filter(
         (l) =>
@@ -83,9 +85,8 @@ function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["prod
           l.item_id !== run.raw_material_item_id
       )
       .reduce((sum, l) => sum + num(l.quantity), 0);
-    const extraWeight = complementWeight + adminStockWeight;
-    if (extraWeight > 0) {
-      scaled[0] = { ...scaled[0], quantity: String(num(scaled[0].quantity) + extraWeight) };
+    if (adminStockWeight > 0) {
+      scaled[0] = { ...scaled[0], quantity: String(num(scaled[0].quantity) + adminStockWeight) };
     }
   }
   return scaled;
@@ -102,7 +103,8 @@ function realProductsForRun(run: ProductionRun): NonNullable<ProductionRun["prod
  * fusionar dos productos distintos que compartan texto. */
 function productoRealLines(
   products: NonNullable<ProductionRun["products"]>,
-  fallbackUnit: string
+  fallbackUnit: string,
+  fallbackFecha: string | null
 ): Extract<ActaSideLine, { kind: "row" }>[] {
   const merged = new Map<string, { label: string; quantity: number; unit: string }>();
   for (const p of products) {
@@ -131,6 +133,7 @@ function productoRealLines(
     unit_code: p.unit,
     editable: false,
     source: "AUTO",
+    fecha: fallbackFecha,
   }));
 }
 
@@ -200,9 +203,11 @@ export type RunActaSides = {
  * vista: ambas llaman esta misma funcion, así no pueden divergir de nuevo. */
 export function buildRunActaSides(run: ProductionRun): RunActaSides {
   const lines = run.acta_lines ?? [];
-  const entregaLines: ActaSideLine[] = lines
-    .filter((l) => l.side === "ENTREGA")
-    .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source }));
+  const entregaLines: ActaSideLine[] = sortRowsByFecha(
+    lines
+      .filter((l) => l.side === "ENTREGA")
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at }))
+  );
   // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
   // crear la orden) no es un recibo real -- se queda fuera de las filas
   // mostradas; el producto resultante REAL se antepone abajo, vacio
@@ -210,12 +215,12 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   // merma por etapa (stage_id != null) tampoco se muestran como fila --
   // solo "Merma total" (Rodrigo, 2026-08-16: la de arriba estaba
   // repetida con la de abajo).
-  const recepcionLines: ActaSideLine[] = [
-    ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code),
+  const recepcionLines: ActaSideLine[] = sortRowsByFecha([
+    ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code ?? "", run.received_at),
     ...lines
       .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.stage_id == null)
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source })),
-  ];
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at })),
+  ]);
 
   const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run, entregaLines, recepcionLines);
 
@@ -283,11 +288,14 @@ function entregaRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "r
       unit_code: line.unidad,
       editable: false,
       source: "AUTO",
+      fecha: run.materials_approved_at,
     }));
   }
-  return (run.acta_lines ?? [])
-    .filter((line) => line.side === "ENTREGA")
-    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source }));
+  return sortRowsByFecha(
+    (run.acta_lines ?? [])
+      .filter((line) => line.side === "ENTREGA")
+      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source, fecha: line.created_at }))
+  );
 }
 
 /** Filas RECEPCION de un run -- misma fuente que Ver Acta, y mismo filtro: la
@@ -307,11 +315,14 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
       unit_code: line.unidad,
       editable: false,
       source: "AUTO",
+      fecha: run.received_at,
     }));
   }
-  return (run.acta_lines ?? [])
-    .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null)
-    .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source }));
+  return sortRowsByFecha(
+    (run.acta_lines ?? [])
+      .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null)
+      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source, fecha: line.created_at }))
+  );
 }
 
 /** ¿Este run tiene avance real del lado RECIBIDO? Recepcion real (linea
@@ -362,7 +373,7 @@ export function buildOrdenProduccion(
   itemNames: Map<string, string>
 ): OrdenProduccionModel {
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
-  const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name;
+  const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name ?? root.name ?? DASH;
   const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
 
   // Caso normal (sin split, la enorme mayoria de las ordenes): exactamente
@@ -372,7 +383,7 @@ export function buildOrdenProduccion(
     const sides = buildRunActaSides(root);
     return {
       folio: root.root_production_code ?? root.production_code ?? DASH,
-      procesoNombre: root.process_name,
+      procesoNombre: root.process_name ?? root.name ?? DASH,
       categoria: materialName,
       responsableProduccion: root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
@@ -392,7 +403,7 @@ export function buildOrdenProduccion(
   const sides = buildFamilyActaSides(family);
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
-    procesoNombre: root.process_name,
+    procesoNombre: root.process_name ?? root.name ?? DASH,
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entregaLines: sides.entregaLines,
@@ -443,7 +454,7 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
   // ESPERANDO_MATERIAL, la familia muestra unicamente lo real del padre, no
   // el plan completo de ambos.
   const recepcionLines: ActaSideLine[] = [
-    ...productoRealLines(familyRealProducts, root.raw_material_unit_code),
+    ...productoRealLines(familyRealProducts, root.raw_material_unit_code ?? "", root.received_at),
     ...recepcionSide.lines,
   ];
 
@@ -484,6 +495,32 @@ export function buildFamilyActaSides(family: ProductionRun[]): RunActaSides {
     entregaTotalRows,
     recepcionTotalRows,
   };
+}
+
+/** Rowspan de la columna FECHA para acta-side.tsx: filas "row" consecutivas
+ * con la misma fecha comparten una sola celda (la primera de la racha lleva
+ * el rowSpan, las demas no pintan nada en esa columna). La racha se corta en
+ * cada fila "group" (separador de familia, ya trae su propia fecha en una
+ * celda de ancho completo) para no fusionar fechas de corridas distintas. */
+export function buildFechaRowSpans(lines: ActaSideLine[]): Map<string, number> {
+  const spans = new Map<string, number>();
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.kind !== "row") {
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < lines.length) {
+      const next = lines[j];
+      if (next.kind !== "row" || next.fecha !== line.fecha) break;
+      j++;
+    }
+    spans.set(line.id, j - i);
+    i = j;
+  }
+  return spans;
 }
 
 /** Formatea gramos con dos decimales (números tabulares en el documento). */

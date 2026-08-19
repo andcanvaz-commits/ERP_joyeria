@@ -14,6 +14,7 @@ export class ApiError extends Error {
 }
 
 const FIELD_LABELS: Record<string, string> = {
+  body: "mensaje",
   description: "descripcion",
   first_name: "nombre",
   item_id: "item",

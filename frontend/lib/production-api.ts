@@ -1,28 +1,12 @@
 import { apiRequest } from "@/lib/api";
-import type { AllocationPreview, AssemblyRecipe, ProductionProcess, ProductionRun } from "@/types/production";
+import type { AllocationPreview, ProductionProcess, ProductionRun } from "@/types/production";
 
+// Banco de procesos (seccion 3): un paso suelto reutilizable, sin sub-etapas
+// ni insumos preconfigurados -- eso se agrega suelto por etapa en el acta.
 export type CreateProductionProcessPayload = {
   name: string;
   description?: string | null;
-  version?: number;
-  waste_limit_percent?: string;
   is_active?: boolean;
-  stages: Array<{
-    name: string;
-    description?: string | null;
-    phase_name?: string | null;
-    stage_type?: string;
-    quality_check?: string | null;
-    rework_action?: string | null;
-    order: number;
-    requires_weighing: boolean;
-    is_active?: boolean;
-    ingredients?: Array<{
-      inventory_item_id: string;
-    }>;
-  }>;
-  // Tipos de producto del catálogo que el proceso puede producir (vacío = todos).
-  product_type_ids?: string[];
 };
 
 export function listProcesses() {
@@ -58,12 +42,8 @@ export function createProductionRun(payload: {
   // Cantidad total de materia prima en la unidad de medida del item elegido.
   quantity: string;
   raw_material_item_id: string;
-  // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
-  assembly_mode: "ASIGNAR" | "ENSAMBLAR";
   // Plan de resultantes: la suma de cantidades debe igualar quantity.
   products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>;
-  // Complementos solicitados al inventario (opcional).
-  complements?: Array<{ item_id: string; quantity: string }>;
   // Cantidad total de cada insumo configurado en las etapas activas del proceso (obligatorio 1:1).
   stage_ingredients?: Array<{ process_stage_ingredient_id: string; quantity: string }>;
 }) {
@@ -80,17 +60,6 @@ export function updateProductionRunProducts(
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/products`, {
     method: "PUT",
     body: JSON.stringify({ products }),
-  });
-}
-
-// Define la combinacion de complementos aplicada al ensamble del resultante.
-export function defineRunAssembly(
-  runId: string,
-  items: Array<{ complement_item_id: string; quantity: string }>,
-) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/assembly`, {
-    method: "POST",
-    body: JSON.stringify({ items }),
   });
 }
 
@@ -141,7 +110,7 @@ export function previewProductionRunAllocation(runId: string, quantityUnits: str
 }
 
 /** Dry-run: cuánto cubriría aprobar materiales hoy, con todos los recursos
- * cortos (materia prima, complementos e insumos). No consume ni cambia estado. */
+ * cortos (materia prima e insumos). No consume ni cambia estado. */
 export function previewProductionRunApproveMaterials(runId: string) {
   return apiRequest<AllocationPreview>(`/api/production/runs/${runId}/approve-materials-preview`);
 }
@@ -232,7 +201,7 @@ export function addActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCI
   });
 }
 
-export function addAdminActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; item_id?: string | null; label?: string | null; quantity: string; unit_code?: string | null; note?: string | null }) {
+export function addAdminActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; item_id?: string | null; label?: string | null; quantity: string; unit_code?: string | null; note?: string | null; stage_attempt_id?: string | null }) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/acta-lines/admin`, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -246,47 +215,52 @@ export function updateActaLine(lineId: string, payload: { label?: string; quanti
   });
 }
 
-export function returnComplement(complementId: string, quantity: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/complements/${complementId}/return`, {
-    method: "POST",
-    body: JSON.stringify({ quantity }),
-  });
-}
-
 export function deleteActaLine(lineId: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/acta-lines/${lineId}`, {
     method: "DELETE",
   });
 }
 
-export function getAssemblyRecipe(params: { productTypeId?: string; itemId?: string; materialItemId?: string }) {
-  const query = params.productTypeId
-    ? `product_type_id=${params.productTypeId}`
-    : `item_id=${params.itemId}`;
-  const materialParam = params.materialItemId ? `&material_item_id=${params.materialItemId}` : "";
-  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes?${query}${materialParam}`);
+// --- Flujo dinamico de produccion (docs/cambios-sistema-produccion.md seccion 4) ---
+
+/** Crea la orden con solo un nombre libre, sin proceso ni materia prima fijos. */
+export function createProductionOrder(name: string) {
+  return apiRequest<ProductionRun>("/api/production/orders", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
 }
 
-export function upsertAssemblyRecipe(
-  modelKey: string,
-  items: Array<{ complement_item_id: string; quantity: string }>,
+/** Elige un proceso del banco y arranca un intento de etapa (secuencial: una
+ * etapa activa a la vez por orden). */
+export function startStageAttempt(runId: string, payload: { process_id: string; responsable_name: string }) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/stage-attempts`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Termina el intento activo: ✔ (APROBADA, calcula merma propia) o ✘
+ * (RECHAZADA, motivo siempre opcional). */
+export function finishStageAttempt(
+  attemptId: string,
+  payload: { peso_al_finalizar: string; decision: "APROBADA" | "RECHAZADA"; rejection_reason?: string | null },
 ) {
-  return apiRequest<AssemblyRecipe>(`/api/production/assembly-recipes/${modelKey}`, {
-    method: "PUT",
-    body: JSON.stringify({ items }),
+  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/finish`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
-export function listAssemblyRecipeModelKeys() {
-  return apiRequest<string[]>("/api/production/assembly-recipes/types");
-}
-
-export function listAssemblyRecipes() {
-  return apiRequest<AssemblyRecipe[]>("/api/production/assembly-recipes/all");
-}
-
-export function deleteAssemblyRecipe(modelKey: string) {
-  return apiRequest<void>(`/api/production/assembly-recipes/${modelKey}`, {
-    method: "DELETE",
+/** Asigna el avance actual a producto terminado, disponible en cualquier
+ * momento de la orden (no solo al final) -- cierra la orden (TERMINADA). */
+export function assignProduct(
+  runId: string,
+  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>,
+) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/assign-product`, {
+    method: "POST",
+    body: JSON.stringify({ products }),
   });
 }
+

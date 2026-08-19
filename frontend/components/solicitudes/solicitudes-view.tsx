@@ -10,6 +10,7 @@ import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
 import { getRunFamily } from "@/lib/orden-produccion";
 import { listInventoryItems } from "@/lib/inventory-api";
+import { listMessages, respondMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
 import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import { ActaView } from "@/components/production/acta-view";
 import type { ProductionRun } from "@/types/production";
@@ -22,6 +23,7 @@ const STATUS_LABELS: Record<ProductionRun["status"], string> = {
   RECIBIDA: "Recibida",
   CANCELADA: "Rechazada / cancelada",
   ESPERANDO_MATERIAL: "Esperando material",
+  TERMINADA: "Terminada",
 };
 
 function dateTimeLabel(value: string | null) {
@@ -51,8 +53,6 @@ function percentText(value: string | null) {
 function RunSummaryRows({ run }: { run: ProductionRun }) {
   const unit = run.raw_material_unit_code || "g";
   const products = run.products ?? [];
-  const complements = run.complements ?? [];
-  const assemblyItems = run.assembly_items ?? [];
 
   // Las fechas van como una fila cada una dentro de la misma ficha, en vez de
   // un panel "Linea de tiempo" aparte: es la mitad de alto y se lee igual.
@@ -66,7 +66,6 @@ function RunSummaryRows({ run }: { run: ProductionRun }) {
 
   return (
     <>
-      {run.assembly_pending ? <span><strong>Ensamble</strong>Pendiente de definir</span> : null}
       <span>
         <strong>Material requerido</strong>
         {num(run.total_required_material)} {unit}
@@ -93,18 +92,6 @@ function RunSummaryRows({ run }: { run: ProductionRun }) {
         <span>
           <strong>Productos</strong>
           {products.map((p) => `${p.product_name ?? "—"} (${num(p.quantity)} ${p.unit_code || unit})`).join(" · ")}
-        </span>
-      ) : null}
-      {complements.length > 0 ? (
-        <span>
-          <strong>Complementos</strong>
-          {complements.map((c) => `${c.name ?? "—"} (${num(c.quantity)} ${c.unit_code})`).join(" · ")}
-        </span>
-      ) : null}
-      {assemblyItems.length > 0 ? (
-        <span>
-          <strong>Ensamble aplicado</strong>
-          {assemblyItems.map((i) => `${i.name ?? "—"} (${num(i.quantity)})`).join(" · ")}
         </span>
       ) : null}
       {timeline.map(([label, value]) => (
@@ -161,6 +148,194 @@ function RunDetail({
         </div>
       </section>
     </div>
+  );
+}
+
+// Mensaje libre Admin -> Produccion/Inventario (docs/cambios-sistema-produccion.md
+// seccion 2.2): comunicacion informal, no crea ninguna orden por si sola. El
+// Admin compone y ve el estado de lo que envio; Produccion/Inventario ve la
+// bandeja pendiente y acepta/rechaza. Historial permanente, misma lista para
+// los dos lados -- la respuesta "vuelve" al Admin porque ve el mismo estado.
+function MessagesPanel({ role, userId }: { role: "admin" | "operaciones"; userId: string | null }) {
+  const queryClient = useQueryClient();
+  const [body, setBody] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const { data: messages = [] } = useQuery({
+    queryKey: ["admin-messages"],
+    queryFn: listMessages,
+  });
+
+  async function handleSend() {
+    if (!body.trim()) {
+      setLocalError("Escribe el mensaje.");
+      return;
+    }
+    setLocalError(null);
+    setIsSaving(true);
+    try {
+      await sendMessage(body.trim());
+      setBody("");
+      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
+    } catch (nextError) {
+      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo enviar el mensaje.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRespond(messageId: string, status: "ACEPTADA" | "RECHAZADA") {
+    setLocalError(null);
+    setIsSaving(true);
+    try {
+      await respondMessage(messageId, status);
+      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
+    } catch (nextError) {
+      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo responder el mensaje.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function statusLabel(status: AdminMessage["status"]) {
+    if (status === "ACEPTADA") return "Aceptado";
+    if (status === "RECHAZADA") return "Rechazado";
+    return "Pendiente";
+  }
+
+  if (role === "admin") {
+    const sent = messages.filter((m) => m.sender_user_id === userId);
+    return (
+      <section className="card panelBody">
+        <div className="panelHeader">
+          <div>
+            <h2 className="panelTitle">Mensaje a Produccion/Inventario</h2>
+            <p className="panelText">Comunicacion libre -- no crea una orden por si sola</p>
+          </div>
+        </div>
+        {localError ? <div className="alert alertError">{localError}</div> : null}
+        <div className="fieldGroup">
+          <textarea
+            className="field"
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Ej: Necesito 20kg de este producto para el 30 de agosto"
+            rows={3}
+            value={body}
+          />
+        </div>
+        <div className="modalActions">
+          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleSend()} type="button">
+            Enviar mensaje
+          </button>
+        </div>
+        <div className="tableWrap" style={{ marginTop: 12 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Mensaje</th>
+                <th>Enviado</th>
+                <th>Estado</th>
+                <th>Respondido por</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sent.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.body}</td>
+                  <td>{dateTimeLabel(m.created_at)}</td>
+                  <td><span className="statusBadge">{statusLabel(m.status)}</span></td>
+                  <td>{m.responded_by_name ?? "-"}</td>
+                </tr>
+              ))}
+              {sent.length === 0 ? (
+                <tr><td colSpan={4}><div className="emptyState">Aun no has enviado mensajes.</div></td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
+
+  const pending = messages.filter((m) => m.status === "PENDIENTE");
+  const responded = messages.filter((m) => m.status !== "PENDIENTE");
+  return (
+    <>
+      <section className="card panelBody">
+        <div className="panelHeader">
+          <div>
+            <h2 className="panelTitle">Mensajes del Admin</h2>
+            <p className="panelText">Pendientes de responder</p>
+          </div>
+        </div>
+        {localError ? <div className="alert alertError">{localError}</div> : null}
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Mensaje</th>
+                <th>Enviado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pending.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.body}</td>
+                  <td>{dateTimeLabel(m.created_at)}</td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleRespond(m.id, "ACEPTADA")} type="button">
+                        Aceptar
+                      </button>
+                      <button className="button" disabled={isSaving} onClick={() => void handleRespond(m.id, "RECHAZADA")} type="button">
+                        Rechazar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {pending.length === 0 ? (
+                <tr><td colSpan={3}><div className="emptyState">Sin mensajes pendientes.</div></td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card panelBody">
+        <div className="panelHeader">
+          <div>
+            <h2 className="panelTitle">Mensajes respondidos</h2>
+            <p className="panelText">Historial</p>
+          </div>
+        </div>
+        <div className="tableWrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Mensaje</th>
+                <th>Enviado</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {responded.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.body}</td>
+                  <td>{dateTimeLabel(m.created_at)}</td>
+                  <td><span className="statusBadge">{statusLabel(m.status)}</span></td>
+                </tr>
+              ))}
+              {responded.length === 0 ? (
+                <tr><td colSpan={3}><div className="emptyState">Sin mensajes respondidos.</div></td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -250,7 +425,9 @@ export function SolicitudesView() {
     <div className="content">
       {error ? <div className="alert alertError">{error}</div> : null}
 
-      {role === "produccion" ? (
+      {role === "admin" || role === "operaciones" ? <MessagesPanel role={role} userId={userId} /> : null}
+
+      {role === "operaciones" ? (
         <section className="card panelBody">
           <div className="panelHeader">
             <div>
@@ -290,7 +467,7 @@ export function SolicitudesView() {
         </section>
       ) : null}
 
-      {role === "inventario" ? (
+      {role === "operaciones" ? (
         <>
           <section className="card panelBody">
             <div className="panelHeader">

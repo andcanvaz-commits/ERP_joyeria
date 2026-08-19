@@ -23,9 +23,7 @@ export function ReportesView() {
     );
   }
 
-  if (role === "inventario") return <InventoryReports />;
-  if (role === "produccion") return <ReportesDashboard />;
-  // Admin (u otros): ve reportes de produccion e inventario.
+  // Admin y el rol fusionado Produccion/Inventario ven los dos reportes.
   return (
     <>
       <ReportesDashboard />

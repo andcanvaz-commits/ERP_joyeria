@@ -5,6 +5,7 @@ import { Check, Info, Pencil, Trash2, X } from "lucide-react";
 import {
   ActaSideLine,
   ActaSideTotal,
+  buildFechaRowSpans,
   formatDocDate,
   formatGramos,
 } from "@/lib/orden-produccion";
@@ -107,6 +108,7 @@ export function ActaSide({
   const rowCount = lines.filter((line) => line.kind === "row").length;
   const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length);
   const wrap = (node: React.ReactNode) => (dataClass ? <span className={dataClass}>{node}</span> : node);
+  const fechaRowSpans = buildFechaRowSpans(lines);
 
   return (
     <section className={`opCol actaDocCol${dataClass ? ` ${dataClass}` : ""}`}>
@@ -142,7 +144,11 @@ export function ActaSide({
                 </tr>
               ) : editingId === line.id ? (
                 <tr key={line.id}>
-                  <td> </td>
+                  {fechaRowSpans.has(line.id) ? (
+                    <td className="opTdFecha" rowSpan={fechaRowSpans.get(line.id)}>
+                      {formatDocDate(line.fecha) || DASH}
+                    </td>
+                  ) : null}
                   <td className="opTdGramos">
                     <span className="actaDocInputs">
                       <input
@@ -189,7 +195,11 @@ export function ActaSide({
                 </tr>
               ) : (
                 <tr className="actaDocRow" key={line.id}>
-                  <td> </td>
+                  {fechaRowSpans.has(line.id) ? (
+                    <td className="opTdFecha" rowSpan={fechaRowSpans.get(line.id)}>
+                      {formatDocDate(line.fecha) || DASH}
+                    </td>
+                  ) : null}
                   <td className="opTdGramos">
                     {wrap(
                       <>

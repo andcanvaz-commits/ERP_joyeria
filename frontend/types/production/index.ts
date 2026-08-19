@@ -1,41 +1,37 @@
-export interface StageIngredient {
-  id: string;
-  inventory_item_id: string;
-}
-
-export type ProductionProcessStage = {
-  id: string;
-  name: string;
-  description: string | null;
-  phase_name: string | null;
-  stage_type: string;
-  quality_check: string | null;
-  rework_action: string | null;
-  rework_target_order?: number | null;
-  stage_order: number;
-  requires_weighing: boolean;
-  is_active: boolean;
-  ingredients?: StageIngredient[];
-};
-
+// Banco de procesos (docs/cambios-sistema-produccion.md seccion 3): un paso
+// suelto reutilizable, sin sub-etapas ni insumos preconfigurados -- eso se
+// agrega suelto por etapa en el acta (mismo mecanismo ADMIN_STOCK/MANUAL).
 export type ProductionProcess = {
   id: string;
   name: string;
   code?: string | null;
   description: string | null;
-  version: number;
-  waste_limit_percent: string;
   is_active: boolean;
-  stages: ProductionProcessStage[];
-  // Tipos de producto del catálogo que este proceso puede producir (vacío = todos).
-  product_type_ids?: string[];
 };
 
-// Receta de ensamble por clave de modelo (categoria+modelo): ultima cantidad
-// total usada por complemento (sugerencia, no autoritativa).
-export type AssemblyRecipe = {
-  model_key: string | null;
-  items: Array<{ complement_item_id: string; name?: string | null; unit_code?: string | null; material_type?: string | null; quantity: string }>;
+// Intento de etapa del flujo nuevo (un ✔ o ✘): reemplaza ProductionRunStage
+// para ordenes creadas con el flujo dinamico. Cada uno tiene su propia acta
+// y su propia merma, independiente de los demas intentos de la orden.
+export type StageAttempt = {
+  id: string;
+  run_id: string;
+  process_id?: string | null;
+  process_name: string;
+  sequence_order: number;
+  attempt_no_for_process: number;
+  code?: string | null;
+  responsable_name?: string | null;
+  status: "EN_PROCESO" | "APROBADA" | "RECHAZADA";
+  rejection_reason?: string | null;
+  peso_al_finalizar?: string | null;
+  unit_code?: string | null;
+  merma_weight?: string | null;
+  merma_percent?: string | null;
+  started_by_name?: string | null;
+  started_at: string;
+  finished_by_name?: string | null;
+  finished_at?: string | null;
+  acta_lines?: ProductionRun["acta_lines"];
 };
 
 export type ProductionRunStage = {
@@ -76,15 +72,18 @@ export type StageDecision = {
 
 export type ProductionRun = {
   id: string;
-  process_id: string;
-  process_name: string;
+  // Nulos en ordenes del flujo nuevo (ver `name`/`stage_attempts` abajo).
+  process_id: string | null;
+  process_name: string | null;
+  // Nombre libre de la orden (flujo nuevo, seccion 4.1). Null en ordenes viejas.
+  name?: string | null;
   production_code?: string | null;
   // Folio de la orden original cuando esta corrida nacio de un split por
   // falta de materia prima (null si nunca se partio).
   root_production_code?: string | null;
   // Corrida padre de la que se partio esta (null si es la original).
   parent_run_id?: string | null;
-  quantity: string;
+  quantity: string | null;
   status:
     | "PENDIENTE_INVENTARIO"
     | "MATERIALES_APROBADOS"
@@ -92,16 +91,17 @@ export type ProductionRun = {
     | "PENDIENTE_RECEPCION"
     | "RECIBIDA"
     | "CANCELADA"
-    | "ESPERANDO_MATERIAL";
+    | "ESPERANDO_MATERIAL"
+    | "TERMINADA";
   raw_material_item_id: string | null;
-  raw_material_unit_code: string;
-  total_required_material: string;
+  raw_material_unit_code: string | null;
+  total_required_material: string | null;
   // Materia prima guardada para esta orden sin consumir todavía. Con
   // reservation_is_complete gobierna el botón "Iniciar con lo reservado".
   reserved_material_quantity?: string;
   reservation_is_complete?: boolean;
-  waste_limit_percent: string;
-  expected_finished_weight: string;
+  waste_limit_percent: string | null;
+  expected_finished_weight: string | null;
   actual_finished_weight: string | null;
   waste_weight: string | null;
   waste_percent: string | null;
@@ -124,7 +124,10 @@ export type ProductionRun = {
   started_at: string | null;
   finished_at: string | null;
   received_at: string | null;
+  // Flujo VIEJO: vacio en ordenes nuevas.
   stages: ProductionRunStage[];
+  // Flujo NUEVO (seccion 4): un intento por ✔/✘. Vacio en ordenes viejas.
+  stage_attempts?: StageAttempt[];
   // Tipos de producto que el proceso de esta orden puede producir (vacío = todos).
   allowed_product_type_ids?: string[];
   // Insumos consumidos al aprobar materiales (para el acta de entrega).
@@ -138,29 +141,8 @@ export type ProductionRun = {
     target_item_id?: string | null;
     unit_code?: string | null;
   }>;
-  // Complementos de inventario solicitados para ensamblar.
-  complements?: Array<{
-    id: string;
-    item_id: string;
-    name?: string | null;
-    quantity: string;
-    // Guardado para esta orden pero todavía no consumido.
-    reserved_quantity?: string;
-    unit_code: string;
-    status: string;
-    // Cuanto de lo aprobado ya se devolvio a inventario por sobrante.
-    returned_quantity?: string;
-    // Cuanto de lo aprobado se uso de verdad en el ensamble.
-    used_quantity?: string;
-  }>;
   // Líneas de evento del acta de entrega/recepción para certificación histórica.
   event_lines?: Array<{ side: "ENTREGA" | "RECEPCION"; gramos: string; unidad: string; detalle: string | null; line_order: number }>;
-  // Modo de destino del resultante: asignar a piezas existentes o ensamblar una nueva.
-  assembly_mode: "ASIGNAR" | "ENSAMBLAR";
-  // Indica si falta definir la combinacion de complementos del ensamble.
-  assembly_pending: boolean;
-  // Combinacion de complementos aplicada al ensamble (totales).
-  assembly_items?: Array<{ id: string; complement_item_id: string; name?: string | null; quantity: string }>;
   // Material adicional pedido mientras la corrida esta EN_PROCESO.
   additional_materials?: Array<{
     id: string;
@@ -191,6 +173,9 @@ export type ProductionRun = {
     item_id?: string | null;
     source: "PLAN" | "AUTO" | "MANUAL" | "ADMIN_STOCK";
     stage_id?: string | null;
+    // Intento de etapa del flujo nuevo al que pertenece esta linea (vacio =
+    // linea de nivel de orden o del flujo viejo).
+    stage_attempt_id?: string | null;
     stage_name?: string | null;
     note?: string | null;
     created_by_name?: string | null;

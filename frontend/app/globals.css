@@ -4748,6 +4748,12 @@ textarea:disabled {
   font-weight: 700;
 }
 
+.opTdFecha {
+  vertical-align: top;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
 .opSubtotalRow td {
   border-top: 2px solid var(--doc-ink);
   font-weight: 800;
