@@ -56,6 +56,19 @@ def send_message(
     return service.send_message(payload, current_user)
 
 
+@router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_message(
+    message_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: MessagesService = Depends(get_messages_service),
+) -> None:
+    _ensure_admin(current_user)
+    try:
+        service.delete_message(message_id)
+    except MessageNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
 @router.post("/{message_id}/reply", response_model=AdminMessageRead)
 def reply_message(
     message_id: UUID,

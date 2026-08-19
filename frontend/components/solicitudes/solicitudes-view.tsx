@@ -3,17 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, FileText, Printer, X } from "lucide-react";
+import { Eye, FileText, Printer, Trash2, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
 import { getRunFamily } from "@/lib/orden-produccion";
 import { listInventoryItems } from "@/lib/inventory-api";
-import { listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
+import { deleteMessage, listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
 import { markMessagesSeen, type MessagesScope } from "@/lib/messages-read-state";
 import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import { ActaView } from "@/components/production/acta-view";
+import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import type { ProductionRun } from "@/types/production";
 
 const STATUS_LABELS: Record<ProductionRun["status"], string> = {
@@ -169,11 +170,13 @@ function MessageThread({
   currentUserId,
   isSaving,
   onReply,
+  onDelete,
 }: {
   message: AdminMessage;
   currentUserId: string | null;
   isSaving: boolean;
   onReply: (messageId: string, body: string) => void | Promise<void>;
+  onDelete?: (messageId: string) => void | Promise<void>;
 }) {
   const [replyText, setReplyText] = useState("");
   const senderName = message.sender_name ?? "Admin";
@@ -185,6 +188,18 @@ function MessageThread({
           <strong>{senderName}</strong>
           <span>{dateTimeLabel(message.created_at)}</span>
         </div>
+        {onDelete ? (
+          <button
+            aria-label="Eliminar mensaje"
+            className="iconOnlyButton"
+            disabled={isSaving}
+            onClick={() => void onDelete(message.id)}
+            title="Eliminar mensaje"
+            type="button"
+          >
+            <Trash2 aria-hidden="true" size={16} />
+          </button>
+        ) : null}
       </div>
       <p className="messageBody">{message.body}</p>
       {message.replies.map((reply) => (
@@ -233,6 +248,7 @@ export function MessagesPanel({
   const [body, setBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const { data: messages = [] } = useQuery({
     queryKey: ["admin-messages"],
@@ -275,6 +291,20 @@ export function MessagesPanel({
     }
   }
 
+  async function handleDelete(messageId: string) {
+    if (!(await confirmDelete(confirm, "este mensaje"))) return;
+    setLocalError(null);
+    setIsSaving(true);
+    try {
+      await deleteMessage(messageId);
+      await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
+    } catch (nextError) {
+      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo eliminar el mensaje.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <section className="card panelBody">
       <div className="panelHeader">
@@ -300,10 +330,18 @@ export function MessagesPanel({
       ) : null}
       <div className="messageList">
         {messages.map((m) => (
-          <MessageThread currentUserId={userId} isSaving={isSaving} key={m.id} message={m} onReply={handleReply} />
+          <MessageThread
+            currentUserId={userId}
+            isSaving={isSaving}
+            key={m.id}
+            message={m}
+            onDelete={role === "admin" ? handleDelete : undefined}
+            onReply={handleReply}
+          />
         ))}
         {messages.length === 0 ? <div className="emptyState">Sin mensajes.</div> : null}
       </div>
+      {dialog}
     </section>
   );
 }

@@ -2229,6 +2229,10 @@ textarea {
   gap: 8px;
 }
 
+.messageCardHead .iconOnlyButton {
+  margin-left: auto;
+}
+
 .messageAvatar {
   width: 26px;
   height: 26px;

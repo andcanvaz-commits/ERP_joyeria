@@ -78,6 +78,13 @@ class MessagesService:
         names = _resolve_user_names(self.session, user_ids)
         return [self._read(m, names) for m in messages]
 
+    def delete_message(self, message_id: UUID) -> None:
+        message = self.session.get(AdminMessage, message_id)
+        if message is None:
+            raise MessageNotFoundError("Mensaje no encontrado.")
+        self.session.delete(message)
+        self.session.flush()
+
     def reply_message(
         self, message_id: UUID, payload: AdminMessageReplyCreate, current_user: CurrentUser
     ) -> AdminMessageRead:

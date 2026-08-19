@@ -34,3 +34,9 @@ export function replyMessage(messageId: string, body: string) {
     body: JSON.stringify({ body }),
   });
 }
+
+export function deleteMessage(messageId: string) {
+  return apiRequest<void>(`/api/messages/${messageId}`, {
+    method: "DELETE",
+  });
+}
