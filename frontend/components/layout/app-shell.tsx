@@ -106,12 +106,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         (run.event_lines ?? []).length === 0,
     ).length + pendingAdditionalMaterials;
   const prodPending = navRuns.filter((run) => run.status === "MATERIALES_APROBADOS").length;
+  // El punto rojo de "hay que actuar" es de Inventario/Produccion: Bandeja
+  // de mensajes ya es solo mensajeria, no hereda ese aviso.
   const navBadges: Record<string, number> = {
     "/inventario": invPending,
     "/produccion": prodPending,
-    // Rol fusionado: ve las dos secciones de Solicitudes a la vez, asi que el
-    // punto rojo suma ambos pendientes en vez de elegir uno.
-    "/solicitudes": invPending + prodPending,
   };
 
   // Punto azul-verdoso de mensajes sin leer (distinto del rojo de pendientes,
