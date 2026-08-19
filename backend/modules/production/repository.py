@@ -42,7 +42,7 @@ class ProductionProcessRepository:
             .options(
                 selectinload(ProductionRun.stages).selectinload(ProductionRunStage.ingredients),
                 selectinload(ProductionRun.event_lines),
-                selectinload(ProductionRun.stage_attempts),
+                selectinload(ProductionRun.stage_attempts).selectinload(ProductionRunStageAttempt.materials),
             )
             .where(ProductionRun.id == run_id)
         )
@@ -51,7 +51,10 @@ class ProductionProcessRepository:
     def get_stage_attempt(self, attempt_id: UUID) -> ProductionRunStageAttempt | None:
         statement = (
             select(ProductionRunStageAttempt)
-            .options(selectinload(ProductionRunStageAttempt.run).selectinload(ProductionRun.stage_attempts))
+            .options(
+                selectinload(ProductionRunStageAttempt.materials),
+                selectinload(ProductionRunStageAttempt.run).selectinload(ProductionRun.stage_attempts),
+            )
             .where(ProductionRunStageAttempt.id == attempt_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
@@ -111,7 +114,7 @@ class ProductionProcessRepository:
             .options(
                 selectinload(ProductionRun.stages).selectinload(ProductionRunStage.ingredients),
                 selectinload(ProductionRun.event_lines),
-                selectinload(ProductionRun.stage_attempts),
+                selectinload(ProductionRun.stage_attempts).selectinload(ProductionRunStageAttempt.materials),
             )
             .order_by(ProductionRun.requested_at.desc())
         )
