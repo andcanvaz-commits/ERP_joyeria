@@ -628,8 +628,8 @@ export function InventoryDashboard() {
     refetchInterval: 15000,
   });
   const { data: messagesLastSeen = new Date(0).toISOString() } = useQuery({
-    queryKey: lastSeenQueryKey(messagesUserId),
-    queryFn: lastSeenQueryFn(messagesUserId),
+    queryKey: lastSeenQueryKey(messagesUserId, "inventario"),
+    queryFn: lastSeenQueryFn(messagesUserId, "inventario"),
     enabled: Boolean(messagesUserId),
   });
   const unreadMessagesCount = countUnreadMessages(inboxMessages, messagesUserId, messagesLastSeen);
@@ -2230,7 +2230,7 @@ export function InventoryDashboard() {
         ? createPortal(
             <button
               className="topbarInbox"
-              onClick={() => { setIsMessagesOpen(true); markMessagesSeen(queryClient, currentUser?.id ?? null); }}
+              onClick={() => { setIsMessagesOpen(true); markMessagesSeen(queryClient, currentUser?.id ?? null, "inventario"); }}
               type="button"
               aria-label="Buzon de mensajes"
             >
@@ -5417,7 +5417,7 @@ export function InventoryDashboard() {
               </button>
             </div>
             {messagesRole === "admin" || messagesRole === "operaciones" ? (
-              <MessagesPanel role={messagesRole} userId={currentUser?.id ?? null} />
+              <MessagesPanel role={messagesRole} scope="inventario" userId={currentUser?.id ?? null} />
             ) : null}
           </section>
         </div>

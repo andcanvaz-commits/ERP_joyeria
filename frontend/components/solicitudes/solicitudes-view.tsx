@@ -11,7 +11,7 @@ import { listProductionRuns } from "@/lib/production-api";
 import { getRunFamily } from "@/lib/orden-produccion";
 import { listInventoryItems } from "@/lib/inventory-api";
 import { listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
-import { markMessagesSeen } from "@/lib/messages-read-state";
+import { markMessagesSeen, type MessagesScope } from "@/lib/messages-read-state";
 import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import { ActaView } from "@/components/production/acta-view";
 import type { ProductionRun } from "@/types/production";
@@ -220,7 +220,15 @@ function MessageThread({
   );
 }
 
-export function MessagesPanel({ role, userId }: { role: "admin" | "operaciones"; userId: string | null }) {
+export function MessagesPanel({
+  role,
+  userId,
+  scope,
+}: {
+  role: "admin" | "operaciones";
+  userId: string | null;
+  scope: MessagesScope;
+}) {
   const queryClient = useQueryClient();
   const [body, setBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -231,6 +239,9 @@ export function MessagesPanel({ role, userId }: { role: "admin" | "operaciones";
     queryFn: listMessages,
   });
 
+  // Mandar o responder desde ACA cuenta como haber visto esta superficie: el
+  // punto de aviso de esta pantalla se apaga, pero el de la otra queda
+  // prendido hasta que el otro lado entre a ver esto.
   async function handleSend() {
     if (!body.trim()) {
       setLocalError("Escribe el mensaje.");
@@ -242,6 +253,7 @@ export function MessagesPanel({ role, userId }: { role: "admin" | "operaciones";
       await sendMessage(body.trim());
       setBody("");
       await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
+      markMessagesSeen(queryClient, userId, scope);
     } catch (nextError) {
       setLocalError(nextError instanceof Error ? nextError.message : "No se pudo enviar el mensaje.");
     } finally {
@@ -255,6 +267,7 @@ export function MessagesPanel({ role, userId }: { role: "admin" | "operaciones";
     try {
       await replyMessage(messageId, replyBody);
       await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
+      markMessagesSeen(queryClient, userId, scope);
     } catch (nextError) {
       setLocalError(nextError instanceof Error ? nextError.message : "No se pudo responder el mensaje.");
     } finally {
@@ -343,7 +356,7 @@ export function SolicitudesView() {
   // Esta pantalla siempre muestra la bandeja de mensajes (para admin y
   // operaciones): entrar aqui ya cuenta como haberla visto.
   useEffect(() => {
-    if (role === "admin" || role === "operaciones") markMessagesSeen(queryClient, userId);
+    if (role === "admin" || role === "operaciones") markMessagesSeen(queryClient, userId, "solicitudes");
   }, [role, userId, queryClient]);
 
   // El acta es editable: si queda abierta mientras se guarda un cambio,
@@ -387,7 +400,9 @@ export function SolicitudesView() {
     <div className="content">
       {error ? <div className="alert alertError">{error}</div> : null}
 
-      {role === "admin" || role === "operaciones" ? <MessagesPanel role={role} userId={userId} /> : null}
+      {role === "admin" || role === "operaciones" ? (
+        <MessagesPanel role={role} scope="solicitudes" userId={userId} />
+      ) : null}
 
       {role === "operaciones" ? (
         <section className="card panelBody">

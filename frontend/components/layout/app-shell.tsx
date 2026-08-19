@@ -124,15 +124,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     enabled: isAuthenticated() && Boolean(currentUser),
     refetchInterval: 15000,
   });
-  const { data: lastSeenMessages = new Date(0).toISOString() } = useQuery({
-    queryKey: lastSeenQueryKey(userId),
-    queryFn: lastSeenQueryFn(userId),
+  const { data: lastSeenInventario = new Date(0).toISOString() } = useQuery({
+    queryKey: lastSeenQueryKey(userId, "inventario"),
+    queryFn: lastSeenQueryFn(userId, "inventario"),
     enabled: Boolean(userId),
   });
-  const unreadMessages = countUnreadMessages(navMessages, userId, lastSeenMessages);
+  const { data: lastSeenSolicitudes = new Date(0).toISOString() } = useQuery({
+    queryKey: lastSeenQueryKey(userId, "solicitudes"),
+    queryFn: lastSeenQueryFn(userId, "solicitudes"),
+    enabled: Boolean(userId),
+  });
   const messageBadges: Record<string, number> = {
-    "/inventario": unreadMessages,
-    "/solicitudes": unreadMessages,
+    "/inventario": countUnreadMessages(navMessages, userId, lastSeenInventario),
+    "/solicitudes": countUnreadMessages(navMessages, userId, lastSeenSolicitudes),
   };
 
   // Cambio forzado de contrasena temporal: se realiza en la pantalla de login.
