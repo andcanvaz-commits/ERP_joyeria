@@ -965,28 +965,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Escribe el nombre del responsable.");
       return;
     }
-    if (!stageMaterialItem || !stageMaterialQuantity || Number(stageMaterialQuantity) <= 0) {
-      setError("Elige la materia prima y su cantidad.");
-      return;
-    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
+      // Material opcional: si se elige, el backend valida stock disponible y
+      // hace split automatico si no alcanza (ver start_stage_attempt) -- ya
+      // no se fuerza el movimiento a mano con addAdminActaLine.
+      const materials =
+        stageMaterialItem && stageMaterialQuantity && Number(stageMaterialQuantity) > 0
+          ? [{ item_id: stageMaterialItem.id, quantity: stageMaterialQuantity }]
+          : undefined;
       const started = await startStageAttempt(dynamicOrderRun.id, {
         process_id: selectedProcessId,
         responsable_name: stageResponsableName.trim(),
+        materials,
       });
-      const newAttempt = started.stage_attempts?.find((a) => a.status === "EN_PROCESO");
-      const updated = newAttempt
-        ? await addAdminActaLine(dynamicOrderRun.id, {
-            side: "ENTREGA",
-            item_id: stageMaterialItem.id,
-            quantity: stageMaterialQuantity,
-            stage_attempt_id: newAttempt.id,
-          })
-        : started;
-      setDynamicOrderRun(updated);
+      setDynamicOrderRun(started);
       setSelectedProcessId("");
       setStageResponsableName("");
       setStageMaterialItem(null);
@@ -994,6 +989,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la etapa.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleAllocateStageAttemptMaterial(attemptId: string) {
+    if (!dynamicOrderRun) return;
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await allocateStageAttemptMaterial(attemptId);
+      setDynamicOrderRun(updated);
+      setSuccess("Material asignado.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo asignar el material.");
     } finally {
       setIsSaving(false);
     }
@@ -1675,7 +1687,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           terminado" disponible en cualquier momento (seccion 4). */}
       {dynamicOrderRun ? (() => {
         const runningAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.status === "EN_PROCESO") ?? null;
-        const pastAttempts = (dynamicOrderRun.stage_attempts ?? []).filter((a) => a.id !== runningAttempt?.id);
+        const waitingMaterialAttempts = (dynamicOrderRun.stage_attempts ?? []).filter(
+          (a) => a.status === "PENDIENTE_MATERIAL",
+        );
+        const pastAttempts = (dynamicOrderRun.stage_attempts ?? []).filter(
+          (a) => a.id !== runningAttempt?.id && a.status !== "PENDIENTE_MATERIAL",
+        );
         const activeActaLines = runningAttempt
           ? (dynamicOrderRun.acta_lines ?? []).filter((line) => line.stage_attempt_id === runningAttempt.id)
           : [];
@@ -1717,6 +1734,38 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       ))}
                     </tbody>
                   </table>
+                </div>
+              ) : null}
+
+              {waitingMaterialAttempts.length > 0 ? (
+                <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                  {waitingMaterialAttempts.map((attempt) => (
+                    <div className="solicitudCard" key={attempt.id}>
+                      <div className="solicitudCardHead">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <strong>
+                            {attempt.code ? <span className="orderCodeTag">{attempt.code}</span> : null}
+                            {attempt.process_name} · Falta material
+                          </strong>
+                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
+                            {attempt.materials
+                              .filter((m) => Number(m.quantity_pending) > 0)
+                              .map((m) => `${m.name ?? m.item_id}: faltan ${numericText(m.quantity_pending)} ${m.unit_code}`)
+                              .join(" · ")}
+                          </span>
+                        </div>
+                        <button
+                          className="button buttonPrimary"
+                          disabled={isSaving}
+                          onClick={() => void handleAllocateStageAttemptMaterial(attempt.id)}
+                          style={{ flexShrink: 0 }}
+                          type="button"
+                        >
+                          Asignar material disponible
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : null}
 
@@ -1920,12 +1969,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     />
                   </label>
                   <label className="fieldGroup">
-                    <span>Materia prima</span>
+                    <span>Materia prima (opcional)</span>
                     <button className="button" disabled={isSaving} onClick={() => setIsStageMaterialPickerOpen(true)} type="button">
                       {stageMaterialItem
                         ? `${stageMaterialItem.name} · ${numericText(stageMaterialQuantity)} ${stageMaterialItem.unit_code}`
                         : "Elegir..."}
                     </button>
+                    <span className="panelText">
+                      Si el stock no alcanza, la etapa arranca con lo disponible y el resto queda pendiente de asignar.
+                    </span>
                   </label>
                   <div className="modalActions">
                     <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleStartStageAttempt()} type="button">
