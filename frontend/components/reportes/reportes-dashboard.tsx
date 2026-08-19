@@ -92,6 +92,22 @@ function aggregate(runs: ProductionRun[]): Aggregate {
         byStageWaste.set(stage.stage_name, entry);
       }
     }
+    // Flujo nuevo (seccion 7): merma propia de cada intento de etapa
+    // (APROBADA), agregada por proceso -- mismo mapa que el flujo viejo, el
+    // nombre del proceso/etapa es la clave comun para las dos fuentes.
+    for (const attempt of run.stage_attempts ?? []) {
+      const attemptWasteWeight = num(attempt.merma_weight);
+      const attemptWastePct = num(attempt.merma_percent);
+      if (attemptWasteWeight > 0 || attemptWastePct > 0) {
+        const entry = byStageWaste.get(attempt.process_name) ?? { waste: 0, pctSum: 0, pctCount: 0 };
+        entry.waste += attemptWasteWeight;
+        if (attemptWastePct > 0) {
+          entry.pctSum += attemptWastePct;
+          entry.pctCount += 1;
+        }
+        byStageWaste.set(attempt.process_name, entry);
+      }
+    }
   }
 
   return {
