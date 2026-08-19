@@ -70,6 +70,7 @@ type ProcessForm = {
   name: string;
   description: string;
   isActive: boolean;
+  qualityControl: boolean;
 };
 
 type FormMode = "create" | "edit";
@@ -102,6 +103,7 @@ const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
   isActive: true,
+  qualityControl: false,
 });
 
 const emptyUserForm = () => ({
@@ -115,6 +117,7 @@ function processToForm(process: ProductionProcess): ProcessForm {
     name: process.name,
     description: process.description ?? "",
     isActive: process.is_active,
+    qualityControl: process.quality_control,
   };
 }
 
@@ -857,6 +860,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       name: processName,
       description: form.description.trim() || null,
       is_active: form.isActive,
+      quality_control: form.qualityControl,
     };
   }
 
@@ -2718,6 +2722,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 type="checkbox"
               />
               <span>Activo</span>
+            </label>
+
+            <label className="checkboxRow">
+              <input
+                checked={form.qualityControl}
+                disabled={isSaving}
+                onChange={(event) => setForm((current) => ({ ...current, qualityControl: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>Control de calidad</span>
             </label>
 
             <div className="modalActions">

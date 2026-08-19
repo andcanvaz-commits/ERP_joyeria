@@ -15,6 +15,7 @@ class ProductionProcessCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
     is_active: bool = True
+    quality_control: bool = False
 
 
 class ProductionProcessUpdate(BaseModel):
@@ -23,6 +24,7 @@ class ProductionProcessUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
     is_active: bool = True
+    quality_control: bool = False
 
 
 class ProductionProcessRead(BaseModel):
@@ -33,6 +35,7 @@ class ProductionProcessRead(BaseModel):
     code: str | None = None
     description: str | None = None
     is_active: bool
+    quality_control: bool
 
 
 class RunProductCreate(BaseModel):

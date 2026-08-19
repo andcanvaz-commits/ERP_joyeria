@@ -255,6 +255,7 @@ class ProductionService:
             code=self._next_process_code(),
             description=payload.description,
             is_active=payload.is_active,
+            quality_control=payload.quality_control,
         )
         self.repository.add(process)
         self.repository.flush()
@@ -271,6 +272,7 @@ class ProductionService:
         process.name = payload.name
         process.description = payload.description
         process.is_active = payload.is_active
+        process.quality_control = payload.quality_control
         self.repository.flush()
         return self._process_read(process)
 

@@ -7,6 +7,7 @@ export type ProductionProcess = {
   code?: string | null;
   description: string | null;
   is_active: boolean;
+  quality_control: boolean;
 };
 
 // Linea de material declarada al iniciar (o pendiente de asignar en) un

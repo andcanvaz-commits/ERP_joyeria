@@ -7,6 +7,7 @@ export type CreateProductionProcessPayload = {
   name: string;
   description?: string | null;
   is_active?: boolean;
+  quality_control?: boolean;
 };
 
 export function listProcesses() {
