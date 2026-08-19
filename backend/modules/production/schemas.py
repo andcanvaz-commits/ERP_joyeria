@@ -333,11 +333,22 @@ class ProductionOrderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
+class StageAttemptMaterialLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
 class StageAttemptCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     process_id: UUID
     responsable_name: str = Field(min_length=1, max_length=180)
+    # Opcional: si viene vacio, la etapa arranca directo (igual que antes).
+    # Si trae lineas, se valida contra stock disponible al iniciar -- puede
+    # terminar en split si no alcanza (ver ProductionService.start_stage_attempt).
+    materials: list[StageAttemptMaterialLine] = Field(default_factory=list)
 
 
 class StageAttemptFinish(BaseModel):
@@ -347,6 +358,16 @@ class StageAttemptFinish(BaseModel):
     decision: Literal["APROBADA", "RECHAZADA"]
     # Opcional -- Rodrigo: el motivo de rechazo no es obligatorio.
     rejection_reason: str | None = Field(default=None, max_length=1000)
+
+
+class StageAttemptMaterialRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    item_id: UUID
+    name: str | None = None
+    unit_code: str
+    quantity_requested: Decimal
+    quantity_pending: Decimal
 
 
 class StageAttemptRead(BaseModel):
@@ -371,6 +392,7 @@ class StageAttemptRead(BaseModel):
     finished_by_name: str | None = None
     finished_at: datetime | None = None
     acta_lines: list[ActaLineRead] = Field(default_factory=list)
+    materials: list[StageAttemptMaterialRead] = Field(default_factory=list)
 
 
 class AssignProductPayload(BaseModel):
