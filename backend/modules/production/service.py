@@ -1141,17 +1141,23 @@ class ProductionService:
         if run.status == ProductionRunStatus.WAITING_MATERIAL:
             run.reserved_material_quantity = Decimal("0")
 
-        if run.materials_approved_at is not None:
-            if self.inventory_service is None:
-                raise ProductionDomainError("Inventario no esta disponible para revertir el consumo de esta orden.")
-            self.inventory_service.reverse_production_consumption(
-                run.id,
-                current_user.id,
-                reason=(
-                    f"Reversion por cancelacion de orden {run.production_code or run.id}."
-                    + (f" {reason}" if reason else "")
-                ),
-            )
+        # reverse_production_consumption suma los movimientos
+        # CONSUMO_PRODUCCION con reference_id=run.id -- si no hay ninguno no
+        # hace nada, es seguro llamarlo siempre (antes solo se llamaba si
+        # materials_approved_at, un campo exclusivo del flujo viejo; el flujo
+        # nuevo tambien puede haber consumido via start_stage_attempt/
+        # allocate_stage_attempt_material y con ese gate esa reversion no
+        # pasaba).
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible para revertir el consumo de esta orden.")
+        self.inventory_service.reverse_production_consumption(
+            run.id,
+            current_user.id,
+            reason=(
+                f"Reversion por cancelacion de orden {run.production_code or run.id}."
+                + (f" {reason}" if reason else "")
+            ),
+        )
 
         self._revert_admin_stock_lines(run, current_user)
 

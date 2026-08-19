@@ -226,3 +226,36 @@ def test_cancel_run_family_unknown_run_raises_not_found(production_service, curr
 
     with pytest.raises(ProductionNotFoundError):
         production_service.cancel_run_family(uuid.uuid4(), current_user, "motivo")
+
+
+def test_cancel_run_restores_stock_consumed_by_a_new_flow_stage_attempt(
+    db_session, production_service, current_user, process, raw_material
+):
+    from backend.modules.product_types.models import ProductType  # noqa: F401
+    from backend.modules.production.schemas import (
+        ProductionOrderCreate,
+        StageAttemptCreate,
+        StageAttemptMaterialLine,
+    )
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+
+    order = production_service.create_order(ProductionOrderCreate(name="Orden a cancelar"), current_user)
+    production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+        ),
+        current_user,
+    )
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")
+
+    result = production_service.cancel_run(order.id, current_user, "Cancelada por error")
+
+    assert result.status == "CANCELADA"
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("100")
