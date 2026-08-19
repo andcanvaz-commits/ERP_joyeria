@@ -1655,14 +1655,25 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     const root = family.find((r) => !r.parent_run_id) ?? family[0];
                     const otherParts = family.filter((r) => r.id !== root.id);
                     const isSplit = otherParts.length > 0;
-                    const primaryAction = () => (isSplit ? setFamilyRuns(family) : openRunStagesModal(root));
+                    // Orden del flujo nuevo: siempre tiene `name`, aun antes de
+                    // iniciar su primera etapa -- stage_attempts vacio no sirve
+                    // como discriminador (bug reportado: "Gestionar" abria el
+                    // modal viejo con 0/0 etapas).
+                    const isDynamic = Boolean(root.name);
+                    const primaryAction = () =>
+                      isDynamic ? setDynamicOrderRun(root) : isSplit ? setFamilyRuns(family) : openRunStagesModal(root);
+                    const runningAttempt = isDynamic ? (root.stage_attempts ?? []).find((a) => a.status === "EN_PROCESO") ?? null : null;
+                    const lastAttempt = isDynamic
+                      ? [...(root.stage_attempts ?? [])].sort((a, b) => b.sequence_order - a.sequence_order)[0] ?? null
+                      : null;
+                    const approvedCount = isDynamic ? (root.stage_attempts ?? []).filter((a) => a.status === "APROBADA").length : 0;
                     const currentStage = root.stages.find((s) => s.status === "EN_PROCESO") ?? root.stages.find((s) => s.status === "PENDIENTE") ?? null;
                     const doneCount = root.stages.filter((s) => s.status === "FINALIZADA").length;
                     const totalQuantity = isSplit
                       ? family.reduce((total, part) => total + Number(part.quantity), 0)
                       : Number(root.quantity);
                     return (
-                      <div className="productionRunListRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Gestionar"} orden ${root.process_name}`)}>
+                      <div className="productionRunListRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Gestionar"} orden ${root.name ?? root.process_name}`)}>
                         {/* Title row: name + code left, timing + button right */}
                         <div className="productionRunListRowHead">
                           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
@@ -1676,7 +1687,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             ) : (
                               rootBadge(root)
                             )}
-                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{root.process_name}</strong>
+                            <strong style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{isDynamic ? root.name : root.process_name}</strong>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }} onClick={stopClick}>
                             <button className="button buttonPrimary runInlineBtn" onClick={primaryAction} type="button">
@@ -1684,30 +1695,54 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             </button>
                           </div>
                         </div>
-                        {/* Meta: current stage + qty + started */}
-                        <div className="productionRunListRowMeta">
-                          {currentStage ? <span>{currentStage.stage_order}. {currentStage.stage_name}</span> : null}
-                          {currentStage ? <span aria-hidden="true">·</span> : null}
-                          <span>{numericText(totalQuantity)} {root.raw_material_unit_code}</span>
-                          {isSplit ? null : (
-                            <>
+                        {isDynamic ? (
+                          <>
+                            {/* Meta: etapa activa (o la ultima) + creada */}
+                            <div className="productionRunListRowMeta">
+                              {runningAttempt ? (
+                                <span>{runningAttempt.process_name} · en curso</span>
+                              ) : lastAttempt ? (
+                                <span>{lastAttempt.process_name} · {lastAttempt.status === "APROBADA" ? "aprobada" : "rechazada"}</span>
+                              ) : (
+                                <span>Sin etapa iniciada</span>
+                              )}
                               <span aria-hidden="true">·</span>
-                              <span>Inició {hourLabel(root.started_at)}</span>
-                            </>
-                          )}
-                        </div>
-                        {/* Progress: caliper scale for stage advance */}
-                        <CaliperScale
-                          ariaLabel="Avance de la orden"
-                          label={`${doneCount}/${root.stages.length}`}
-                          max={root.stages.length}
-                          ticks={root.stages.length}
-                          value={doneCount}
-                        />
-                        {/* Tiempo transcurrido desde el inicio de la orden. */}
-                        <div className="productionRunListRowMeta">
-                          <span>Tiempo en proceso: {elapsedLabel(root.started_at, nowTick)}</span>
-                        </div>
+                              <span>Creada {hourLabel(root.requested_at)}</span>
+                            </div>
+                            <div className="productionRunListRowMeta">
+                              <span>{approvedCount} {approvedCount === 1 ? "etapa aprobada" : "etapas aprobadas"}</span>
+                              <span aria-hidden="true">·</span>
+                              <span>Tiempo en proceso: {elapsedLabel(root.requested_at, nowTick)}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            {/* Meta: current stage + qty + started */}
+                            <div className="productionRunListRowMeta">
+                              {currentStage ? <span>{currentStage.stage_order}. {currentStage.stage_name}</span> : null}
+                              {currentStage ? <span aria-hidden="true">·</span> : null}
+                              <span>{numericText(totalQuantity)} {root.raw_material_unit_code}</span>
+                              {isSplit ? null : (
+                                <>
+                                  <span aria-hidden="true">·</span>
+                                  <span>Inició {hourLabel(root.started_at)}</span>
+                                </>
+                              )}
+                            </div>
+                            {/* Progress: caliper scale for stage advance */}
+                            <CaliperScale
+                              ariaLabel="Avance de la orden"
+                              label={`${doneCount}/${root.stages.length}`}
+                              max={root.stages.length}
+                              ticks={root.stages.length}
+                              value={doneCount}
+                            />
+                            {/* Tiempo transcurrido desde el inicio de la orden. */}
+                            <div className="productionRunListRowMeta">
+                              <span>Tiempo en proceso: {elapsedLabel(root.started_at, nowTick)}</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
