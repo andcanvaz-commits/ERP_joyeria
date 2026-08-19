@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
-import { buildItemNameMap, buildOrdenProduccion, canPrintRecepcion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildItemNameMap, buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { ActaView } from "@/components/production/acta-view";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
@@ -45,20 +45,12 @@ import {
   type SaveInventoryItemPayload,
 } from "@/lib/inventory-api";
 import {
-  allocateProductionRunMaterial,
   approveAdditionalMaterial,
-  approveProductionRunMaterials,
-  previewProductionRunAllocation,
-  previewProductionRunApproveMaterials,
   rejectAdditionalMaterial,
-  rejectProductionRunMaterials,
-  releaseProductionRunReservation,
-  reserveProductionRunMaterial,
   listProductionRuns,
-  receiveProductionRunFinishedProduct,
 } from "@/lib/production-api";
-import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType, WaitingProductionRunSummary } from "@/types/inventory";
-import type { AllocationPreview, ProductionRun, ProductionRunStage } from "@/types/production";
+import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
+import type { ProductionRun } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { WorkInProgressRunRow, WorkInProgressTableHead, WORK_IN_PROGRESS_COLUMN_COUNT } from "@/components/shared/work-in-progress-run-row";
@@ -464,23 +456,6 @@ export function InventoryDashboard() {
   const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
   const [viewingRun, setViewingRun] = useState<ProductionRun | null>(null);
   const [printPreview, setPrintPreview] = useState<{ family: ProductionRun[]; mode: DocMode } | null>(null);
-  // Aviso de split: se muestra en ventana propia (no como toast) porque
-  // trae varios datos a la vez y conviene que el usuario lo lea con calma.
-  const [splitNotice, setSplitNotice] = useState<{
-    processName: string;
-    rootCode: string;
-    startedCode: string;
-    startedQuantity: string;
-    waitingCode: string;
-    waitingQuantity: string;
-    unit: string;
-  } | null>(null);
-  // Pregunta previa al split: se muestra ANTES de aprobar cuando el stock no
-  // alcanza para toda la cantidad, para que Inventario decida si aprueba la
-  // parte cubierta (el resto queda esperando material) o cancela. La
-  // cobertura (incluidos TODOS los recursos cortos, no solo uno) sale del
-  // dry-run del backend -- previewProductionRunApproveMaterials.
-  const [approveSplitConfirm, setApproveSplitConfirm] = useState<{ run: ProductionRun; preview: AllocationPreview } | null>(null);
   // Reclasificar merma ya recibida: mueve cantidad de un movimiento
   // INGRESO_PRODUCCION de item WASTE hacia otro item WASTE.
   const [reclassifyConfirm, setReclassifyConfirm] = useState<{ movement: InventoryMovement } | null>(null);
@@ -494,17 +469,6 @@ export function InventoryDashboard() {
   // si el selector de item es el flat select o el picker de complementos.
   const [movementEntryType, setMovementEntryType] = useState<InventoryItemType | null>(null);
   const [isComplementPickerOpen, setIsComplementPickerOpen] = useState(false);
-  // Modal automatico "Destinar material": aparece tras registrar un ingreso
-  // que puede cubrir corridas ESPERANDO_MATERIAL de la misma materia prima.
-  const [allocateRuns, setAllocateRuns] = useState<WaitingProductionRunSummary[]>([]);
-  const [allocateQuantities, setAllocateQuantities] = useState<Record<string, string>>({});
-  const [allocateErrors, setAllocateErrors] = useState<Record<string, string>>({});
-  const [allocatingRunId, setAllocatingRunId] = useState<string | null>(null);
-  // Confirmacion previa cuando destinar va a quedar PARCIAL: se pregunta antes
-  // de tocar stock (preview dry-run), no despues con un deshacer.
-  const [partialConfirm, setPartialConfirm] = useState<
-    { run: WaitingProductionRunSummary; quantity: string; preview: AllocationPreview } | null
-  >(null);
   // Ventana con los movimientos individuales de un mismo lote/orden.
   const [movementGroupWindow, setMovementGroupWindow] = useState<{ lotCode: string; movements: InventoryMovement[] } | null>(null);
   // Dentro de la ventana de movimientos de la orden: null = resumen por
@@ -547,9 +511,6 @@ export function InventoryDashboard() {
   // catálogo (product_type_id, ej. producto recién creado). Uno de los dos.
   const [convertForm, setConvertForm] = useState({ material_code: "", material_type: "", product_type_id: "", target_item_id: "", quantity: "" });
   const [isConverting, setIsConverting] = useState(false);
-  // Rechazo de solicitud de materiales: modal con motivo.
-  const [rejectRun, setRejectRun] = useState<ProductionRun | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
   // Detalle de un rechazo ya registrado (desde movimientos/historial).
   const [rejectionInfoRun, setRejectionInfoRun] = useState<ProductionRun | null>(null);
   // Acta editable de una orden -- misma ventana que en Producción, disponible
@@ -591,8 +552,6 @@ export function InventoryDashboard() {
   // Kardex de cualquier item (pieza o lote); se abre desde su Visualizar.
   const [kardexItem, setKardexItem] = useState<InventoryItem | null>(null);
   const [isSavingProduction, setIsSavingProduction] = useState(false);
-  const [isSolicitudesOpen, setIsSolicitudesOpen] = useState(false);
-  const [expandedSolicitudId, setExpandedSolicitudId] = useState<string | null>(null);
   // Confirmaciones por modal (nada de window.confirm); doble confirmacion para borrar.
   const { confirm, dialog: confirmDialog } = useConfirm();
   // Slot del topbar (AppShell) donde se inyecta la bandeja de solicitudes.
@@ -619,6 +578,7 @@ export function InventoryDashboard() {
   const canRevertEntry = canSeeAudit || currentUser?.role === "Producción/Inventario";
 
   const [isMessagesOpen, setIsMessagesOpen] = useState(false);
+  const [isAdditionalMaterialOpen, setIsAdditionalMaterialOpen] = useState(false);
   const messagesRole = normalizeRole(currentUser?.role);
   const messagesUserId = currentUser?.id ?? null;
   const { data: inboxMessages = [] } = useQuery({
@@ -1076,88 +1036,6 @@ export function InventoryDashboard() {
     return run.is_cancellation ? "Orden cancelada" : "Solicitud rechazada";
   }
 
-  async function handleApproveClick(run: ProductionRun) {
-    // La cobertura la calcula el backend (_compute_coverage), la misma
-    // fuente que usa approve_materials de verdad -- antes se replicaba a
-    // mano aca y siempre quedaba corta de algo (primero los insumos por
-    // etapa, que el frontend ni recibe; bugs reportados varias veces).
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      const preview = await previewProductionRunApproveMaterials(run.id);
-      if (preview.shortages.length > 0 && Number(preview.covered_qty) > 0 && preview.is_partial) {
-        setApproveSplitConfirm({ run, preview });
-        return;
-      }
-      await handleApproveMaterials(run);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo calcular la cobertura de esta orden.");
-    } finally {
-      setIsSavingProduction(false);
-    }
-  }
-
-  async function handleApproveMaterials(run: ProductionRun) {
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      const updated = await approveProductionRunMaterials(run.id);
-      const nextRuns = await listProductionRuns();
-      const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === updated.id);
-      setSuccess(
-        splitChild
-          ? `Salida aprobada para ${updated.production_code}. ${splitChild.production_code} queda a la espera de más material.`
-          : "Salida de materia prima aprobada."
-      );
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la salida de materia prima.");
-    } finally {
-      setIsSavingProduction(false);
-    }
-  }
-
-  function openRejectModal(run: ProductionRun) {
-    setRejectReason("");
-    setRejectRun(run);
-  }
-
-  async function handleRejectMaterials(run: ProductionRun, reason: string) {
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      await rejectProductionRunMaterials(run.id, reason);
-      setRejectRun(null);
-      setSuccess("Solicitud rechazada. La orden fue cancelada.");
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
-    } finally {
-      setIsSavingProduction(false);
-    }
-  }
-
-  // La reserva la hizo Inventario ("Reservar y esperar a completar" del
-  // modal Destinar) -- liberarla tambien es decision de Inventario.
-  async function handleReleaseReservation(run: ProductionRun) {
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      await releaseProductionRunReservation(run.id);
-      setSuccess(`Reserva liberada para ${run.production_code ?? run.process_name}: el material vuelve a estar disponible.`);
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo liberar la reserva.");
-    } finally {
-      setIsSavingProduction(false);
-    }
-  }
-
   async function handleConfirmReclassify() {
     if (!reclassifyConfirm || !reclassifyTargetId || isReclassifying) return;
     setIsReclassifying(true);
@@ -1176,27 +1054,6 @@ export function InventoryDashboard() {
       setError(nextError instanceof Error ? nextError.message : "No se pudo reclasificar la merma.");
     } finally {
       setIsReclassifying(false);
-    }
-  }
-
-  async function handleReceiveFinishedProduct(run: ProductionRun, wasteItemId?: string, wasteItemName?: string) {
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      const updated = await receiveProductionRunFinishedProduct(run.id, wasteItemId, wasteItemName);
-      setSuccess("Producto terminado recibido en inventario.");
-      const nextRuns = await listProductionRuns();
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
-      const family = getRunFamily(nextRuns, updated);
-      if (canPrintRecepcion(family)) {
-        setPrintPreview({ family, mode: "recepcion" });
-      }
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo recibir el producto terminado.");
-    } finally {
-      setIsSavingProduction(false);
     }
   }
 
@@ -1229,91 +1086,6 @@ export function InventoryDashboard() {
       setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
     } finally {
       setIsSavingProduction(false);
-    }
-  }
-
-  /**
-   * Paso 1 de destinar: pregunta al backend cuanto se alcanza a cubrir SIN
-   * tocar nada. Si cubre todo, procede directo; si va a quedar parcial, abre
-   * la confirmacion para que el usuario elija arrancar o reservar y esperar.
-   */
-  async function handleAllocateRun(run: WaitingProductionRunSummary) {
-    const quantity = allocateQuantities[run.run_id] ?? String(Number(run.missing_quantity));
-    setAllocateErrors((current) => ({ ...current, [run.run_id]: "" }));
-    setAllocatingRunId(run.run_id);
-    try {
-      const preview = await previewProductionRunAllocation(run.run_id, quantity);
-      if (preview.is_partial) {
-        setPartialConfirm({ run, quantity, preview });
-        return;
-      }
-      await runAllocation(run, quantity);
-    } catch (nextError) {
-      setAllocateErrors((current) => ({
-        ...current,
-        [run.run_id]: nextError instanceof Error ? nextError.message : "No se pudo destinar el material.",
-      }));
-    } finally {
-      setAllocatingRunId(null);
-    }
-  }
-
-  /** Reserva sin consumir: el stock queda guardado para esta orden puntual. */
-  async function handleReserveForRun(run: WaitingProductionRunSummary, quantity: string) {
-    setAllocateErrors((current) => ({ ...current, [run.run_id]: "" }));
-    setAllocatingRunId(run.run_id);
-    try {
-      const reserved = await reserveProductionRunMaterial(run.run_id, quantity);
-      setPartialConfirm(null);
-      setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
-      setSuccess(
-        `Material reservado para la orden ${run.production_code ?? run.run_id}. ` +
-          (reserved.reservation_is_complete
-            ? "Ya esta completa: puedes iniciarla desde Produccion."
-            : "La orden sigue esperando el resto para poder iniciar."),
-      );
-      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      await queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setAllocateErrors((current) => ({
-        ...current,
-        [run.run_id]: nextError instanceof Error ? nextError.message : "No se pudo reservar el material.",
-      }));
-    } finally {
-      setAllocatingRunId(null);
-    }
-  }
-
-  /** Paso 2: destinar de verdad (consume, parte lo que no alcanza y arranca). */
-  async function runAllocation(run: WaitingProductionRunSummary, quantity: string) {
-    setAllocatingRunId(run.run_id);
-    try {
-      const started = await allocateProductionRunMaterial(run.run_id, quantity);
-      setPartialConfirm(null);
-      const nextRuns = await listProductionRuns();
-      const splitChild = nextRuns.find((r) => r.status === "ESPERANDO_MATERIAL" && r.parent_run_id === started.id);
-      setAllocateRuns((current) => current.filter((item) => item.run_id !== run.run_id));
-      setSuccess(`Material destinado a la orden ${run.production_code ?? run.run_id}.`);
-      if (splitChild) {
-        setSplitNotice({
-          processName: started.process_name ?? "—",
-          rootCode: started.root_production_code ?? started.production_code ?? "",
-          startedCode: started.production_code ?? "",
-          startedQuantity: numericText(started.quantity),
-          waitingCode: splitChild.production_code ?? "",
-          waitingQuantity: numericText(splitChild.quantity),
-          unit: started.raw_material_unit_code ?? "",
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      await queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setAllocateErrors((current) => ({
-        ...current,
-        [run.run_id]: nextError instanceof Error ? nextError.message : "No se pudo destinar el material.",
-      }));
-    } finally {
-      setAllocatingRunId(null);
     }
   }
 
@@ -1430,13 +1202,6 @@ export function InventoryDashboard() {
     }
   }
 
-  const pendingInventoryRuns = productionRuns.filter((run) => run.status === "PENDIENTE_INVENTARIO");
-  // Las corridas historicas migradas (con event_lines) nunca deben caer en
-  // la cola EN VIVO de recepcion: recibirlas ahi dispararia un movimiento
-  // real de inventario que el certificado de papel nunca genero.
-  const pendingReceptionRuns = productionRuns.filter(
-    (run) => run.status === "PENDIENTE_RECEPCION" && (run.event_lines ?? []).length === 0,
-  );
   const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
   const inProcessRuns = productionRuns.filter((run) => run.status === "EN_PROCESO");
   // Material adicional pedido durante EN_PROCESO, pendiente de aprobar/rechazar.
@@ -1445,26 +1210,14 @@ export function InventoryDashboard() {
       .filter((request) => request.status === "PENDIENTE")
       .map((request) => ({ run, request })),
   );
-  // ESPERANDO_MATERIAL con algo ya reservado: la reserva la hizo Inventario
-  // (boton "Reservar y esperar a completar" del modal Destinar), asi que
-  // liberarla tambien es decision de Inventario, no de Produccion -- antes
-  // el boton "Liberar reserva" vivia en Produccion, que solo debia poder
-  // VER estas ordenes (bug reportado: se puede confundir con inventario).
-  const waitingReservedRuns = productionRuns.filter(
-    (run) => run.status === "ESPERANDO_MATERIAL" && Number(run.reserved_material_quantity ?? 0) > 0,
-  );
-  const totalPendingSolicitudes =
-    pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length + waitingReservedRuns.length;
-  // La bandeja se cierra sola apenas queda en 0, sin importar que la vacio:
-  // una accion adentro del modal, el refetch periodico (10s) o el refetch al
-  // volver a la pestana. Antes esto se checaba a mano despues de cada accion
-  // con un fetch aparte -- se quedaba abierta si el conteo llegaba a 0 por
-  // cualquier otro camino (ver bug reportado).
+  // El modal se cierra solo apenas queda en 0, sin importar que la vacio: una
+  // accion adentro, el refetch periodico (10s) o el refetch al volver a la
+  // pestana.
   useEffect(() => {
-    if (isSolicitudesOpen && totalPendingSolicitudes === 0) {
-      setIsSolicitudesOpen(false);
+    if (isAdditionalMaterialOpen && pendingAdditionalMaterialRequests.length === 0) {
+      setIsAdditionalMaterialOpen(false);
     }
-  }, [isSolicitudesOpen, totalPendingSolicitudes]);
+  }, [isAdditionalMaterialOpen, pendingAdditionalMaterialRequests.length]);
   // Órdenes tras aplicar los filtros de fecha y estado (pestañas de procesos).
   const receivedRunsFiltered = receivedRuns.filter(
     (run) => (orderStatusFilter === "TODOS" || run.status === orderStatusFilter) && withinDateRange(run.received_at),
@@ -2015,15 +1768,6 @@ export function InventoryDashboard() {
       // propia query: sin esto quedaba con el valor viejo hasta su refetch
       // automatico de 30s.
       await queryClient.invalidateQueries({ queryKey: ["production"] });
-      if (created.waiting_production_runs.length > 0) {
-        setAllocateRuns(created.waiting_production_runs);
-        setAllocateQuantities(
-          Object.fromEntries(
-            created.waiting_production_runs.map((run) => [run.run_id, String(Number(run.missing_quantity))]),
-          ),
-        );
-        setAllocateErrors({});
-      }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo registrar el movimiento.");
     } finally {
@@ -2212,14 +1956,14 @@ export function InventoryDashboard() {
         ? createPortal(
             <button
               className="topbarInbox"
-              onClick={() => { setIsSolicitudesOpen(true); setExpandedSolicitudId(null); }}
+              onClick={() => setIsAdditionalMaterialOpen(true)}
               type="button"
-              aria-label="Bandeja de solicitudes de produccion"
+              aria-label="Material adicional pedido en produccion"
             >
               <Inbox aria-hidden="true" size={18} />
-              Solicitudes
-              {pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length > 0 ? (
-                <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length}</span>
+              Material adicional
+              {pendingAdditionalMaterialRequests.length > 0 ? (
+                <span className="solicitudesBadge">{pendingAdditionalMaterialRequests.length}</span>
               ) : null}
             </button>,
             topbarSlot,
@@ -3563,200 +3307,6 @@ export function InventoryDashboard() {
         />
       ) : null}
 
-      {allocateRuns.length > 0 ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Destinar material">
-          <section className="modalWindow processViewWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Ordenes esperando este material</h2>
-                <p>Este ingreso puede cubrir partes de ordenes que quedaron esperando material.</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setAllocateRuns([])} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div className="tableWrap">
-              <table className="table tableAuto">
-                <thead>
-                  <tr>
-                    <th>Orden</th>
-                    <th>Proceso</th>
-                    <th className="num">Falta</th>
-                    <th className="num">Destinar</th>
-                    <th aria-label="Accion" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {allocateRuns.map((run) => (
-                    <tr key={run.run_id}>
-                      <td>
-                        <span className="orderCodeTag">{run.production_code ?? run.run_id}</span>
-                        {run.root_production_code && run.root_production_code !== run.production_code ? (
-                          <span className="rootBadgeTag">de {run.root_production_code}</span>
-                        ) : null}
-                      </td>
-                      <td>{run.process_name ?? "—"}</td>
-                      <td className="num">{numericText(run.missing_quantity)} {run.unit_code}</td>
-                      <td className="num">
-                        <input
-                          className="field"
-                          max={Number(run.missing_quantity)}
-                          min="1"
-                          onChange={(event) =>
-                            setAllocateQuantities((current) => ({ ...current, [run.run_id]: event.target.value }))
-                          }
-                          step="1"
-                          style={{ width: 90 }}
-                          type="number"
-                          value={allocateQuantities[run.run_id] ?? String(Number(run.missing_quantity))}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          className="button buttonPrimary"
-                          disabled={allocatingRunId === run.run_id}
-                          onClick={() => void handleAllocateRun(run)}
-                          type="button"
-                        >
-                          <Repeat aria-hidden="true" size={14} />
-                          {allocatingRunId === run.run_id ? "Destinando" : "Destinar"}
-                        </button>
-                        {allocateErrors[run.run_id] ? (
-                          <div>
-                            <small style={{ color: "var(--danger, #c0392b)" }}>{allocateErrors[run.run_id]}</small>
-                          </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      {partialConfirm ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Esta orden quedaria parcial">
-          <section className="modalWindow" style={{ maxWidth: 560 }}>
-            <div className="modalHeader">
-              <div>
-                <h2>Esto no alcanza para la orden completa</h2>
-                <p>
-                  {Number(partialConfirm.preview.covered_qty) > 0 ? (
-                    <>
-                      Solo cubre {numericText(partialConfirm.preview.covered_qty)} de{" "}
-                      {numericText(partialConfirm.preview.target_qty)} {partialConfirm.run.unit_code} de la orden{" "}
-                      {partialConfirm.run.production_code ?? partialConfirm.run.run_id}.
-                    </>
-                  ) : (
-                    <>
-                      No alcanza para producir ni una unidad de la orden{" "}
-                      {partialConfirm.run.production_code ?? partialConfirm.run.run_id}: falta
-                      otro material. Puedes guardar lo que llego y esperar el resto.
-                    </>
-                  )}
-                </p>
-              </div>
-              <button
-                aria-label="Cerrar"
-                className="iconOnlyButton"
-                onClick={() => setPartialConfirm(null)}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-              {partialConfirm.preview.shortages.map((shortage, index) => (
-                <div key={index} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
-                  <span style={{ color: "var(--muted)" }}>
-                    <strong>{shortage.name}</strong>
-                    {shortage.is_complement ? " (insumo de etapa)" : ""}: quedan{" "}
-                    {numericText(shortage.available)} {shortage.unit} disponibles, cada unidad necesita{" "}
-                    {numericText(shortage.needed)} {shortage.unit}.
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "grid", gap: 12, marginTop: 8 }}>
-
-              {/* Con cobertura 0 no se ofrece arrancar: el backend lo
-                  rechazaria (no hay ni una unidad completa que producir) y
-                  seria un boton que solo sabe fallar. */}
-              {Number(partialConfirm.preview.covered_qty) > 0 ? (
-                <div style={{ display: "grid", gap: 4 }}>
-                  <button
-                    className="button buttonPrimary"
-                    disabled={allocatingRunId === partialConfirm.run.run_id}
-                    onClick={() => void runAllocation(partialConfirm.run, partialConfirm.quantity)}
-                    type="button"
-                  >
-                    Arrancar con lo que alcanza
-                  </button>
-                  <small style={{ color: "var(--muted)" }}>
-                    Consume el material ahora, arranca {numericText(partialConfirm.preview.covered_qty)} {partialConfirm.run.unit_code}
-                    y el resto queda como una orden nueva esperando material.
-                  </small>
-                </div>
-              ) : null}
-
-              <div style={{ display: "grid", gap: 4 }}>
-                <button
-                  className={Number(partialConfirm.preview.covered_qty) > 0 ? "button" : "button buttonPrimary"}
-                  disabled={allocatingRunId === partialConfirm.run.run_id}
-                  onClick={() => void handleReserveForRun(partialConfirm.run, partialConfirm.quantity)}
-                  type="button"
-                >
-                  Reservar y esperar a completar
-                </button>
-                <small style={{ color: "var(--muted)" }}>
-                  No consume ni arranca nada: el material queda guardado para esta orden, deja de estar
-                  disponible para otras y la orden no se parte.
-                </small>
-              </div>
-
-              {allocateErrors[partialConfirm.run.run_id] ? (
-                <small style={{ color: "var(--danger, #c0392b)" }}>
-                  {allocateErrors[partialConfirm.run.run_id]}
-                </small>
-              ) : null}
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      {splitNotice ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Orden dividida">
-          <section className="modalWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>La orden {splitNotice.rootCode} se dividió</h2>
-                <p>{splitNotice.processName}: no había materia prima suficiente para toda la cantidad pedida.</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setSplitNotice(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
-                <span><span className="orderCodeTag">{splitNotice.startedCode}</span> ya en producción</span>
-                <strong>{splitNotice.startedQuantity} {splitNotice.unit}</strong>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
-                <span><span className="orderCodeTag">{splitNotice.waitingCode}</span> esperando material</span>
-                <strong>{splitNotice.waitingQuantity} {splitNotice.unit}</strong>
-              </div>
-            </div>
-            <div className="modalActions">
-              <button className="button buttonPrimary" onClick={() => setSplitNotice(null)} type="button">
-                Entendido
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {familyRuns ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Partes de la orden">
           <section className="modalWindow processViewWindow">
@@ -4557,50 +4107,6 @@ export function InventoryDashboard() {
         />
       ) : null}
 
-      {rejectRun ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Rechazar solicitud">
-          <form
-            className="modalWindow processFormWindow"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (rejectRun) void handleRejectMaterials(rejectRun, rejectReason);
-            }}
-          >
-            <div className="modalHeader">
-              <div>
-                <h2>Rechazar solicitud</h2>
-                <p>
-                  {rejectRun.production_code ? `${rejectRun.production_code} · ` : ""}{rejectRun.process_name} ·{" "}
-                  {numericText(rejectRun.total_required_material)} {rejectRun.raw_material_unit_code}
-                </p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setRejectRun(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <label className="fieldGroup">
-              <span>Motivo del rechazo (opcional)</span>
-              <textarea
-                className="field textarea"
-                maxLength={1000}
-                onChange={(event) => setRejectReason(event.target.value)}
-                rows={3}
-                value={rejectReason}
-              />
-            </label>
-            <p className="panelText">La orden quedará cancelada y el rechazo se registrará en el historial de inventario.</p>
-            <div className="modalActions">
-              <button className="button" onClick={() => setRejectRun(null)} type="button">
-                Cancelar
-              </button>
-              <button className="button buttonDanger" disabled={isSavingProduction} type="submit">
-                {isSavingProduction ? "Rechazando" : "Rechazar solicitud"}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
-
       {isArchivedOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Items archivados">
           <section className="modalWindow processViewWindow">
@@ -5151,255 +4657,61 @@ export function InventoryDashboard() {
           )
         : null}
 
-      {isSolicitudesOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Solicitudes de produccion">
+      {isAdditionalMaterialOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Material adicional">
           <section className="modalWindow solicitudesModal">
             <div className="modalHeader">
               <div>
-                <h2>Solicitudes de produccion</h2>
-                <p>{totalPendingSolicitudes} solicitudes pendientes</p>
+                <h2>Material adicional</h2>
+                <p>{pendingAdditionalMaterialRequests.length} pedidos pendientes</p>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsSolicitudesOpen(false)} type="button">
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsAdditionalMaterialOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
 
-            {pendingInventoryRuns.length > 0 ? (
-              <>
-                <h3 style={{ margin: "4px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
-                  Salida de materia prima ({pendingInventoryRuns.length})
-                </h3>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {pendingInventoryRuns.map((run) => (
-                    <div className="solicitudCard" key={run.id}>
-                      <div className="solicitudCardHead">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>
-                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                            {run.process_name}
-                          </strong>
-                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                            {numericText(run.total_required_material)} {run.raw_material_unit_code} · {productionTimeLabel(run.requested_at)}
-                          </span>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                          <button
-                            className="button buttonPrimary"
-                            disabled={isSavingProduction}
-                            onClick={() => void handleApproveClick(run)}
-                            type="button"
-                          >
-                            Aprobar
-                          </button>
-                          <button
-                            className="button buttonDanger"
-                            disabled={isSavingProduction}
-                            onClick={() => openRejectModal(run)}
-                            type="button"
-                          >
-                            Rechazar
-                          </button>
-                        </div>
+            {pendingAdditionalMaterialRequests.length > 0 ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                {pendingAdditionalMaterialRequests.map(({ run, request }) => (
+                  <div className="solicitudCard" key={request.id}>
+                    <div className="solicitudCardHead">
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <strong>
+                          {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
+                          {request.name ?? request.item_id}
+                        </strong>
+                        <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
+                          {numericText(request.quantity)} {request.unit_code}
+                          {request.stage_name ? ` · Etapa: ${request.stage_name}` : ""}
+                          {request.note ? ` · ${request.note}` : ""}
+                          {" · "}{productionTimeLabel(request.requested_at)}
+                        </span>
                       </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
-                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
-                          <FileText aria-hidden="true" size={14} />
-                          Ver acta
-                        </button>
-                        <button
-                          className="solicitudCardToggle"
-                          onClick={() => setExpandedSolicitudId(expandedSolicitudId === run.id ? null : run.id)}
-                          type="button"
-                          aria-label="Ver detalle"
-                        >
-                          <Eye aria-hidden="true" size={14} />
-                          {expandedSolicitudId === run.id ? "Ocultar detalle" : "Ver detalle"}
-                        </button>
-                      </div>
-                      {expandedSolicitudId === run.id ? (
-                        <div className="solicitudCardDetail">
-                          <div className="solicitudDetailItem">
-                            <strong>Solicitado</strong>
-                            <span>{productionTimeLabel(run.requested_at)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Proceso</strong>
-                            <span>{run.process_name}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Material requerido</strong>
-                            <span>{numericText(run.total_required_material)} {run.raw_material_unit_code}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Solicitada por</strong>
-                            <span>{run.created_by_name ?? "-"}</span>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : null}
-
-            {pendingReceptionRuns.length > 0 ? (
-              <>
-                <h3 style={{ margin: "12px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
-                  Recepcion de producto terminado ({pendingReceptionRuns.length})
-                </h3>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {pendingReceptionRuns.map((run) => (
-                    <div className="solicitudCard receptionRequestCard" key={run.id}>
-                      <div className="solicitudCardHead">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>
-                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                            {run.process_name}
-                          </strong>
-                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                            {runQuantityText(run)} · Merma: {run.waste_percent ?? 0}%
-                          </span>
-                        </div>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                         <button
                           className="button buttonPrimary"
                           disabled={isSavingProduction}
-                          onClick={() => void handleReceiveFinishedProduct(run)}
+                          onClick={() => void handleApproveAdditionalMaterial(request.id)}
                           type="button"
-                          style={{ flexShrink: 0 }}
                         >
-                          Recibir
-                        </button>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
-                        <button className="solicitudCardToggle" onClick={() => setActaRun(run)} type="button">
-                          <FileText aria-hidden="true" size={14} />
-                          Ver acta
+                          Aprobar
                         </button>
                         <button
-                          className="solicitudCardToggle"
-                          onClick={() => setExpandedSolicitudId(expandedSolicitudId === `recv-${run.id}` ? null : `recv-${run.id}`)}
-                          type="button"
-                          aria-label="Ver detalle"
-                        >
-                          <Eye aria-hidden="true" size={14} />
-                          {expandedSolicitudId === `recv-${run.id}` ? "Ocultar detalle" : "Ver detalle"}
-                        </button>
-                      </div>
-                      {expandedSolicitudId === `recv-${run.id}` ? (
-                        <div className="solicitudCardDetail">
-                          <div className="solicitudDetailItem">
-                            <strong>Proceso</strong>
-                            <span>{run.process_name}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Cantidad</strong>
-                            <span>{runQuantityText(run)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Finalizado</strong>
-                            <span>{productionTimeLabel(run.finished_at)}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Peso real</strong>
-                            <span>{(() => { const weight = runFinalWeight(run); return weight ? numericText(String(weight)) : "-"; })()}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Merma</strong>
-                            <span>{run.waste_weight ? `${numericText(run.waste_weight)} (${percentText(run.waste_percent)}%)` : `${percentText(run.waste_percent)}%`}</span>
-                          </div>
-                          <div className="solicitudDetailItem">
-                            <strong>Limite de merma</strong>
-                            <span>{percentText(run.waste_limit_percent)}%</span>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : null}
-
-            {waitingReservedRuns.length > 0 ? (
-              <>
-                <h3 style={{ margin: "12px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
-                  Reservas de material ({waitingReservedRuns.length})
-                </h3>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {waitingReservedRuns.map((run) => (
-                    <div className="solicitudCard" key={run.id}>
-                      <div className="solicitudCardHead">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>
-                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                            {run.process_name}
-                          </strong>
-                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                            Reservado {numericText(run.reserved_material_quantity ?? "0")} de{" "}
-                            {numericText(run.total_required_material)} {run.raw_material_unit_code}
-                            {run.reservation_is_complete ? "" : " · reserva incompleta"}
-                          </span>
-                        </div>
-                        <button
-                          className="button"
+                          className="button buttonDanger"
                           disabled={isSavingProduction}
-                          onClick={() => void handleReleaseReservation(run)}
+                          onClick={() => void handleRejectAdditionalMaterial(request.id)}
                           type="button"
-                          style={{ flexShrink: 0 }}
                         >
-                          Liberar reserva
+                          Rechazar
                         </button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </>
-            ) : null}
-
-            {pendingAdditionalMaterialRequests.length > 0 ? (
-              <>
-                <h3 style={{ margin: "12px 0 8px", fontSize: 14, fontWeight: 800, color: "var(--muted)" }}>
-                  Material adicional ({pendingAdditionalMaterialRequests.length})
-                </h3>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {pendingAdditionalMaterialRequests.map(({ run, request }) => (
-                    <div className="solicitudCard" key={request.id}>
-                      <div className="solicitudCardHead">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>
-                            {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                            {request.name ?? request.item_id}
-                          </strong>
-                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                            {numericText(request.quantity)} {request.unit_code}
-                            {request.stage_name ? ` · Etapa: ${request.stage_name}` : ""}
-                            {request.note ? ` · ${request.note}` : ""}
-                            {" · "}{productionTimeLabel(request.requested_at)}
-                          </span>
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                          <button
-                            className="button buttonPrimary"
-                            disabled={isSavingProduction}
-                            onClick={() => void handleApproveAdditionalMaterial(request.id)}
-                            type="button"
-                          >
-                            Aprobar
-                          </button>
-                          <button
-                            className="button buttonDanger"
-                            disabled={isSavingProduction}
-                            onClick={() => void handleRejectAdditionalMaterial(request.id)}
-                            type="button"
-                          >
-                            Rechazar
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="emptyState">Sin pedidos de material adicional pendientes.</div>
+            )}
           </section>
         </div>
       ) : null}
@@ -5423,49 +4735,6 @@ export function InventoryDashboard() {
         </div>
       ) : null}
 
-      {approveSplitConfirm ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Confirmar division de la orden">
-          <section className="modalWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Stock insuficiente{approveSplitConfirm.run.production_code ? ` para ${approveSplitConfirm.run.production_code}` : ""}</h2>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setApproveSplitConfirm(null)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-              {approveSplitConfirm.preview.shortages.map((shortage, index) => (
-                <div key={index} style={{ padding: "8px 10px", borderRadius: 6, background: "var(--surface-muted)" }}>
-                  <span style={{ color: "var(--muted)" }}>
-                    <strong>{shortage.name}</strong>: quedan {numericText(shortage.available)} {shortage.unit} disponibles, se
-                    necesitan {numericText(shortage.needed)} {shortage.unit}.
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p style={{ margin: "8px 0 0" }}>
-              ¿Aprobar la parte cubierta? El resto pasará a una nueva orden a la espera de más material.
-            </p>
-            <div className="modalActions">
-              <button className="button" onClick={() => setApproveSplitConfirm(null)} type="button">
-                Cancelar
-              </button>
-              <button
-                className="button buttonPrimary"
-                onClick={() => {
-                  const run = approveSplitConfirm.run;
-                  setApproveSplitConfirm(null);
-                  void handleApproveMaterials(run);
-                }}
-                type="button"
-              >
-                Aprobar parcial
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
       {reclassifyConfirm ? (
         <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Reclasificar merma">
           <section className="modalWindow">
