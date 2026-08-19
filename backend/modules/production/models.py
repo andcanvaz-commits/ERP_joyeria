@@ -288,6 +288,11 @@ class StageAttemptStatus:
     IN_PROGRESS = "EN_PROCESO"
     APPROVED = "APROBADA"
     REJECTED = "RECHAZADA"
+    # Split por falta de stock al iniciar la etapa (o al asignar despues del
+    # split): la parte cubierta arranca en IN_PROGRESS, el remanente queda
+    # aca hasta que alguien apriete "Asignar material disponible"
+    # (allocate_stage_attempt_material) y alcance el 100%.
+    WAITING_MATERIAL = "PENDIENTE_MATERIAL"
 
 
 class ProductionRunStageAttempt(Base):
@@ -335,7 +340,32 @@ class ProductionRunStageAttempt(Base):
     finished_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    materials: Mapped[list["ProductionRunStageAttemptMaterial"]] = relationship(
+        back_populates="stage_attempt",
+        cascade="all, delete-orphan",
+    )
+
     run: Mapped["ProductionRun"] = relationship(back_populates="stage_attempts")
+
+
+class ProductionRunStageAttemptMaterial(Base):
+    """Una linea de material declarada al iniciar un intento de etapa (flujo
+    nuevo, seccion 4). quantity_pending baja cada vez que se consume (al
+    iniciar si alcanza, o via allocate_stage_attempt_material si quedo
+    corta) -- llega a 0 cuando esta linea esta completamente cubierta."""
+
+    __tablename__ = "production_run_stage_attempt_materials"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    stage_attempt_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_run_stage_attempts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    quantity_requested: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    quantity_pending: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+
+    stage_attempt: Mapped["ProductionRunStageAttempt"] = relationship(back_populates="materials")
 
 
 class ProductionRunActaLine(Base):
