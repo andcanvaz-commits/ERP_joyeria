@@ -9,6 +9,17 @@ export type ProductionProcess = {
   is_active: boolean;
 };
 
+// Linea de material declarada al iniciar (o pendiente de asignar en) un
+// intento de etapa. quantity_pending > 0 significa que todavia falta cubrir
+// esa parte -- baja a 0 cuando allocate_stage_attempt_material la completa.
+export type StageAttemptMaterial = {
+  item_id: string;
+  name?: string | null;
+  unit_code: string;
+  quantity_requested: string;
+  quantity_pending: string;
+};
+
 // Intento de etapa del flujo nuevo (un ✔ o ✘): reemplaza ProductionRunStage
 // para ordenes creadas con el flujo dinamico. Cada uno tiene su propia acta
 // y su propia merma, independiente de los demas intentos de la orden.
@@ -21,7 +32,9 @@ export type StageAttempt = {
   attempt_no_for_process: number;
   code?: string | null;
   responsable_name?: string | null;
-  status: "EN_PROCESO" | "APROBADA" | "RECHAZADA";
+  // PENDIENTE_MATERIAL: split automatico por falta de stock al iniciar la
+  // etapa -- ver allocate_stage_attempt_material para asignarle el resto.
+  status: "EN_PROCESO" | "APROBADA" | "RECHAZADA" | "PENDIENTE_MATERIAL";
   rejection_reason?: string | null;
   peso_al_finalizar?: string | null;
   unit_code?: string | null;
@@ -32,6 +45,7 @@ export type StageAttempt = {
   finished_by_name?: string | null;
   finished_at?: string | null;
   acta_lines?: ProductionRun["acta_lines"];
+  materials: StageAttemptMaterial[];
 };
 
 export type ProductionRunStage = {

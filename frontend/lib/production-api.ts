@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/api";
-import type { AllocationPreview, ProductionProcess, ProductionRun } from "@/types/production";
+import type { ProductionProcess, ProductionRun } from "@/types/production";
 
 // Banco de procesos (seccion 3): un paso suelto reutilizable, sin sub-etapas
 // ni insumos preconfigurados -- eso se agrega suelto por etapa en el acta.
@@ -37,22 +37,6 @@ export function listProductionRuns() {
   return apiRequest<ProductionRun[]>("/api/production/runs");
 }
 
-export function createProductionRun(payload: {
-  process_id: string;
-  // Cantidad total de materia prima en la unidad de medida del item elegido.
-  quantity: string;
-  raw_material_item_id: string;
-  // Plan de resultantes: la suma de cantidades debe igualar quantity.
-  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>;
-  // Cantidad total de cada insumo configurado en las etapas activas del proceso (obligatorio 1:1).
-  stage_ingredients?: Array<{ process_stage_ingredient_id: string; quantity: string }>;
-}) {
-  return apiRequest<ProductionRun>("/api/production/runs", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
 export function updateProductionRunProducts(
   runId: string,
   products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>,
@@ -60,13 +44,6 @@ export function updateProductionRunProducts(
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/products`, {
     method: "PUT",
     body: JSON.stringify({ products }),
-  });
-}
-
-export function rejectProductionRunMaterials(runId: string, reason?: string | null) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/reject-materials`, {
-    method: "POST",
-    body: JSON.stringify({ reason: reason ?? null }),
   });
 }
 
@@ -85,92 +62,6 @@ export function cancelProductionRunFamily(runId: string, reason?: string) {
   return apiRequest<ProductionRun[]>(`/api/production/runs/${runId}/cancel-family`, {
     method: "POST",
     body: JSON.stringify({ reason: reason?.trim() || null }),
-  });
-}
-
-export function approveProductionRunMaterials(runId: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/approve-materials`, {
-    method: "POST",
-  });
-}
-
-export function allocateProductionRunMaterial(runId: string, quantityUnits: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/allocate-material`, {
-    method: "POST",
-    body: JSON.stringify({ quantity_units: quantityUnits }),
-  });
-}
-
-/** Dry-run: cuánto cubriría destinar esta cantidad. No consume ni cambia estado. */
-export function previewProductionRunAllocation(runId: string, quantityUnits: string) {
-  return apiRequest<AllocationPreview>(`/api/production/runs/${runId}/allocation-preview`, {
-    method: "POST",
-    body: JSON.stringify({ quantity_units: quantityUnits }),
-  });
-}
-
-/** Dry-run: cuánto cubriría aprobar materiales hoy, con todos los recursos
- * cortos (materia prima e insumos). No consume ni cambia estado. */
-export function previewProductionRunApproveMaterials(runId: string) {
-  return apiRequest<AllocationPreview>(`/api/production/runs/${runId}/approve-materials-preview`);
-}
-
-/** Guarda el stock para la orden sin consumirlo ni arrancarla. */
-export function reserveProductionRunMaterial(runId: string, quantityUnits: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/reserve-material`, {
-    method: "POST",
-    body: JSON.stringify({ quantity_units: quantityUnits }),
-  });
-}
-
-export function releaseProductionRunReservation(runId: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/release-reservation`, {
-    method: "POST",
-  });
-}
-
-/** Reserva completa: recién aquí se consume de verdad y arranca. */
-export function startProductionRunWithReserved(runId: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/start-reserved`, {
-    method: "POST",
-  });
-}
-
-export function startProductionRun(runId: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/start`, {
-    method: "POST",
-  });
-}
-
-export function finishProductionRunStage(
-  stageId: string,
-  payload: {
-    initial_weight?: string | null;
-    final_weight?: string | null;
-    decision?: "APPROVED" | "REJECTED";
-    justification?: string | null;
-  },
-) {
-  return apiRequest<ProductionRun>(`/api/production/runs/stages/${stageId}/finish`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function editProductionRunStageWeight(
-  stageId: string,
-  payload: { initial_weight?: string | null; final_weight: string; justification?: string | null },
-) {
-  return apiRequest<ProductionRun>(`/api/production/runs/stages/${stageId}/edit-weight`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function receiveProductionRunFinishedProduct(runId: string, wasteItemId?: string, wasteItemName?: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/receive-finished`, {
-    method: "POST",
-    body: JSON.stringify({ waste_item_id: wasteItemId ?? null, waste_item_name: wasteItemName ?? null }),
   });
 }
 
@@ -232,11 +123,30 @@ export function createProductionOrder(name: string) {
 }
 
 /** Elige un proceso del banco y arranca un intento de etapa (secuencial: una
- * etapa activa a la vez por orden). */
-export function startStageAttempt(runId: string, payload: { process_id: string; responsable_name: string }) {
+ * etapa activa a la vez por orden). Si vienen `materials`, valida stock: si
+ * alcanza arranca directo (consume ya); si falta, hace split automatico --
+ * la parte cubierta arranca EN_PROCESO y el resto queda PENDIENTE_MATERIAL
+ * hasta que alguien lo asigne con allocateStageAttemptMaterial. */
+export function startStageAttempt(
+  runId: string,
+  payload: {
+    process_id: string;
+    responsable_name: string;
+    materials?: Array<{ item_id: string; quantity: string }>;
+  },
+) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/stage-attempts`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+/** Asigna stock recien disponible a un intento PENDIENTE_MATERIAL: consume lo
+ * que alcance y, si queda 100% cubierto y no hay otro intento activo en la
+ * orden, lo arranca. */
+export function allocateStageAttemptMaterial(attemptId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/allocate-material`, {
+    method: "POST",
   });
 }
 
