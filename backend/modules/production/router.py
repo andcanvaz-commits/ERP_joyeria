@@ -200,6 +200,24 @@ def finish_stage_attempt(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.post("/runs/stage-attempts/{attempt_id}/allocate-material", response_model=ProductionRunRead)
+def allocate_stage_attempt_material(
+    attempt_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Asigna stock recien disponible a un intento PENDIENTE_MATERIAL --
+    consume lo que alcance y, si queda 100% cubierto y no hay otro intento
+    EN_PROCESO en la orden, lo arranca."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.allocate_stage_attempt_material(attempt_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/runs/{run_id}/assign-product", response_model=ProductionRunRead)
 def assign_product(
     run_id: UUID,
