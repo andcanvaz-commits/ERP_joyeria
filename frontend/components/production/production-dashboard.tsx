@@ -739,6 +739,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setCancelRun(null);
       setSuccess(`Orden ${run.production_code ?? ""} cancelada. Inventario fue restaurado.`.trim());
       closeRunStagesModal();
+      setDynamicOrderRun((current) => (current?.id === run.id ? null : current));
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo cancelar la orden.");
@@ -2308,6 +2309,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   >
                     Asignar a producto terminado
                   </button>
+                  {/* Faltaba en el flujo nuevo -- solo existia en el modal viejo
+                      (openRunStagesModal). Mismo modal/handler genericos de
+                      siempre (cancelProductionRun ya revierte lineas ADMIN_STOCK
+                      sin importar si estan ligadas a stage_id o stage_attempt_id). */}
+                  {canCancelRun && canRunBeCancelled(dynamicOrderRun) ? (
+                    <button className="button buttonDanger" onClick={() => openCancelRunModal(dynamicOrderRun)} type="button">
+                      <Trash2 aria-hidden="true" size={15} />
+                      Cancelar orden
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -2808,7 +2819,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div>
                 <h2>Cancelar orden</h2>
                 <p>
-                  {cancelRun.production_code ? `${cancelRun.production_code} · ` : ""}{cancelRun.process_name}
+                  {cancelRun.production_code ? `${cancelRun.production_code} · ` : ""}{cancelRun.name ?? cancelRun.process_name}
                 </p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setCancelRun(null)} type="button">
@@ -2827,7 +2838,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </label>
             <p className="panelText">
               La orden quedará cancelada y se restaurará al inventario todo lo que ya consumió (materia prima,
-              insumos, complementos). No se puede deshacer.
+              insumos). No se puede deshacer.
             </p>
             <div className="modalActions">
               <button className="button" onClick={() => setCancelRun(null)} type="button">
