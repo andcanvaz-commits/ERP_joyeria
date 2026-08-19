@@ -10,7 +10,8 @@ import { normalizeRole } from "@/lib/roles";
 import { listProductionRuns } from "@/lib/production-api";
 import { getRunFamily } from "@/lib/orden-produccion";
 import { listInventoryItems } from "@/lib/inventory-api";
-import { listMessages, respondMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
+import { listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
+import { markMessagesSeen } from "@/lib/messages-read-state";
 import { RunStageSummaryTable } from "@/components/production/run-stage-summary";
 import { ActaView } from "@/components/production/acta-view";
 import type { ProductionRun } from "@/types/production";
@@ -151,12 +152,75 @@ function RunDetail({
   );
 }
 
-// Mensaje libre Admin -> Produccion/Inventario (docs/cambios-sistema-produccion.md
-// seccion 2.2): comunicacion informal, no crea ninguna orden por si sola. El
-// Admin compone y ve el estado de lo que envio; Produccion/Inventario ve la
-// bandeja pendiente y acepta/rechaza. Historial permanente, misma lista para
-// los dos lados -- la respuesta "vuelve" al Admin porque ve el mismo estado.
-function MessagesPanel({ role, userId }: { role: "admin" | "operaciones"; userId: string | null }) {
+// Mensaje libre Admin <-> Produccion/Inventario (docs/cambios-sistema-produccion.md
+// seccion 2.2): una ida y una vuelta de texto, no una orden ni un aceptar/
+// rechazar. Historial permanente, misma lista para los dos lados.
+function initials(name: string | null | undefined) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
+// Un hilo por mensaje: cualquiera de los dos lados (admin o Produccion/
+// Inventario) puede seguir agregando respuestas, no hay un unico round-trip.
+function MessageThread({
+  message,
+  currentUserId,
+  isSaving,
+  onReply,
+}: {
+  message: AdminMessage;
+  currentUserId: string | null;
+  isSaving: boolean;
+  onReply: (messageId: string, body: string) => void | Promise<void>;
+}) {
+  const [replyText, setReplyText] = useState("");
+  const senderName = message.sender_name ?? "Admin";
+  return (
+    <div className="messageCard">
+      <div className="messageCardHead">
+        <span className="messageAvatar" aria-hidden="true">{initials(senderName)}</span>
+        <div className="messageCardMeta">
+          <strong>{senderName}</strong>
+          <span>{dateTimeLabel(message.created_at)}</span>
+        </div>
+      </div>
+      <p className="messageBody">{message.body}</p>
+      {message.replies.map((reply) => (
+        <div className={`messageReply${reply.sender_user_id === currentUserId ? " messageReplyMine" : ""}`} key={reply.id}>
+          <div className="messageCardMeta">
+            <strong>{reply.sender_name ?? "Respuesta"}</strong>
+            <span>{dateTimeLabel(reply.created_at)}</span>
+          </div>
+          <p className="messageBody">{reply.body}</p>
+        </div>
+      ))}
+      <div className="messageReplyPending">
+        <textarea
+          className="field"
+          onChange={(e) => setReplyText(e.target.value)}
+          placeholder="Escribe tu respuesta..."
+          rows={2}
+          value={replyText}
+        />
+        <button
+          className="button buttonPrimary"
+          disabled={isSaving || !replyText.trim()}
+          onClick={() => {
+            void onReply(message.id, replyText.trim());
+            setReplyText("");
+          }}
+          type="button"
+        >
+          Responder
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function MessagesPanel({ role, userId }: { role: "admin" | "operaciones"; userId: string | null }) {
   const queryClient = useQueryClient();
   const [body, setBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -185,11 +249,11 @@ function MessagesPanel({ role, userId }: { role: "admin" | "operaciones"; userId
     }
   }
 
-  async function handleRespond(messageId: string, status: "ACEPTADA" | "RECHAZADA") {
+  async function handleReply(messageId: string, replyBody: string) {
     setLocalError(null);
     setIsSaving(true);
     try {
-      await respondMessage(messageId, status);
+      await replyMessage(messageId, replyBody);
       await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
     } catch (nextError) {
       setLocalError(nextError instanceof Error ? nextError.message : "No se pudo responder el mensaje.");
@@ -198,144 +262,36 @@ function MessagesPanel({ role, userId }: { role: "admin" | "operaciones"; userId
     }
   }
 
-  function statusLabel(status: AdminMessage["status"]) {
-    if (status === "ACEPTADA") return "Aceptado";
-    if (status === "RECHAZADA") return "Rechazado";
-    return "Pendiente";
-  }
-
-  if (role === "admin") {
-    const sent = messages.filter((m) => m.sender_user_id === userId);
-    return (
-      <section className="card panelBody">
-        <div className="panelHeader">
-          <div>
-            <h2 className="panelTitle">Mensaje a Produccion/Inventario</h2>
-            <p className="panelText">Comunicacion libre -- no crea una orden por si sola</p>
-          </div>
+  return (
+    <section className="card panelBody">
+      <div className="panelHeader">
+        <div>
+          <h2 className="panelTitle">{role === "admin" ? "Mensajes con Produccion/Inventario" : "Mensajes del Admin"}</h2>
+          <p className="panelText">Comunicacion libre -- cualquiera de los dos lados puede responder</p>
         </div>
-        {localError ? <div className="alert alertError">{localError}</div> : null}
-        <div className="fieldGroup">
+      </div>
+      {localError ? <div className="alert alertError">{localError}</div> : null}
+      {role === "admin" ? (
+        <div className="messageComposer">
           <textarea
             className="field"
             onChange={(e) => setBody(e.target.value)}
             placeholder="Ej: Necesito 20kg de este producto para el 30 de agosto"
-            rows={3}
+            rows={2}
             value={body}
           />
-        </div>
-        <div className="modalActions">
-          <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleSend()} type="button">
-            Enviar mensaje
+          <button className="button buttonPrimary" disabled={isSaving || !body.trim()} onClick={() => void handleSend()} type="button">
+            Enviar
           </button>
         </div>
-        <div className="tableWrap" style={{ marginTop: 12 }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Mensaje</th>
-                <th>Enviado</th>
-                <th>Estado</th>
-                <th>Respondido por</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sent.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.body}</td>
-                  <td>{dateTimeLabel(m.created_at)}</td>
-                  <td><span className="statusBadge">{statusLabel(m.status)}</span></td>
-                  <td>{m.responded_by_name ?? "-"}</td>
-                </tr>
-              ))}
-              {sent.length === 0 ? (
-                <tr><td colSpan={4}><div className="emptyState">Aun no has enviado mensajes.</div></td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    );
-  }
-
-  const pending = messages.filter((m) => m.status === "PENDIENTE");
-  const responded = messages.filter((m) => m.status !== "PENDIENTE");
-  return (
-    <>
-      <section className="card panelBody">
-        <div className="panelHeader">
-          <div>
-            <h2 className="panelTitle">Mensajes del Admin</h2>
-            <p className="panelText">Pendientes de responder</p>
-          </div>
-        </div>
-        {localError ? <div className="alert alertError">{localError}</div> : null}
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Mensaje</th>
-                <th>Enviado</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pending.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.body}</td>
-                  <td>{dateTimeLabel(m.created_at)}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleRespond(m.id, "ACEPTADA")} type="button">
-                        Aceptar
-                      </button>
-                      <button className="button" disabled={isSaving} onClick={() => void handleRespond(m.id, "RECHAZADA")} type="button">
-                        Rechazar
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {pending.length === 0 ? (
-                <tr><td colSpan={3}><div className="emptyState">Sin mensajes pendientes.</div></td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="card panelBody">
-        <div className="panelHeader">
-          <div>
-            <h2 className="panelTitle">Mensajes respondidos</h2>
-            <p className="panelText">Historial</p>
-          </div>
-        </div>
-        <div className="tableWrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Mensaje</th>
-                <th>Enviado</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {responded.map((m) => (
-                <tr key={m.id}>
-                  <td>{m.body}</td>
-                  <td>{dateTimeLabel(m.created_at)}</td>
-                  <td><span className="statusBadge">{statusLabel(m.status)}</span></td>
-                </tr>
-              ))}
-              {responded.length === 0 ? (
-                <tr><td colSpan={3}><div className="emptyState">Sin mensajes respondidos.</div></td></tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </>
+      ) : null}
+      <div className="messageList">
+        {messages.map((m) => (
+          <MessageThread currentUserId={userId} isSaving={isSaving} key={m.id} message={m} onReply={handleReply} />
+        ))}
+        {messages.length === 0 ? <div className="emptyState">Sin mensajes.</div> : null}
+      </div>
+    </section>
   );
 }
 
@@ -383,6 +339,12 @@ export function SolicitudesView() {
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "Admin";
   const isLoading = isLoadingUser || isLoadingRuns;
   const error = queryError instanceof Error ? queryError.message : null;
+
+  // Esta pantalla siempre muestra la bandeja de mensajes (para admin y
+  // operaciones): entrar aqui ya cuenta como haberla visto.
+  useEffect(() => {
+    if (role === "admin" || role === "operaciones") markMessagesSeen(queryClient, userId);
+  }, [role, userId, queryClient]);
 
   // El acta es editable: si queda abierta mientras se guarda un cambio,
   // tiene que reflejar la orden fresca, no la foto de cuando se abrio.

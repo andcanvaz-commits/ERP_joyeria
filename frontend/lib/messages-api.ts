@@ -1,15 +1,20 @@
 import { apiRequest } from "@/lib/api";
 
+export type AdminMessageReply = {
+  id: string;
+  sender_user_id: string;
+  sender_name?: string | null;
+  body: string;
+  created_at: string;
+};
+
 export type AdminMessage = {
   id: string;
   sender_user_id: string;
   sender_name?: string | null;
   body: string;
-  status: "PENDIENTE" | "ACEPTADA" | "RECHAZADA";
   created_at: string;
-  responded_by_user_id?: string | null;
-  responded_by_name?: string | null;
-  responded_at?: string | null;
+  replies: AdminMessageReply[];
 };
 
 export function listMessages() {
@@ -23,9 +28,9 @@ export function sendMessage(body: string) {
   });
 }
 
-export function respondMessage(messageId: string, status: "ACEPTADA" | "RECHAZADA") {
-  return apiRequest<AdminMessage>(`/api/messages/${messageId}/respond`, {
+export function replyMessage(messageId: string, body: string) {
+  return apiRequest<AdminMessage>(`/api/messages/${messageId}/reply`, {
     method: "POST",
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ body }),
   });
 }

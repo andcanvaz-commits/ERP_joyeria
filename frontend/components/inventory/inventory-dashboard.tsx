@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FileText, FlaskConical, History, Inbox, Minus, Pencil, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
+import { Boxes, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, FileText, FlaskConical, History, Inbox, MessageSquare, Minus, Pencil, Plus, Printer, Repeat, RotateCcw, Save, SlidersHorizontal, Trash2, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
@@ -11,6 +11,10 @@ import { buildItemNameMap, buildOrdenProduccion, canPrintRecepcion, getRunFamily
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { ActaView } from "@/components/production/acta-view";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
+import { normalizeRole } from "@/lib/roles";
+import { listMessages } from "@/lib/messages-api";
+import { countUnreadMessages, lastSeenQueryFn, lastSeenQueryKey, markMessagesSeen } from "@/lib/messages-read-state";
+import { MessagesPanel } from "@/components/solicitudes/solicitudes-view";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { listCatalogSegments, metalTagClass } from "@/lib/catalog-api";
@@ -613,6 +617,22 @@ export function InventoryDashboard() {
   // fusionado Produccion/Inventario tambien puede, igual que el admin (ver
   // INVENTORY_ADMIN_ONLY en el backend -- inventory.movements.revert no esta ahi).
   const canRevertEntry = canSeeAudit || currentUser?.role === "Producción/Inventario";
+
+  const [isMessagesOpen, setIsMessagesOpen] = useState(false);
+  const messagesRole = normalizeRole(currentUser?.role);
+  const messagesUserId = currentUser?.id ?? null;
+  const { data: inboxMessages = [] } = useQuery({
+    queryKey: ["admin-messages"],
+    queryFn: listMessages,
+    enabled: messagesRole === "admin" || messagesRole === "operaciones",
+    refetchInterval: 15000,
+  });
+  const { data: messagesLastSeen = new Date(0).toISOString() } = useQuery({
+    queryKey: lastSeenQueryKey(messagesUserId),
+    queryFn: lastSeenQueryFn(messagesUserId),
+    enabled: Boolean(messagesUserId),
+  });
+  const unreadMessagesCount = countUnreadMessages(inboxMessages, messagesUserId, messagesLastSeen);
 
   useEffect(() => {
     if (itemFilter === "ORDENES_TERMINADAS") {
@@ -2201,6 +2221,22 @@ export function InventoryDashboard() {
               {pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length > 0 ? (
                 <span className="solicitudesBadge">{pendingInventoryRuns.length + pendingReceptionRuns.length + pendingAdditionalMaterialRequests.length}</span>
               ) : null}
+            </button>,
+            topbarSlot,
+          )
+        : null}
+
+      {topbarSlot
+        ? createPortal(
+            <button
+              className="topbarInbox"
+              onClick={() => { setIsMessagesOpen(true); markMessagesSeen(queryClient, currentUser?.id ?? null); }}
+              type="button"
+              aria-label="Buzon de mensajes"
+            >
+              <MessageSquare aria-hidden="true" size={18} />
+              Mensajes
+              {unreadMessagesCount > 0 ? <span className="messagesBadge">{unreadMessagesCount}</span> : null}
             </button>,
             topbarSlot,
           )
@@ -5363,6 +5399,25 @@ export function InventoryDashboard() {
                   ))}
                 </div>
               </>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {isMessagesOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Buzon de mensajes">
+          <section className="modalWindow processViewWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Buzón de mensajes</h2>
+                <p>Comunicados del administrador</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsMessagesOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            {messagesRole === "admin" || messagesRole === "operaciones" ? (
+              <MessagesPanel role={messagesRole} userId={currentUser?.id ?? null} />
             ) : null}
           </section>
         </div>

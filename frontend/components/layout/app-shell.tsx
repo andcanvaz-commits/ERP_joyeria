@@ -8,6 +8,8 @@ import { BarChart3, Boxes, ChevronUp, ClipboardList, Factory, FileText, KeyRound
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout } from "@/lib/auth-api";
 import { listProductionRuns } from "@/lib/production-api";
+import { listMessages } from "@/lib/messages-api";
+import { countUnreadMessages, lastSeenQueryFn, lastSeenQueryKey } from "@/lib/messages-read-state";
 import { allowedRoutes, canAccess, homeRoute, normalizeRole } from "@/lib/roles";
 import { useModalA11y } from "@/hooks/use-modal-a11y";
 
@@ -16,7 +18,7 @@ const navItems = [
   { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
   { href: "/produccion", label: "Producción", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
-  { href: "/solicitudes", label: "Solicitudes", icon: ClipboardList },
+  { href: "/solicitudes", label: "Comunicados", icon: ClipboardList },
   { href: "/documentos", label: "Documentos", icon: FileText },
   { href: "/reportes", label: "Estadísticas", icon: BarChart3 }
 ];
@@ -112,6 +114,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     "/solicitudes": invPending + prodPending,
   };
 
+  // Punto azul-verdoso de mensajes sin leer (distinto del rojo de pendientes,
+  // que es "hay que actuar"): junto a Inventario y Comunicados, desaparece en
+  // cuanto se abre la bandeja de mensajes en cualquiera de las dos pantallas.
+  const userId = currentUser?.id ?? null;
+  const { data: navMessages = [] } = useQuery({
+    queryKey: ["admin-messages"],
+    queryFn: listMessages,
+    enabled: isAuthenticated() && Boolean(currentUser),
+    refetchInterval: 15000,
+  });
+  const { data: lastSeenMessages = new Date(0).toISOString() } = useQuery({
+    queryKey: lastSeenQueryKey(userId),
+    queryFn: lastSeenQueryFn(userId),
+    enabled: Boolean(userId),
+  });
+  const unreadMessages = countUnreadMessages(navMessages, userId, lastSeenMessages);
+  const messageBadges: Record<string, number> = {
+    "/inventario": unreadMessages,
+    "/solicitudes": unreadMessages,
+  };
+
   // Cambio forzado de contrasena temporal: se realiza en la pantalla de login.
   useEffect(() => {
     if (currentUser?.must_change_password && pathname !== "/login") {
@@ -186,6 +209,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             const Icon = item.icon;
             const isActive = pathname === item.href;
             const badge = navBadges[item.href] ?? 0;
+            const messageBadge = messageBadges[item.href] ?? 0;
             return (
               <Link
                 className={`navItem ${isActive ? "navItemActive" : ""}`}
@@ -195,8 +219,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon aria-hidden="true" size={18} />
                 <span>{item.label}</span>
-                {badge > 0 ? (
-                  <span className="navBadge" aria-label={`${badge} pendientes`}>{badge > 9 ? "9+" : badge}</span>
+                {badge > 0 || messageBadge > 0 ? (
+                  <span className="navBadges">
+                    {badge > 0 ? (
+                      <span className="navBadge" aria-label={`${badge} pendientes`}>{badge > 9 ? "9+" : badge}</span>
+                    ) : null}
+                    {messageBadge > 0 ? (
+                      <span className="navBadgeInfo" aria-label={`${messageBadge} mensajes sin leer`}>{messageBadge > 9 ? "9+" : messageBadge}</span>
+                    ) : null}
+                  </span>
                 ) : null}
               </Link>
             );
