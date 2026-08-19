@@ -4,26 +4,23 @@ from decimal import Decimal
 
 import pytest
 
+# Import necesario aunque no se use directamente: registra la tabla
+# product_types en el metadata de SQLAlchemy antes del flush (ProductionRun
+# tiene un FK a product_types.id). Mismo patron que test_dynamic_flow.py.
+from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.models import ActaLineSource
 from backend.modules.production.schemas import (
     ActaLineCreate,
     ActaLineUpdate,
-    ProductionRunCreate,
-    RunProductCreate,
+    ProductionOrderCreate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 
 
 def _create_run(production_service, current_user, process, raw_material, target_complement, quantity="10"):
     raw_material.current_stock = Decimal("1000")
-    payload = ProductionRunCreate(
-        process_id=process.id,
-        raw_material_item_id=raw_material.id,
-        quantity=Decimal(quantity),
-        products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(quantity))],
-    )
-    run_read = production_service.create_run(payload, current_user)
-    return production_service.repository.get_run(run_read.id)
+    order = production_service.create_order(ProductionOrderCreate(name="Orden acta edit test"), current_user)
+    return production_service.repository.get_run(order.id)
 
 
 def test_add_acta_line_creates_manual_line(
@@ -68,7 +65,21 @@ def test_update_acta_line_changes_only_given_fields(
 def test_update_acta_line_allows_editing_plan_line(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden con etapa"), current_user)
+    started = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+        ),
+        current_user,
+    )
+    run = production_service.repository.get_run(started.id)
     plan_line = run.acta_lines[0]
     assert plan_line.source == "PLAN"
 
@@ -100,7 +111,21 @@ def test_delete_manual_line_removes_it(
 def test_delete_rejects_plan_line(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden con etapa"), current_user)
+    started = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+        ),
+        current_user,
+    )
+    run = production_service.repository.get_run(started.id)
     plan_line = run.acta_lines[0]
 
     with pytest.raises(ProductionDomainError, match="a mano"):

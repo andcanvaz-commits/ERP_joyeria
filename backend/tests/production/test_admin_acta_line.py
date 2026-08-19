@@ -16,6 +16,10 @@ from decimal import Decimal
 
 import pytest
 
+# Import necesario aunque no se use directamente: registra la tabla
+# product_types en el metadata de SQLAlchemy antes del flush (ProductionRun
+# tiene un FK a product_types.id). Mismo patron que test_dynamic_flow.py.
+from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.production.models import ActaLineSource
@@ -25,13 +29,10 @@ from backend.modules.production.schemas import (
     ActaLineUpdate,
     AdditionalMaterialRequestCreate,
     AdminActaLineCreate,
-    ProductionRunCreate,
-    RunProductCreate,
+    ProductionOrderCreate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 from backend.tests.production.test_additional_material import _in_progress_run
-from backend.tests.production.test_material_reservation import _reserve_partial
-from backend.tests.production.test_material_split import _create_run as _create_plain_run
 
 
 @pytest.fixture()
@@ -54,14 +55,8 @@ def admin_user(db_session) -> CurrentUser:
 
 def _create_run(production_service, current_user, process, raw_material, target_complement, quantity="10"):
     raw_material.current_stock = Decimal("1000")
-    payload = ProductionRunCreate(
-        process_id=process.id,
-        raw_material_item_id=raw_material.id,
-        quantity=Decimal(quantity),
-        products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(quantity))],
-    )
-    run_read = production_service.create_run(payload, current_user)
-    return production_service.repository.get_run(run_read.id)
+    order = production_service.create_order(ProductionOrderCreate(name="Orden admin acta test"), current_user)
+    return production_service.repository.get_run(order.id)
 
 
 def test_add_admin_acta_line_free_text_does_not_move_stock(
@@ -499,16 +494,25 @@ def test_cancel_run_reverts_admin_stock_line_stock(
     assert supply.current_stock == Decimal("50")
 
 
-def test_cancel_run_reverts_admin_stock_line_even_after_materials_approved(
+def test_cancel_run_reverts_admin_stock_line_alongside_stage_attempt_consumption(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     """La linea ADMIN_STOCK se revierte pase lo que pase con el consumo
-    normal de la orden -- el loop no depende de materials_approved_at."""
+    normal de la orden (flujo nuevo: start_stage_attempt)."""
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine
+
     raw_material.current_stock = Decimal("1000")
     db_session.flush()
-    run_read = _create_run(production_service, current_user, process, raw_material, target_complement, 100)
-    production_service.approve_materials(run_read.id, current_user)
-    production_service.start_run(run_read.id, current_user)
+    order = production_service.create_order(ProductionOrderCreate(name="Orden a cancelar con acta admin"), current_user)
+    production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+        ),
+        current_user,
+    )
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("900")
 
@@ -519,50 +523,18 @@ def test_cancel_run_reverts_admin_stock_line_even_after_materials_approved(
     db_session.add(supply)
     db_session.flush()
     production_service.add_admin_acta_line(
-        run_read.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
+        order.id, AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("5")), current_user,
     )
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("45")
 
-    result = production_service.cancel_run(run_read.id, current_user, "motivo")
+    result = production_service.cancel_run(order.id, current_user, "motivo")
 
     assert result.status == "CANCELADA"
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("1000")  # consumo normal revertido
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("50")  # linea admin tambien revertida
-
-
-# ---------------------------------------------------------------------------
-# Fix 4 (review final, decision de Rodrigo): _apply_admin_acta_line_delta
-# heredaba la exencion de PRODUCTION_MOVEMENTS pensada para
-# consume_material_for_production (que ya libero su propia reserva antes de
-# consumir) -- una linea de admin no libera ninguna reserva, asi que debe
-# respetar el stock reservado para otras ordenes ESPERANDO_MATERIAL.
-# ---------------------------------------------------------------------------
-
-
-def test_admin_stock_line_respects_reserved_stock_for_other_orders(
-    db_session, production_service, current_user, process, raw_material, target_complement
-):
-    waiting_child = _reserve_partial(
-        db_session, production_service, current_user, process, raw_material, target_complement
-    )
-    assert waiting_child.reserved_material_quantity == Decimal("25")
-    db_session.refresh(raw_material)
-    assert raw_material.current_stock == Decimal("25")
-
-    other_run = _create_plain_run(production_service, current_user, process, raw_material, target_complement, "5")
-
-    with pytest.raises(ProductionDomainError, match="reservados"):
-        production_service.add_admin_acta_line(
-            other_run.id,
-            AdminActaLineCreate(side="ENTREGA", item_id=raw_material.id, quantity=Decimal("10")),
-            current_user,
-        )
-
-    db_session.refresh(raw_material)
-    assert raw_material.current_stock == Decimal("25")  # nada se movio: se corto antes del movimiento
 
 
 def test_admin_stock_line_allows_consuming_unreserved_stock(

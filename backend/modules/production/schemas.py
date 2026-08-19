@@ -54,32 +54,10 @@ class RunProductCreate(BaseModel):
         return self
 
 
-class RunStageIngredientCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    process_stage_ingredient_id: UUID
-    quantity: Decimal = Field(gt=0)
-
-
 class RunProductsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     products: list[RunProductCreate] = Field(min_length=1)
-
-
-class ProductionRunCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    process_id: UUID
-    raw_material_item_id: UUID
-    # Cantidad total de materia prima en la unidad de medida del item elegido
-    # (gramos u otra): ya NO se multiplica por ningun factor.
-    quantity: Decimal = Field(gt=0)
-    products: list[RunProductCreate] = Field(min_length=1)
-    # Cantidad total a usar de cada insumo configurado en las etapas activas
-    # del proceso (obligatorio 1:1 contra la configuracion, ver validacion en
-    # ProductionService.create_run).
-    stage_ingredients: list[RunStageIngredientCreate] = Field(default_factory=list)
 
 
 class MaterialRejectPayload(BaseModel):
@@ -92,79 +70,6 @@ class RunCancelPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str | None = Field(default=None, max_length=1000)
-
-
-class ReceiveFinishedProductPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # Item WASTE elegido por Inventario para recibir la merma; si falta y
-    # run.waste_weight > 0, el servicio resuelve/crea "Merma <proceso>".
-    waste_item_id: UUID | None = None
-    # Nombre de un item WASTE a resolver-o-crear (usado cuando Inventario
-    # escribe un nombre nuevo/existente en vez de elegir uno de la lista).
-    # Ignorado si waste_item_id viene presente.
-    waste_item_name: str | None = Field(default=None, max_length=180)
-
-
-class MaterialShortageRead(BaseModel):
-    """Un recurso puntual (materia prima, complemento o insumo de etapa) que
-    no alcanza -- una orden puede estar corta de varios a la vez."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    unit: str
-    available: Decimal
-    needed: Decimal
-    is_complement: bool
-
-
-class AllocationPreviewRead(BaseModel):
-    """Dry-run de destinar o de aprobar materiales: cuanto se alcanza a
-    cubrir, sin tocar nada. Misma forma para las dos, mismo calculo
-    (_compute_coverage). `shortages` trae TODOS los recursos cortos, no solo
-    el que manda la fraccion cubierta (limiting_*, que se mantiene por
-    compatibilidad con el mensaje de error de aprobacion bloqueada)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    covered_qty: Decimal
-    target_qty: Decimal
-    is_partial: bool
-    limiting_name: str
-    limiting_available: Decimal
-    limiting_unit: str
-    limiting_required_per_unit: Decimal
-    limiting_is_complement: bool
-    shortages: list[MaterialShortageRead] = Field(default_factory=list)
-
-
-class AllocateMaterialPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # Cantidad de materia prima (en la unidad de la orden) que se intenta
-    # cubrir ahora mismo, no piezas.
-    quantity_units: Decimal = Field(gt=0)
-
-
-class ProductionRunStageFinish(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    initial_weight: Decimal | None = Field(default=None, ge=0)
-    final_weight: Decimal | None = Field(default=None, ge=0)
-    decision: Literal["APPROVED", "REJECTED"] | None = None
-    justification: str | None = Field(default=None, max_length=1000)
-
-
-class StageWeightEdit(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    initial_weight: Decimal | None = Field(default=None, ge=0)
-    final_weight: Decimal = Field(ge=0)
-    # Igual que ProductionRunStageFinish.justification: solo se usa (y solo
-    # hace falta) cuando el peso corregido deja la merma de la etapa por
-    # encima del limite del proceso -- ver edit_stage_weight.
-    justification: str | None = Field(default=None, max_length=1000)
 
 
 class StageDecisionRead(BaseModel):

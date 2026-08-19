@@ -12,24 +12,17 @@ from backend.modules.production.schemas import (
     ActaLineUpdate,
     AdditionalMaterialRequestCreate,
     AdminActaLineCreate,
-    AllocateMaterialPayload,
-    AllocationPreviewRead,
     AssignProductPayload,
-    MaterialShortageRead,
+    MaterialRejectPayload,
     ProductionOrderCreate,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
-    ProductionRunCreate,
     ProductionRunRead,
-    MaterialRejectPayload,
-    ProductionRunStageFinish,
-    ReceiveFinishedProductPayload,
     RunCancelPayload,
     RunProductsUpdate,
     StageAttemptCreate,
     StageAttemptFinish,
-    StageWeightEdit,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 from backend.modules.security.permissions import require_permission
@@ -51,28 +44,6 @@ def get_production_service():
         raise
     finally:
         session.close()
-
-
-def _coverage_to_preview(coverage) -> AllocationPreviewRead:
-    """_MaterialCoverage -> AllocationPreviewRead, compartido entre el
-    preview de destinar y el de aprobar materiales (misma forma, mismo
-    calculo de origen: ProductionService._compute_coverage)."""
-    return AllocationPreviewRead(
-        covered_qty=coverage.covered_qty,
-        target_qty=coverage.target_qty,
-        is_partial=coverage.is_partial,
-        limiting_name=coverage.limiting_name,
-        limiting_available=coverage.limiting_available,
-        limiting_unit=coverage.limiting_unit,
-        limiting_required_per_unit=coverage.limiting_required_per_unit,
-        limiting_is_complement=coverage.limiting_is_complement,
-        shortages=[
-            MaterialShortageRead(
-                name=s.name, unit=s.unit, available=s.available, needed=s.needed, is_complement=s.is_complement
-            )
-            for s in coverage.shortages
-        ],
-    )
 
 
 ADMIN_ONLY_PRODUCTION_PERMISSIONS = {
@@ -132,21 +103,6 @@ def update_process(
     ensure_permission(current_user, "production.processes.update")
     try:
         return service.update_process(process_id, payload)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs", response_model=ProductionRunRead, status_code=status.HTTP_201_CREATED)
-def create_run(
-    payload: ProductionRunCreate,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.create")
-    try:
-        return service.create_run(payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
@@ -261,37 +217,6 @@ def update_run_products(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.post("/runs/{run_id}/approve-materials", response_model=ProductionRunRead)
-def approve_run_materials(
-    run_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.approve_materials(run_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/reject-materials", response_model=ProductionRunRead)
-def reject_run_materials(
-    run_id: UUID,
-    payload: MaterialRejectPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.reject_materials(run_id, current_user, payload.reason if payload else None)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
 @router.post("/runs/{run_id}/cancel", response_model=ProductionRunRead)
 def cancel_run(
     run_id: UUID,
@@ -324,176 +249,6 @@ def cancel_run_family(
     ensure_permission(current_user, "production.runs.delete")
     try:
         return service.cancel_run_family(run_id, current_user, payload.reason)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/allocate-material", response_model=ProductionRunRead)
-def allocate_run_material(
-    run_id: UUID,
-    payload: AllocateMaterialPayload,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    # Igual que approve-materials: inventario puede destinar material a una
-    # orden que quedo esperando por falta de stock.
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.allocate_material(run_id, payload.quantity_units, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/allocation-preview", response_model=AllocationPreviewRead)
-def preview_run_allocation(
-    run_id: UUID,
-    payload: AllocateMaterialPayload,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> AllocationPreviewRead:
-    """Dry-run: cuanto cubriria destinar esta cantidad. NO consume ni cambia
-    estado -- alimenta la confirmacion previa del modal 'Destinar'."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        coverage = service.preview_allocation(run_id, payload.quantity_units)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return _coverage_to_preview(coverage)
-
-
-@router.get("/runs/{run_id}/approve-materials-preview", response_model=AllocationPreviewRead)
-def preview_run_approve_materials(
-    run_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> AllocationPreviewRead:
-    """Dry-run: cuanto cubriria aprobar materiales HOY, con TODOS los
-    recursos cortos (materia prima e insumos por etapa) -- alimenta la
-    confirmacion previa cuando la aprobacion va a quedar parcial y la orden
-    se divide. NO consume ni cambia estado."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        coverage = service.preview_approve_materials(run_id)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return _coverage_to_preview(coverage)
-
-
-@router.post("/runs/{run_id}/reserve-material", response_model=ProductionRunRead)
-def reserve_run_material(
-    run_id: UUID,
-    payload: AllocateMaterialPayload,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    """Guarda el stock para esta orden sin consumirlo ni arrancarla."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.reserve_material(run_id, payload.quantity_units, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/release-reservation", response_model=ProductionRunRead)
-def release_run_reservation(
-    run_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    """Devuelve al disponible todo lo reservado por esta orden."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.release_material_reservation(run_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/start-reserved", response_model=ProductionRunRead)
-def start_run_with_reserved(
-    run_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    """Reserva completa: recien aqui se consume de verdad y arranca."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.start_with_reserved_material(run_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/start", response_model=ProductionRunRead)
-def start_run(
-    run_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.start_run(run_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/stages/{stage_id}/finish", response_model=ProductionRunRead)
-def finish_run_stage(
-    stage_id: UUID,
-    payload: ProductionRunStageFinish,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.finish_stage(stage_id, payload, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/stages/{stage_id}/edit-weight", response_model=ProductionRunRead)
-def edit_run_stage_weight(
-    stage_id: UUID,
-    payload: StageWeightEdit,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    # Corrige un peso mal tipeado en una etapa ya finalizada (antes de recibir).
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.edit_stage_weight(stage_id, payload, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/receive-finished", response_model=ProductionRunRead)
-def receive_finished_product(
-    run_id: UUID,
-    payload: ReceiveFinishedProductPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.receive_finished_product(run_id, current_user, payload)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
