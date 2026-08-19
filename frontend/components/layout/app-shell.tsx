@@ -18,7 +18,7 @@ const navItems = [
   { href: "/mantenimientos", label: "Mantenimientos", icon: Wrench },
   { href: "/produccion", label: "Producción", icon: Factory },
   { href: "/inventario", label: "Inventario", icon: Boxes },
-  { href: "/solicitudes", label: "Solicitudes", icon: ClipboardList },
+  { href: "/solicitudes", label: "Bandeja de mensajes", icon: ClipboardList },
   { href: "/documentos", label: "Documentos", icon: FileText },
   { href: "/reportes", label: "Estadísticas", icon: BarChart3 }
 ];
