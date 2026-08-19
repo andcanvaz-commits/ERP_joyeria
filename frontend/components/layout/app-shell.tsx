@@ -86,12 +86,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     refetchOnWindowFocus: true,
   });
 
-  // Pendientes por seccion: inventario aprueba/recibe; produccion inicia las
-  // ordenes con materiales aprobados. El punto rojo aparece donde hay accion.
-  // Incluye tambien el material adicional pedido desde la acta mientras la
-  // corrida esta EN_PROCESO: no cambia el status de la orden, asi que sin
-  // esto el numerito no se movia aunque hubiera varias solicitudes esperando
-  // (mismo conteo que usa la bandeja de Solicitudes de Inventario).
+  // Pendientes por seccion: inventario aprueba el material adicional pedido
+  // desde la acta mientras la corrida esta EN_PROCESO; produccion asigna el
+  // material a las etapas que quedaron PENDIENTE_MATERIAL por un split
+  // automatico (ver allocate_stage_attempt_material). El punto rojo aparece
+  // donde hay accion.
   const pendingAdditionalMaterials = navRuns.reduce(
     (total, run) =>
       run.status === "EN_PROCESO"
@@ -99,13 +98,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         : total,
     0,
   );
-  const invPending =
-    navRuns.filter(
-      (run) =>
-        (run.status === "PENDIENTE_INVENTARIO" || run.status === "PENDIENTE_RECEPCION") &&
-        (run.event_lines ?? []).length === 0,
-    ).length + pendingAdditionalMaterials;
-  const prodPending = navRuns.filter((run) => run.status === "MATERIALES_APROBADOS").length;
+  const pendingStageMaterial = navRuns.reduce(
+    (total, run) => total + (run.stage_attempts ?? []).filter((attempt) => attempt.status === "PENDIENTE_MATERIAL").length,
+    0,
+  );
+  const invPending = pendingAdditionalMaterials;
+  const prodPending = pendingStageMaterial;
   // El punto rojo de "hay que actuar" es de Inventario/Produccion: Bandeja
   // de mensajes ya es solo mensajeria, no hereda ese aviso.
   const navBadges: Record<string, number> = {
