@@ -10,6 +10,7 @@ from backend.modules.database.base import Base
 from backend.modules.auth import models as auth_models  # noqa: F401
 from backend.modules.catalog import models as catalog_models  # noqa: F401
 from backend.modules.inventory import models as inventory_models  # noqa: F401
+from backend.modules.messages import models as messages_models  # noqa: F401
 from backend.modules.production import models as production_models  # noqa: F401
 
 config = context.config

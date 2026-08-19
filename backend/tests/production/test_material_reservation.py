@@ -233,146 +233,12 @@ def test_split_carries_the_reservation_to_the_child_run(
     assert run.reserved_material_quantity + grandchild.reserved_material_quantity == reserved_before
 
 
-# ---------------------------------------------------------------------------
-# Escenario reportado: 15 unidades, 1 g de materia prima y 1 g de complemento
-# por unidad, 10 g de stock de cada uno. Se parte en 10 + 5. Llegan los 5 g de
-# materia prima que faltaban, pero el complemento sigue en cero.
-# ---------------------------------------------------------------------------
-
-def _run_short_on_both(db_session, production_service, current_user, process, raw_material, complement_item, target_complement):
-    """Corrida hija de 5 unidades que necesita materia prima Y complemento,
-    con ambos en cero. Devuelve la hija."""
-    from backend.modules.production.schemas import ProductionRunCreate, RunComplementCreate, RunProductCreate
-
-    raw_material.current_stock = Decimal("10")
-    complement_item.current_stock = Decimal("10")
-    db_session.flush()
-
-    payload = ProductionRunCreate(
-        process_id=process.id,
-        raw_material_item_id=raw_material.id,
-        quantity=Decimal("15"),
-        assembly_mode="ASIGNAR",
-        products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("15"))],
-        complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("15"))],
-    )
-
-    run_read = production_service.create_run(payload, current_user)
-    production_service.approve_materials(run_read.id, current_user)
-    children = [
-        r for r in production_service.repository.list_runs() if r.parent_run_id == run_read.id
-    ]
-    return children[0]
-
-
-def test_reserve_holds_the_material_that_arrived_even_if_a_complement_is_at_zero(
-    db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-):
-    """El caso reportado: llegan los 5 g de materia prima que faltaban pero el
-    complemento sigue en cero. Reservar NO debe fallar: guarda la materia prima
-    y la orden queda esperando el complemento."""
-    child = _run_short_on_both(
-        db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-    )
-    assert child.quantity == Decimal("5")
-
-    # Ingresa la materia prima faltante; el complemento sigue agotado.
-    raw_material.current_stock = Decimal("5")
-    complement_item.current_stock = Decimal("0")
-    db_session.flush()
-
-    result = production_service.reserve_material(child.id, Decimal("5"), current_user)
-
-    db_session.refresh(child)
-    assert child.reserved_material_quantity == Decimal("5"), "la materia prima que llego debe quedar guardada"
-    assert child.complements[0].reserved_quantity == Decimal("0")
-    assert child.status == "ESPERANDO_MATERIAL"
-    assert result.reservation_is_complete is False, "falta el complemento: no puede iniciarse"
-    # Y ese material ya no esta disponible para nadie mas.
-    assert production_service.inventory_service.available_stock(raw_material) == Decimal("0")
-
-
-def test_reserve_completes_when_the_missing_complement_finally_arrives(
-    db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-):
-    child = _run_short_on_both(
-        db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-    )
-    raw_material.current_stock = Decimal("5")
-    db_session.flush()
-    production_service.reserve_material(child.id, Decimal("5"), current_user)
-
-    # Ahora si llegan los complementos que faltaban.
-    complement_item.current_stock = Decimal("5")
-    db_session.flush()
-    result = production_service.reserve_material(child.id, Decimal("5"), current_user)
-
-    db_session.refresh(child)
-    assert child.complements[0].reserved_quantity == Decimal("5")
-    assert result.reservation_is_complete is True, "con ambos recursos reservados ya puede iniciar"
-
-    started = production_service.start_with_reserved_material(child.id, current_user)
-    assert started.status == "EN_PROCESO"
-    assert started.quantity == Decimal("5")
-
-
-def test_reserve_never_exceeds_what_is_physically_free(
-    db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-):
-    """Reservar dos veces seguidas no puede pasarse del stock fisico."""
-    child = _run_short_on_both(
-        db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-    )
-    raw_material.current_stock = Decimal("3")  # menos de los 5 g que necesita
-    db_session.flush()
-
-    production_service.reserve_material(child.id, Decimal("5"), current_user)
-    production_service.reserve_material(child.id, Decimal("5"), current_user)
-
-    db_session.refresh(child)
-    assert child.reserved_material_quantity == Decimal("3")
-    assert production_service.inventory_service.available_stock(raw_material) == Decimal("0")
-
-
-def test_reserve_fails_only_when_nothing_at_all_is_free(
-    db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-):
-    child = _run_short_on_both(
-        db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-    )
-    raw_material.current_stock = Decimal("0")
-    complement_item.current_stock = Decimal("0")
-    db_session.flush()
-
-    with pytest.raises(ProductionDomainError, match="No hay stock libre para reservar"):
-        production_service.reserve_material(child.id, Decimal("5"), current_user)
-
-
-def test_preview_reports_zero_coverage_when_a_complement_is_missing(
-    db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-):
-    """El preview debe decir 'cubre 0': la UI usa esto para NO ofrecer
-    'arrancar con lo que alcanza', que no podria funcionar."""
-    child = _run_short_on_both(
-        db_session, production_service, current_user, process, raw_material, complement_item, target_complement
-    )
-    raw_material.current_stock = Decimal("5")
-    complement_item.current_stock = Decimal("0")
-    db_session.flush()
-
-    preview = production_service.preview_allocation(child.id, Decimal("5"))
-
-    assert preview.covered_qty == Decimal("0")
-    assert preview.is_partial is True
-    assert preview.limiting_is_complement is True
-
-
 def test_reserve_material_covers_stage_ingredients_too(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     from backend.modules.inventory.models import InventoryItem
-    from backend.modules.production.models import ProductionProcessStageIngredient
-    from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate, RunStageIngredientCreate
+    from backend.modules.production.models import ProductionRunStageIngredient
+    from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate
     from backend.modules.production.service import _reservation_is_complete
     import uuid
 
@@ -384,9 +250,6 @@ def test_reserve_material_covers_stage_ingredients_too(
     )
     db_session.add(supply)
     db_session.flush()
-    process.stages[0].ingredients.append(ProductionProcessStageIngredient(inventory_item_id=supply.id))
-    db_session.flush()
-    config_id = process.stages[0].ingredients[0].id
 
     raw_material.current_stock = Decimal("50")
     db_session.flush()
@@ -395,11 +258,16 @@ def test_reserve_material_covers_stage_ingredients_too(
         process_id=process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
-        stage_ingredients=[RunStageIngredientCreate(process_stage_ingredient_id=config_id, quantity=Decimal("10"))],
     )
     run_read = production_service.create_run(payload, current_user)
+    # El banco de procesos ya no preconfigura insumos (seccion 3): se agrega
+    # directo a la etapa ya materializada de la corrida.
+    run = production_service.repository.get_run(run_read.id)
+    run.stages[0].ingredients.append(
+        ProductionRunStageIngredient(inventory_item_id=supply.id, quantity=Decimal("10"), unit_code=supply.unit_code)
+    )
+    db_session.flush()
     approved = production_service.approve_materials(run_read.id, current_user)
     assert approved.quantity == Decimal("50")
 

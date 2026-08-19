@@ -3,11 +3,7 @@ from decimal import Decimal
 import pytest
 
 from backend.modules.inventory.models import InventoryItem
-from backend.modules.production.models import (
-    ActaLineSide,
-    ProductionProcess,
-    ProductionProcessStage,
-)
+from backend.modules.production.models import ActaLineSide, ProductionProcess
 from backend.modules.production.schemas import (
     ProductionRunCreate,
     ProductionRunStageFinish,
@@ -19,20 +15,10 @@ from backend.modules.production.service import ProductionDomainError
 
 @pytest.fixture()
 def weighed_process(db_session) -> ProductionProcess:
-    """Variante del fixture `process`: una sola etapa que SI pesa, y limite de
-    merma alto para que no dispare el flujo de rechazo por peso al finalizar
-    con una perdida grande a proposito en los tests."""
-    proc = ProductionProcess(
-        name="Cadenas test",
-        waste_limit_percent=Decimal("100"),
-        is_active=True,
-        stages=[
-            ProductionProcessStage(
-                name="Etapa pesada", stage_type="PROCESS", stage_order=1, is_active=True,
-                requires_weighing=True,
-            )
-        ],
-    )
+    """Variante del fixture `process`: nace SIN limite de merma bajo (el
+    banco de procesos ya no lo trae, seccion 3) -- `_run_to_pending_reception`
+    marca la etapa como que SI pesa despues de crear la corrida."""
+    proc = ProductionProcess(name="Cadenas test", is_active=True)
     db_session.add(proc)
     db_session.flush()
     return proc
@@ -45,15 +31,17 @@ def _run_to_pending_reception(
         process_id=weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(quantity),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(quantity))],
-        complements=[],
     )
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
     stage = run.stages[0]
+    stage.requires_weighing = True
+    # waste_limit_percent alto para que no dispare el flujo de rechazo por
+    # peso con una perdida grande a proposito en los tests.
+    run.waste_limit_percent = Decimal("100")
     production_service.finish_stage(
         stage.id,
         ProductionRunStageFinish(initial_weight=run.total_required_material, final_weight=Decimal(final_weight)),
@@ -94,17 +82,7 @@ def test_waste_acta_line_label_avoids_repeating_etapa(
     """Rodrigo reporto "Merma etapa ETAPA 2" repetida -- no eran dos filas
     duplicadas, era la palabra "etapa" repetida en el texto porque el nombre
     de la etapa (dato libre del proceso) ya empieza con "Etapa"."""
-    proc = ProductionProcess(
-        name="Cadenas etapa test",
-        waste_limit_percent=Decimal("100"),
-        is_active=True,
-        stages=[
-            ProductionProcessStage(
-                name="Etapa 2", stage_type="PROCESS", stage_order=1, is_active=True,
-                requires_weighing=True,
-            )
-        ],
-    )
+    proc = ProductionProcess(name="Etapa 2", is_active=True)
     db_session.add(proc)
     db_session.flush()
     raw_material.current_stock = Decimal("2000")

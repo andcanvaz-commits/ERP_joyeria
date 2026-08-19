@@ -13,7 +13,7 @@ from backend.modules.catalog.router import _ensure_admin as catalog_ensure_admin
 from backend.modules.product_types.router import _ensure_admin as product_types_ensure_admin
 from backend.modules.units.router import _ensure_admin as units_ensure_admin
 
-NON_ADMIN_ROLES = ["Jefe de inventario", "Jefe de producción", "unknown"]
+NON_ADMIN_ROLES = ["Producción/Inventario", "unknown"]
 
 
 def _user(role: str) -> CurrentUser:

@@ -9,29 +9,11 @@ from decimal import Decimal
 # localmente antes de tocar una corrida).
 from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.models import (
-    ProductionProcess,
-    ProductionProcessStage,
-    ProductionProcessStageIngredient,
     ProductionRun,
     ProductionRunStage,
     ProductionRunStageIngredient,
     ProductionRunStatus,
 )
-
-
-def test_stage_ingredient_has_no_quantity_column(db_session, raw_material):
-    stage = ProductionProcessStage(name="Etapa", stage_order=1)
-    stage.ingredients.append(ProductionProcessStageIngredient(inventory_item_id=raw_material.id))
-    process = ProductionProcess(
-        name=f"Proceso {uuid.uuid4().hex[:6]}",
-        waste_limit_percent=Decimal("1"),
-        stages=[stage],
-    )
-    db_session.add(process)
-    db_session.flush()
-
-    assert not hasattr(ProductionProcessStageIngredient, "quantity")
-    assert not hasattr(ProductionProcessStageIngredient, "unit_code")
 
 
 def test_run_stage_ingredient_round_trip(db_session, raw_material, current_user):

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.production.router import ensure_permission
 
-NON_ADMIN_ROLES = ["Jefe de inventario", "Jefe de producción", "unknown"]
+NON_ADMIN_ROLES = ["Producción/Inventario", "unknown"]
 
 
 def _user(role: str) -> CurrentUser:

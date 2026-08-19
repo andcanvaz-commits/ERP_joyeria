@@ -20,7 +20,6 @@ def test_finish_stage_adds_merma_line_when_there_is_waste(
         process_id=weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
     )
     run_read = production_service.create_run(payload, current_user)
@@ -28,6 +27,8 @@ def test_finish_stage_adds_merma_line_when_there_is_waste(
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
     stage = run.stages[0]
+    stage.requires_weighing = True
+    db_session.flush()
 
     production_service.finish_stage(
         stage.id,
@@ -43,7 +44,9 @@ def test_finish_stage_adds_merma_line_when_there_is_waste(
     assert len(merma_lines) == 1
     assert merma_lines[0].quantity == Decimal("5")
     assert merma_lines[0].stage_id == stage.id
-    assert "Etapa pesada" in merma_lines[0].label
+    # El banco de procesos ya no tiene sub-etapas (seccion 3): stage_name ==
+    # process.name.
+    assert "Cadenas test" in merma_lines[0].label
 
 
 def test_finish_stage_does_not_add_line_when_no_waste(
@@ -55,7 +58,6 @@ def test_finish_stage_does_not_add_line_when_no_waste(
         process_id=weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
     )
     run_read = production_service.create_run(payload, current_user)
@@ -63,6 +65,8 @@ def test_finish_stage_does_not_add_line_when_no_waste(
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
     stage = run.stages[0]
+    stage.requires_weighing = True
+    db_session.flush()
 
     production_service.finish_stage(
         stage.id,
@@ -90,13 +94,14 @@ def test_receive_does_not_add_peso_final_recibido_line_when_products_declared(
         process_id=weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
     )
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
+    run.stages[0].requires_weighing = True
+    db_session.flush()
     production_service.finish_stage(
         run.stages[0].id,
         ProductionRunStageFinish(initial_weight=run.total_required_material, final_weight=Decimal("95")),
@@ -128,7 +133,6 @@ def test_receive_adds_peso_final_recibido_line_when_no_products_declared(
         process_id=weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
     )
     run_read = production_service.create_run(payload, current_user)
@@ -136,6 +140,7 @@ def test_receive_adds_peso_final_recibido_line_when_no_products_declared(
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
     run.products = []
+    run.stages[0].requires_weighing = True
     db_session.flush()
     production_service.finish_stage(
         run.stages[0].id,

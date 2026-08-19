@@ -39,24 +39,22 @@ def get_inventory_service():
         session.close()
 
 
-# Editar y eliminar inventario es exclusivo del administrador (el jefe de
-# inventario puede leer, crear items y registrar movimientos, pero no editar/borrar).
+# Editar y eliminar inventario es exclusivo del administrador (el rol
+# fusionado Produccion/Inventario puede leer, crear items y registrar
+# movimientos, pero no editar/borrar).
 INVENTORY_ADMIN_ONLY = {"inventory.items.update", "inventory.items.delete"}
 
 
 def _find_waiting_production_runs(session, item_id):
     """Ordenes ESPERANDO_MATERIAL que necesitan este item -- de materia
-    prima, de complemento pendiente (receta de ensamble) O de insumo de
-    etapa: candidatas para el aviso de 'destinar' al registrar un ingreso.
-    allocate_material ya revalida los tres recursos al aprobar, asi que
-    basta con encontrar la orden aqui; la cobertura real la decide el
-    backend. Antes solo miraba materia prima y complementos -- un ingreso
-    de insumo (SUPPLY) nunca disparaba el aviso aunque fuera lo unico que
-    le faltaba a la orden (bug reportado)."""
+    prima O de insumo de etapa: candidatas para el aviso de 'destinar' al
+    registrar un ingreso. allocate_material ya revalida ambos recursos al
+    aprobar, asi que basta con encontrar la orden aqui; la cobertura real la
+    decide el backend. Antes solo miraba materia prima -- un ingreso de
+    insumo (SUPPLY) nunca disparaba el aviso aunque fuera lo unico que le
+    faltaba a la orden (bug reportado)."""
     from sqlalchemy import select
     from backend.modules.production.models import (
-        ComplementRequestStatus,
-        ProductionComplementRequest,
         ProductionRun,
         ProductionRunStage,
         ProductionRunStageIngredient,
@@ -66,15 +64,6 @@ def _find_waiting_production_runs(session, item_id):
     by_material = select(ProductionRun).where(
         ProductionRun.raw_material_item_id == item_id,
         ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
-    )
-    by_complement = (
-        select(ProductionRun)
-        .join(ProductionComplementRequest, ProductionComplementRequest.run_id == ProductionRun.id)
-        .where(
-            ProductionComplementRequest.item_id == item_id,
-            ProductionComplementRequest.status == ComplementRequestStatus.PENDING,
-            ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
-        )
     )
     by_ingredient = (
         select(ProductionRun)
@@ -86,8 +75,6 @@ def _find_waiting_production_runs(session, item_id):
         )
     )
     runs = {run.id: run for run in session.execute(by_material).scalars().all()}
-    for run in session.execute(by_complement).scalars().all():
-        runs.setdefault(run.id, run)
     for run in session.execute(by_ingredient).scalars().all():
         runs.setdefault(run.id, run)
     return list(runs.values())
@@ -102,8 +89,6 @@ def ensure_permission(current_user: CurrentUser, permission: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo el administrador puede editar o eliminar el inventario.",
         )
-    if current_user.role in {"admin", "Admin", "Jefe de inventario"} and permission.startswith("inventory."):
-        return
     try:
         require_permission(current_user, permission)
     except PermissionError as exc:

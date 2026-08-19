@@ -32,6 +32,8 @@ from backend.modules.inventory import models as inventory_models
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.router import router as inventory_router
 from backend.modules.inventory.service import InventoryService
+from backend.modules.messages import models as messages_models
+from backend.modules.messages.router import router as messages_router
 from backend.modules.production import models as production_models
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.router import router as production_router
@@ -214,11 +216,6 @@ def upgrade_inventory_movements_table() -> None:
 
 def upgrade_production_tables() -> None:
     statements = (
-        "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS waste_limit_percent NUMERIC(7, 4) NOT NULL DEFAULT 5",
-        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS phase_name VARCHAR(120)",
-        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS stage_type VARCHAR(40) NOT NULL DEFAULT 'PROCESS'",
-        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS quality_check TEXT",
-        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS rework_action TEXT",
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ",
         "UPDATE production_runs SET requested_at = COALESCE(requested_at, started_at, NOW())",
         "ALTER TABLE production_runs ALTER COLUMN requested_at SET NOT NULL",
@@ -230,7 +227,6 @@ def upgrade_production_tables() -> None:
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS stage_type VARCHAR(40) NOT NULL DEFAULT 'PROCESS'",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS quality_check TEXT",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS rework_action TEXT",
-        "CREATE TABLE IF NOT EXISTS production_process_stage_ingredients (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), stage_id UUID NOT NULL REFERENCES production_process_stages(id) ON DELETE CASCADE, inventory_item_id UUID NOT NULL, quantity NUMERIC(14,4) NOT NULL, unit_code VARCHAR(20) NOT NULL)",
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS production_code VARCHAR(30)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_production_runs_production_code ON production_runs (production_code) WHERE production_code IS NOT NULL",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS stage_code VARCHAR(40)",
@@ -238,7 +234,6 @@ def upgrade_production_tables() -> None:
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS materials_approved_by_user_id UUID",
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS received_by_user_id UUID",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS finished_by_user_id UUID",
-        "ALTER TABLE production_process_stages ADD COLUMN IF NOT EXISTS rework_target_order INTEGER",
         "ALTER TABLE production_run_stages ADD COLUMN IF NOT EXISTS rework_target_order INTEGER",
         "ALTER TABLE production_processes ADD COLUMN IF NOT EXISTS code VARCHAR(10)",
         "WITH ordered AS (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) AS rn FROM production_processes) "
@@ -260,7 +255,6 @@ def upgrade_production_tables() -> None:
         "decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), "
         "attempt_no INTEGER NOT NULL DEFAULT 1)",
         "ALTER TABLE production_runs ADD COLUMN IF NOT EXISTS reserved_material_quantity NUMERIC(14,4) NOT NULL DEFAULT 0",
-        "ALTER TABLE production_complement_requests ADD COLUMN IF NOT EXISTS reserved_quantity NUMERIC(14,4) NOT NULL DEFAULT 0",
     )
     with engine.begin() as connection:
         for statement in statements:
@@ -273,3 +267,4 @@ app.include_router(inventory_router, prefix="/api/inventory", tags=["inventory"]
 app.include_router(catalog_router, prefix="/api/catalog", tags=["catalog"])
 app.include_router(product_types_router, prefix="/api/product-types", tags=["product-types"])
 app.include_router(units_router, prefix="/api/units", tags=["units"])
+app.include_router(messages_router, prefix="/api/messages", tags=["messages"])

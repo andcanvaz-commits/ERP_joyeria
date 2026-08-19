@@ -30,7 +30,6 @@ from backend.modules.auth.models import AuthUser
 from backend.modules.database.session import SessionLocal
 from backend.modules.production.models import (
     ProductionProcess,
-    ProductionProcessStage,
     ProductionRun,
     ProductionRunEventLine,
     ProductionRunStage,
@@ -162,12 +161,7 @@ def _get_or_create_process(session) -> ProductionProcess:
     process = ProductionProcess(
         name=PROCESS_NAME,
         description="Proceso generico para las ordenes migradas del Excel historico de papel.",
-        waste_limit_percent=Decimal("100"),
         is_active=False,
-        stages=[
-            ProductionProcessStage(name="Entregado", stage_type="PROCESS", stage_order=1, is_active=True),
-            ProductionProcessStage(name="Recibido", stage_type="PROCESS", stage_order=2, is_active=True),
-        ],
     )
     session.add(process)
     session.flush()
@@ -236,7 +230,6 @@ def build_runs_for_order(
             process_name=order.order_name or f"Orden histórica {order.order_id}",
             quantity=Decimal("1"),
             status=ProductionRunStatus.RECEIVED if recibido else ProductionRunStatus.PENDING_RECEPTION,
-            assembly_mode="ASIGNAR",
             raw_material_item_id=None,
             raw_material_unit_code="g",
             total_required_material=per_unit,
@@ -279,14 +272,14 @@ def build_runs_for_order(
                 )
         run.stages = [
             ProductionRunStage(
-                source_stage_id=stage.id,
-                stage_name=stage.name,
-                stage_type=stage.stage_type,
-                stage_order=stage.stage_order,
+                source_stage_id=process.id,
+                stage_name=stage_name,
+                stage_type="PROCESS",
+                stage_order=stage_order,
                 status=ProductionRunStageStatus.FINISHED,
-                stage_code=f"{run.production_code}-{stage.stage_order}",
+                stage_code=f"{run.production_code}-{stage_order}",
             )
-            for stage in sorted(process.stages, key=lambda s: s.stage_order)
+            for stage_order, stage_name in enumerate(("Entregado", "Recibido"), start=1)
         ]
         runs.append(run)
     return runs

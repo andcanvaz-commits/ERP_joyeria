@@ -19,9 +19,12 @@ from backend.modules.config.settings import settings
 logger = logging.getLogger(__name__)
 
 ROLE_ADMIN = "Admin"
-ROLE_PRODUCTION_MANAGER = "Jefe de producción"
-ROLE_INVENTORY_MANAGER = "Jefe de inventario"
-SYSTEM_ROLES = (ROLE_PRODUCTION_MANAGER, ROLE_ADMIN, ROLE_INVENTORY_MANAGER)
+# Fusion de los antiguos "Jefe de produccion" y "Jefe de inventario": un solo
+# rol operativo que hereda los permisos de ambos (ver docs/cambios-sistema-produccion.md
+# seccion 2). Los dos roles viejos ya no son asignables a usuarios nuevos --
+# los existentes se migran en la revision de Alembic que acompaña este cambio.
+ROLE_PRODUCTION_INVENTORY = "Producción/Inventario"
+SYSTEM_ROLES = (ROLE_ADMIN, ROLE_PRODUCTION_INVENTORY)
 
 ADMIN_PERMISSIONS = [
     "production.processes.read",
@@ -39,25 +42,19 @@ ADMIN_PERMISSIONS = [
     "inventory.movements.create",
     "inventory.movements.revert",
 ]
-PRODUCTION_MANAGER_PERMISSIONS = [
+# Union de los permisos que antes tenian por separado Jefe de produccion y
+# Jefe de inventario -- editar/eliminar items de inventario sigue exclusivo
+# del admin (ver INVENTORY_ADMIN_ONLY en inventory/router.py), igual que
+# cancelar una orden o borrar un proceso (ADMIN_ONLY_PRODUCTION_PERMISSIONS).
+PRODUCTION_INVENTORY_PERMISSIONS = [
     "production.processes.read",
     "production.runs.read",
     "production.runs.create",
-    "production.runs.update",
-    # Cancelar/eliminar una orden es exclusivo del administrador.
-    # Lectura de inventario: ver materiales y stock para planificar produccion.
-    "inventory.read",
-]
-INVENTORY_MANAGER_PERMISSIONS = [
-    "production.processes.read",
-    "production.runs.read",
     "production.runs.update",
     "inventory.read",
     "inventory.items.create",
     "inventory.items.update",
     "inventory.items.delete",
-    # Revertir la ultima entrada es distinto de editar/eliminar items: el jefe
-    # de inventario si puede (igual que el admin); ver INVENTORY_ADMIN_ONLY.
     "inventory.movements.revert",
     "inventory.movements.create",
 ]
@@ -65,15 +62,13 @@ INVENTORY_MANAGER_PERMISSIONS = [
 ROLE_PERMISSIONS = {
     ROLE_ADMIN: ADMIN_PERMISSIONS,
     "admin": ADMIN_PERMISSIONS,
-    ROLE_PRODUCTION_MANAGER: PRODUCTION_MANAGER_PERMISSIONS,
-    ROLE_INVENTORY_MANAGER: INVENTORY_MANAGER_PERMISSIONS,
+    ROLE_PRODUCTION_INVENTORY: PRODUCTION_INVENTORY_PERMISSIONS,
 }
 
 ROLE_EMAIL_IDENTIFIERS = {
     ROLE_ADMIN: "admin",
     "admin": "admin",
-    ROLE_PRODUCTION_MANAGER: "produccion",
-    ROLE_INVENTORY_MANAGER: "inventario",
+    ROLE_PRODUCTION_INVENTORY: "produccion",
 }
 
 

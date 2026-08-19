@@ -6,46 +6,15 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class StageIngredientCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    inventory_item_id: UUID
-
-
-class StageIngredientRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    id: UUID
-    inventory_item_id: UUID
-
-
-class ProductionProcessStageCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=180)
-    description: str | None = Field(default=None, max_length=1000)
-    phase_name: str | None = Field(default=None, max_length=120)
-    stage_type: str = Field(default="PROCESS", max_length=40)
-    quality_check: str | None = Field(default=None, max_length=1000)
-    rework_action: str | None = Field(default=None, max_length=1000)
-    rework_target_order: int | None = Field(default=None, ge=1)
-    order: int = Field(ge=1)
-    requires_weighing: bool = False
-    is_active: bool = True
-    ingredients: list[StageIngredientCreate] = Field(default_factory=list)
-
-
+# Banco de procesos (docs/cambios-sistema-produccion.md seccion 3): un paso
+# suelto reutilizable, sin etapas ni insumos preconfigurados -- eso se agrega
+# suelto por etapa en el acta (mismo mecanismo ADMIN_STOCK/MANUAL de siempre).
 class ProductionProcessCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
-    version: int = Field(default=1, ge=1)
-    waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
-    stages: list[ProductionProcessStageCreate] = Field(min_length=1)
-    # Tipos de producto del catalogo que este proceso puede producir (vacio = todos).
-    product_type_ids: list[UUID] = Field(default_factory=list)
 
 
 class ProductionProcessUpdate(BaseModel):
@@ -53,28 +22,7 @@ class ProductionProcessUpdate(BaseModel):
 
     name: str = Field(min_length=1, max_length=180)
     description: str | None = Field(default=None, max_length=1000)
-    version: int = Field(default=1, ge=1)
-    waste_limit_percent: Decimal = Field(default=Decimal("1"), ge=0, le=100)
     is_active: bool = True
-    stages: list[ProductionProcessStageCreate] = Field(min_length=1)
-    product_type_ids: list[UUID] = Field(default_factory=list)
-
-
-class ProductionProcessStageRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    id: UUID
-    name: str
-    description: str | None = None
-    phase_name: str | None = None
-    stage_type: str
-    quality_check: str | None = None
-    rework_action: str | None = None
-    rework_target_order: int | None = None
-    stage_order: int
-    requires_weighing: bool
-    is_active: bool
-    ingredients: list[StageIngredientRead] = Field(default_factory=list)
 
 
 class ProductionProcessRead(BaseModel):
@@ -84,11 +32,7 @@ class ProductionProcessRead(BaseModel):
     name: str
     code: str | None = None
     description: str | None = None
-    version: int
-    waste_limit_percent: Decimal
     is_active: bool
-    stages: list[ProductionProcessStageRead] = Field(default_factory=list)
-    product_type_ids: list[UUID] = Field(default_factory=list)
 
 
 class RunProductCreate(BaseModel):
@@ -108,13 +52,6 @@ class RunProductCreate(BaseModel):
                 "tipo del catalogo (uno de los dos)."
             )
         return self
-
-
-class RunComplementCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    item_id: UUID
-    quantity: Decimal = Field(gt=0)
 
 
 class RunStageIngredientCreate(BaseModel):
@@ -138,9 +75,7 @@ class ProductionRunCreate(BaseModel):
     # Cantidad total de materia prima en la unidad de medida del item elegido
     # (gramos u otra): ya NO se multiplica por ningun factor.
     quantity: Decimal = Field(gt=0)
-    assembly_mode: Literal["ASIGNAR", "ENSAMBLAR"] = "ASIGNAR"
     products: list[RunProductCreate] = Field(min_length=1)
-    complements: list[RunComplementCreate] = Field(default_factory=list)
     # Cantidad total a usar de cada insumo configurado en las etapas activas
     # del proceso (obligatorio 1:1 contra la configuracion, ver validacion en
     # ProductionService.create_run).
@@ -304,85 +239,6 @@ class RunProductRead(BaseModel):
     unit_code: str | None = None
 
 
-class RunComplementRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    id: UUID
-    item_id: UUID
-    name: str | None = None
-    quantity: Decimal
-    # Guardado para esta orden pero todavia no consumido (no hay movimiento).
-    reserved_quantity: Decimal = Decimal("0")
-    unit_code: str
-    status: str
-    # Cuanto de lo aprobado ya se devolvio a inventario por sobrante.
-    returned_quantity: Decimal = Decimal("0")
-    # Informativo unicamente: cuanto de lo aprobado ya consumio el ensamble
-    # automatico (suma de run.assembly_items para este item) — no viene del
-    # ORM, lo llena ProductionService._attach_plan_names. NO se usa para
-    # calcular cuanto se puede devolver: esa regla es siempre
-    # `quantity - returned_quantity` (ver return_complement en
-    # production/service.py), sin importar lo que el ensamble haya marcado
-    # como usado. Ojo: hoy used_quantity tampoco baja cuando se registra una
-    # devolucion despues de que el ensamble ya corrio
-    # (_approved_complement_totals no resta returned_quantity) — es una
-    # limitacion conocida y deliberadamente diferida, no algo a corregir aqui.
-    used_quantity: Decimal = Decimal("0")
-
-
-class ComplementReturnCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    quantity: Decimal = Field(gt=0)
-
-
-class RunAssemblyItemRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    id: UUID
-    complement_item_id: UUID
-    name: str | None = None
-    quantity: Decimal
-
-
-class RunAssemblyLineCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    complement_item_id: UUID
-    # Cantidad total a usar de este complemento en el ensamble (no por unidad).
-    quantity: Decimal = Field(gt=0, decimal_places=4)
-
-
-class RunAssemblyDefine(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[RunAssemblyLineCreate] = Field(min_length=1)
-
-
-class AssemblyRecipeItemRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    complement_item_id: UUID
-    name: str | None = None
-    unit_code: str | None = None
-    material_type: str | None = None
-    # Ultima cantidad total usada (sugerencia, no autoritativa).
-    quantity: Decimal
-
-
-class AssemblyRecipeRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    model_key: str | None = None
-    items: list[AssemblyRecipeItemRead] = Field(default_factory=list)
-
-
-class AssemblyRecipeUpsert(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[RunAssemblyLineCreate] = Field(min_length=1)
-
-
 class AdditionalMaterialRequestCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -421,6 +277,7 @@ class ActaLineRead(BaseModel):
     item_id: UUID | None = None
     source: str
     stage_id: UUID | None = None
+    stage_attempt_id: UUID | None = None
     stage_name: str | None = None
     note: str | None = None
     created_by_name: str | None = None
@@ -439,6 +296,9 @@ class ActaLineCreate(BaseModel):
     # libre (sin item de catalogo) sigue siendo valida.
     item_id: UUID | None = None
     note: str | None = Field(default=None, max_length=500)
+    # Intento de etapa del flujo nuevo al que esta linea pertenece (vacio =
+    # linea de nivel de orden, flujo viejo).
+    stage_attempt_id: UUID | None = None
 
 
 class ActaLineUpdate(BaseModel):
@@ -461,33 +321,87 @@ class AdminActaLineCreate(BaseModel):
     quantity: Decimal = Field(gt=0)
     unit_code: str | None = Field(default=None, min_length=1, max_length=20)
     note: str | None = Field(default=None, max_length=500)
+    stage_attempt_id: UUID | None = None
+
+
+# --- Flujo nuevo (docs/cambios-sistema-produccion.md seccion 4) ---
+
+
+class ProductionOrderCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+
+
+class StageAttemptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    process_id: UUID
+    responsable_name: str = Field(min_length=1, max_length=180)
+
+
+class StageAttemptFinish(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    peso_al_finalizar: Decimal = Field(ge=0)
+    decision: Literal["APROBADA", "RECHAZADA"]
+    # Opcional -- Rodrigo: el motivo de rechazo no es obligatorio.
+    rejection_reason: str | None = Field(default=None, max_length=1000)
+
+
+class StageAttemptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    run_id: UUID
+    process_id: UUID | None = None
+    process_name: str
+    sequence_order: int
+    attempt_no_for_process: int
+    code: str | None = None
+    responsable_name: str | None = None
+    status: str
+    rejection_reason: str | None = None
+    peso_al_finalizar: Decimal | None = None
+    unit_code: str | None = None
+    merma_weight: Decimal | None = None
+    merma_percent: Decimal | None = None
+    started_by_name: str | None = None
+    started_at: datetime
+    finished_by_name: str | None = None
+    finished_at: datetime | None = None
+    acta_lines: list[ActaLineRead] = Field(default_factory=list)
+
+
+class AssignProductPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    products: list[RunProductCreate] = Field(min_length=1)
 
 
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     id: UUID
-    process_id: UUID
-    process_name: str
+    # Nulo en ordenes del flujo nuevo (ver `name` abajo).
+    process_id: UUID | None = None
+    process_name: str | None = None
+    # Nombre libre de la orden (flujo nuevo, seccion 4.1). Nulo en ordenes viejas.
+    name: str | None = None
     production_code: str | None = None
     root_production_code: str | None = None
     parent_run_id: UUID | None = None
-    quantity: Decimal
+    quantity: Decimal | None = None
     status: str
-    # Modo del plan: ASIGNAR (split directo) o ENSAMBLAR (un producto + complementos).
-    assembly_mode: str
-    # ENSAMBLAR sin receta aplicable: produccion debe definir la combinacion
-    # antes de que inventario pueda recibir.
-    assembly_pending: bool
     raw_material_item_id: UUID | None
-    raw_material_unit_code: str
-    total_required_material: Decimal
+    raw_material_unit_code: str | None = None
+    total_required_material: Decimal | None = None
     # Materia prima guardada para esta orden sin consumir todavia. Junto con
     # reservation_is_complete gobierna el boton "Iniciar con lo reservado".
     reserved_material_quantity: Decimal = Decimal("0")
     reservation_is_complete: bool = False
-    waste_limit_percent: Decimal
-    expected_finished_weight: Decimal
+    waste_limit_percent: Decimal | None = None
+    expected_finished_weight: Decimal | None = None
     actual_finished_weight: Decimal | None = None
     waste_weight: Decimal | None = None
     waste_percent: Decimal | None = None
@@ -511,6 +425,8 @@ class ProductionRunRead(BaseModel):
     finished_at: datetime | None = None
     received_at: datetime | None = None
     stages: list[ProductionRunStageRead] = Field(default_factory=list)
+    # Intentos de etapa del flujo nuevo (uno por ✔/✘). Vacio en ordenes viejas.
+    stage_attempts: list[StageAttemptRead] = Field(default_factory=list)
     # Tipos de producto que el proceso de esta orden puede producir (vacio = todos).
     # Gobierna el combo al convertir el lote en productos terminados.
     allowed_product_type_ids: list[UUID] = Field(default_factory=list)
@@ -519,11 +435,8 @@ class ProductionRunRead(BaseModel):
     supply_consumptions: list[SupplyConsumptionRead] = Field(default_factory=list)
     # Lineas de detalle por evento (solo ordenes historicas migradas).
     event_lines: list[ProductionRunEventLineRead] = Field(default_factory=list)
-    # Plan de resultantes (split) y complementos solicitados.
+    # Plan de resultantes (split).
     products: list[RunProductRead] = Field(default_factory=list)
-    complements: list[RunComplementRead] = Field(default_factory=list)
-    # Combinacion de complementos aplicada al ensamble (cantidades totales).
-    assembly_items: list[RunAssemblyItemRead] = Field(default_factory=list)
     # Material adicional pedido mientras la corrida esta EN_PROCESO.
     additional_materials: list[AdditionalMaterialRequestRead] = Field(default_factory=list)
     # Acta persistida: que entro y que salio de la orden (ver ActaLineSource).

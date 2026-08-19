@@ -14,10 +14,9 @@ from backend.modules.production.schemas import (
     AdminActaLineCreate,
     AllocateMaterialPayload,
     AllocationPreviewRead,
-    AssemblyRecipeRead,
-    AssemblyRecipeUpsert,
-    ComplementReturnCreate,
+    AssignProductPayload,
     MaterialShortageRead,
+    ProductionOrderCreate,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
@@ -26,9 +25,10 @@ from backend.modules.production.schemas import (
     MaterialRejectPayload,
     ProductionRunStageFinish,
     ReceiveFinishedProductPayload,
-    RunAssemblyDefine,
     RunCancelPayload,
     RunProductsUpdate,
+    StageAttemptCreate,
+    StageAttemptFinish,
     StageWeightEdit,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
@@ -77,8 +77,8 @@ def _coverage_to_preview(coverage) -> AllocationPreviewRead:
 
 ADMIN_ONLY_PRODUCTION_PERMISSIONS = {
     # Cancelar una orden y borrar una plantilla de proceso son exclusivos del
-    # administrador -- ni el jefe de produccion pasa por el atajo generico de
-    # abajo para estos dos permisos puntuales.
+    # administrador, sin importar el permiso que tenga el rol fusionado
+    # Produccion/Inventario.
     "production.runs.delete": "Solo el administrador puede cancelar una orden de produccion.",
     "production.processes.delete": "Solo el administrador puede eliminar un proceso.",
     "production.acta-lines.admin-stock": "Solo el administrador puede agregar una linea de acta enlazada a inventario o de texto libre desde este boton.",
@@ -94,11 +94,6 @@ def ensure_permission(current_user: CurrentUser, permission: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ADMIN_ONLY_PRODUCTION_PERMISSIONS[permission],
         )
-    inventory_run_permissions = {"production.runs.read", "production.runs.update"}
-    if current_user.role == "Jefe de inventario" and permission in inventory_run_permissions:
-        return
-    if is_admin or current_user.role in {"Jefe de produccion", "Jefe de producción"} and permission.startswith("production."):
-        return
     try:
         require_permission(current_user, permission)
     except PermissionError as exc:
@@ -158,6 +153,71 @@ def create_run(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.post("/orders", response_model=ProductionRunRead, status_code=status.HTTP_201_CREATED)
+def create_order(
+    payload: ProductionOrderCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Flujo nuevo (docs/cambios-sistema-produccion.md seccion 4.1): crea la
+    orden con solo un nombre libre, sin proceso ni materia prima fijos."""
+    ensure_permission(current_user, "production.runs.create")
+    return service.create_order(payload, current_user)
+
+
+@router.post("/runs/{run_id}/stage-attempts", response_model=ProductionRunRead, status_code=status.HTTP_201_CREATED)
+def start_stage_attempt(
+    run_id: UUID,
+    payload: StageAttemptCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Seccion 4.2: elige un proceso del banco y arranca un intento de etapa."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.start_stage_attempt(run_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/stage-attempts/{attempt_id}/finish", response_model=ProductionRunRead)
+def finish_stage_attempt(
+    attempt_id: UUID,
+    payload: StageAttemptFinish,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Seccion 4: ✔ (APROBADA, calcula merma propia del intento) o ✘
+    (RECHAZADA, motivo opcional, no repite el proceso automaticamente)."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.finish_stage_attempt(attempt_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/assign-product", response_model=ProductionRunRead)
+def assign_product(
+    run_id: UUID,
+    payload: AssignProductPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Seccion 4.3: asigna el resultado a producto terminado en cualquier
+    etapa, no solo al final. Cierra la orden (TERMINADA)."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.assign_product(run_id, payload, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.get("/runs", response_model=list[ProductionRunRead])
 def list_runs(
     current_user: CurrentUser = Depends(get_current_user),
@@ -174,31 +234,9 @@ def update_run_products(
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
 ) -> ProductionRunRead:
-    # Solo produccion/admin: el plan es del jefe de produccion, no de inventario.
-    if current_user.role == "Jefe de inventario":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.update_run_products(run_id, payload, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/assembly", response_model=ProductionRunRead)
-def define_run_assembly(
-    run_id: UUID,
-    payload: RunAssemblyDefine,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    # Solo produccion/admin: el ensamble es del jefe de produccion, no de inventario.
-    if current_user.role == "Jefe de inventario":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.define_run_assembly(run_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
@@ -318,9 +356,9 @@ def preview_run_approve_materials(
     service: ProductionService = Depends(get_production_service),
 ) -> AllocationPreviewRead:
     """Dry-run: cuanto cubriria aprobar materiales HOY, con TODOS los
-    recursos cortos (materia prima, complementos e insumos por etapa) --
-    alimenta la confirmacion previa cuando la aprobacion va a quedar
-    parcial y la orden se divide. NO consume ni cambia estado."""
+    recursos cortos (materia prima e insumos por etapa) -- alimenta la
+    confirmacion previa cuando la aprobacion va a quedar parcial y la orden
+    se divide. NO consume ni cambia estado."""
     ensure_permission(current_user, "production.runs.update")
     try:
         coverage = service.preview_approve_materials(run_id)
@@ -514,7 +552,13 @@ def add_admin_acta_line(
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
 ) -> ProductionRunRead:
-    ensure_permission(current_user, "production.acta-lines.admin-stock")
+    # Ligada a un intento de etapa (flujo nuevo, seccion 2.3): cualquiera del
+    # rol fusionado opera el acta directo, ya no es admin-only -- ese gate
+    # sigue aplicando solo al boton "+" viejo (linea de nivel de orden).
+    if payload.stage_attempt_id is not None:
+        ensure_permission(current_user, "production.runs.update")
+    else:
+        ensure_permission(current_user, "production.acta-lines.admin-stock")
     try:
         return service.add_admin_acta_line(run_id, payload, current_user)
     except ProductionNotFoundError as exc:
@@ -548,89 +592,6 @@ def delete_acta_line(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.delete_acta_line(line_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/complements/{complement_id}/return", response_model=ProductionRunRead)
-def return_complement(
-    complement_id: UUID,
-    payload: ComplementReturnCreate,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.return_complement(complement_id, payload, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.get("/assembly-recipes/types", response_model=list[str])
-def list_assembly_recipe_model_keys(
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> list[str]:
-    ensure_permission(current_user, "production.runs.read")
-    return service.list_assembly_recipe_model_keys()
-
-
-@router.get("/assembly-recipes/all", response_model=list[AssemblyRecipeRead])
-def list_assembly_recipes(
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> list[AssemblyRecipeRead]:
-    ensure_permission(current_user, "production.runs.read")
-    return service.list_assembly_recipes()
-
-
-@router.get("/assembly-recipes", response_model=AssemblyRecipeRead)
-def get_assembly_recipe(
-    product_type_id: UUID | None = None,
-    item_id: UUID | None = None,
-    material_item_id: UUID | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> AssemblyRecipeRead:
-    ensure_permission(current_user, "production.runs.read")
-    try:
-        return service.get_assembly_recipe(product_type_id, item_id, material_item_id)
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.put("/assembly-recipes/{model_key}", response_model=AssemblyRecipeRead)
-def upsert_assembly_recipe(
-    model_key: str,
-    payload: AssemblyRecipeUpsert,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> AssemblyRecipeRead:
-    # Solo produccion/admin: la receta es del jefe de produccion, no de inventario.
-    if current_user.role == "Jefe de inventario":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.upsert_assembly_recipe(model_key, payload, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-
-
-@router.delete("/assembly-recipes/{model_key}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_assembly_recipe(
-    model_key: str,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> None:
-    if current_user.role == "Jefe de inventario":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo produccion puede editar el plan.")
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        service.delete_assembly_recipe(model_key)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

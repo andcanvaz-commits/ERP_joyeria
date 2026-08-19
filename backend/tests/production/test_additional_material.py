@@ -19,7 +19,6 @@ def _in_progress_run(production_service, current_user, process, raw_material, ta
         process_id=process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(quantity),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(quantity))],
     )
     run_read = production_service.create_run(payload, current_user)
@@ -49,7 +48,6 @@ def test_request_rejects_when_run_not_in_progress(
         process_id=process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("10"),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("10"))],
     )
     run_read = production_service.create_run(payload, current_user)

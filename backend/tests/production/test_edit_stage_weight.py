@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from backend.modules.production.models import ProductionProcess, ProductionProcessStage
+from backend.modules.production.models import ProductionProcess, ProductionRunStage, ProductionRunStageStatus
 from backend.modules.production.schemas import ProductionRunCreate, ProductionRunStageFinish, RunProductCreate, StageWeightEdit
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 from backend.tests.production.test_receive_merma import _run_to_pending_reception, weighed_process  # noqa: F401
@@ -17,41 +17,41 @@ from backend.tests.production.test_receive_merma import _run_to_pending_receptio
 
 @pytest.fixture()
 def two_stage_weighed_process(db_session) -> ProductionProcess:
-    """Dos etapas que pesan, para probar el efecto cascada de una correccion."""
-    proc = ProductionProcess(
-        name="Fundicion y pulido test",
-        waste_limit_percent=Decimal("100"),
-        is_active=True,
-        stages=[
-            ProductionProcessStage(
-                name="Fundicion", stage_type="PROCESS", stage_order=1, is_active=True, requires_weighing=True,
-            ),
-            ProductionProcessStage(
-                name="Pulido", stage_type="PROCESS", stage_order=2, is_active=True, requires_weighing=True,
-            ),
-        ],
-    )
+    proc = ProductionProcess(name="Fundicion y pulido test", is_active=True)
     db_session.add(proc)
     db_session.flush()
     return proc
 
 
 def _run_with_two_finished_stages(
-    production_service, current_user, two_stage_weighed_process, raw_material, target_complement,
+    db_session, production_service, current_user, two_stage_weighed_process, raw_material, target_complement,
     quantity, stage1_final, stage2_final,
 ):
+    """create_run ya solo arma UNA etapa (banco de procesos aplanado, seccion
+    3) -- la segunda se agrega directo por ORM para seguir cubriendo el
+    efecto cascada de editar el peso de una etapa anterior."""
     payload = ProductionRunCreate(
         process_id=two_stage_weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(quantity),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(quantity))],
-        complements=[],
     )
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
+    run.stages[0].requires_weighing = True
+    run.stages.append(
+        ProductionRunStage(
+            source_stage_id=two_stage_weighed_process.id,
+            stage_name="Pulido",
+            stage_type="PROCESS",
+            stage_order=2,
+            requires_weighing=True,
+            status=ProductionRunStageStatus.PENDING,
+        )
+    )
+    db_session.flush()
     stage1, stage2 = sorted(run.stages, key=lambda s: s.stage_order)
     production_service.finish_stage(
         stage1.id, ProductionRunStageFinish(final_weight=Decimal(stage1_final)), current_user,
@@ -133,7 +133,7 @@ def test_edit_cascades_to_later_finished_stages(
     # 100g requeridos. Fundicion termina en 90 (merma 10), pulido en 80
     # (merma 10 respecto a 90).
     run = _run_with_two_finished_stages(
-        production_service, current_user, two_stage_weighed_process, raw_material, target_complement, 100, "90", "80"
+        db_session, production_service, current_user, two_stage_weighed_process, raw_material, target_complement, 100, "90", "80"
     )
     stage1, stage2 = sorted(run.stages, key=lambda s: s.stage_order)
     assert stage1.waste_weight == Decimal("10")
@@ -165,14 +165,24 @@ def test_edit_while_run_still_in_progress_only_touches_finished_stages(
         process_id=two_stage_weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(100),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(100))],
-        complements=[],
     )
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
     production_service.start_run(run_read.id, current_user)
     run = production_service.repository.get_run(run_read.id)
+    run.stages[0].requires_weighing = True
+    run.stages.append(
+        ProductionRunStage(
+            source_stage_id=two_stage_weighed_process.id,
+            stage_name="Pulido",
+            stage_type="PROCESS",
+            stage_order=2,
+            requires_weighing=True,
+            status=ProductionRunStageStatus.PENDING,
+        )
+    )
+    db_session.flush()
     stage1, stage2 = sorted(run.stages, key=lambda s: s.stage_order)
     production_service.finish_stage(stage1.id, ProductionRunStageFinish(final_weight=Decimal("90")), current_user)
     assert run.finished_at is None
@@ -211,9 +221,7 @@ def test_edit_rejects_when_stage_not_finished(
         process_id=weighed_process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(100),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(100))],
-        complements=[],
     )
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
@@ -236,9 +244,7 @@ def test_edit_rejects_when_stage_does_not_require_weighing(
         process_id=process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(100),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(100))],
-        complements=[],
     )
     run_read = production_service.create_run(payload, current_user)
     production_service.approve_materials(run_read.id, current_user)
@@ -280,7 +286,7 @@ def test_edit_cascades_rejects_weight_above_previous_finished_stage(
     raw_material.current_stock = Decimal("2000")
     db_session.flush()
     run = _run_with_two_finished_stages(
-        production_service, current_user, two_stage_weighed_process, raw_material, target_complement, 100, "90", "80"
+        db_session, production_service, current_user, two_stage_weighed_process, raw_material, target_complement, 100, "90", "80"
     )
     stage1, stage2 = sorted(run.stages, key=lambda s: s.stage_order)
 

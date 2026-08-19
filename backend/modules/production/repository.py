@@ -6,14 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.modules.production.models import (
-    ProductionComplementRequest,
     ProductionProcess,
-    ProductionProcessStage,
-    ProductionProcessStageIngredient,
     ProductionRun,
     ProductionRunActaLine,
     ProductionRunAdditionalMaterialRequest,
     ProductionRunStage,
+    ProductionRunStageAttempt,
+    StageAttemptStatus,
 )
 
 
@@ -26,23 +25,11 @@ class ProductionProcessRepository:
         return process
 
     def get(self, process_id: UUID) -> ProductionProcess | None:
-        statement = (
-            select(ProductionProcess)
-            .options(
-                selectinload(ProductionProcess.stages).selectinload(ProductionProcessStage.ingredients)
-            )
-            .where(ProductionProcess.id == process_id)
-        )
+        statement = select(ProductionProcess).where(ProductionProcess.id == process_id)
         return self.session.execute(statement).scalar_one_or_none()
 
     def list(self) -> list[ProductionProcess]:
-        statement = (
-            select(ProductionProcess)
-            .options(
-                selectinload(ProductionProcess.stages).selectinload(ProductionProcessStage.ingredients)
-            )
-            .order_by(ProductionProcess.name.asc(), ProductionProcess.version.desc())
-        )
+        statement = select(ProductionProcess).order_by(ProductionProcess.name.asc())
         return list(self.session.execute(statement).scalars().all())
 
     def add_run(self, run: ProductionRun) -> ProductionRun:
@@ -55,24 +42,50 @@ class ProductionProcessRepository:
             .options(
                 selectinload(ProductionRun.stages).selectinload(ProductionRunStage.ingredients),
                 selectinload(ProductionRun.event_lines),
+                selectinload(ProductionRun.stage_attempts),
             )
             .where(ProductionRun.id == run_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
+
+    def get_stage_attempt(self, attempt_id: UUID) -> ProductionRunStageAttempt | None:
+        statement = (
+            select(ProductionRunStageAttempt)
+            .options(selectinload(ProductionRunStageAttempt.run).selectinload(ProductionRun.stage_attempts))
+            .where(ProductionRunStageAttempt.id == attempt_id)
+        )
+        return self.session.execute(statement).scalar_one_or_none()
+
+    def get_active_stage_attempt(self, run_id: UUID) -> ProductionRunStageAttempt | None:
+        """La corrida es secuencial: a lo mas un intento EN_PROCESO a la vez."""
+        statement = select(ProductionRunStageAttempt).where(
+            ProductionRunStageAttempt.run_id == run_id,
+            ProductionRunStageAttempt.status == StageAttemptStatus.IN_PROGRESS,
+        )
+        return self.session.execute(statement).scalar_one_or_none()
+
+    def count_stage_attempts_for_process(self, run_id: UUID, process_id: UUID | None, process_name: str) -> int:
+        """Cuantas veces se uso este mismo proceso en esta orden -- por
+        process_id si el banco sigue existiendo, si no por process_name
+        (proceso borrado del banco despues de usarse)."""
+        if process_id is not None:
+            statement = select(ProductionRunStageAttempt).where(
+                ProductionRunStageAttempt.run_id == run_id,
+                ProductionRunStageAttempt.process_id == process_id,
+            )
+        else:
+            statement = select(ProductionRunStageAttempt).where(
+                ProductionRunStageAttempt.run_id == run_id,
+                ProductionRunStageAttempt.process_id.is_(None),
+                ProductionRunStageAttempt.process_name == process_name,
+            )
+        return len(self.session.execute(statement).scalars().all())
 
     def get_additional_material_request(self, request_id: UUID) -> ProductionRunAdditionalMaterialRequest | None:
         statement = (
             select(ProductionRunAdditionalMaterialRequest)
             .options(selectinload(ProductionRunAdditionalMaterialRequest.run).selectinload(ProductionRun.stages))
             .where(ProductionRunAdditionalMaterialRequest.id == request_id)
-        )
-        return self.session.execute(statement).scalar_one_or_none()
-
-    def get_complement_request(self, complement_id: UUID) -> ProductionComplementRequest | None:
-        statement = (
-            select(ProductionComplementRequest)
-            .options(selectinload(ProductionComplementRequest.run).selectinload(ProductionRun.stages))
-            .where(ProductionComplementRequest.id == complement_id)
         )
         return self.session.execute(statement).scalar_one_or_none()
 
@@ -98,6 +111,7 @@ class ProductionProcessRepository:
             .options(
                 selectinload(ProductionRun.stages).selectinload(ProductionRunStage.ingredients),
                 selectinload(ProductionRun.event_lines),
+                selectinload(ProductionRun.stage_attempts),
             )
             .order_by(ProductionRun.requested_at.desc())
         )

@@ -10,117 +10,45 @@ from backend.modules.database.base import Base
 
 
 class ProductionProcess(Base):
+    """Banco de procesos (docs/cambios-sistema-produccion.md seccion 3): un
+    paso suelto reutilizable (ej. "Fundido", "Laminado"), elegible uno a la
+    vez al construir una orden del flujo dinamico. Ya NO es una plantilla con
+    varias etapas fijas -- eso era el modelo viejo (ProductionProcessStage,
+    eliminado). Sin insumos preconfigurados: se agregan sueltos por etapa via
+    el mismo mecanismo ADMIN_STOCK/MANUAL que ya existe en el acta."""
+
     __tablename__ = "production_processes"
 
     id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    waste_limit_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=Decimal("1"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
-    stages: Mapped[list["ProductionProcessStage"]] = relationship(
-        back_populates="process",
-        cascade="all, delete-orphan",
-        order_by="ProductionProcessStage.stage_order",
-    )
-    # Tipos de producto del catalogo que este proceso puede producir. Vacio =
-    # produce cualquier tipo. Gobierna el combo de conversion de lotes.
-    product_types: Mapped[list["ProductionProcessProductType"]] = relationship(
-        back_populates="process",
-        cascade="all, delete-orphan",
-    )
-
-
-class ProductionProcessProductType(Base):
-    __tablename__ = "production_process_product_types"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    process_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("production_processes.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    product_type_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("product_types.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    process: Mapped["ProductionProcess"] = relationship(back_populates="product_types")
-
-
-class ProductionProcessStage(Base):
-    __tablename__ = "production_process_stages"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    process_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("production_processes.id"),
-        nullable=False,
-    )
-    name: Mapped[str] = mapped_column(String(180), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    phase_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    stage_type: Mapped[str] = mapped_column(String(40), nullable=False, default="PROCESS")
-    quality_check: Mapped[str | None] = mapped_column(Text, nullable=True)
-    rework_action: Mapped[str | None] = mapped_column(Text, nullable=True)
-    rework_target_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    stage_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    requires_weighing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    initial_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
-    final_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
-
-    process: Mapped["ProductionProcess"] = relationship(back_populates="stages")
-    ingredients: Mapped[list["ProductionProcessStageIngredient"]] = relationship(
-        back_populates="stage",
-        cascade="all, delete-orphan",
-    )
-
-    @property
-    def waste_percent(self) -> Decimal | None:
-        if (
-            self.initial_weight is not None
-            and self.final_weight is not None
-            and self.initial_weight > 0
-        ):
-            return (self.initial_weight - self.final_weight) / self.initial_weight * Decimal("100")
-        return None
-
-
-class ProductionProcessStageIngredient(Base):
-    __tablename__ = "production_process_stage_ingredients"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    stage_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("production_process_stages.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-
-    stage: Mapped["ProductionProcessStage"] = relationship(back_populates="ingredients")
-
 
 class ProductionRunStatus:
+    # --- Estados del flujo VIEJO (solo ordenes historicas, no se usan para
+    # ordenes nuevas -- ver ProductionRunStatus.IN_PROGRESS/FINISHED/CANCELLED
+    # para el flujo nuevo). No borrar: hace falta para que Documentos/Reportes
+    # sigan mostrando bien las ordenes ya hechas antes de este cambio.
     PENDING_INVENTORY = "PENDIENTE_INVENTARIO"
     # Corrida creada por split (falta materia prima): no entra en la cola
     # normal de aprobacion; solo se activa cuando inventario le destina
     # material desde un ingreso nuevo (ver ProductionService.allocate_material).
     WAITING_MATERIAL = "ESPERANDO_MATERIAL"
     MATERIALS_APPROVED = "MATERIALES_APROBADOS"
-    IN_PROGRESS = "EN_PROCESO"
     PENDING_RECEPTION = "PENDIENTE_RECEPCION"
     RECEIVED = "RECIBIDA"
+    # --- Estados del flujo NUEVO (docs/cambios-sistema-produccion.md seccion
+    # 2.3/4): una orden nueva nace directo en IN_PROGRESS (sin aprobacion de
+    # materiales) y termina en FINISHED al asignarse a producto terminado.
+    IN_PROGRESS = "EN_PROCESO"
+    FINISHED = "TERMINADA"
+    # Compartido por los dos flujos (viejo: rechazo/cancelacion antes o
+    # despues de aprobar; nuevo: cancelar una orden en curso).
     CANCELLED = "CANCELADA"
-
-
-class AssemblyMode:
-    ASSIGN = "ASIGNAR"
-    ASSEMBLE = "ENSAMBLAR"
 
 
 class ComplementRequestStatus:
@@ -158,29 +86,34 @@ class ProductionRun(Base):
     __tablename__ = "production_runs"
 
     id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    process_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    process_name: Mapped[str] = mapped_column(String(180), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    # Nulo en ordenes del flujo nuevo (docs seccion 4.1): esas nacen con solo
+    # un nombre libre, sin proceso ni materia prima fijos -- eso se declara
+    # etapa por etapa (ver ProductionRunStageAttempt). Las ordenes viejas
+    # siguen usando process_id/process_name/quantity tal cual.
+    process_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    process_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default=ProductionRunStatus.PENDING_INVENTORY)
-    # Modo de la orden: ASIGNAR (split directo) o ENSAMBLAR (con complementos).
-    assembly_mode: Mapped[str] = mapped_column(String(20), nullable=False, default=AssemblyMode.ASSIGN)
-    # ENSAMBLAR sin receta aplicable: producción debe definir la combinación
-    # antes de que inventario pueda recibir.
-    assembly_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Nombre libre de la orden (flujo nuevo, seccion 4.1). Nulo en ordenes
+    # viejas -- esas se identifican por process_name.
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Nulo en ordenes historicas migradas (import de certificados de papel):
     # esas actas nunca referencian una materia prima real del inventario.
     raw_material_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    raw_material_unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
-    total_required_material: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    # Nulo en ordenes del flujo nuevo: no hay una sola materia prima/unidad
+    # fija para toda la orden, cada etapa declara la suya en su propia acta.
+    raw_material_unit_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    total_required_material: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     # Materia prima RESERVADA pero aun no consumida: inventario destino stock a
     # esta corrida y eligio esperar a completar todo antes de arrancar. No es un
     # movimiento -- el stock sigue fisicamente en el item, pero deja de estar
     # disponible para otras ordenes (ver InventoryService.available_stock).
+    # Solo aplica al flujo viejo (con aprobacion de materiales).
     reserved_material_quantity: Mapped[Decimal] = mapped_column(
         Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
     )
-    waste_limit_percent: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False)
-    expected_finished_weight: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    waste_limit_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
+    expected_finished_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     actual_finished_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     waste_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     waste_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
@@ -231,17 +164,19 @@ class ProductionRun(Base):
         cascade="all, delete-orphan",
         order_by="ProductionRunStage.stage_order",
     )
+    # Intentos de etapa del flujo nuevo (uno por cada ✔/✘, seccion 4). Ordenes
+    # viejas usan `stages` en vez de esto.
+    stage_attempts: Mapped[list["ProductionRunStageAttempt"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="ProductionRunStageAttempt.sequence_order",
+    )
     # Plan de productos resultantes declarado al crear la orden (split):
     # a qué tipos del catálogo se convierte el lote al recibirlo.
     products: Mapped[list["ProductionRunProduct"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
         order_by="ProductionRunProduct.line_order",
-    )
-    # Complementos de inventario solicitados para ensamblar con la producción.
-    complements: Mapped[list["ProductionComplementRequest"]] = relationship(
-        back_populates="run",
-        cascade="all, delete-orphan",
     )
     # Lineas de detalle por evento de entrega/recepcion (solo ordenes
     # historicas migradas: una corrida en vivo nunca las llena). Cuando
@@ -251,11 +186,6 @@ class ProductionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
         order_by="ProductionRunEventLine.line_order",
-    )
-    # Combinación de complementos aplicada al ensamble (cantidades totales).
-    assembly_items: Mapped[list["ProductionRunAssemblyItem"]] = relationship(
-        back_populates="run",
-        cascade="all, delete-orphan",
     )
     # Acta persistida: que entro y que salio de la orden, sembrada con el plan
     # al crearla y alimentada por eventos reales despues (ver ActaLineSource).
@@ -346,13 +276,66 @@ class ProductionRunStageIngredient(Base):
     inventory_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
-    # Guardado para esta orden pero todavia no consumido (mismo patron que
-    # ProductionComplementRequest.reserved_quantity).
+    # Guardado para esta orden pero todavia no consumido.
     reserved_quantity: Mapped[Decimal] = mapped_column(
         Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
     )
 
     stage: Mapped["ProductionRunStage"] = relationship(back_populates="ingredients")
+
+
+class StageAttemptStatus:
+    IN_PROGRESS = "EN_PROCESO"
+    APPROVED = "APROBADA"
+    REJECTED = "RECHAZADA"
+
+
+class ProductionRunStageAttempt(Base):
+    """Un intento de etapa del flujo nuevo (docs/cambios-sistema-produccion.md
+    seccion 4): un ✔ o un ✘. Reemplaza a ProductionRunStage para ordenes
+    nuevas -- las viejas siguen usando esa tabla, sin tocar. La merma es
+    propia de CADA intento (entregado de este mismo intento - peso al
+    finalizar), no se compara contra el intento anterior."""
+
+    __tablename__ = "production_run_stage_attempts"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # El proceso del banco pudo borrarse despues -- process_name denormalizado
+    # sobrevive para que el intento siga siendo legible.
+    process_id: Mapped[PyUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("production_processes.id", ondelete="SET NULL"), nullable=True
+    )
+    process_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    # Orden cronologico dentro de la orden, incluye intentos rechazados.
+    sequence_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Cuantas veces se uso ESTE MISMO proceso en esta orden (1, 2, ...) --
+    # alimenta el sufijo del codigo de acta (FUND-01, FUND-02), contado por
+    # proceso, no por posicion cronologica (seccion 8).
+    attempt_no_for_process: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Codigo del acta de este intento: {codigo de orden}-{ABREV}-{NN}.
+    code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Texto libre, lo llena Produccion/Inventario al iniciar (seccion 4.2) --
+    # no es una cuenta de usuario, igual criterio que los *_responsable_name
+    # de ordenes historicas.
+    responsable_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=StageAttemptStatus.IN_PROGRESS)
+    # Motivo del rechazo (✘) -- opcional, no obligatorio.
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    peso_al_finalizar: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    unit_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Merma de ESTE intento unicamente: suma(ENTREGA de este intento) - peso
+    # al finalizar. Solo se calcula al aprobar (✔).
+    merma_weight: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    merma_percent: Mapped[Decimal | None] = mapped_column(Numeric(7, 4), nullable=True)
+    started_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    finished_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped["ProductionRun"] = relationship(back_populates="stage_attempts")
 
 
 class ProductionRunActaLine(Base):
@@ -364,8 +347,16 @@ class ProductionRunActaLine(Base):
     )
     # Etapa a la que esta linea esta ligada (ej. merma de esa etapa), o NULL
     # si es una linea de nivel de orden (materia prima, producto final, etc.).
+    # Flujo VIEJO unicamente -- ordenes nuevas usan stage_attempt_id (nunca
+    # los dos a la vez).
     stage_id: Mapped[PyUUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("production_run_stages.id", ondelete="SET NULL"), nullable=True
+    )
+    # Intento de etapa (flujo nuevo) al que esta linea esta ligada.
+    stage_attempt_id: Mapped[PyUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("production_run_stage_attempts.id", ondelete="SET NULL"),
+        nullable=True,
     )
     side: Mapped[str] = mapped_column(String(20), nullable=False)
     label: Mapped[str] = mapped_column(String(180), nullable=False)
@@ -436,96 +427,6 @@ class ProductionRunProduct(Base):
     line_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     run: Mapped["ProductionRun"] = relationship(back_populates="products")
-
-
-class ProductionComplementRequest(Base):
-    __tablename__ = "production_complement_requests"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    run_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("production_runs.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
-    # Parcial a proposito: el stock llega de a poco y la reserva se acumula
-    # ingreso tras ingreso hasta cubrir `quantity`. Un status "RESERVADO" de
-    # todo-o-nada impediria juntar el faltante en varias entradas, que es
-    # justo el caso de uso.
-    reserved_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
-    )
-    unit_code: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=ComplementRequestStatus.PENDING
-    )
-    approved_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Cuanto de lo aprobado (y ya descontado de inventario al aprobar) se
-    # devolvio por sobrante al recibir: aprobado - usado en ensamble -
-    # devuelto = lo que todavia falta devolver. Ver ProductionService.
-    # return_complement.
-    returned_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(14, 4), nullable=False, default=Decimal("0"), server_default="0"
-    )
-
-    run: Mapped["ProductionRun"] = relationship(back_populates="complements")
-
-
-class AssemblyRecipe(Base):
-    """Receta de ensamble por tipo de producto: qué complementos y cuántos POR
-    UNIDAD. Se aprende del primer ensamble manual y luego aplica sola."""
-
-    __tablename__ = "assembly_recipes"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    # Clave de modelo: material(1)+categoria(2)+modelo(4), el codigo de
-    # catalogo completo de 7 digitos — la receta NO se comparte entre
-    # materiales (oro y plata tienen recetas distintas).
-    model_key: Mapped[str] = mapped_column(String(7), nullable=False, unique=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    # Corrida que la creo (null si se creo a mano en Mantenimiento, o para
-    # recetas ya existentes antes de esta columna). Solo se setea al CREAR la
-    # receta -- si otra corrida despues la actualiza, esto no cambia. Sirve
-    # para borrar la receta si esa corrida en particular se cancela (ver
-    # ProductionService.cancel_run/_cancel_orphaned_recipe); si una corrida
-    # distinta ya la reuso/actualizo, cancelar la creadora original ya no la
-    # toca (dejo de ser "solo de esta orden").
-    created_by_run_id: Mapped[PyUUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("production_runs.id", ondelete="SET NULL"), nullable=True
-    )
-
-    items: Mapped[list["AssemblyRecipeItem"]] = relationship(
-        back_populates="recipe",
-        cascade="all, delete-orphan",
-    )
-
-
-class AssemblyRecipeItem(Base):
-    __tablename__ = "assembly_recipe_items"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    recipe_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("assembly_recipes.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    complement_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
-
-    recipe: Mapped["AssemblyRecipe"] = relationship(back_populates="items")
-
-
-class ProductionRunAssemblyItem(Base):
-    __tablename__ = "production_run_assembly_items"
-
-    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    run_id: Mapped[PyUUID] = mapped_column(
-        ForeignKey("production_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    complement_item_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
-
-    run: Mapped["ProductionRun"] = relationship(back_populates="assembly_items")
 
 
 class ProductionRunEventLine(Base):

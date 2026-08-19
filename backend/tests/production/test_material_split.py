@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from backend.modules.production.models import ActaLineSide, ProductionProcessStageIngredient, ProductionRunStatus
-from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate, RunStageIngredientCreate
+from backend.modules.production.models import ActaLineSide, ProductionRunStatus
+from backend.modules.production.schemas import ProductionRunCreate, RunProductCreate
 from backend.modules.production.service import ProductionDomainError
 
 
@@ -10,9 +10,7 @@ def _create_run(production_service, current_user, process, raw_material, target_
         process_id=process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal(quantity),
-        assembly_mode="ASIGNAR",
         products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal(quantity))],
-        complements=[],
         stage_ingredients=stage_ingredients or [],
     )
     return production_service.create_run(payload, current_user)
@@ -66,63 +64,6 @@ def test_next_split_code_increments_letter_per_child(
     assert len(codes) == 3
 
 
-def test_split_run_splits_complements_proportionally(
-    db_session, production_service, current_user, process, raw_material, target_complement, complement_item
-):
-    from backend.modules.production.schemas import RunComplementCreate
-
-    raw_material.current_stock = Decimal("60")
-    db_session.flush()
-
-    payload = ProductionRunCreate(
-        process_id=process.id,
-        raw_material_item_id=raw_material.id,
-        quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
-        products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("100"))],
-        complements=[RunComplementCreate(item_id=complement_item.id, quantity=Decimal("50"))],
-    )
-    run_read = production_service.create_run(payload, current_user)
-    run = production_service.repository.get_run(run_read.id)
-
-    child = production_service._split_run_for_partial_material(run, Decimal("60"))
-
-    assert run.complements[0].quantity == Decimal("30")
-    assert child.complements[0].quantity == Decimal("20")
-    assert run.complements[0].quantity + child.complements[0].quantity == Decimal("50")
-
-
-def test_split_run_splits_stage_ingredients_proportionally(
-    db_session, production_service, current_user, process, raw_material, target_complement
-):
-    from backend.modules.inventory.models import InventoryItem
-    import uuid
-
-    supply = InventoryItem(
-        item_type="SUPPLY", name="Hilo", sku=f"IN-{uuid.uuid4().hex[:8]}", unit_code="m",
-        current_stock=Decimal("0"),
-    )
-    db_session.add(supply)
-    db_session.flush()
-    process.stages[0].ingredients.append(ProductionProcessStageIngredient(inventory_item_id=supply.id))
-    db_session.flush()
-    config_id = process.stages[0].ingredients[0].id
-
-    raw_material.current_stock = Decimal("60")
-    db_session.flush()
-
-    run_read = _create_run(
-        production_service, current_user, process, raw_material, target_complement, "100",
-        stage_ingredients=[RunStageIngredientCreate(process_stage_ingredient_id=config_id, quantity=Decimal("10"))],
-    )
-    run = production_service.repository.get_run(run_read.id)
-
-    child = production_service._split_run_for_partial_material(run, Decimal("60"))
-
-    assert run.stages[0].ingredients[0].quantity == Decimal("6")
-    assert child.stages[0].ingredients[0].quantity == Decimal("4")
-
-
 def test_split_run_respects_declared_product_line_order_after_reload(
     db_session, production_service, current_user, process, raw_material, target_complement, complement_item
 ):
@@ -133,12 +74,10 @@ def test_split_run_respects_declared_product_line_order_after_reload(
         process_id=process.id,
         raw_material_item_id=raw_material.id,
         quantity=Decimal("100"),
-        assembly_mode="ASIGNAR",
         products=[
             RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("70")),
             RunProductCreate(target_item_id=complement_item.id, quantity=Decimal("30")),
         ],
-        complements=[],
     )
     run_read = production_service.create_run(payload, current_user)
 

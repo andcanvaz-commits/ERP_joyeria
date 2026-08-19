@@ -7,10 +7,7 @@ from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.inventory.repository import InventoryRepository
 from backend.modules.inventory.service import InventoryService
-from backend.modules.production.models import (
-    ProductionProcess,
-    ProductionProcessStage,
-)
+from backend.modules.production.models import ProductionProcess
 from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.service import ProductionService
 
@@ -25,12 +22,12 @@ def current_user(db_session) -> CurrentUser:
         username="jefe_test",
         email="jefe@test.local",
         password_hash="mock_hashed",
-        role="Jefe de producción",
+        role="Producción/Inventario",
     )
     db_session.add(auth_user)
     db_session.flush()
 
-    return CurrentUser(id=user_id, username="jefe_test", role="Jefe de producción", permissions=frozenset())
+    return CurrentUser(id=user_id, username="jefe_test", role="Producción/Inventario", permissions=frozenset())
 
 
 @pytest.fixture()
@@ -102,17 +99,7 @@ def catalog_finished_item(db_session) -> InventoryItem:
 def process(db_session) -> ProductionProcess:
     proc = ProductionProcess(
         name=f"Proceso test {uuid.uuid4().hex[:6]}",
-        waste_limit_percent=Decimal("1"),
         is_active=True,
-        stages=[
-            ProductionProcessStage(
-                name="Etapa unica",
-                stage_type="PROCESS",
-                stage_order=1,
-                is_active=True,
-                requires_weighing=False,
-            )
-        ],
     )
     db_session.add(proc)
     db_session.flush()

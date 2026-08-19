@@ -294,12 +294,7 @@ class InventoryService(InventoryIntegrationPort):
         aprobarle materiales a esa corrida, su propia reserva SI esta
         disponible para ella (es justamente el stock que le guardamos).
         """
-        from backend.modules.production.models import (
-            ComplementRequestStatus,
-            ProductionComplementRequest,
-            ProductionRun,
-            ProductionRunStatus,
-        )
+        from backend.modules.production.models import ProductionRun, ProductionRunStatus
 
         totals: dict[UUID, Decimal] = {}
 
@@ -315,25 +310,6 @@ class InventoryService(InventoryIntegrationPort):
             material_query = material_query.where(ProductionRun.id != exclude_run_id)
         for item_id, total in self.repository.session.execute(
             material_query.group_by(ProductionRun.raw_material_item_id)
-        ).all():
-            totals[item_id] = totals.get(item_id, Decimal("0")) + (total or Decimal("0"))
-
-        complement_query = (
-            select(
-                ProductionComplementRequest.item_id,
-                func.sum(ProductionComplementRequest.reserved_quantity),
-            )
-            .join(ProductionRun, ProductionRun.id == ProductionComplementRequest.run_id)
-            .where(
-                ProductionRun.status == ProductionRunStatus.WAITING_MATERIAL,
-                ProductionComplementRequest.status == ComplementRequestStatus.PENDING,
-                ProductionComplementRequest.reserved_quantity > 0,
-            )
-        )
-        if exclude_run_id is not None:
-            complement_query = complement_query.where(ProductionRun.id != exclude_run_id)
-        for item_id, total in self.repository.session.execute(
-            complement_query.group_by(ProductionComplementRequest.item_id)
         ).all():
             totals[item_id] = totals.get(item_id, Decimal("0")) + (total or Decimal("0"))
 
