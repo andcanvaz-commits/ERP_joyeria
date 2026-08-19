@@ -565,7 +565,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </button>
         ) : null}
         {run.status === "EN_PROCESO" ? (
-          <button className="button buttonPrimary" onClick={() => openRunStagesModal(run)} type="button">
+          <button
+            className="button buttonPrimary"
+            onClick={() => (run.name ? setDynamicOrderRun(run) : openRunStagesModal(run))}
+            type="button"
+          >
             Gestionar
           </button>
         ) : null}
@@ -1804,7 +1808,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     {processFamilies.map(([key, family]) => {
                       const root = family.find((r) => !r.parent_run_id) ?? family[0];
                       const otherParts = family.filter((r) => r.id !== root.id);
-                      const isDynamic = (root.stage_attempts ?? []).length > 0;
+                      // Orden del flujo nuevo: siempre tiene `name` (seccion 4.1), aun
+                      // antes de iniciar su primera etapa (stage_attempts todavia vacio
+                      // en ese momento -- no sirve como discriminador).
+                      const isDynamic = Boolean(root.name);
                       const rootStage = runCurrentStage(root);
                       const lastAttempt = isDynamic
                         ? [...(root.stage_attempts ?? [])].sort((a, b) => b.sequence_order - a.sequence_order)[0]
