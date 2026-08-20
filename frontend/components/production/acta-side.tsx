@@ -35,6 +35,7 @@ export function ActaSide({
   onEditLine,
   onDeleteLine,
   onError,
+  pendingRow,
 }: {
   title: string;
   lines: ActaSideLine[];
@@ -53,6 +54,16 @@ export function ActaSide({
   onEditLine?: (lineId: string, patch: { label?: string; quantity: string; unit_code?: string }) => Promise<unknown> | void;
   onDeleteLine?: (lineId: string) => Promise<unknown> | void;
   onError?: (message: string) => void;
+  // Fila extra, siempre en modo edicion, para un dato que todavia no es una
+  // linea real del acta (ej. cantidad del producto resultante antes de
+  // finalizar la etapa -- Rodrigo, 2026-08-20: "el campo debe estar en la
+  // misma acta, no en otro input"). No pasa por onEditLine/onDeleteLine.
+  pendingRow?: {
+    label: string;
+    quantity: string;
+    onQuantityChange: (value: string) => void;
+    disabled?: boolean;
+  };
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<string>("MANUAL");
@@ -105,7 +116,7 @@ export function ActaSide({
 
   const totals = totalRows ?? [];
   const hasGroups = lines.some((line) => line.kind === "group");
-  const rowCount = lines.filter((line) => line.kind === "row").length;
+  const rowCount = lines.filter((line) => line.kind === "row").length + (pendingRow ? 1 : 0);
   const blankCount = Math.max(0, MIN_ROWS - rowCount - totals.length);
   const wrap = (node: React.ReactNode) => (dataClass ? <span className={dataClass}>{node}</span> : node);
   const fechaRowSpans = buildFechaRowSpans(lines);
@@ -231,6 +242,29 @@ export function ActaSide({
                 </tr>
               )
             )}
+            {pendingRow ? (
+              <tr>
+                <td className="opTdFecha">{DASH}</td>
+                <td className="opTdGramos">
+                  <span className="actaDocInputs">
+                    <input
+                      autoFocus
+                      className="field"
+                      disabled={pendingRow.disabled}
+                      min="0.0001"
+                      onChange={(e) => pendingRow.onQuantityChange(e.target.value)}
+                      step="0.0001"
+                      style={{ width: 100 }}
+                      type="number"
+                      value={pendingRow.quantity}
+                    />
+                  </span>
+                </td>
+                <td>
+                  <span className="actaDocDetail">{pendingRow.label}</span>
+                </td>
+              </tr>
+            ) : null}
             {totals.map((row, i) => (
               <tr
                 className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}

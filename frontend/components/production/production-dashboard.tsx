@@ -286,6 +286,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Reporte de etapas ya terminadas de la orden (codigo/proceso/responsable/
   // estado/merma) -- ventana aparte, ya no ocupa espacio arriba del acta.
   const [isStageReportOpen, setIsStageReportOpen] = useState(false);
+  // Etapa (ya terminada o rechazada) elegida en el reporte para revisar su
+  // acta completa -- ver/editar/borrar lineas, aunque ya no este activa
+  // (Rodrigo: "no me sale nada para revisar visualmente esa etapa").
+  const [viewingAttemptId, setViewingAttemptId] = useState<string | null>(null);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [cancelRun, setCancelRun] = useState<ProductionRun | null>(null);
   const [cancelRunReason, setCancelRunReason] = useState("");
@@ -1700,6 +1704,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     onClick={() => {
                       setDynamicOrderRun(null);
                       setIsStageReportOpen(false);
+                      setViewingAttemptId(null);
                     }}
                     type="button"
                   >
@@ -1773,22 +1778,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     fecha: line.created_at,
                     item_id: line.item_id,
                   }));
-                // Producto resultante elegido al iniciar la etapa: la cantidad
-                // real se llena recien al finalizar (Rodrigo, 2026-08-20), asi
-                // que todavia no hay linea real -- se muestra un aviso de que
-                // va a salir por aca, sin numero inventado.
-                if (runningAttempt.target_label && recepcionLines.length === 0) {
-                  recepcionLines.push({
-                    kind: "row",
-                    id: "pending-product",
-                    label: `Pendiente: ${runningAttempt.target_label}`,
-                    quantity: "0",
-                    unit_code: "",
-                    editable: false,
-                    source: "PLAN",
-                    fecha: null,
-                  });
-                }
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
@@ -1845,6 +1834,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                               onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
                               onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
                               onError={setError}
+                              pendingRow={
+                                runningAttempt.target_label
+                                  ? {
+                                      label: runningAttempt.target_label,
+                                      onQuantityChange: setRunQuantity,
+                                      quantity: runQuantity,
+                                      disabled: isSaving,
+                                    }
+                                  : undefined
+                              }
                               responsable={runningAttempt.finished_by_name ?? "—"}
                               title="RECIBIDO"
                             />
@@ -1852,20 +1851,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         </article>
                       </div>
                     </div>
-
-                    <label className="fieldGroup" style={{ marginTop: 10 }}>
-                      <span>Cantidad real de {runningAttempt.target_label ?? "producto resultante"}</span>
-                      <input
-                        className="field"
-                        disabled={isSaving}
-                        min="0.0001"
-                        onChange={(event) => setRunQuantity(event.target.value)}
-                        step="0.0001"
-                        style={{ width: 140 }}
-                        type="number"
-                        value={runQuantity}
-                      />
-                    </label>
 
                     {(() => {
                       const attemptProcess = processes.find((p) => p.id === runningAttempt.process_id);
@@ -2086,6 +2071,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                 ? "rechazada"
                                 : "enProceso"
                           }`}
+                          onClick={attempt.status !== "EN_PROCESO" ? () => setViewingAttemptId(attempt.id) : undefined}
+                          style={attempt.status !== "EN_PROCESO" ? { cursor: "pointer" } : undefined}
                         >
                           {attempt.code ? <span className="orderCodeTag">{attempt.code}</span> : null}
                           <strong>{attempt.process_name}</strong>
@@ -2115,7 +2102,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     </thead>
                     <tbody>
                       {pastAttempts.map((attempt) => (
-                        <tr key={attempt.id}>
+                        <tr key={attempt.id} onClick={() => setViewingAttemptId(attempt.id)} style={{ cursor: "pointer" }}>
                           <td>{attempt.code ?? "—"}</td>
                           <td>{attempt.process_name}</td>
                           <td>{attempt.responsable_name ?? "—"}</td>
@@ -2129,6 +2116,116 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </section>
             </div>
           ) : null}
+
+          {viewingAttemptId ? (() => {
+            const viewingOrderId = dynamicOrderRun.id;
+            async function refreshViewingOrder() {
+              await reload();
+              const fresh = (await listProductionRuns()).find((r) => r.id === viewingOrderId);
+              if (fresh) setDynamicOrderRun(fresh);
+            }
+            const viewingAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.id === viewingAttemptId);
+            if (!viewingAttempt) return null;
+            const viewingActaLines = (dynamicOrderRun.acta_lines ?? []).filter(
+              (line) => line.stage_attempt_id === viewingAttempt.id,
+            );
+            const viewEntregaLines: ActaSideLine[] = viewingActaLines
+              .filter((line) => line.side === "ENTREGA")
+              .map((line) => ({
+                kind: "row" as const,
+                id: line.id,
+                label: line.label,
+                quantity: line.quantity,
+                unit_code: line.unit_code,
+                editable: true,
+                source: line.source,
+                fecha: line.created_at,
+                item_id: line.item_id,
+              }));
+            const viewRecepcionLines: ActaSideLine[] = viewingActaLines
+              .filter((line) => line.side === "RECEPCION")
+              .map((line) => ({
+                kind: "row" as const,
+                id: line.id,
+                label: line.label,
+                quantity: line.quantity,
+                unit_code: line.unit_code,
+                editable: true,
+                source: line.source,
+                fecha: line.created_at,
+                item_id: line.item_id,
+              }));
+            const viewMaterialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
+            return (
+              <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true" aria-label="Acta de la etapa">
+                <section className="modalWindow processViewWindow">
+                  <div className="modalHeader">
+                    <div>
+                      <h2>{viewingAttempt.process_name}</h2>
+                      <p>
+                        {viewingAttempt.code ?? "—"} · Responsable: {viewingAttempt.responsable_name ?? "—"} ·{" "}
+                        {viewingAttempt.status === "APROBADA" ? "Aprobada" : viewingAttempt.status === "RECHAZADA" ? "Rechazada" : "En proceso"}
+                      </p>
+                    </div>
+                    <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingAttemptId(null)} type="button">
+                      <X aria-hidden="true" size={18} />
+                    </button>
+                  </div>
+                  <div className="actaDocFrame">
+                    <div className="opDocWrap">
+                      <article className="opDoc actaDoc">
+                        <div className="opBody">
+                          <ActaSide
+                            actions={
+                              <AdminAddActaLineControl
+                                isAdmin
+                                items={viewMaterialItems}
+                                onChanged={() => void refreshViewingOrder()}
+                                onError={setError}
+                                onSuccess={setSuccess}
+                                runId={dynamicOrderRun.id}
+                                side="ENTREGA"
+                                stageAttemptId={viewingAttempt.id}
+                              />
+                            }
+                            fecha={viewingAttempt.started_at}
+                            lines={viewEntregaLines}
+                            onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refreshViewingOrder())}
+                            onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
+                            onError={setError}
+                            responsable={viewingAttempt.responsable_name ?? "—"}
+                            title="ENTREGADO"
+                          />
+                          <div className="opDivider" aria-hidden="true" />
+                          <ActaSide
+                            actions={
+                              <StageRecepcionControl
+                                entregaLines={viewEntregaLines}
+                                materialItems={viewMaterialItems}
+                                onChanged={() => void refreshViewingOrder()}
+                                onError={setError}
+                                onSuccess={setSuccess}
+                                recepcionLines={viewRecepcionLines}
+                                runId={dynamicOrderRun.id}
+                                stageAttemptId={viewingAttempt.id}
+                              />
+                            }
+                            fecha={viewingAttempt.finished_at ?? null}
+                            lines={viewRecepcionLines}
+                            onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refreshViewingOrder())}
+                            onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
+                            onError={setError}
+                            responsable={viewingAttempt.finished_by_name ?? "—"}
+                            title="RECIBIDO"
+                          />
+                        </div>
+                      </article>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            );
+          })() : null}
           </>
         );
       })() : null}
