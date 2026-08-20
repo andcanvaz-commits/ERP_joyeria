@@ -209,8 +209,16 @@ class AdminActaLineCreate(BaseModel):
 
     side: Literal["ENTREGA", "RECEPCION"]
     # Si viene, la linea se enlaza a este item real y mueve inventario. Si es
-    # None, es una linea libre (label/unit_code obligatorios, ver service).
+    # None, es una linea libre (label/unit_code obligatorios, ver service) --
+    # salvo que venga product_type_id, que crea la pieza (ver mas abajo).
     item_id: UUID | None = None
+    # Alternativa a item_id para una pieza de catalogo que aun no tiene stock
+    # (Tipo de producto creado en Mantenimiento, sin material asignado
+    # todavia): crea el item de inventario en el momento (o reusa el que ya
+    # exista para ese tipo+material) y le suma `quantity`. Solo valido con
+    # side=RECEPCION -- no se puede "entregar" una pieza que no existe.
+    product_type_id: UUID | None = None
+    material_code: str | None = Field(default=None, max_length=10)
     label: str | None = Field(default=None, min_length=1, max_length=180)
     quantity: Decimal = Field(gt=0)
     unit_code: str | None = Field(default=None, min_length=1, max_length=20)

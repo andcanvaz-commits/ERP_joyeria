@@ -843,7 +843,7 @@ class ProductionService:
                 "Esta orden ya tiene su acta cargada desde papel; no se pueden agregar lineas nuevas por este flujo."
             )
 
-        if payload.item_id is None:
+        if payload.item_id is None and payload.product_type_id is None:
             if not payload.label or not payload.unit_code:
                 raise ProductionDomainError("Escribe el detalle y la unidad de la linea.")
             line = ProductionRunActaLine(
@@ -865,11 +865,27 @@ class ProductionService:
         if self.inventory_service is None:
             raise ProductionDomainError("Inventario no esta disponible para agregar esta linea.")
 
-        from backend.modules.inventory.models import InventoryItem
+        if payload.item_id is not None:
+            from backend.modules.inventory.models import InventoryItem
 
-        item = self.repository.session.get(InventoryItem, payload.item_id)
-        if item is None:
-            raise ProductionNotFoundError("Item de inventario no encontrado.")
+            item = self.repository.session.get(InventoryItem, payload.item_id)
+            if item is None:
+                raise ProductionNotFoundError("Item de inventario no encontrado.")
+        else:
+            # Pieza de catalogo (Tipo de producto de Mantenimiento) que
+            # todavia no tiene ninguna fila de inventario -- se crea (o
+            # reusa si ya existia) en el momento. Solo tiene sentido como
+            # devolucion (RECEPCION): no se puede "entregar" algo que nunca
+            # existio en stock.
+            if payload.side != ActaLineSide.RECEPCION:
+                raise ProductionDomainError(
+                    "Un producto de catalogo sin stock solo se puede agregar por el lado RECIBIDO."
+                )
+            if not payload.material_code or not payload.unit_code:
+                raise ProductionDomainError("Elige el material y la unidad de la pieza nueva.")
+            item = self.inventory_service.get_or_create_finished_item(
+                payload.product_type_id, payload.material_code, payload.unit_code.strip()
+            )
 
         if payload.side == ActaLineSide.RECEPCION and payload.stage_attempt_id is not None:
             if item.item_type == "RAW_MATERIAL":

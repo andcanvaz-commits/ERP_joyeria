@@ -651,3 +651,100 @@ def test_add_admin_acta_line_recepcion_without_stage_attempt_id_skips_check(
     lines = [l for l in result.acta_lines if l.item_id == raw_material.id and l.side == "RECEPCION" and l.stage_attempt_id is None]
     assert len(lines) == 1
     assert lines[0].quantity == Decimal("500")
+
+
+def test_add_admin_acta_line_recepcion_creates_finished_item_from_product_type(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Un Tipo de producto de Mantenimiento (sin material, sin item de
+    inventario todavia) se puede agregar por RECEPCION eligiendo material y
+    unidad -- crea la pieza de catalogo en el momento y le suma la cantidad
+    (Rodrigo, 2026-08-20: 'necesito que me salgan productos terminados que
+    haya creado aunque no haya stock y poder seleccionarlo')."""
+    from sqlalchemy import select
+
+    from backend.modules.catalog.models import CatalogSegment
+    from backend.modules.product_types.models import ProductType
+
+    order, attempt, _supply = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
+
+    material = CatalogSegment(kind="MATERIAL", code="9", label="Oro test material")
+    db_session.add(material)
+    product_type = ProductType(category_code="88", model_code="8801", name="Anillo nuevo test")
+    db_session.add(product_type)
+    db_session.flush()
+
+    result = production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(
+            side="RECEPCION",
+            product_type_id=product_type.id,
+            material_code="9",
+            quantity=Decimal("3"),
+            unit_code="und",
+            stage_attempt_id=attempt.id,
+        ),
+        current_user,
+    )
+
+    from backend.modules.inventory.models import InventoryItem
+
+    created = db_session.execute(
+        select(InventoryItem).where(InventoryItem.product_code == "9888801")
+    ).scalar_one()
+    assert created.current_stock == Decimal("3")
+    assert created.material_type == "Oro test material"
+    assert created.name == "Anillo nuevo test"
+    lines = [l for l in result.acta_lines if l.item_id == created.id and l.side == "RECEPCION"]
+    assert len(lines) == 1
+    assert lines[0].quantity == Decimal("3")
+
+    # Reusa la misma fila (no duplica) si se agrega de nuevo.
+    production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(
+            side="RECEPCION",
+            product_type_id=product_type.id,
+            material_code="9",
+            quantity=Decimal("2"),
+            unit_code="und",
+            stage_attempt_id=attempt.id,
+        ),
+        current_user,
+    )
+    db_session.refresh(created)
+    assert created.current_stock == Decimal("5")
+    all_created = db_session.execute(
+        select(InventoryItem).where(InventoryItem.product_code == "9888801")
+    ).scalars().all()
+    assert len(all_created) == 1
+
+
+def test_add_admin_acta_line_entrega_rejects_product_type_id(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """No se puede 'entregar' una pieza que todavia no existe en stock."""
+    from backend.modules.catalog.models import CatalogSegment
+    from backend.modules.product_types.models import ProductType
+
+    order, attempt, _supply = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
+
+    material = CatalogSegment(kind="MATERIAL", code="9", label="Oro test material")
+    db_session.add(material)
+    product_type = ProductType(category_code="88", model_code="8802", name="Otro test")
+    db_session.add(product_type)
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError, match="solo se puede agregar por el lado RECIBIDO"):
+        production_service.add_admin_acta_line(
+            order.id,
+            AdminActaLineCreate(
+                side="ENTREGA",
+                product_type_id=product_type.id,
+                material_code="9",
+                quantity=Decimal("1"),
+                unit_code="und",
+                stage_attempt_id=attempt.id,
+            ),
+            current_user,
+        )

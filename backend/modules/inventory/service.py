@@ -1025,6 +1025,51 @@ class InventoryService(InventoryIntegrationPort):
         product_code = f"{material_code}{product_type.category_code}{product_type.model_code}"
         return product_code, product_type
 
+    def get_or_create_finished_item(
+        self, product_type_id: UUID, material_code: str, unit_code: str
+    ) -> InventoryItem:
+        """Encuentra o crea el item de un producto del catalogo (tipo +
+        material) que todavia no tiene ninguna pieza en stock -- a diferencia
+        de convert_lot_to_product, sin lote de origen: es produccion
+        declarando stock nuevo de una pieza que nunca paso por una orden (ej.
+        devolucion de algo que ya tenian hecho). Usa el mismo criterio de
+        reuso que la conversion (codigo + nombre + sin descripcion), asi
+        nunca duplica la fila si ya existe."""
+        product_code, product_type = self._resolve_catalog_target(material_code, product_type_id)
+        from backend.modules.catalog.models import CatalogSegment
+
+        material = self.repository.session.execute(
+            select(CatalogSegment).where(
+                CatalogSegment.kind == "MATERIAL",
+                CatalogSegment.code == material_code,
+                CatalogSegment.is_active.is_(True),
+            )
+        ).scalar_one()
+        existing = next(
+            (
+                item
+                for item in self.repository.list_items("FINISHED_PRODUCT")
+                if item.product_code == product_code
+                and item.name == (product_type.name or product_code)
+                and not (item.description or "").strip()
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        item = InventoryItem(
+            item_type="FINISHED_PRODUCT",
+            name=product_type.name or product_code,
+            sku=self._generate_piece_sku(product_code),
+            product_code=product_code,
+            material_type=material.label,
+            unit_code=unit_code,
+            minimum_stock=None,
+        )
+        self.repository.add_item(item)
+        self.repository.flush()
+        return item
+
     def match_material_code(self, text: str | None) -> str | None:
         """Empata el texto de material de un lote con un segmento MATERIAL del
         catálogo: exacto primero; si no, el segmento cuya etiqueta esté
