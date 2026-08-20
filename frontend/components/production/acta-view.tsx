@@ -91,7 +91,10 @@ export function ActaView({
               </header>
 
               <div className="opResponsable">
-                RESPONSABLE PRODUCCIÓN: <span>{headerRun.created_by_name ?? DASH}</span>
+                NOMBRE: <span>{headerRun.name ?? headerRun.process_name ?? DASH}</span>
+              </div>
+              <div className="opResponsable">
+                RESPONSABLE: <span>{headerRun.created_by_name ?? DASH}</span>
               </div>
 
               <div className="opBody">

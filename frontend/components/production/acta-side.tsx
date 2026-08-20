@@ -126,7 +126,9 @@ export function ActaSide({
       <div className="opColHead">
         {title}
         {hasGroups ? null : fecha ? (
-          <span className="opColSub"> · {formatDocDate(fecha) || DASH} · {responsable || DASH}</span>
+          // Sin fecha aca -- ya esta en la columna FECHA de cada fila
+          // (Rodrigo, 2026-08-20: "ya no debe porque ya tenemos la columna").
+          <span className="opColSub"> · {responsable || DASH}</span>
         ) : (
           <span className="opColSubPending">
             <Info aria-hidden="true" size={12} /> Pendiente

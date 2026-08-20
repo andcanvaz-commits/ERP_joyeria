@@ -112,6 +112,7 @@ export function DocumentosDashboard() {
     const root = familyRoot(family);
     return [
       key,
+      root.name ?? "",
       root.process_name,
       root.created_by_name ?? "",
       root.materials_approved_by_name ?? "",
@@ -331,7 +332,7 @@ export function DocumentosDashboard() {
                     >
                       <span style={{ display: "grid", gap: 2, textAlign: "left" }}>
                         <strong style={{ color: "var(--text)", fontSize: 14 }}>
-                          {key} · {root.process_name}
+                          {key} · {root.name ?? root.process_name}
                         </strong>
                         <span>{statusText}</span>
                       </span>
@@ -561,7 +562,7 @@ export function DocumentosDashboard() {
                         {...openableProps(() => selectFamilyFromCalendar(key), `Ver comprobante de ${key}`)}
                       >
                         <div>
-                          <strong>{key} · {root.process_name}</strong>
+                          <strong>{key} · {root.name ?? root.process_name}</strong>
                           <span>
                             {calendarSearchActive ? `${formatDocDate(root.requested_at) || "Sin fecha"} · ` : ""}
                             {statusText}

@@ -303,7 +303,10 @@ export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemp
   return {
     entregaLines,
     entregaFecha: attempt?.started_at ?? null,
-    entregaResponsable: attempt?.responsable_name ?? DASH,
+    // El usuario real de Produccion/Inventario que hizo la entrega/recepcion
+    // (Rodrigo, 2026-08-20) -- responsable_name es texto libre (regla 3 de
+    // CLAUDE.md, solo para ordenes historicas de papel), no va aca.
+    entregaResponsable: attempt?.started_by_name ?? DASH,
     recepcionLines,
     recepcionFecha: attempt?.finished_at ?? null,
     recepcionResponsable: attempt?.finished_by_name ?? DASH,
@@ -470,7 +473,10 @@ export function buildOrdenProduccion(
     const sides = buildRunActaSidesForStageAttempt(root, effectiveStageAttemptId);
     return {
       folio: root.production_code ?? DASH,
-      procesoNombre: attempt?.process_name ?? root.process_name ?? root.name ?? DASH,
+      // Nombre de la orden (paso 1 al crearla) por sobre el nombre del
+      // proceso -- son cosas distintas, "el nombre del acta" es el que se le
+      // puso a la orden (Rodrigo, 2026-08-20).
+      procesoNombre: root.name ?? attempt?.process_name ?? root.process_name ?? DASH,
       categoria: materialName,
       responsableProduccion: attempt?.responsable_name ?? root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
@@ -493,7 +499,7 @@ export function buildOrdenProduccion(
     const sides = buildRunActaSides(root);
     return {
       folio: root.root_production_code ?? root.production_code ?? DASH,
-      procesoNombre: root.process_name ?? root.name ?? DASH,
+      procesoNombre: root.name ?? root.process_name ?? DASH,
       categoria: materialName,
       responsableProduccion: root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
@@ -514,7 +520,7 @@ export function buildOrdenProduccion(
   const sides = buildFamilyActaSides(family);
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
-    procesoNombre: root.process_name ?? root.name ?? DASH,
+    procesoNombre: root.name ?? root.process_name ?? DASH,
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entregaLines: sides.entregaLines,

@@ -1804,7 +1804,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                               onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
                               onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
                               onError={setError}
-                              responsable={runningAttempt.responsable_name ?? "—"}
+                              responsable={runningAttempt.started_by_name ?? "—"}
                               title="ENTREGADO"
                               totalRows={runningSides.entregaTotalRows}
                             />
@@ -2164,7 +2164,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refreshViewingOrder())}
                             onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
                             onError={setError}
-                            responsable={viewingAttempt.responsable_name ?? "—"}
+                            responsable={viewingAttempt.started_by_name ?? "—"}
                             title="ENTREGADO"
                             totalRows={viewingSides.entregaTotalRows}
                           />
