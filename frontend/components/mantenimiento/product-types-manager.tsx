@@ -15,12 +15,14 @@ export function ProductTypesManager({
   mode,
   onClose,
   onProductCreated,
+  tabs,
 }: {
   mode: "create" | "view";
   onClose: () => void;
   // Avisa al padre cuando se crea un producto (opción 3) para poder
   // auto-seleccionarlo, ej. como destino de un ensamble.
   onProductCreated?: (created: ProductType) => void;
+  tabs?: React.ReactNode;
 }) {
   const queryClient = useQueryClient();
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
@@ -150,6 +152,8 @@ export function ProductTypesManager({
             <X aria-hidden="true" size={18} />
           </button>
         </div>
+
+        {tabs}
 
         {error || success ? (
           <div className="toastStack" aria-live="polite">

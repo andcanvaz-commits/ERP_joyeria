@@ -20,7 +20,17 @@ function stockText(value: string) {
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : value;
 }
 
-export function ComplementsManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
+export function ComplementsManager({
+  mode,
+  onClose,
+  onCreated,
+  tabs,
+}: {
+  mode: "create" | "view";
+  onClose: () => void;
+  onCreated?: (item: InventoryItem) => void;
+  tabs?: React.ReactNode;
+}) {
   const queryClient = useQueryClient();
   const { data: complementTypes = [] } = useQuery({ queryKey: ["complement-types"], queryFn: listComplementTypes });
   const { data: items = [], isLoading } = useQuery({
@@ -148,6 +158,7 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
       setComplName("");
       setSuccess(`Complemento ${created.name} creado.`);
       invalidate();
+      onCreated?.(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear el complemento.");
     } finally {
@@ -180,6 +191,8 @@ export function ComplementsManager({ mode, onClose }: { mode: "create" | "view";
             <X aria-hidden="true" size={18} />
           </button>
         </div>
+
+        {tabs}
 
         {error || success ? (
           <div className="toastStack" aria-live="polite">

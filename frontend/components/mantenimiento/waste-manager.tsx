@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,7 +10,13 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { Pager, usePagination } from "@/components/shared/pager";
 
-export function RawMaterialsManager({
+// Mantenimiento de mermas (Rodrigo, 2026-08-20): produccion ya las crea
+// solas al finalizar una etapa con merma real (InventoryService.
+// get_or_create_waste_item, nombradas "Merma {proceso}"), pero tambien
+// deben poder crearse/editarse a mano aca, igual que materia prima/insumo/
+// complemento. Material y ley se guardan porque la merma de oro y plata no
+// son lo mismo (mismo criterio del resto del sistema).
+export function WasteManager({
   mode,
   onClose,
   onCreated,
@@ -18,23 +24,22 @@ export function RawMaterialsManager({
 }: {
   mode: "create" | "view";
   onClose: () => void;
-  // Avisa al padre cuando se crea una materia prima (ej. CreateItemTabs).
   onCreated?: (item: InventoryItem) => void;
-  // Slot opcional debajo del header (ej. pestañas de CreateItemTabs).
   tabs?: React.ReactNode;
 }) {
   const queryClient = useQueryClient();
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ["raw-materials"],
-    queryFn: () => listInventoryItems("RAW_MATERIAL"),
+    queryKey: ["waste-items"],
+    queryFn: () => listInventoryItems("WASTE"),
   });
   const itemsPager = usePagination(items, 6);
   const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits });
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const [materialType, setMaterialType] = useState("");
-  const [description, setDescription] = useState("");
   const [purity, setPurity] = useState("");
+  const [description, setDescription] = useState("");
   const [unitCode, setUnitCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -49,38 +54,38 @@ export function RawMaterialsManager({
 
   function resetForm() {
     setEditingId(null);
+    setName("");
     setMaterialType("");
-    setDescription("");
     setPurity("");
+    setDescription("");
     setUnitCode("");
   }
 
   function startEdit(item: InventoryItem) {
     setEditingId(item.id);
-    setMaterialType(item.material_type ?? item.name);
-    setDescription(item.description ?? "");
+    setName(item.name);
+    setMaterialType(item.material_type ?? "");
     setPurity(item.purity ?? "");
+    setDescription(item.description ?? "");
     setUnitCode(item.unit_code);
     setError(null);
   }
 
+  function invalidate() {
+    void queryClient.invalidateQueries({ queryKey: ["waste-items"] });
+    void queryClient.invalidateQueries({ queryKey: ["inventory"] });
+  }
+
   async function handleDelete(item: InventoryItem) {
-    const ok = await confirmDelete(confirm, item.material_type ?? item.name);
+    const ok = await confirmDelete(confirm, item.name);
     if (!ok) return;
     setError(null);
     try {
       await deleteInventoryItem(item.id);
-      setSuccess("Materia prima eliminada.");
-      // Sin awaitear: invalidateQueries espera el refetch de las queries
-      // activas (["production"] dispara varios requests en paralelo) —
-      // awaitearlo dejaba isSaving atascado en true hasta que todo terminara.
-      void queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["process-materials"] });
-      // El combo de materiales del formulario de procesos lee del bundle de produccion.
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
+      setSuccess("Merma eliminada.");
+      invalidate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar la materia prima.");
+      setError(err instanceof Error ? err.message : "No se pudo eliminar la merma.");
     }
   }
 
@@ -92,15 +97,15 @@ export function RawMaterialsManager({
   async function handleAdd(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    if (!materialType.trim()) {
-      setError("Escribe el tipo de materia prima.");
+    if (!name.trim()) {
+      setError("Escribe el nombre de la merma.");
       return;
     }
     const unit = unitCode || unitOptions[0]?.value || "g";
     const payload = {
-      item_type: "RAW_MATERIAL" as const,
-      name: materialType.trim(),
-      material_type: materialType.trim(),
+      item_type: "WASTE" as const,
+      name: name.trim(),
+      material_type: materialType.trim() || null,
       description: description.trim() || null,
       purity: purity.trim() || null,
       unit_code: unit,
@@ -109,35 +114,28 @@ export function RawMaterialsManager({
     try {
       if (editingId) {
         await updateInventoryItem(editingId, payload);
-        setSuccess("Materia prima actualizada.");
+        setSuccess("Merma actualizada.");
       } else {
         const created = await createInventoryItem(payload);
-        setSuccess("Materia prima creada.");
+        setSuccess("Merma creada.");
         onCreated?.(created);
       }
       resetForm();
-      // Sin awaitear: invalidateQueries espera el refetch de las queries
-      // activas (["production"] dispara varios requests en paralelo) —
-      // awaitearlo dejaba isSaving atascado en true hasta que todo terminara.
-      void queryClient.invalidateQueries({ queryKey: ["raw-materials"] });
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["process-materials"] });
-      // El combo de materiales del formulario de procesos lee del bundle de produccion.
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
+      invalidate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo guardar la materia prima.");
+      setError(err instanceof Error ? err.message : "No se pudo guardar la merma.");
     } finally {
       setIsSaving(false);
     }
   }
 
   return (
-    <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Materias primas">
+    <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Mermas">
       <section className="modalWindow">
         <div className="modalHeader">
           <div>
-            <h2>{mode === "create" ? "Crear materia prima" : "Materias primas"}</h2>
-            <p className="panelText">Materias primas del inventario (tipo, ley y unidad).</p>
+            <h2>{mode === "create" ? "Crear merma" : "Mermas"}</h2>
+            <p className="panelText">Merma real acumulada por material (nombre, ley y unidad).</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
@@ -157,15 +155,19 @@ export function RawMaterialsManager({
         <form onSubmit={handleAdd} style={{ display: "grid", gap: 12 }}>
           <div className="materialRow">
             <label className="fieldGroup">
-              <span>Tipo</span>
+              <span>Nombre</span>
+              <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setName(e.target.value)} placeholder="Ej. Merma Fundición" value={name} />
+            </label>
+            <label className="fieldGroup">
+              <span>Material</span>
               <input className="field" disabled={isSaving} maxLength={80} onChange={(e) => setMaterialType(e.target.value)} placeholder="Ej. Oro, Plata" value={materialType} />
             </label>
+          </div>
+          <div className="materialRow">
             <label className="fieldGroup">
               <span>Ley / pureza</span>
               <input className="field" disabled={isSaving} maxLength={40} onChange={(e) => setPurity(e.target.value)} placeholder="Ej. 18K, 925" value={purity} />
             </label>
-          </div>
-          <div className="materialRow">
             <label className="fieldGroup">
               <span>Unidad</span>
               <select className="field" disabled={isSaving} onChange={(e) => setUnitCode(e.target.value)} value={unitCode || unitOptions[0]?.value || ""}>
@@ -174,6 +176,8 @@ export function RawMaterialsManager({
                 ))}
               </select>
             </label>
+          </div>
+          <div className="materialRow">
             <label className="fieldGroup">
               <span>Descripción</span>
               <input className="field" disabled={isSaving} maxLength={1000} onChange={(e) => setDescription(e.target.value)} value={description} />
@@ -185,7 +189,7 @@ export function RawMaterialsManager({
             ) : null}
             <button className="button buttonPrimary" disabled={isSaving} type="submit">
               {editingId ? <Save aria-hidden="true" size={14} /> : <Plus aria-hidden="true" size={14} />}
-              {editingId ? " Guardar cambios" : " Crear materia prima"}
+              {editingId ? " Guardar cambios" : " Crear merma"}
             </button>
           </div>
         </form>
@@ -197,8 +201,10 @@ export function RawMaterialsManager({
             <thead>
               <tr>
                 <th style={{ width: 40 }}>#</th>
-                <th>Tipo</th>
+                <th>Nombre</th>
+                <th>Material</th>
                 <th>Ley/pureza</th>
+                <th className="num">Stock</th>
                 <th>Unidad</th>
                 <th aria-label="Acciones" />
               </tr>
@@ -207,13 +213,15 @@ export function RawMaterialsManager({
               {itemsPager.pageItems.map((item, index) => (
                 <tr key={item.id}>
                   <td className="num">{itemsPager.page * itemsPager.pageSize + index + 1}</td>
-                  <td>{item.material_type ?? item.name}</td>
-                  <td>{item.purity ?? "â€”"}</td>
+                  <td>{item.name}</td>
+                  <td>{item.material_type ?? "—"}</td>
+                  <td>{item.purity ?? "—"}</td>
+                  <td className="num">{item.current_stock}</td>
                   <td>{item.unit_code}</td>
                   <td style={{ textAlign: "right" }}>
                     <span className="rowActions" style={{ justifyContent: "flex-end" }}>
                       <button
-                        aria-label={`Editar ${item.material_type ?? item.name}`}
+                        aria-label={`Editar ${item.name}`}
                         className="iconOnlyButton"
                         onClick={() => startEdit(item)}
                         type="button"
@@ -221,7 +229,7 @@ export function RawMaterialsManager({
                         <Pencil aria-hidden="true" size={14} />
                       </button>
                       <button
-                        aria-label={`Eliminar ${item.material_type ?? item.name}`}
+                        aria-label={`Eliminar ${item.name}`}
                         className="iconOnlyButton dangerIconButton"
                         disabled={Number(item.current_stock) > 0}
                         title={Number(item.current_stock) > 0 ? "Deja el stock en cero para poder eliminar" : "Eliminar"}
@@ -236,7 +244,7 @@ export function RawMaterialsManager({
               ))}
               {!isLoading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={5}><div className="emptyState">Sin materias primas. Crea la primera.</div></td>
+                  <td colSpan={7}><div className="emptyState">Sin mermas. Se crean solas al finalizar una etapa con merma, o crea una a mano.</div></td>
                 </tr>
               ) : null}
             </tbody>

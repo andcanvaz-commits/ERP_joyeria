@@ -9,6 +9,8 @@ import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
 import { SuppliesManager } from "@/components/mantenimiento/supplies-manager";
 import { ComplementsManager } from "@/components/mantenimiento/complements-manager";
+import { WasteManager } from "@/components/mantenimiento/waste-manager";
+import { CreateItemTabs } from "@/components/mantenimiento/create-item-tabs";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
@@ -253,7 +255,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [processesPickerMode, setProcessesPickerMode] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
-  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "complements" | "productTypes"; mode: "create" | "view" } | null>(null);
+  const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "complements" | "waste" | "productTypes"; mode: "create" | "view" } | null>(null);
   const [returnToProcesses, setReturnToProcesses] = useState(false);
   const [returnToUsers, setReturnToUsers] = useState(false);
   const [userFormMode, setUserFormMode] = useState<UserFormMode>("create");
@@ -323,6 +325,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Picker de pieza abierto: "create" = modal Asignar a producto terminado
   // (flujo nuevo), "edit" = modal Editar producto resultante (flujo viejo).
   const [itemPickerFor, setItemPickerFor] = useState<"create" | "edit" | null>(null);
+  // "Crear en el mantenimiento" desde el picker de producto final (Rodrigo,
+  // 2026-08-20) -- ventana con pestañas para crear cualquier item, no solo
+  // tipo de producto.
+  const [isCreatingNewItem, setIsCreatingNewItem] = useState(false);
   // Pestaña activa del picker de producto: productos terminados o
   // complementos (la joyeria fabrica sus propios complementos).
   const [assignPickerTab, setAssignPickerTab] = useState<"PRODUCTOS" | "COMPLEMENTOS">("PRODUCTOS");
@@ -1307,6 +1313,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             </div>
           </section>
 
+          <section className="maintenanceSection" aria-label="Mermas">
+            <h2>Mermas</h2>
+            <div className="maintenanceGrid">
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "waste", mode: "create" })} type="button">
+                <Plus aria-hidden="true" size={22} />
+                <strong>Crear merma</strong>
+                <span>Merma acumulada por material.</span>
+              </button>
+              <button className="maintenanceTile" onClick={() => setDataModal({ type: "waste", mode: "view" })} type="button">
+                <Trash2 aria-hidden="true" size={22} />
+                <strong>Mermas</strong>
+                <span>{wasteList.length} mermas registradas.</span>
+              </button>
+            </div>
+          </section>
+
           <section className="maintenanceSection" aria-label="Productos terminados">
             <h2>Productos terminados</h2>
             <div className="maintenanceGrid">
@@ -2126,9 +2148,30 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           picker de tipo del catálogo, para productos que aún no tienen
           piezas. Se muestran dos pestañas: productos terminados y
           complementos (la joyeria fabrica sus propios complementos). */}
-      {itemPickerFor ? (() => {
+      {itemPickerFor && isCreatingNewItem ? (
+        <CreateItemTabs
+          initialTab="COMPLEMENT"
+          onClose={() => setIsCreatingNewItem(false)}
+          onCreated={(result) => {
+            setIsCreatingNewItem(false);
+            if (result.kind === "productType") {
+              const label = result.productType.name?.trim() || `${result.productType.category_code}${result.productType.model_code}`;
+              applyProductChoice(itemPickerFor, { productTypeId: result.productType.id, label });
+              setItemPickerFor(null);
+            } else if (result.item.item_type === "COMPLEMENT") {
+              applyProductChoice(itemPickerFor, { targetItemId: result.item.id, label: result.item.name });
+              setItemPickerFor(null);
+            } else {
+              // Materia prima/insumo/merma: no son destino valido de una
+              // etapa, solo quedan creados en inventario para usarse despues
+              // -- se sigue eligiendo producto normalmente.
+              setSuccess(`${result.item.name} creado.`);
+            }
+          }}
+        />
+      ) : itemPickerFor ? (() => {
         const tabsBar = (
-          <div className="materialRow" style={{ gap: 8 }}>
+          <div className="materialRow" style={{ gap: 8, flexWrap: "wrap" }}>
             <button
               className={`button${assignPickerTab === "PRODUCTOS" ? " buttonPrimary" : ""}`}
               onClick={() => setAssignPickerTab("PRODUCTOS")}
@@ -2142,6 +2185,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               type="button"
             >
               Complementos
+            </button>
+            <button className="button" onClick={() => setIsCreatingNewItem(true)} type="button">
+              <Plus aria-hidden="true" size={14} />
+              Crear en el mantenimiento
             </button>
           </div>
         );
@@ -2820,6 +2867,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {dataModal?.type === "materials" ? <RawMaterialsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "supplies" ? <SuppliesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "complements" ? <ComplementsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
+      {dataModal?.type === "waste" ? <WasteManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "productTypes" ? <ProductTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
       {isProcessesOpen ? (() => {

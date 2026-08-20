@@ -10,7 +10,17 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { Pager, usePagination } from "@/components/shared/pager";
 
-export function SuppliesManager({ mode, onClose }: { mode: "create" | "view"; onClose: () => void }) {
+export function SuppliesManager({
+  mode,
+  onClose,
+  onCreated,
+  tabs,
+}: {
+  mode: "create" | "view";
+  onClose: () => void;
+  onCreated?: (item: InventoryItem) => void;
+  tabs?: React.ReactNode;
+}) {
   const queryClient = useQueryClient();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["supplies"],
@@ -99,8 +109,9 @@ export function SuppliesManager({ mode, onClose }: { mode: "create" | "view"; on
         await updateInventoryItem(editingId, payload);
         setSuccess("Insumo actualizado.");
       } else {
-        await createInventoryItem(payload);
+        const created = await createInventoryItem(payload);
         setSuccess("Insumo creado.");
+        onCreated?.(created);
       }
       resetForm();
       invalidate();
@@ -123,6 +134,8 @@ export function SuppliesManager({ mode, onClose }: { mode: "create" | "view"; on
             <X aria-hidden="true" size={18} />
           </button>
         </div>
+
+        {tabs}
 
         {error || success ? (
           <div className="toastStack" aria-live="polite">
