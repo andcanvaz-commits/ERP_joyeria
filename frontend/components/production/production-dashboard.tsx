@@ -1650,7 +1650,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           orden recien creada. */}
       {isCreateOrderOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Crear orden">
-          <section className="modalWindow">
+          <form
+            className="modalWindow"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateOrder();
+            }}
+          >
             <div className="modalHeader">
               <div>
                 <h2>Crear orden</h2>
@@ -1671,12 +1677,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               />
             </label>
             <div className="modalActions">
-              <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleCreateOrder()} type="button">
+              <button className="button buttonPrimary" disabled={isSaving} type="submit">
                 <Save aria-hidden="true" size={17} />
                 {isSaving ? "Creando" : "Crear orden"}
               </button>
             </div>
-          </section>
+          </form>
         </div>
       ) : null}
 
@@ -1781,10 +1787,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     </div>
 
                     {/* Misma vista de acta de siempre (ENTREGADO/RECIBIDO), solo que
-                        acotada a las lineas de esta etapa en vez de toda la orden. */}
+                        acotada a las lineas de esta etapa en vez de toda la orden.
+                        Cabecera igual que Documentos/Ver Acta (Rodrigo, 2026-08-20:
+                        "ahi falta la cabecera del acta") -- no es un fragmento
+                        suelto, es el mismo documento. */}
                     <div className="actaDocFrame">
                       <div className="opDocWrap">
                         <article className="opDoc actaDoc">
+                          <header className="opHeader">
+                            <div className="opTitleBar">ORDEN DE PRODUCCIÓN</div>
+                            <div className="opCategoryBar">
+                              {materialItems.find((item) => item.id === dynamicOrderRun.raw_material_item_id)?.name ?? "—"}
+                            </div>
+                            <div className="opFolio">Nº {dynamicOrderRun.production_code ?? "—"}</div>
+                          </header>
+                          <div className="opResponsable">
+                            RESPONSABLE: <span>{dynamicOrderRun.created_by_name ?? "—"}</span>
+                          </div>
                           <div className="opBody">
                             <ActaSide
                               actions={
@@ -2145,6 +2164,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <div className="actaDocFrame">
                     <div className="opDocWrap">
                       <article className="opDoc actaDoc">
+                        <header className="opHeader">
+                          <div className="opTitleBar">ORDEN DE PRODUCCIÓN</div>
+                          <div className="opCategoryBar">
+                            {viewMaterialItems.find((item) => item.id === dynamicOrderRun.raw_material_item_id)?.name ?? "—"}
+                          </div>
+                          <div className="opFolio">Nº {dynamicOrderRun.production_code ?? "—"}</div>
+                        </header>
+                        <div className="opResponsable">
+                          RESPONSABLE: <span>{dynamicOrderRun.created_by_name ?? "—"}</span>
+                        </div>
                         <div className="opBody">
                           <ActaSide
                             actions={
