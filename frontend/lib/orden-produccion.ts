@@ -1,4 +1,4 @@
-import type { ProductionRun } from "@/types/production";
+import type { ProductionRun, StageAttempt } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 
 // Tipos compartidos por el UNICO componente que renderiza una columna del
@@ -249,13 +249,43 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   };
 }
 
+// Totales de UN intento de etapa: a diferencia de computeRunTotals (que
+// depende de materials_approved_at, un campo del flujo viejo que las
+// ordenes nuevas nunca setean), usa el propio intento -- attempt.unit_code
+// es la unidad de la materia prima de ESTA etapa, y attempt.merma_weight ya
+// viene calculado por el backend (finish_stage_attempt), no se recalcula
+// aca para no divergir de la regla real (Rodrigo, 2026-08-20: "misma
+// cantidad de gramos para el producto").
+function computeStageAttemptTotals(
+  attempt: StageAttempt | undefined,
+  entregaLines: ActaSideLine[],
+  recepcionLines: ActaSideLine[]
+): { entregaTotalRows: ActaSideTotal[]; recepcionTotalRows: ActaSideTotal[] } {
+  const entregaUnit = attempt?.unit_code || (entregaLines.find((l) => l.kind === "row") as Extract<ActaSideLine, { kind: "row" }> | undefined)?.unit_code;
+  if (!entregaUnit) return { entregaTotalRows: [], recepcionTotalRows: [] };
+  const entregaTotal = sumRowsByUnit(entregaLines, entregaUnit);
+  if (entregaTotal <= 0) return { entregaTotalRows: [], recepcionTotalRows: [] };
+
+  const recepcionUnit = (recepcionLines.find((l) => l.kind === "row") as Extract<ActaSideLine, { kind: "row" }> | undefined)?.unit_code;
+  const recepcionTotalRows: ActaSideTotal[] = recepcionUnit
+    ? [{ label: "Total recibido", quantity: sumRowsByUnit(recepcionLines, recepcionUnit), unit: recepcionUnit, kind: "total" }]
+    : [];
+  if (attempt?.merma_weight != null) {
+    recepcionTotalRows.push({ label: "Merma", quantity: num(attempt.merma_weight), unit: entregaUnit, kind: "merma" });
+  }
+
+  return {
+    entregaTotalRows: [{ label: "Total entregado", quantity: entregaTotal, unit: entregaUnit, kind: "total" }],
+    recepcionTotalRows,
+  };
+}
+
 /** El acta de UN intento de etapa puntual (flujo nuevo, seccion 4): a
  * diferencia de buildRunActaSides (toda la orden junta), acota las lineas al
  * stage_attempt_id pedido -- fuente unica compartida entre el acta en vivo
  * de production-dashboard.tsx y el drill-down por etapa de Documentos. Sin
- * totales (computeRunTotals depende de materials_approved_at, un campo del
- * flujo viejo que las ordenes nuevas nunca setean) ni producto-real /
- * event_lines (eso es concepto de ORDEN completa, no de una etapa sola). */
+ * producto-real / event_lines (eso es concepto de ORDEN completa, no de una
+ * etapa sola) -- los totales SI aplican, ver computeStageAttemptTotals. */
 export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemptId: string): RunActaSides {
   const lines = (run.acta_lines ?? []).filter((l) => l.stage_attempt_id === stageAttemptId);
   const attempt = (run.stage_attempts ?? []).find((a) => a.id === stageAttemptId);
@@ -269,6 +299,7 @@ export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemp
       .filter((l) => l.side === "RECEPCION")
       .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at, item_id: l.item_id }))
   );
+  const { entregaTotalRows, recepcionTotalRows } = computeStageAttemptTotals(attempt, entregaLines, recepcionLines);
   return {
     entregaLines,
     entregaFecha: attempt?.started_at ?? null,
@@ -276,8 +307,8 @@ export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemp
     recepcionLines,
     recepcionFecha: attempt?.finished_at ?? null,
     recepcionResponsable: attempt?.finished_by_name ?? DASH,
-    entregaTotalRows: [],
-    recepcionTotalRows: [],
+    entregaTotalRows,
+    recepcionTotalRows,
   };
 }
 
@@ -425,10 +456,18 @@ export function buildOrdenProduccion(
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
   const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name ?? root.name ?? DASH;
   const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
+  // Flujo nuevo con una sola etapa (el caso normal): no hay eleccion que
+  // hacer (needsStageList en Documentos solo pide elegir con 2+), pero el
+  // acta sigue siendo "de esa etapa", no de la orden vieja -- si cae al
+  // branch de abajo (buildRunActaSides), materials_approved_at nunca esta
+  // seteado en ordenes nuevas y el acta sale sin totales ni merma (bug
+  // reportado, Rodrigo 2026-08-20).
+  const effectiveStageAttemptId =
+    stageAttemptId ?? (!isHistorical && root.stage_attempts?.length === 1 ? root.stage_attempts[0].id : undefined);
 
-  if (stageAttemptId) {
-    const attempt = (root.stage_attempts ?? []).find((a) => a.id === stageAttemptId);
-    const sides = buildRunActaSidesForStageAttempt(root, stageAttemptId);
+  if (effectiveStageAttemptId) {
+    const attempt = (root.stage_attempts ?? []).find((a) => a.id === effectiveStageAttemptId);
+    const sides = buildRunActaSidesForStageAttempt(root, effectiveStageAttemptId);
     return {
       folio: root.production_code ?? DASH,
       procesoNombre: attempt?.process_name ?? root.process_name ?? root.name ?? DASH,

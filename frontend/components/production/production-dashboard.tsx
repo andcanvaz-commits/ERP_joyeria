@@ -54,14 +54,13 @@ import {
 } from "@/lib/production-api";
 import type { InventoryItem } from "@/types/inventory";
 import type { ProductChoice, ProductionProcess, ProductionRun, ProductionRunStage } from "@/types/production";
-import type { ActaSideLine } from "@/lib/orden-produccion";
 import { CaliperScale } from "@/components/ui/caliper-scale";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
-import { getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildRunActaSidesForStageAttempt, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 import { useCountUp } from "@/hooks/use-count-up";
 
@@ -1693,9 +1692,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         const pastAttempts = (dynamicOrderRun.stage_attempts ?? [])
           .filter((a) => a.id !== runningAttempt?.id && a.status !== "PENDIENTE_MATERIAL")
           .sort((a, b) => a.sequence_order - b.sequence_order);
-        const activeActaLines = runningAttempt
-          ? (dynamicOrderRun.acta_lines ?? []).filter((line) => line.stage_attempt_id === runningAttempt.id)
-          : [];
         const isTerminada = dynamicOrderRun.status === "TERMINADA" || dynamicOrderRun.status === "CANCELADA";
         return (
           <>
@@ -1771,32 +1767,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   const fresh = (await listProductionRuns()).find((r) => r.id === orderId);
                   if (fresh) setDynamicOrderRun(fresh);
                 }
-                const entregaLines: ActaSideLine[] = activeActaLines
-                  .filter((line) => line.side === "ENTREGA")
-                  .map((line) => ({
-                    kind: "row" as const,
-                    id: line.id,
-                    label: line.label,
-                    quantity: line.quantity,
-                    unit_code: line.unit_code,
-                    editable: true,
-                    source: line.source,
-                    fecha: line.created_at,
-                    item_id: line.item_id,
-                  }));
-                const recepcionLines: ActaSideLine[] = activeActaLines
-                  .filter((line) => line.side === "RECEPCION")
-                  .map((line) => ({
-                    kind: "row" as const,
-                    id: line.id,
-                    label: line.label,
-                    quantity: line.quantity,
-                    unit_code: line.unit_code,
-                    editable: true,
-                    source: line.source,
-                    fecha: line.created_at,
-                    item_id: line.item_id,
-                  }));
+                const runningSides = buildRunActaSidesForStageAttempt(dynamicOrderRun, runningAttempt.id);
+                const entregaLines = runningSides.entregaLines;
+                const recepcionLines = runningSides.recepcionLines;
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
@@ -1833,6 +1806,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                               onError={setError}
                               responsable={runningAttempt.responsable_name ?? "—"}
                               title="ENTREGADO"
+                              totalRows={runningSides.entregaTotalRows}
                             />
                             <div className="opDivider" aria-hidden="true" />
                             <ActaSide
@@ -1865,6 +1839,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                               }
                               responsable={runningAttempt.finished_by_name ?? "—"}
                               title="RECIBIDO"
+                              totalRows={runningSides.recepcionTotalRows}
                             />
                           </div>
                         </article>
@@ -2148,35 +2123,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             }
             const viewingAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.id === viewingAttemptId);
             if (!viewingAttempt) return null;
-            const viewingActaLines = (dynamicOrderRun.acta_lines ?? []).filter(
-              (line) => line.stage_attempt_id === viewingAttempt.id,
-            );
-            const viewEntregaLines: ActaSideLine[] = viewingActaLines
-              .filter((line) => line.side === "ENTREGA")
-              .map((line) => ({
-                kind: "row" as const,
-                id: line.id,
-                label: line.label,
-                quantity: line.quantity,
-                unit_code: line.unit_code,
-                editable: true,
-                source: line.source,
-                fecha: line.created_at,
-                item_id: line.item_id,
-              }));
-            const viewRecepcionLines: ActaSideLine[] = viewingActaLines
-              .filter((line) => line.side === "RECEPCION")
-              .map((line) => ({
-                kind: "row" as const,
-                id: line.id,
-                label: line.label,
-                quantity: line.quantity,
-                unit_code: line.unit_code,
-                editable: true,
-                source: line.source,
-                fecha: line.created_at,
-                item_id: line.item_id,
-              }));
+            const viewingSides = buildRunActaSidesForStageAttempt(dynamicOrderRun, viewingAttempt.id);
+            const viewEntregaLines = viewingSides.entregaLines;
+            const viewRecepcionLines = viewingSides.recepcionLines;
             const viewMaterialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
             return (
               <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true" aria-label="Acta de la etapa">
@@ -2217,6 +2166,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             onError={setError}
                             responsable={viewingAttempt.responsable_name ?? "—"}
                             title="ENTREGADO"
+                            totalRows={viewingSides.entregaTotalRows}
                           />
                           <div className="opDivider" aria-hidden="true" />
                           <ActaSide
@@ -2239,6 +2189,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             onError={setError}
                             responsable={viewingAttempt.finished_by_name ?? "—"}
                             title="RECIBIDO"
+                            totalRows={viewingSides.recepcionTotalRows}
                           />
                         </div>
                       </article>
