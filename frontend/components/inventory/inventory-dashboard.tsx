@@ -44,11 +44,7 @@ import {
   type CreateInventoryMovementPayload,
   type SaveInventoryItemPayload,
 } from "@/lib/inventory-api";
-import {
-  approveAdditionalMaterial,
-  rejectAdditionalMaterial,
-  listProductionRuns,
-} from "@/lib/production-api";
+import { listProductionRuns } from "@/lib/production-api";
 import type { InventoryItem, InventoryItemType, InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import type { ProductionRun } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
@@ -579,7 +575,6 @@ export function InventoryDashboard() {
   const canRevertEntry = canSeeAudit || currentUser?.role === "Producción/Inventario";
 
   const [isMessagesOpen, setIsMessagesOpen] = useState(false);
-  const [isAdditionalMaterialOpen, setIsAdditionalMaterialOpen] = useState(false);
   const messagesRole = normalizeRole(currentUser?.role);
   const messagesUserId = currentUser?.id ?? null;
   const { data: inboxMessages = [] } = useQuery({
@@ -1058,38 +1053,6 @@ export function InventoryDashboard() {
     }
   }
 
-  async function handleApproveAdditionalMaterial(requestId: string) {
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      await approveAdditionalMaterial(requestId);
-      setSuccess("Material adicional aprobado.");
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar el material adicional.");
-    } finally {
-      setIsSavingProduction(false);
-    }
-  }
-
-  async function handleRejectAdditionalMaterial(requestId: string) {
-    setError(null);
-    setIsSavingProduction(true);
-    try {
-      await rejectAdditionalMaterial(requestId);
-      setSuccess("Solicitud de material adicional rechazada.");
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] });
-      void queryClient.invalidateQueries({ queryKey: ["solicitudes"] });
-      void queryClient.invalidateQueries({ queryKey: ["production"] });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la solicitud.");
-    } finally {
-      setIsSavingProduction(false);
-    }
-  }
-
   async function handleConvertLot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!convertRun) return;
@@ -1205,20 +1168,6 @@ export function InventoryDashboard() {
 
   const receivedRuns = productionRuns.filter((run) => run.status === "RECIBIDA");
   const inProcessRuns = productionRuns.filter((run) => run.status === "EN_PROCESO");
-  // Material adicional pedido durante EN_PROCESO, pendiente de aprobar/rechazar.
-  const pendingAdditionalMaterialRequests = inProcessRuns.flatMap((run) =>
-    (run.additional_materials ?? [])
-      .filter((request) => request.status === "PENDIENTE")
-      .map((request) => ({ run, request })),
-  );
-  // El modal se cierra solo apenas queda en 0, sin importar que la vacio: una
-  // accion adentro, el refetch periodico (10s) o el refetch al volver a la
-  // pestana.
-  useEffect(() => {
-    if (isAdditionalMaterialOpen && pendingAdditionalMaterialRequests.length === 0) {
-      setIsAdditionalMaterialOpen(false);
-    }
-  }, [isAdditionalMaterialOpen, pendingAdditionalMaterialRequests.length]);
   // Órdenes tras aplicar los filtros de fecha y estado (pestañas de procesos).
   const receivedRunsFiltered = receivedRuns.filter(
     (run) => (orderStatusFilter === "TODOS" || run.status === orderStatusFilter) && withinDateRange(run.received_at),
@@ -1952,24 +1901,6 @@ export function InventoryDashboard() {
           <strong className="metricValue">{finishedProductsCount}</strong>
         </article>
       </section>
-
-      {topbarSlot
-        ? createPortal(
-            <button
-              className="topbarInbox"
-              onClick={() => setIsAdditionalMaterialOpen(true)}
-              type="button"
-              aria-label="Material adicional pedido en produccion"
-            >
-              <Inbox aria-hidden="true" size={18} />
-              Material adicional
-              {pendingAdditionalMaterialRequests.length > 0 ? (
-                <span className="solicitudesBadge">{pendingAdditionalMaterialRequests.length}</span>
-              ) : null}
-            </button>,
-            topbarSlot,
-          )
-        : null}
 
       {topbarSlot
         ? createPortal(
@@ -4658,65 +4589,6 @@ export function InventoryDashboard() {
           )
         : null}
 
-      {isAdditionalMaterialOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Material adicional">
-          <section className="modalWindow solicitudesModal">
-            <div className="modalHeader">
-              <div>
-                <h2>Material adicional</h2>
-                <p>{pendingAdditionalMaterialRequests.length} pedidos pendientes</p>
-              </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsAdditionalMaterialOpen(false)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-
-            {pendingAdditionalMaterialRequests.length > 0 ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                {pendingAdditionalMaterialRequests.map(({ run, request }) => (
-                  <div className="solicitudCard" key={request.id}>
-                    <div className="solicitudCardHead">
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <strong>
-                          {run.production_code ? <span className="orderCodeTag">{run.production_code}</span> : null}
-                          {request.name ?? request.item_id}
-                        </strong>
-                        <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                          {numericText(request.quantity)} {request.unit_code}
-                          {request.stage_name ? ` · Etapa: ${request.stage_name}` : ""}
-                          {request.note ? ` · ${request.note}` : ""}
-                          {" · "}{productionTimeLabel(request.requested_at)}
-                        </span>
-                      </div>
-                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                        <button
-                          className="button buttonPrimary"
-                          disabled={isSavingProduction}
-                          onClick={() => void handleApproveAdditionalMaterial(request.id)}
-                          type="button"
-                        >
-                          Aprobar
-                        </button>
-                        <button
-                          className="button buttonDanger"
-                          disabled={isSavingProduction}
-                          onClick={() => void handleRejectAdditionalMaterial(request.id)}
-                          type="button"
-                        >
-                          Rechazar
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="emptyState">Sin pedidos de material adicional pendientes.</div>
-            )}
-          </section>
-        </div>
-      ) : null}
-
       {isMessagesOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Buzon de mensajes">
           <section className="modalWindow processViewWindow">
@@ -4802,7 +4674,6 @@ export function InventoryDashboard() {
           family={getRunFamily(productionRuns, actaRun)}
           inventoryItems={items}
           isAdmin={canSeeAudit}
-          materialItems={items}
           onChanged={() => void queryClient.invalidateQueries({ queryKey: ["inventory"] })}
           onClose={() => setActaRun(null)}
           run={actaRun}

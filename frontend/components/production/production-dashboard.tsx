@@ -13,7 +13,7 @@ import { FinishedItemPicker } from "@/components/inventory/finished-item-picker"
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
 import { ActaSide } from "@/components/production/acta-side";
-import { ActaView, ReturnCandidatesForm, buildReturnCandidates } from "@/components/production/acta-view";
+import { ActaView } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
 import { isAuthenticated } from "@/lib/api";
@@ -334,12 +334,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Acta editable: disponible en cualquier etapa de la orden y tambien
   // despues de recibida (ver ActaView).
   const [actaRun, setActaRun] = useState<ProductionRun | null>(null);
-  // Ritual automatico al terminar la ultima etapa: 1) si queda sobrante de
-  // complementos por devolver, se pide (opcional) antes que nada; 2) se abre
-  // la acta como quedaria, con opcion a entregar material faltante o corregir
-  // algo mal tipeado; 3) recien ahi el resumen/reporte de merma de siempre.
-  const [postFinishReturnRun, setPostFinishReturnRun] = useState<ProductionRun | null>(null);
-  const [isPostFinishActa, setIsPostFinishActa] = useState(false);
   // Ventana con las demas partes de una orden dividida.
   const [familyRuns, setFamilyRuns] = useState<ProductionRun[] | null>(null);
   const [printingWasteRun, setPrintingWasteRun] = useState<ProductionRun | null>(null);
@@ -390,18 +384,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedRunForStages((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
     setSelectedStatsRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
     setActaRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
-    setPostFinishReturnRun((current) => (current ? runs.find((run) => run.id === current.id) ?? null : current));
   }, [runs]);
-
-  // Si ya no queda nada por devolver (se devolvio todo dentro de esta misma
-  // ventana), el paso 1 del ritual automatico no tiene mas sentido -- sigue
-  // solo al paso 2 (acta) en vez de quedar con la ventana vacia esperando un
-  // clic en "Continuar".
-  useEffect(() => {
-    if (postFinishReturnRun && buildReturnCandidates(postFinishReturnRun).length === 0) {
-      continueFromReturnStep();
-    }
-  }, [postFinishReturnRun]);
 
 
   useEffect(() => {
@@ -762,27 +745,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSelectedStatsRun(null);
   }
 
-  // Paso 1 -> 2 del ritual automatico al terminar produccion: de devolver
-  // sobrante (opcional) se pasa a la acta.
-  function continueFromReturnStep() {
-    const run = postFinishReturnRun;
-    setPostFinishReturnRun(null);
-    if (run) {
-      setIsPostFinishActa(true);
-      setActaRun(run);
-    }
-  }
-
-  // Paso 2 -> 3: al cerrar la acta abierta por el ritual automatico, recien
-  // ahi se abre el resumen/reporte de merma de siempre (flujo normal). Si la
-  // acta se abrio a mano ("Ver acta"), isPostFinishActa es false y solo cierra.
   function closeActaModal() {
-    const run = actaRun;
     setActaRun(null);
-    if (isPostFinishActa) {
-      setIsPostFinishActa(false);
-      if (run) openStatsModal(run);
-    }
   }
 
   const currentHistoryMonth = historyMonth || (new Date().toISOString().slice(0, 7));
@@ -2351,45 +2315,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     </div>
                   ) : null}
 
-                  {/* Solicitudes de material fuera de lo declarado al crear la
-                      orden. La solicitud misma ahora se hace desde la acta
-                      (lado Entregado, boton "Solicitar material"). Una vez
-                      APROBADA ya quedo como linea AUTO en la acta -- mostrarla
-                      aqui tambien seria la misma info duplicada, asi que solo
-                      se listan las que siguen pendientes de que Inventario
-                      responda (o las que rechazo). */}
                   <div className="fieldGroup">
                     <span>Acta y materiales</span>
-                    {(() => {
-                      const openRequests = (selectedRunForStages.additional_materials ?? []).filter(
-                        (request) => request.status !== "APROBADA",
-                      );
-                      return openRequests.length > 0 ? (
-                        <div className="tableWrap">
-                          <table className="table">
-                            <thead>
-                              <tr>
-                                <th>Material</th>
-                                <th>Etapa</th>
-                                <th className="num">Cantidad</th>
-                                <th>Estado</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {openRequests.map((request) => (
-                                <tr key={request.id}>
-                                  <td>{request.name ?? request.item_id}</td>
-                                  <td>{request.stage_name ?? "—"}</td>
-                                  <td className="num">{numericText(request.quantity)} {request.unit_code}</td>
-                                  <td><StatusPunch label={request.status} tone={request.status === "RECHAZADA" ? "danger" : "warning"} /></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : null;
-                    })()}
-
                     <button className="button" onClick={() => setActaRun(selectedRunForStages)} style={{ marginTop: 8 }} type="button">
                       Ver acta
                     </button>
@@ -3121,43 +3048,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         </div>
       ) : null}
 
-      {postFinishReturnRun ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Sobrante por devolver">
-          <section className="modalWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Sobrante por devolver</h2>
-                <p>
-                  Revisa y devuelve los complementos o insumos de sobra de{" "}
-                  {postFinishReturnRun.production_code ?? postFinishReturnRun.process_name}. Es opcional, se puede
-                  hacer después desde la acta.
-                </p>
-              </div>
-              <button
-                aria-label="Cerrar"
-                className="iconOnlyButton"
-                onClick={() => continueFromReturnStep()}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
-            <ReturnCandidatesForm onChanged={() => void reload()} onError={setError} run={postFinishReturnRun} />
-            <div className="modalActions">
-              <button className="button buttonPrimary" onClick={() => continueFromReturnStep()} type="button">
-                Continuar
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {actaRun ? (
         <ActaView
           family={getRunFamily(runs, actaRun)}
           inventoryItems={[...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems]}
           isAdmin={isAdmin}
-          materialItems={[...rawMaterials, ...orderSupplyItems, ...complementItems]}
           onChanged={() => void reload()}
           onClose={() => closeActaModal()}
           run={actaRun}

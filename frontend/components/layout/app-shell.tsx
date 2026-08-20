@@ -86,28 +86,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     refetchOnWindowFocus: true,
   });
 
-  // Pendientes por seccion: inventario aprueba el material adicional pedido
-  // desde la acta mientras la corrida esta EN_PROCESO; produccion asigna el
-  // material a las etapas que quedaron PENDIENTE_MATERIAL por un split
-  // automatico (ver allocate_stage_attempt_material). El punto rojo aparece
-  // donde hay accion.
-  const pendingAdditionalMaterials = navRuns.reduce(
-    (total, run) =>
-      run.status === "EN_PROCESO"
-        ? total + (run.additional_materials ?? []).filter((request) => request.status === "PENDIENTE").length
-        : total,
-    0,
-  );
+  // Pendientes de produccion: etapas que quedaron PENDIENTE_MATERIAL por un
+  // split automatico (ver allocate_stage_attempt_material). El punto rojo
+  // aparece donde hay accion.
   const pendingStageMaterial = navRuns.reduce(
     (total, run) => total + (run.stage_attempts ?? []).filter((attempt) => attempt.status === "PENDIENTE_MATERIAL").length,
     0,
   );
-  const invPending = pendingAdditionalMaterials;
   const prodPending = pendingStageMaterial;
-  // El punto rojo de "hay que actuar" es de Inventario/Produccion: Bandeja
-  // de mensajes ya es solo mensajeria, no hereda ese aviso.
+  // El punto rojo de "hay que actuar" es de Produccion: Bandeja de mensajes
+  // ya es solo mensajeria, no hereda ese aviso.
   const navBadges: Record<string, number> = {
-    "/inventario": invPending,
     "/produccion": prodPending,
   };
 

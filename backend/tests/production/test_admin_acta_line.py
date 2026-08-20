@@ -27,12 +27,10 @@ from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
     ActaLineCreate,
     ActaLineUpdate,
-    AdditionalMaterialRequestCreate,
     AdminActaLineCreate,
     ProductionOrderCreate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
-from backend.tests.production.test_additional_material import _in_progress_run
 
 
 @pytest.fixture()
@@ -415,53 +413,6 @@ def test_non_admin_can_still_update_and_delete_a_manual_line(
 
     final = production_service.delete_acta_line(line_id, current_user)
     assert all(l.id != line_id for l in final.acta_lines)
-
-
-# ---------------------------------------------------------------------------
-# Fix 2 (review final): _add_or_merge_acta_line/_sync_entrega_acta_line
-# emparejaban por side+item_id sin filtrar por source -- podian aterrizar
-# sobre una linea ADMIN_STOCK y sumarle cantidad a mano, desincronizandola
-# de lo que el ledger de movimientos realmente sabe que se movio.
-# ---------------------------------------------------------------------------
-
-
-def test_approve_additional_material_does_not_merge_into_admin_stock_line(
-    db_session, production_service, current_user, process, raw_material, target_complement
-):
-    run = _in_progress_run(production_service, current_user, process, raw_material, target_complement)
-    extra_supply = InventoryItem(
-        item_type="SUPPLY", name="Lija extra", sku=f"IN-{uuid.uuid4().hex[:8]}", unit_code="und",
-        current_stock=Decimal("50"),
-    )
-    db_session.add(extra_supply)
-    db_session.flush()
-
-    admin_result = production_service.add_admin_acta_line(
-        run.id,
-        AdminActaLineCreate(side="ENTREGA", item_id=extra_supply.id, quantity=Decimal("5")),
-        current_user,
-    )
-    admin_line = [l for l in admin_result.acta_lines if l.item_id == extra_supply.id][0]
-    assert admin_line.quantity == Decimal("5")
-    assert admin_line.source == "ADMIN_STOCK"
-
-    run_read = production_service.request_additional_material(
-        run.id,
-        AdditionalMaterialRequestCreate(item_id=extra_supply.id, quantity=Decimal("2")),
-        current_user,
-    )
-    request_id = run_read.additional_materials[0].id
-    result = production_service.approve_additional_material(request_id, current_user)
-
-    admin_lines_after = [l for l in result.acta_lines if l.id == admin_line.id]
-    assert len(admin_lines_after) == 1
-    assert admin_lines_after[0].quantity == Decimal("5")  # intacta, no absorbio los 2 nuevos
-
-    same_item_lines = [l for l in result.acta_lines if l.item_id == extra_supply.id]
-    assert len(same_item_lines) == 2  # la ADMIN_STOCK original + una AUTO nueva, no fusionadas
-    auto_lines = [l for l in same_item_lines if l.source == "AUTO"]
-    assert len(auto_lines) == 1
-    assert auto_lines[0].quantity == Decimal("2")
 
 
 # ---------------------------------------------------------------------------

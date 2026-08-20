@@ -9,7 +9,6 @@ from backend.modules.production.models import (
     ProductionProcess,
     ProductionRun,
     ProductionRunActaLine,
-    ProductionRunAdditionalMaterialRequest,
     ProductionRunStage,
     ProductionRunStageAttempt,
     StageAttemptStatus,
@@ -83,14 +82,6 @@ class ProductionProcessRepository:
                 ProductionRunStageAttempt.process_name == process_name,
             )
         return len(self.session.execute(statement).scalars().all())
-
-    def get_additional_material_request(self, request_id: UUID) -> ProductionRunAdditionalMaterialRequest | None:
-        statement = (
-            select(ProductionRunAdditionalMaterialRequest)
-            .options(selectinload(ProductionRunAdditionalMaterialRequest.run).selectinload(ProductionRun.stages))
-            .where(ProductionRunAdditionalMaterialRequest.id == request_id)
-        )
-        return self.session.execute(statement).scalar_one_or_none()
 
     def get_acta_line(self, line_id: UUID) -> ProductionRunActaLine | None:
         statement = (

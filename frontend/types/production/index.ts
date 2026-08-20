@@ -158,23 +158,6 @@ export type ProductionRun = {
   }>;
   // Líneas de evento del acta de entrega/recepción para certificación histórica.
   event_lines?: Array<{ side: "ENTREGA" | "RECEPCION"; gramos: string; unidad: string; detalle: string | null; line_order: number }>;
-  // Material adicional pedido mientras la corrida esta EN_PROCESO.
-  additional_materials?: Array<{
-    id: string;
-    item_id: string;
-    name?: string | null;
-    quantity: string;
-    unit_code: string;
-    status: "PENDIENTE" | "APROBADA" | "RECHAZADA";
-    stage_id?: string | null;
-    stage_name?: string | null;
-    note?: string | null;
-    requested_by_name?: string | null;
-    requested_at: string;
-    approved_by_name?: string | null;
-    approved_at?: string | null;
-    rejection_reason?: string | null;
-  }>;
   // Acta persistida: que entro y que salio de la orden.
   acta_lines?: Array<{
     id: string;

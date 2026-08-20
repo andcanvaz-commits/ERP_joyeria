@@ -13,11 +13,9 @@ from backend.modules.shared.formatting import format_qty
 from backend.modules.production.models import (
     ActaLineSide,
     ActaLineSource,
-    ComplementRequestStatus,
     ProductionProcess,
     ProductionRun,
     ProductionRunActaLine,
-    ProductionRunAdditionalMaterialRequest,
     ProductionRunProduct,
     ProductionRunStageAttempt,
     ProductionRunStageAttemptMaterial,
@@ -30,8 +28,6 @@ from backend.modules.production.schemas import (
     ActaLineCreate,
     ActaLineRead,
     ActaLineUpdate,
-    AdditionalMaterialRequestCreate,
-    AdditionalMaterialRequestRead,
     AdminActaLineCreate,
     ProductionOrderCreate,
     ProductionProcessCreate,
@@ -321,118 +317,6 @@ class ProductionService:
         self.repository.flush()
         return self._read_with_names(run)
 
-    def request_additional_material(
-        self, run_id: UUID, payload: AdditionalMaterialRequestCreate, current_user: CurrentUser
-    ) -> ProductionRunRead:
-        """Pide un material que no se declaro al crear la orden, mientras esta
-        EN_PROCESO. Pasa por el mismo circuito real de Inventario que los
-        insumos de creacion: queda PENDIENTE hasta que Inventario lo aprueba
-        (consume stock de verdad) o lo rechaza."""
-        run = self.repository.get_run(run_id)
-        if run is None:
-            raise ProductionNotFoundError("Orden de produccion no encontrada.")
-        if run.status != ProductionRunStatus.IN_PROGRESS:
-            raise ProductionDomainError(
-                "Solo se puede solicitar material adicional mientras la orden esta EN_PROCESO."
-            )
-
-        from backend.modules.inventory.models import InventoryItem
-
-        item = self.repository.session.get(InventoryItem, payload.item_id)
-        if item is None or item.item_type not in ("RAW_MATERIAL", "SUPPLY", "COMPLEMENT"):
-            raise ProductionDomainError(
-                "El material solicitado no existe en materia prima, insumos o complementos."
-            )
-        active_stage = next(
-            (stage for stage in run.stages if stage.status == ProductionRunStageStatus.IN_PROGRESS), None
-        )
-        run.additional_material_requests.append(
-            ProductionRunAdditionalMaterialRequest(
-                stage_id=active_stage.id if active_stage else None,
-                item_id=item.id,
-                quantity=payload.quantity,
-                unit_code=item.unit_code,
-                status=ComplementRequestStatus.PENDING,
-                note=(payload.note or "").strip() or None,
-                requested_by_user_id=current_user.id,
-            )
-        )
-        self.repository.flush()
-        return self._read_with_names(run)
-
-    def approve_additional_material(self, request_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
-        if self.inventory_service is None:
-            raise ProductionDomainError("Inventario no esta disponible para aprobar material adicional.")
-        request = self.repository.get_additional_material_request(request_id)
-        if request is None:
-            raise ProductionNotFoundError("Solicitud de material adicional no encontrada.")
-        if request.status != ComplementRequestStatus.PENDING:
-            raise ProductionDomainError("Esta solicitud ya fue procesada.")
-
-        from backend.modules.inventory.models import InventoryItem
-
-        run = request.run
-        item = self.repository.session.get(InventoryItem, request.item_id)
-        item_name = item.name if item is not None else "material adicional"
-        stage_name = next((s.stage_name for s in run.stages if s.id == request.stage_id), None)
-        try:
-            self.inventory_service.consume_material_for_production(
-                item_id=request.item_id,
-                quantity=request.quantity,
-                production_run_id=run.id,
-                user_id=current_user.id,
-                production_code=run.production_code or run.root_production_code,
-                reason=(
-                    f"Material adicional solicitado durante la etapa {stage_name}."
-                    if stage_name
-                    else "Material adicional solicitado durante la produccion."
-                ),
-            )
-        except InventoryDomainError as exc:
-            raise ProductionDomainError(f"Material adicional '{item_name}': {exc}") from exc
-        request.status = ComplementRequestStatus.APPROVED
-        request.approved_by_user_id = current_user.id
-        request.approved_at = datetime.utcnow()
-
-        # Si lo aprobado es MAS de la propia materia prima de la orden (no un
-        # insumo/complemento aparte), el total que entro a la orden crece: la
-        # merma automatica por etapa (_previous_stage_weight/
-        # _accumulated_loss_percent) usa run.total_required_material como
-        # base, asi que las etapas siguientes recalculan solas contra el
-        # nuevo total. Las etapas ya finalizadas no se tocan retroactivamente.
-        if request.item_id == run.raw_material_item_id:
-            run.total_required_material += request.quantity
-            if run.expected_finished_weight is not None:
-                run.expected_finished_weight += request.quantity
-
-        self._add_or_merge_acta_line(
-            run,
-            side=ActaLineSide.ENTREGA,
-            stage_id=request.stage_id,
-            label=item_name,
-            quantity=request.quantity,
-            unit_code=request.unit_code,
-            item_id=request.item_id,
-            source=ActaLineSource.AUTO,
-        )
-        self.repository.flush()
-        return self._read_with_names(run)
-
-    def reject_additional_material(
-        self, request_id: UUID, reason: str | None, current_user: CurrentUser
-    ) -> ProductionRunRead:
-        request = self.repository.get_additional_material_request(request_id)
-        if request is None:
-            raise ProductionNotFoundError("Solicitud de material adicional no encontrada.")
-        if request.status != ComplementRequestStatus.PENDING:
-            raise ProductionDomainError("Esta solicitud ya fue procesada.")
-        request.status = ComplementRequestStatus.REJECTED
-        request.rejection_reason = (reason or "").strip() or None
-        request.approved_by_user_id = current_user.id
-        request.approved_at = datetime.utcnow()
-        self.repository.flush()
-        return self._read_with_names(request.run)
-
     def _cancel_run_core(self, run: ProductionRun, current_user: CurrentUser, reason: str | None) -> None:
         """Nucleo de la cancelacion: libera cualquier reserva y devuelve al
         inventario todo lo que la corrida ya consumio (materia prima,
@@ -478,9 +362,6 @@ class ProductionService:
         run.rejection_reason = reason
         run.rejected_at = datetime.utcnow()
         run.is_cancellation = True
-        for request in run.additional_material_requests:
-            if request.status == ComplementRequestStatus.PENDING:
-                request.status = ComplementRequestStatus.REJECTED
 
     def _revert_admin_stock_lines(self, run: ProductionRun, current_user: CurrentUser) -> None:
         """Lineas ADMIN_STOCK mueven stock por su propio rastro
@@ -673,48 +554,6 @@ class ProductionService:
                 else:
                     product.product_name = target_names.get(product.target_item_id)
                     product.unit_code = item_units.get(product.target_item_id)
-
-    def _attach_additional_materials(self, reads: list, runs: list) -> None:
-        """Nombres de item/etapa/usuario para las solicitudes de material
-        adicional pedidas mientras la corrida estaba EN_PROCESO."""
-        from sqlalchemy import select
-        from backend.modules.inventory.models import InventoryItem
-
-        item_ids = {r.item_id for run in runs for r in run.additional_material_requests}
-        item_names: dict = {}
-        if item_ids:
-            rows = self.repository.session.execute(
-                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(item_ids))
-            ).all()
-            item_names = {row[0]: row[1] for row in rows}
-        user_ids = [
-            uid
-            for run in runs
-            for r in run.additional_material_requests
-            for uid in (r.requested_by_user_id, r.approved_by_user_id)
-        ]
-        user_names = _resolve_run_user_names(self.repository.session, user_ids)
-        for read, run in zip(reads, runs):
-            stages_by_id = {stage.id: stage for stage in run.stages}
-            read.additional_materials = [
-                AdditionalMaterialRequestRead(
-                    id=r.id,
-                    item_id=r.item_id,
-                    name=item_names.get(r.item_id),
-                    quantity=r.quantity,
-                    unit_code=r.unit_code,
-                    status=r.status,
-                    stage_id=r.stage_id,
-                    stage_name=(stages_by_id[r.stage_id].stage_name if r.stage_id in stages_by_id else None),
-                    note=r.note,
-                    requested_by_name=user_names.get(str(r.requested_by_user_id)),
-                    requested_at=r.requested_at,
-                    approved_by_name=user_names.get(str(r.approved_by_user_id)) if r.approved_by_user_id else None,
-                    approved_at=r.approved_at,
-                    rejection_reason=r.rejection_reason,
-                )
-                for r in run.additional_material_requests
-            ]
 
     def _attach_acta_lines(self, reads: list, runs: list) -> None:
         """Nombres de etapa/usuario para las lineas de la acta persistida."""
@@ -1180,7 +1019,6 @@ class ProductionService:
         self._attach_allowed_types([read], [run])
         self._attach_supply_consumptions([read], [run])
         self._attach_plan_names([read], [run])
-        self._attach_additional_materials([read], [run])
         self._attach_acta_lines([read], [run])
         self._attach_stage_attempts([read], [run])
         read.reservation_is_complete = _reservation_is_complete(run)
@@ -1193,7 +1031,6 @@ class ProductionService:
         self._attach_allowed_types(reads, runs)
         self._attach_supply_consumptions(reads, runs)
         self._attach_plan_names(reads, runs)
-        self._attach_additional_materials(reads, runs)
         self._attach_acta_lines(reads, runs)
         self._attach_stage_attempts(reads, runs)
         for read, run in zip(reads, runs):

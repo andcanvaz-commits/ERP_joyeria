@@ -63,12 +63,6 @@ class RunProductsUpdate(BaseModel):
     products: list[RunProductCreate] = Field(min_length=1)
 
 
-class MaterialRejectPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    reason: str | None = Field(default=None, max_length=1000)
-
-
 class RunCancelPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,33 +139,6 @@ class RunProductRead(BaseModel):
     # Unidad real del item destino (g, und, ...); None si el plan es por
     # product_type_id (categoria sin pieza de catalogo elegida todavia).
     unit_code: str | None = None
-
-
-class AdditionalMaterialRequestCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    item_id: UUID
-    quantity: Decimal = Field(gt=0)
-    note: str | None = Field(default=None, max_length=500)
-
-
-class AdditionalMaterialRequestRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    id: UUID
-    item_id: UUID
-    name: str | None = None
-    quantity: Decimal
-    unit_code: str
-    status: str
-    stage_id: UUID | None = None
-    stage_name: str | None = None
-    note: str | None = None
-    requested_by_name: str | None = None
-    requested_at: datetime
-    approved_by_name: str | None = None
-    approved_at: datetime | None = None
-    rejection_reason: str | None = None
 
 
 class ActaLineRead(BaseModel):
@@ -366,7 +333,5 @@ class ProductionRunRead(BaseModel):
     event_lines: list[ProductionRunEventLineRead] = Field(default_factory=list)
     # Plan de resultantes (split).
     products: list[RunProductRead] = Field(default_factory=list)
-    # Material adicional pedido mientras la corrida esta EN_PROCESO.
-    additional_materials: list[AdditionalMaterialRequestRead] = Field(default_factory=list)
     # Acta persistida: que entro y que salio de la orden (ver ActaLineSource).
     acta_lines: list[ActaLineRead] = Field(default_factory=list)

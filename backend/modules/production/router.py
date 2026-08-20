@@ -10,9 +10,7 @@ from backend.modules.production.repository import ProductionProcessRepository
 from backend.modules.production.schemas import (
     ActaLineCreate,
     ActaLineUpdate,
-    AdditionalMaterialRequestCreate,
     AdminActaLineCreate,
-    MaterialRejectPayload,
     ProductionOrderCreate,
     ProductionProcessCreate,
     ProductionProcessRead,
@@ -236,51 +234,6 @@ def cancel_run_family(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.post("/runs/{run_id}/additional-materials", response_model=ProductionRunRead)
-def request_additional_material(
-    run_id: UUID,
-    payload: AdditionalMaterialRequestCreate,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.request_additional_material(run_id, payload, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/additional-materials/{request_id}/approve", response_model=ProductionRunRead)
-def approve_additional_material(
-    request_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.approve_additional_material(request_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/additional-materials/{request_id}/reject", response_model=ProductionRunRead)
-def reject_additional_material(
-    request_id: UUID,
-    payload: MaterialRejectPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.reject_additional_material(request_id, payload.reason if payload else None, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.post("/runs/{run_id}/acta-lines", response_model=ProductionRunRead)

@@ -66,26 +66,6 @@ export function cancelProductionRunFamily(runId: string, reason?: string) {
   });
 }
 
-export function requestAdditionalMaterial(runId: string, payload: { item_id: string; quantity: string; note?: string | null }) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/additional-materials`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function approveAdditionalMaterial(requestId: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/additional-materials/${requestId}/approve`, {
-    method: "POST",
-  });
-}
-
-export function rejectAdditionalMaterial(requestId: string, reason?: string | null) {
-  return apiRequest<ProductionRun>(`/api/production/runs/additional-materials/${requestId}/reject`, {
-    method: "POST",
-    body: JSON.stringify({ reason: reason ?? null }),
-  });
-}
-
 export function addActaLine(runId: string, payload: { side: "ENTREGA" | "RECEPCION"; label: string; quantity: string; unit_code: string; item_id?: string | null; note?: string | null }) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/acta-lines`, {
     method: "POST",
