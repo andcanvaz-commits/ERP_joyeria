@@ -371,6 +371,24 @@ class ProductionRunStageAttemptMaterial(Base):
     stage_attempt: Mapped["ProductionRunStageAttempt"] = relationship(back_populates="materials")
 
 
+class ProductionRunStageAttemptDecision(Base):
+    """Bitacora de cada vez que se aprueba (check) o rechaza (x) un intento
+    de etapa (flujo nuevo, control de calidad universal). A diferencia de
+    ProductionRunStageAttempt.status, un rechazo NO cierra el intento -- solo
+    queda esta fila como registro; el intento sigue EN_PROCESO y editable."""
+
+    __tablename__ = "production_run_stage_attempt_decisions"
+
+    id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    stage_attempt_id: Mapped[PyUUID] = mapped_column(
+        ForeignKey("production_run_stage_attempts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by_user_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+
 class ProductionRunActaLine(Base):
     __tablename__ = "production_run_acta_lines"
 

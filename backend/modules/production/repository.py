@@ -11,6 +11,7 @@ from backend.modules.production.models import (
     ProductionRunActaLine,
     ProductionRunStage,
     ProductionRunStageAttempt,
+    ProductionRunStageAttemptDecision,
     StageAttemptStatus,
 )
 
@@ -82,6 +83,14 @@ class ProductionProcessRepository:
                 ProductionRunStageAttempt.process_name == process_name,
             )
         return len(self.session.execute(statement).scalars().all())
+
+    def list_stage_attempt_decisions(self, attempt_id: UUID) -> list[ProductionRunStageAttemptDecision]:
+        statement = (
+            select(ProductionRunStageAttemptDecision)
+            .where(ProductionRunStageAttemptDecision.stage_attempt_id == attempt_id)
+            .order_by(ProductionRunStageAttemptDecision.decided_at.asc())
+        )
+        return list(self.session.execute(statement).scalars().all())
 
     def get_acta_line(self, line_id: UUID) -> ProductionRunActaLine | None:
         statement = (

@@ -101,6 +101,15 @@ class StageDecisionRead(BaseModel):
     attempt_no: int
 
 
+class StageAttemptDecisionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    decision: str
+    reason: str | None = None
+    decided_by_name: str | None = None
+    decided_at: datetime
+
+
 class ProductionRunStageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -309,6 +318,7 @@ class StageAttemptRead(BaseModel):
     finished_at: datetime | None = None
     acta_lines: list[ActaLineRead] = Field(default_factory=list)
     materials: list[StageAttemptMaterialRead] = Field(default_factory=list)
+    decisions: list[StageAttemptDecisionRead] = Field(default_factory=list)
 
 
 class ProductionRunRead(BaseModel):
