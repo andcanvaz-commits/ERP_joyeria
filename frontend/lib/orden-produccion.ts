@@ -40,6 +40,9 @@ export type OrdenProduccionModel = {
   entregaTotalRows: ActaSideTotal[];
   recepcionTotalRows: ActaSideTotal[];
   cancelada: boolean;
+  // Etapa individual (stageAttemptId pasado a buildOrdenProduccion) que
+  // termino RECHAZADA por control de calidad.
+  rechazada: boolean;
 };
 
 const DASH = "—"; // —
@@ -246,6 +249,38 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   };
 }
 
+/** El acta de UN intento de etapa puntual (flujo nuevo, seccion 4): a
+ * diferencia de buildRunActaSides (toda la orden junta), acota las lineas al
+ * stage_attempt_id pedido -- fuente unica compartida entre el acta en vivo
+ * de production-dashboard.tsx y el drill-down por etapa de Documentos. Sin
+ * totales (computeRunTotals depende de materials_approved_at, un campo del
+ * flujo viejo que las ordenes nuevas nunca setean) ni producto-real /
+ * event_lines (eso es concepto de ORDEN completa, no de una etapa sola). */
+export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemptId: string): RunActaSides {
+  const lines = (run.acta_lines ?? []).filter((l) => l.stage_attempt_id === stageAttemptId);
+  const attempt = (run.stage_attempts ?? []).find((a) => a.id === stageAttemptId);
+  const entregaLines: ActaSideLine[] = sortRowsByFecha(
+    lines
+      .filter((l) => l.side === "ENTREGA")
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at, item_id: l.item_id }))
+  );
+  const recepcionLines: ActaSideLine[] = sortRowsByFecha(
+    lines
+      .filter((l) => l.side === "RECEPCION")
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at, item_id: l.item_id }))
+  );
+  return {
+    entregaLines,
+    entregaFecha: attempt?.started_at ?? null,
+    entregaResponsable: attempt?.responsable_name ?? DASH,
+    recepcionLines,
+    recepcionFecha: attempt?.finished_at ?? null,
+    recepcionResponsable: attempt?.finished_by_name ?? DASH,
+    entregaTotalRows: [],
+    recepcionTotalRows: [],
+  };
+}
+
 /** Mapa inventory_item_id → nombre, a partir de la lista de inventario. */
 export function buildItemNameMap(items: InventoryItem[]): Map<string, string> {
   return new Map(items.map((item) => [item.id, item.name]));
@@ -380,11 +415,37 @@ function buildSide(
  * es identico a lo que Ver Acta mostraria para ese unico run. */
 export function buildOrdenProduccion(
   family: ProductionRun[],
-  itemNames: Map<string, string>
+  itemNames: Map<string, string>,
+  // Acota el acta a UN intento de etapa (flujo nuevo, Documentos Task 13):
+  // cuando una orden tiene mas de una etapa, se elige cual ver antes de
+  // armar el modelo. Sin esto, el comportamiento es el de siempre (toda la
+  // orden/familia junta).
+  stageAttemptId?: string
 ): OrdenProduccionModel {
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
   const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name ?? root.name ?? DASH;
   const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
+
+  if (stageAttemptId) {
+    const attempt = (root.stage_attempts ?? []).find((a) => a.id === stageAttemptId);
+    const sides = buildRunActaSidesForStageAttempt(root, stageAttemptId);
+    return {
+      folio: root.production_code ?? DASH,
+      procesoNombre: attempt?.process_name ?? root.process_name ?? root.name ?? DASH,
+      categoria: materialName,
+      responsableProduccion: attempt?.responsable_name ?? root.created_by_name ?? DASH,
+      entregaLines: sides.entregaLines,
+      entregaFecha: sides.entregaFecha,
+      entregaResponsable: sides.entregaResponsable,
+      recepcionLines: sides.recepcionLines,
+      recepcionFecha: sides.recepcionFecha,
+      recepcionResponsable: sides.recepcionResponsable,
+      entregaTotalRows: sides.entregaTotalRows,
+      recepcionTotalRows: sides.recepcionTotalRows,
+      cancelada: root.status === "CANCELADA",
+      rechazada: attempt?.status === "RECHAZADA",
+    };
+  }
 
   // Caso normal (sin split, la enorme mayoria de las ordenes): exactamente
   // la misma acta que "Ver acta" muestra para ese run -- misma funcion, cero
@@ -405,6 +466,7 @@ export function buildOrdenProduccion(
       entregaTotalRows: sides.entregaTotalRows,
       recepcionTotalRows: sides.recepcionTotalRows,
       cancelada: root.status === "CANCELADA",
+      rechazada: false,
     };
   }
 
@@ -425,6 +487,7 @@ export function buildOrdenProduccion(
     entregaTotalRows: sides.entregaTotalRows,
     recepcionTotalRows: sides.recepcionTotalRows,
     cancelada: family.every((run) => run.status === "CANCELADA"),
+    rechazada: false,
   };
 }
 

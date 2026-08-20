@@ -63,6 +63,9 @@ export function DocumentosDashboard() {
   const runs = (data?.runs ?? []).filter((run) => run.status !== "CANCELADA");
   const items = data?.items ?? [];
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Carpeta por orden (Task 13): con mas de una etapa, primero se elige cual
+  // ver antes de armar el acta -- null = todavia no se eligio.
+  const [selectedStageAttemptId, setSelectedStageAttemptId] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState<DocMode | null>(null);
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<"ALL" | "LIVE">("ALL");
@@ -201,15 +204,29 @@ export function DocumentosDashboard() {
     setIsCalendarOpen(true);
   }
 
-  function selectFamilyFromCalendar(key: string) {
+  function selectFamily(key: string) {
     setSelectedKey(key);
+    setSelectedStageAttemptId(null);
+  }
+
+  function selectFamilyFromCalendar(key: string) {
+    selectFamily(key);
     setIsCalendarOpen(false);
   }
 
   const selectedFamily = selectedKey ? families.get(selectedKey) ?? null : null;
+  const selectedFamilyRoot = selectedFamily ? familyRoot(selectedFamily) : null;
+  // Solo el flujo nuevo tiene stage_attempts -- ordenes historicas (event_lines)
+  // o de una sola etapa saltan directo a la acta, como siempre.
+  const stageAttempts = selectedFamilyRoot?.stage_attempts ?? [];
+  const needsStageList =
+    stageAttempts.length > 1 && selectedFamily !== null && !isHistoricalFamily(selectedFamily);
   const model = useMemo(
-    () => (selectedFamily ? buildOrdenProduccion(selectedFamily, itemNames) : null),
-    [selectedFamily, itemNames]
+    () =>
+      selectedFamily && (!needsStageList || selectedStageAttemptId)
+        ? buildOrdenProduccion(selectedFamily, itemNames, selectedStageAttemptId ?? undefined)
+        : null,
+    [selectedFamily, itemNames, needsStageList, selectedStageAttemptId]
   );
   const selectedRootRunId = selectedFamily
     ? (selectedFamily.find((r) => !r.parent_run_id) ?? selectedFamily[0]).id
@@ -308,7 +325,7 @@ export function DocumentosDashboard() {
                     <button
                       className={`processPicker${isSel ? " processPickerActive" : ""}`}
                       key={key}
-                      onClick={() => setSelectedKey(key)}
+                      onClick={() => selectFamily(key)}
                       type="button"
                     >
                       <span style={{ display: "grid", gap: 2, textAlign: "left" }}>
@@ -325,7 +342,42 @@ export function DocumentosDashboard() {
           </div>
 
           <div className="documentosPreview">
-            {model && selectedFamily ? (
+            {needsStageList && !selectedStageAttemptId ? (
+              <div className="tableWrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Codigo</th>
+                      <th>Proceso</th>
+                      <th>Responsable</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stageAttempts.map((attempt) => (
+                      <tr
+                        key={attempt.id}
+                        onClick={() => setSelectedStageAttemptId(attempt.id)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td>{attempt.code ?? "—"}</td>
+                        <td>{attempt.process_name}</td>
+                        <td>{attempt.responsable_name ?? "—"}</td>
+                        <td>
+                          {attempt.status === "RECHAZADA" ? (
+                            <span className="statusBadge">Rechazada</span>
+                          ) : attempt.status === "APROBADA" ? (
+                            <span className="statusBadge">Aprobada</span>
+                          ) : (
+                            <span className="statusBadge">{attempt.status}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : model && selectedFamily ? (
               <>
                 {docError || docSuccess ? (
                   <div className="toastStack" aria-live="polite" aria-atomic="true">
@@ -334,6 +386,12 @@ export function DocumentosDashboard() {
                   </div>
                 ) : null}
                 <div className="documentosActions">
+                  {needsStageList ? (
+                    <button className="button" onClick={() => setSelectedStageAttemptId(null)} type="button">
+                      <ChevronLeft aria-hidden="true" size={16} />
+                      Ver etapas
+                    </button>
+                  ) : null}
                   <button
                     className="button"
                     disabled={!selectedFamily || !canPrintEntrega(selectedFamily)}
@@ -374,6 +432,7 @@ export function DocumentosDashboard() {
                           onSuccess={setDocSuccess}
                           runId={selectedRootRunId}
                           side="ENTREGA"
+                          stageAttemptId={selectedStageAttemptId ?? undefined}
                         />
                       ) : null
                     }
@@ -398,6 +457,7 @@ export function DocumentosDashboard() {
                           onSuccess={setDocSuccess}
                           runId={selectedRootRunId}
                           side="RECEPCION"
+                          stageAttemptId={selectedStageAttemptId ?? undefined}
                         />
                       ) : null
                     }

@@ -73,6 +73,7 @@ export function OrdenProduccionDoc({
         </div>
 
         {model.cancelada ? <div className="opStamp opStampCancel">CANCELADO</div> : null}
+        {model.rechazada ? <div className="opStamp opStampReject">RECHAZADO POR CONTROL DE CALIDAD</div> : null}
       </article>
     </div>
   );

@@ -5078,6 +5078,14 @@ textarea:disabled {
   pointer-events: none;
 }
 
+/* Texto mas largo que CANCELADO -- mismo sello, letra mas chica para que no
+   se salga del documento. */
+.opStampReject {
+  font-size: 26px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
 /* ── Modos de impresión (controlan tinta vía visibility) ──────── */
 .opMode-entrega .opRecepcionData {
   visibility: hidden;
