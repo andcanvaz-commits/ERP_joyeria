@@ -9,12 +9,34 @@ import { normalizeRole } from "@/lib/roles";
 import { deleteMessage, listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
 import { markMessagesSeen, type MessagesScope } from "@/lib/messages-read-state";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
+import { dateKey } from "@/lib/calendar";
 
 function dateTimeLabel(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function dayLabel(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  return date.toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" });
+}
+
+// Agrupa mensajes por dia (mas reciente primero) -- separador de fecha una
+// vez por grupo, no por mensaje.
+function groupMessagesByDay(messages: AdminMessage[]): Array<{ key: string; label: string; items: AdminMessage[] }> {
+  const groups = new Map<string, AdminMessage[]>();
+  for (const message of messages) {
+    const key = dateKey(new Date(message.created_at));
+    const existing = groups.get(key);
+    if (existing) existing.push(message);
+    else groups.set(key, [message]);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([key, items]) => ({ key, label: dayLabel(items[0].created_at), items }));
 }
 
 // Mensaje libre Admin <-> Produccion/Inventario (docs/cambios-sistema-produccion.md
@@ -103,10 +125,14 @@ export function MessagesPanel({
   role,
   userId,
   scope,
+  title,
 }: {
   role: "admin" | "operaciones";
   userId: string | null;
   scope: MessagesScope;
+  // null = no renderiza titulo propio (el caller ya tiene uno, ej. el
+  // modalHeader de Inventario) -- si se omite, usa el titulo por defecto.
+  title?: string | null;
 }) {
   const queryClient = useQueryClient();
   const [body, setBody] = useState("");
@@ -172,21 +198,25 @@ export function MessagesPanel({
     }
   }
 
+  const resolvedTitle =
+    title === null ? null : title ?? (role === "admin" ? "Mensajes con Producción/Inventario" : "Mensajes del Admin");
+  const groups = groupMessagesByDay(messages);
+
   return (
     <section className="card panelBody">
-      <div className="panelHeader">
-        <div>
-          <h2 className="panelTitle">{role === "admin" ? "Mensajes con Produccion/Inventario" : "Mensajes del Admin"}</h2>
-          <p className="panelText">Comunicacion libre -- cualquiera de los dos lados puede responder</p>
+      {resolvedTitle ? (
+        <div className="panelHeader">
+          <div>
+            <h2 className="panelTitle">{resolvedTitle}</h2>
+          </div>
         </div>
-      </div>
+      ) : null}
       {localError ? <div className="alert alertError">{localError}</div> : null}
       {role === "admin" ? (
         <div className="messageComposer">
           <textarea
             className="field"
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Ej: Necesito 20kg de este producto para el 30 de agosto"
             rows={2}
             value={body}
           />
@@ -196,15 +226,20 @@ export function MessagesPanel({
         </div>
       ) : null}
       <div className="messageList">
-        {messages.map((m) => (
-          <MessageThread
-            currentUserId={userId}
-            isSaving={isSaving}
-            key={m.id}
-            message={m}
-            onDelete={role === "admin" ? handleDelete : undefined}
-            onReply={handleReply}
-          />
+        {groups.map((group) => (
+          <div key={group.key}>
+            <div className="messageDaySeparator">{group.label}</div>
+            {group.items.map((m) => (
+              <MessageThread
+                currentUserId={userId}
+                isSaving={isSaving}
+                key={m.id}
+                message={m}
+                onDelete={role === "admin" ? handleDelete : undefined}
+                onReply={handleReply}
+              />
+            ))}
+          </div>
         ))}
         {messages.length === 0 ? <div className="emptyState">Sin mensajes.</div> : null}
       </div>
@@ -240,7 +275,7 @@ export function SolicitudesView() {
   return (
     <div className="content">
       {role === "admin" || role === "operaciones" ? (
-        <MessagesPanel role={role} scope="solicitudes" userId={userId} />
+        <MessagesPanel role={role} scope="solicitudes" title="Mensajes con Producción" userId={userId} />
       ) : null}
     </div>
   );

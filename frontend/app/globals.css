@@ -2201,9 +2201,19 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 420px;
-  overflow-y: auto;
-  padding-right: 2px;
+}
+
+.messageDaySeparator {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 10px 0 6px;
+}
+
+.messageDaySeparator:first-child {
+  margin-top: 0;
 }
 
 .messageCard {

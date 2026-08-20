@@ -1908,7 +1908,7 @@ export function InventoryDashboard() {
               className="topbarInbox"
               onClick={() => { setIsMessagesOpen(true); markMessagesSeen(queryClient, currentUser?.id ?? null, "inventario"); }}
               type="button"
-              aria-label="Buzon de mensajes"
+              aria-label="Bandeja de entrada"
             >
               <MessageSquare aria-hidden="true" size={18} />
               Mensajes
@@ -4590,19 +4590,18 @@ export function InventoryDashboard() {
         : null}
 
       {isMessagesOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Buzon de mensajes">
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Bandeja de entrada">
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
-                <h2>Buzón de mensajes</h2>
-                <p>Comunicados del administrador</p>
+                <h2>Bandeja de entrada</h2>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsMessagesOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
             {messagesRole === "admin" || messagesRole === "operaciones" ? (
-              <MessagesPanel role={messagesRole} scope="inventario" userId={currentUser?.id ?? null} />
+              <MessagesPanel role={messagesRole} scope="inventario" title={null} userId={currentUser?.id ?? null} />
             ) : null}
           </section>
         </div>
