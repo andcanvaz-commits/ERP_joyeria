@@ -567,9 +567,13 @@ def test_add_admin_acta_line_recepcion_rejects_raw_material(
         )
 
 
-def test_add_admin_acta_line_recepcion_rejects_item_never_entregado(
+def test_add_admin_acta_line_recepcion_allows_extra_never_entregado(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
+    """Devolucion 'extra': un item que nunca aparecio en ENTREGA de esta etapa
+    (fuera de lo entregado) se puede recibir igual, sin tope -- Rodrigo,
+    2026-08-20: produccion a veces devuelve algo que no estaba en lo
+    entregado, y eso debe sumar al stock igual."""
     from backend.modules.inventory.models import InventoryItem
 
     order, attempt, _supply = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
@@ -580,12 +584,17 @@ def test_add_admin_acta_line_recepcion_rejects_item_never_entregado(
     db_session.add(other_item)
     db_session.flush()
 
-    with pytest.raises(ProductionDomainError, match="ya se entrego en esta etapa"):
-        production_service.add_admin_acta_line(
-            order.id,
-            AdminActaLineCreate(side="RECEPCION", item_id=other_item.id, quantity=Decimal("1"), stage_attempt_id=attempt.id),
-            current_user,
-        )
+    result = production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(side="RECEPCION", item_id=other_item.id, quantity=Decimal("500"), stage_attempt_id=attempt.id),
+        current_user,
+    )
+
+    db_session.refresh(other_item)
+    assert other_item.current_stock == Decimal("510")  # 10 + 500 devuelto, sin tope
+    lines = [l for l in result.acta_lines if l.item_id == other_item.id and l.side == "RECEPCION"]
+    assert len(lines) == 1
+    assert lines[0].quantity == Decimal("500")
 
 
 def test_add_admin_acta_line_recepcion_caps_at_entregado_minus_recibido(
