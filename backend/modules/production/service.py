@@ -938,42 +938,22 @@ class ProductionService:
                 payload.product_type_id, payload.material_code, payload.unit_code
             )
 
-        if payload.side == ActaLineSide.RECEPCION and payload.stage_attempt_id is not None:
-            if item.item_type == "RAW_MATERIAL":
-                raise ProductionDomainError(
-                    "La materia prima no se devuelve por aca -- ya paso a formar parte del producto resultante."
-                )
-            entregado = sum(
-                (
-                    l.quantity
-                    for l in run.acta_lines
-                    if l.side == ActaLineSide.ENTREGA
-                    and l.item_id == item.id
-                    and l.stage_attempt_id == payload.stage_attempt_id
-                ),
-                Decimal("0"),
+        if payload.side == ActaLineSide.RECEPCION and item.item_type == "RAW_MATERIAL":
+            raise ProductionDomainError(
+                "La materia prima no se devuelve por aca -- ya paso a formar parte del producto resultante."
             )
-            # entregado == 0: devolucion "extra", un item que nunca se
-            # entrego en esta etapa -- se permite sin tope (Rodrigo,
-            # 2026-08-20). El tope entregado-recibido solo tiene sentido
-            # cuando el item si se entrego.
-            if entregado > 0:
-                recibido = sum(
-                    (
-                        l.quantity
-                        for l in run.acta_lines
-                        if l.side == ActaLineSide.RECEPCION
-                        and l.item_id == item.id
-                        and l.stage_attempt_id == payload.stage_attempt_id
-                    ),
-                    Decimal("0"),
+
+        # RECEPCION no tiene tope de cantidad (Rodrigo, 2026-08-20): una
+        # devolucion puede superar lo entregado en la etapa sin problema, el
+        # tope de stock real (que nunca quede negativo) ya lo cubre
+        # _apply_admin_acta_line_delta para el lado ENTREGA, que es el unico
+        # que puede dejar stock negativo.
+
+        if payload.side == ActaLineSide.ENTREGA and payload.stage_attempt_id is not None:
+            if not payload.note or not payload.note.strip():
+                raise ProductionDomainError(
+                    "Indica el motivo: esta linea se agrega despues de haber iniciado la etapa."
                 )
-                disponible = entregado - recibido
-                if payload.quantity > disponible:
-                    raise ProductionDomainError(
-                        f"La cantidad ({format_qty(payload.quantity)} {item.unit_code}) supera lo que en realidad "
-                        f"se entrego para este material ({format_qty(disponible)} {item.unit_code})."
-                    )
 
         line = ProductionRunActaLine(
             side=payload.side,

@@ -73,7 +73,10 @@ def test_revert_stage_attempt_reverts_admin_stock_supply_return(
     attempt_id = started.stage_attempts[0].id
     production_service.add_admin_acta_line(
         order.id,
-        AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("100"), stage_attempt_id=attempt_id),
+        AdminActaLineCreate(
+            side="ENTREGA", item_id=supply.id, quantity=Decimal("100"),
+            stage_attempt_id=attempt_id, note="Insumo agregado en setup de test",
+        ),
         current_user,
     )
     production_service.add_admin_acta_line(
