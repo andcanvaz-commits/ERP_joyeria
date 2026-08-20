@@ -124,7 +124,7 @@ export function startStageAttempt(
     responsable_name: string;
     materials?: Array<{ item_id: string; quantity: string }>;
     // Solo el destino -- la cantidad real se llena al finalizar (Rodrigo, 2026-08-20).
-    product: { product_type_id?: string; target_item_id?: string };
+    products: Array<{ product_type_id?: string | null; target_item_id?: string | null; material_code?: string | null; quantity: string }>;
   },
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/stage-attempts`, {
@@ -133,25 +133,14 @@ export function startStageAttempt(
   });
 }
 
-/** Asigna stock recien disponible a un intento PENDIENTE_MATERIAL: consume lo
- * que alcance y, si queda 100% cubierto y no hay otro intento activo en la
- * orden, lo arranca. */
-export function allocateStageAttemptMaterial(attemptId: string) {
-  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/allocate-material`, {
+export function approveStageAttempt(attemptId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/approve`, {
     method: "POST",
   });
 }
 
-/** Termina el intento activo. La cantidad real del producto resultante
- * (elegido al iniciar la etapa, sin cantidad todavia) se llena aca --
- * recien aca se convierte el lote y se mueve inventario (Rodrigo,
- * 2026-08-20). decision solo importa si el proceso tiene control de
- * calidad; si no, el backend fuerza APROBADA. */
-export function finishStageAttempt(
-  attemptId: string,
-  payload: { product_quantity: string; decision?: "APROBADA" | "RECHAZADA"; rejection_reason?: string | null },
-) {
-  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/finish`, {
+export function rejectStageAttempt(attemptId: string, payload: { reason?: string | null }) {
+  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/reject`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
