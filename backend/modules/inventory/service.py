@@ -879,6 +879,11 @@ class InventoryService(InventoryIntegrationPort):
         material_type: str | None,
         purity: str | None,
         received_by_user_id: UUID | None,
+        # Unidad de la materia prima que se peso para esta etapa (Rodrigo,
+        # 2026-08-20: "todos los productos terminados van a trabajar con su
+        # unidad de medida que son los gramos... nada de unidades") -- el
+        # lote se mide en la MISMA unidad que se entrego, nunca "und" fijo.
+        unit_code: str = "g",
     ) -> InventoryItem:
         """Un solo lote FINISHED_PRODUCT por orden, alimentado de a poco por
         cada etapa: si la orden ya tiene un INGRESO_PRODUCCION propio, le suma
@@ -895,7 +900,7 @@ class InventoryService(InventoryIntegrationPort):
         if existing is None:
             return self.create_finished_product_lot(
                 name=run.name or "Producto",
-                unit_code="und",
+                unit_code=unit_code,
                 production_order_id=run.id,
                 production_code=run.production_code,
                 quantity=quantity,

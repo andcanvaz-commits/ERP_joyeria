@@ -151,6 +151,42 @@ def test_merma_computed_from_entrega_minus_same_item_recepcion(
     assert done.merma_percent == Decimal("4")
 
 
+def test_recepcion_line_unit_is_raw_material_unit_not_target_catalog_unit(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Rodrigo, 2026-08-20: "todos los productos terminados van a trabajar
+    con su unidad de medida que son los gramos... nada de unidades" --
+    target_complement.unit_code es "und" (su propia unidad de catalogo) pero
+    la linea RECEPCION debe quedar en la unidad de la materia prima ("g"),
+    no en la del destino."""
+    from backend.modules.production.schemas import StageAttemptMaterialLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden unidad test"), current_user)
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+        ),
+        current_user,
+    )
+    attempt = result.stage_attempts[0]
+
+    finished = production_service.finish_stage_attempt(
+        attempt.id, StageAttemptFinish(product_quantity=Decimal("90")), current_user
+    )
+
+    done = finished.stage_attempts[0]
+    assert done.unit_code == "g"
+    recepcion_lines = [l for l in finished.acta_lines if l.side == "RECEPCION" and l.stage_attempt_id == attempt.id]
+    assert len(recepcion_lines) == 1
+    assert recepcion_lines[0].unit_code == "g"
+
+
 def test_finish_rejects_product_quantity_above_what_was_delivered(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):

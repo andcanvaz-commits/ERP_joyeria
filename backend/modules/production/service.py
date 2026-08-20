@@ -1310,6 +1310,7 @@ class ProductionService:
             material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
             purity=raw_material.purity if raw_material else None,
             received_by_user_id=current_user.id,
+            unit_code=attempt.unit_code or "g",
         )
         try:
             if attempt.target_item_id is not None:
@@ -1344,7 +1345,11 @@ class ProductionService:
             side=ActaLineSide.RECEPCION,
             label=target_item.name if target_item else "Producto",
             quantity=payload.product_quantity,
-            unit_code=target_item.unit_code if target_item else "und",
+            # La unidad de la materia prima (gramos), no la del catalogo del
+            # destino (Rodrigo, 2026-08-20: "todos los productos terminados
+            # van a trabajar con su unidad de medida que son los gramos...
+            # nada de unidades") -- la cantidad ya esta en esos terminos.
+            unit_code=attempt.unit_code or "g",
             source=ActaLineSource.PLAN,
             item_id=target_id,
             stage_attempt_id=attempt.id,
