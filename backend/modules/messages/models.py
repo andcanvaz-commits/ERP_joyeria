@@ -9,9 +9,9 @@ from backend.modules.database.base import Base
 
 
 class AdminMessage(Base):
-    """Hilo de mensajes libres Admin <-> Produccion/Inventario
-    (docs/cambios-sistema-produccion.md seccion 2.2): cualquiera de los dos
-    lados puede seguir respondiendo, no es una unica ida y vuelta.
+    """Solicitud del admin a Produccion/Inventario (Rodrigo, 2026-08-20): dos
+    partes fijas, no un chat -- el admin solicita y Produccion/Inventario
+    responde una sola vez con Aprobar/Rechazar + comentario opcional.
 
     Eliminar es por superficie, no global: "Bandeja de mensajes" (solicitudes)
     e "Inventario" son dos vistas de la misma conversacion, pero borrar desde
@@ -36,6 +36,9 @@ class AdminMessage(Base):
 
 
 class AdminMessageReply(Base):
+    """La respuesta -- una sola por solicitud (Rodrigo, 2026-08-20). `decision`
+    es obligatorio (APROBADA/RECHAZADA); `body` es el comentario, opcional."""
+
     __tablename__ = "admin_message_replies"
 
     id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -43,7 +46,8 @@ class AdminMessageReply(Base):
         PG_UUID(as_uuid=True), ForeignKey("admin_messages.id", ondelete="CASCADE"), nullable=False
     )
     sender_user_id: Mapped[PyUUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    body: Mapped[str] = mapped_column(Text, nullable=False)
+    decision: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     message: Mapped[AdminMessage] = relationship("AdminMessage", back_populates="replies")

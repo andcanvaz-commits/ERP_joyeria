@@ -51,6 +51,7 @@ class MessagesService:
                     "id": reply.id,
                     "sender_user_id": reply.sender_user_id,
                     "sender_name": names.get(reply.sender_user_id),
+                    "decision": reply.decision,
                     "body": reply.body,
                     "created_at": reply.created_at,
                 }
@@ -105,7 +106,12 @@ class MessagesService:
         ).scalar_one_or_none()
         if message is None:
             raise MessageNotFoundError("Mensaje no encontrado.")
-        reply = AdminMessageReply(message_id=message.id, sender_user_id=current_user.id, body=payload.body.strip())
+        if message.replies:
+            raise MessageDomainError("Esta solicitud ya fue respondida.")
+        body = payload.body.strip() if payload.body else None
+        reply = AdminMessageReply(
+            message_id=message.id, sender_user_id=current_user.id, decision=payload.decision, body=body or None
+        )
         self.session.add(reply)
         self.session.flush()
         message.replies.append(reply)

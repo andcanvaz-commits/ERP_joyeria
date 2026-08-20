@@ -1,7 +1,10 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+MessageDecision = Literal["APROBADA", "RECHAZADA"]
 
 
 class AdminMessageCreate(BaseModel):
@@ -13,7 +16,8 @@ class AdminMessageCreate(BaseModel):
 class AdminMessageReplyCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    body: str = Field(min_length=1, max_length=2000)
+    decision: MessageDecision
+    body: str | None = Field(default=None, max_length=2000)
 
 
 class AdminMessageReplyRead(BaseModel):
@@ -22,7 +26,8 @@ class AdminMessageReplyRead(BaseModel):
     id: UUID
     sender_user_id: UUID
     sender_name: str | None = None
-    body: str
+    decision: MessageDecision
+    body: str | None = None
     created_at: datetime
 
 

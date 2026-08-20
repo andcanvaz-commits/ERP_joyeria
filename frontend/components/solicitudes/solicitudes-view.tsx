@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, ChevronLeft, ChevronRight, Send, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Trash2, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
-import { deleteMessage, listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
+import { deleteMessage, listMessages, replyMessage, sendMessage, type AdminMessage, type MessageDecision } from "@/lib/messages-api";
 import { markMessagesSeen, type MessagesScope } from "@/lib/messages-read-state";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
@@ -39,77 +39,85 @@ function groupMessagesByDay(messages: AdminMessage[]): Array<{ key: string; labe
     .map(([key, items]) => ({ key, label: dayLabel(items[0].created_at), items }));
 }
 
-// Mensaje libre Admin <-> Produccion/Inventario (docs/cambios-sistema-produccion.md
-// seccion 2.2): una ida y una vuelta de texto, no una orden ni un aceptar/
-// rechazar. Historial permanente, misma lista para los dos lados. Estilo
-// chat (Rodrigo, 2026-08-20): burbujas simples, sin tarjeta/boton grande.
+// Solicitud del admin + respuesta de Produccion/Inventario (Rodrigo,
+// 2026-08-20): dos partes fijas por cuadro, no un chat -- la respuesta es
+// Aprobar/Rechazar con comentario opcional, una sola vez por solicitud.
 function MessageThread({
   message,
-  currentUserId,
+  role,
   isSaving,
   onReply,
   onDelete,
 }: {
   message: AdminMessage;
-  currentUserId: string | null;
+  role: "admin" | "operaciones";
   isSaving: boolean;
-  onReply: (messageId: string, body: string) => void | Promise<void>;
+  onReply: (messageId: string, decision: MessageDecision, body: string) => void | Promise<void>;
   onDelete?: (messageId: string) => void | Promise<void>;
 }) {
-  const [replyText, setReplyText] = useState("");
-  const bubbles = [
-    { id: message.id, body: message.body, created_at: message.created_at, senderName: message.sender_name ?? "Admin", mine: message.sender_user_id === currentUserId },
-    ...message.replies.map((reply) => ({
-      id: reply.id,
-      body: reply.body,
-      created_at: reply.created_at,
-      senderName: reply.sender_name ?? "Respuesta",
-      mine: reply.sender_user_id === currentUserId,
-    })),
-  ];
+  const [comment, setComment] = useState("");
+  const reply = message.replies[0] ?? null;
   return (
-    <div className="chatThread">
-      {onDelete ? (
-        <button
-          aria-label="Eliminar mensaje"
-          className="chatThreadDelete iconOnlyButton"
-          disabled={isSaving}
-          onClick={() => void onDelete(message.id)}
-          title="Eliminar mensaje"
-          type="button"
-        >
-          <Trash2 aria-hidden="true" size={14} />
-        </button>
-      ) : null}
-      {bubbles.map((bubble) => (
-        <div className={`chatBubble${bubble.mine ? " chatBubbleMine" : ""}`} key={bubble.id}>
-          <span className="chatBubbleMeta">{bubble.senderName} · {timeLabel(bubble.created_at)}</span>
-          <p>{bubble.body}</p>
+    <article className="requestCard">
+      <header className="requestCardHead">
+        <div className="requestCardMeta">
+          <strong>{message.sender_name ?? "Admin"} solicita</strong>
+          <span>{timeLabel(message.created_at)}</span>
         </div>
-      ))}
-      <div className="chatReplyRow">
-        <textarea
-          className="field chatReplyField"
-          onChange={(e) => setReplyText(e.target.value)}
-          placeholder="Escribe tu respuesta..."
-          rows={1}
-          value={replyText}
-        />
-        <button
-          aria-label="Responder"
-          className="chatSendButton"
-          disabled={isSaving || !replyText.trim()}
-          onClick={() => {
-            void onReply(message.id, replyText.trim());
-            setReplyText("");
-          }}
-          title="Responder"
-          type="button"
-        >
-          <Send aria-hidden="true" size={16} />
-        </button>
-      </div>
-    </div>
+        {onDelete ? (
+          <button
+            aria-label="Eliminar solicitud"
+            className="iconOnlyButton"
+            disabled={isSaving}
+            onClick={() => void onDelete(message.id)}
+            title="Eliminar solicitud"
+            type="button"
+          >
+            <Trash2 aria-hidden="true" size={15} />
+          </button>
+        ) : null}
+      </header>
+      <p className="requestBody">{message.body}</p>
+      {reply ? (
+        <div className={`requestDecision ${reply.decision === "APROBADA" ? "requestDecisionOk" : "requestDecisionNo"}`}>
+          <strong>
+            {reply.decision === "APROBADA" ? <Check aria-hidden="true" size={14} /> : <X aria-hidden="true" size={14} />}
+            {reply.decision === "APROBADA" ? "Aprobado" : "Rechazado"} · {reply.sender_name ?? "Producción/Inventario"} · {timeLabel(reply.created_at)}
+          </strong>
+          {reply.body ? <p>{reply.body}</p> : null}
+        </div>
+      ) : role === "operaciones" ? (
+        <div className="requestActions">
+          <textarea
+            className="field"
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Comentario opcional..."
+            rows={1}
+            value={comment}
+          />
+          <div className="requestActionButtons">
+            <button
+              className="button buttonDanger"
+              disabled={isSaving}
+              onClick={() => void onReply(message.id, "RECHAZADA", comment)}
+              type="button"
+            >
+              Rechazar
+            </button>
+            <button
+              className="button buttonPrimary"
+              disabled={isSaving}
+              onClick={() => void onReply(message.id, "APROBADA", comment)}
+              type="button"
+            >
+              Aprobar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="requestPending">Esperando respuesta de Producción/Inventario.</p>
+      )}
+    </article>
   );
 }
 
@@ -184,15 +192,15 @@ export function MessagesPanel({
     }
   }
 
-  async function handleReply(messageId: string, replyBody: string) {
+  async function handleReply(messageId: string, decision: MessageDecision, replyBody: string) {
     setLocalError(null);
     setIsSaving(true);
     try {
-      await replyMessage(messageId, replyBody);
+      await replyMessage(messageId, decision, replyBody);
       markMessagesSeen(queryClient, userId, scope);
       await queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
     } catch (nextError) {
-      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo responder el mensaje.");
+      setLocalError(nextError instanceof Error ? nextError.message : "No se pudo responder la solicitud.");
     } finally {
       setIsSaving(false);
     }
@@ -232,12 +240,12 @@ export function MessagesPanel({
           <textarea
             className="field"
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Escribe un mensaje..."
-            rows={1}
+            placeholder="Escribe la solicitud..."
+            rows={2}
             value={body}
           />
-          <button aria-label="Enviar" className="chatSendButton" disabled={isSaving || !body.trim()} onClick={() => void handleSend()} title="Enviar" type="button">
-            <Send aria-hidden="true" size={16} />
+          <button className="button buttonPrimary" disabled={isSaving || !body.trim()} onClick={() => void handleSend()} type="button">
+            Enviar
           </button>
         </div>
       ) : null}
@@ -270,12 +278,12 @@ export function MessagesPanel({
               <div className="messageDaySeparator"><span>{group.label}</span></div>
               {group.items.map((m) => (
                 <MessageThread
-                  currentUserId={userId}
                   isSaving={isSaving}
                   key={m.id}
                   message={m}
                   onDelete={role === "admin" ? handleDelete : undefined}
                   onReply={handleReply}
+                  role={role}
                 />
               ))}
             </div>

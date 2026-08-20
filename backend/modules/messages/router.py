@@ -30,11 +30,11 @@ def _ensure_admin(current_user: CurrentUser) -> None:
         )
 
 
-def _ensure_participant(current_user: CurrentUser) -> None:
-    if current_user.role not in {"admin", "Admin", "Producción/Inventario"}:
+def _ensure_responder(current_user: CurrentUser) -> None:
+    if current_user.role not in {"Producción/Inventario"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes acceso a este mensaje.",
+            detail="Solo Producción/Inventario puede responder una solicitud.",
         )
 
 
@@ -78,7 +78,7 @@ def reply_message(
     current_user: CurrentUser = Depends(get_current_user),
     service: MessagesService = Depends(get_messages_service),
 ) -> AdminMessageRead:
-    _ensure_participant(current_user)
+    _ensure_responder(current_user)
     try:
         return service.reply_message(message_id, payload, current_user)
     except MessageNotFoundError as exc:

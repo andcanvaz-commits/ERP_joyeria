@@ -1,11 +1,14 @@
 import { apiRequest } from "@/lib/api";
 import type { MessagesScope } from "@/lib/messages-read-state";
 
+export type MessageDecision = "APROBADA" | "RECHAZADA";
+
 export type AdminMessageReply = {
   id: string;
   sender_user_id: string;
   sender_name?: string | null;
-  body: string;
+  decision: MessageDecision;
+  body: string | null;
   created_at: string;
 };
 
@@ -32,10 +35,10 @@ export function sendMessage(body: string) {
   });
 }
 
-export function replyMessage(messageId: string, body: string) {
+export function replyMessage(messageId: string, decision: MessageDecision, body: string | null) {
   return apiRequest<AdminMessage>(`/api/messages/${messageId}/reply`, {
     method: "POST",
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ decision, body: body?.trim() || null }),
   });
 }
 
