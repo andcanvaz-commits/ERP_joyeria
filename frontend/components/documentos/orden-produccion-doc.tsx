@@ -19,6 +19,7 @@ export function OrdenProduccionDoc({
   mode,
   entregaActions,
   recepcionFooter,
+  recepcionPendingRow,
   onEditLine,
   onDeleteLine,
   onError,
@@ -27,6 +28,16 @@ export function OrdenProduccionDoc({
   mode: DocMode;
   entregaActions?: React.ReactNode;
   recepcionFooter?: React.ReactNode;
+  // Fila extra en RECIBIDO para cargar la cantidad real del producto
+  // resultante antes de finalizar la etapa (produccion-dashboard.tsx, etapa
+  // en curso) -- Documentos nunca la pasa, ahi no hay nada pendiente que
+  // cargar.
+  recepcionPendingRow?: {
+    label: string;
+    quantity: string;
+    onQuantityChange: (value: string) => void;
+    disabled?: boolean;
+  };
   onEditLine?: (lineId: string, patch: { label?: string; quantity: string; unit_code?: string }) => Promise<unknown> | void;
   onDeleteLine?: (lineId: string) => Promise<unknown> | void;
   onError?: (message: string) => void;
@@ -40,6 +51,9 @@ export function OrdenProduccionDoc({
           <div className="opFolio">Nº {model.folio}</div>
         </header>
 
+        <div className="opResponsable">
+          NOMBRE: <span>{model.procesoNombre}</span>
+        </div>
         <div className="opResponsable">
           RESPONSABLE: <span>{model.responsableProduccion}</span>
         </div>
@@ -66,6 +80,7 @@ export function OrdenProduccionDoc({
             onDeleteLine={onDeleteLine}
             onEditLine={onEditLine}
             onError={onError}
+            pendingRow={recepcionPendingRow}
             responsable={model.recepcionResponsable}
             title="RECIBIDO"
             totalRows={model.recepcionTotalRows}

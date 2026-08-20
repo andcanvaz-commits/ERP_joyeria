@@ -13,7 +13,7 @@ import { FinishedItemPicker } from "@/components/inventory/finished-item-picker"
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
 import { StageRecepcionControl } from "@/components/production/stage-recepcion-control";
-import { ActaSide } from "@/components/production/acta-side";
+import { OrdenProduccionDoc } from "@/components/documentos/orden-produccion-doc";
 import { ActaView } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
 import { ComplementPicker } from "@/components/inventory/complement-picker";
@@ -60,7 +60,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
-import { buildRunActaSidesForStageAttempt, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildItemNameMap, buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 import { useCountUp } from "@/hooks/use-count-up";
 
@@ -1773,96 +1773,60 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   const fresh = (await listProductionRuns()).find((r) => r.id === orderId);
                   if (fresh) setDynamicOrderRun(fresh);
                 }
-                const runningSides = buildRunActaSidesForStageAttempt(dynamicOrderRun, runningAttempt.id);
-                const entregaLines = runningSides.entregaLines;
-                const recepcionLines = runningSides.recepcionLines;
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
+                const runningModel = buildOrdenProduccion([dynamicOrderRun], buildItemNameMap(materialItems), runningAttempt.id);
+                const entregaLines = runningModel.entregaLines;
+                const recepcionLines = runningModel.recepcionLines;
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
-                    <div className="panelHeader">
-                      <div>
-                        <h2 className="panelTitle">{runningAttempt.process_name}</h2>
-                        <p className="panelText">{runningAttempt.code} · Responsable: {runningAttempt.responsable_name ?? "—"}</p>
-                      </div>
-                    </div>
-
-                    {/* Misma vista de acta de siempre (ENTREGADO/RECIBIDO), solo que
-                        acotada a las lineas de esta etapa en vez de toda la orden.
-                        Cabecera igual que Documentos/Ver Acta (Rodrigo, 2026-08-20:
-                        "ahi falta la cabecera del acta") -- no es un fragmento
-                        suelto, es el mismo documento. */}
+                    {/* Mismo componente que arma Documentos (Rodrigo, 2026-08-20:
+                        "solamente tienes que compartir el componente que muestra
+                        el acta en documentos pero ponerlo aca") -- ya trae su
+                        propia cabecera (NOMBRE = proceso, RESPONSABLE = el texto
+                        libre de "Responsable: X"), asi que el panelHeader de
+                        arriba con esos mismos datos sobraba. */}
                     <div className="actaDocFrame">
-                      <div className="opDocWrap">
-                        <article className="opDoc actaDoc">
-                          <header className="opHeader">
-                            <div className="opTitleBar">ORDEN DE PRODUCCIÓN</div>
-                            <div className="opCategoryBar">
-                              {materialItems.find((item) => item.id === dynamicOrderRun.raw_material_item_id)?.name ?? "—"}
-                            </div>
-                            <div className="opFolio">Nº {dynamicOrderRun.production_code ?? "—"}</div>
-                          </header>
-                          <div className="opResponsable">
-                            RESPONSABLE: <span>{dynamicOrderRun.created_by_name ?? "—"}</span>
-                          </div>
-                          <div className="opBody">
-                            <ActaSide
-                              actions={
-                                <AdminAddActaLineControl
-                                  isAdmin
-                                  items={materialItems}
-                                  onChanged={refreshDynamicOrder}
-                                  onError={setError}
-                                  onSuccess={setSuccess}
-                                  runId={dynamicOrderRun.id}
-                                  side="ENTREGA"
-                                  stageAttemptId={runningAttempt.id}
-                                />
+                      <OrdenProduccionDoc
+                        entregaActions={
+                          <AdminAddActaLineControl
+                            isAdmin
+                            items={materialItems}
+                            onChanged={refreshDynamicOrder}
+                            onError={setError}
+                            onSuccess={setSuccess}
+                            runId={dynamicOrderRun.id}
+                            side="ENTREGA"
+                            stageAttemptId={runningAttempt.id}
+                          />
+                        }
+                        mode="completo"
+                        model={runningModel}
+                        onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
+                        onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
+                        onError={setError}
+                        recepcionFooter={
+                          <StageRecepcionControl
+                            entregaLines={entregaLines}
+                            materialItems={materialItems}
+                            onChanged={refreshDynamicOrder}
+                            onError={setError}
+                            onSuccess={setSuccess}
+                            recepcionLines={recepcionLines}
+                            runId={dynamicOrderRun.id}
+                            stageAttemptId={runningAttempt.id}
+                          />
+                        }
+                        recepcionPendingRow={
+                          runningAttempt.target_label
+                            ? {
+                                label: runningAttempt.target_label,
+                                onQuantityChange: setRunQuantity,
+                                quantity: runQuantity,
+                                disabled: isSaving,
                               }
-                              fecha={runningAttempt.started_at}
-                              lines={entregaLines}
-                              onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
-                              onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
-                              onError={setError}
-                              responsable={runningAttempt.started_by_name ?? "—"}
-                              title="ENTREGADO"
-                              totalRows={runningSides.entregaTotalRows}
-                            />
-                            <div className="opDivider" aria-hidden="true" />
-                            <ActaSide
-                              actions={
-                                <StageRecepcionControl
-                                  entregaLines={entregaLines}
-                                  materialItems={materialItems}
-                                  onChanged={refreshDynamicOrder}
-                                  onError={setError}
-                                  onSuccess={setSuccess}
-                                  recepcionLines={recepcionLines}
-                                  runId={dynamicOrderRun.id}
-                                  stageAttemptId={runningAttempt.id}
-                                />
-                              }
-                              fecha={runningAttempt.finished_at ?? null}
-                              lines={recepcionLines}
-                              onDeleteLine={(lineId) => deleteActaLine(lineId).then(refreshDynamicOrder)}
-                              onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
-                              onError={setError}
-                              pendingRow={
-                                runningAttempt.target_label
-                                  ? {
-                                      label: runningAttempt.target_label,
-                                      onQuantityChange: setRunQuantity,
-                                      quantity: runQuantity,
-                                      disabled: isSaving,
-                                    }
-                                  : undefined
-                              }
-                              responsable={runningAttempt.finished_by_name ?? "—"}
-                              title="RECIBIDO"
-                              totalRows={runningSides.recepcionTotalRows}
-                            />
-                          </div>
-                        </article>
-                      </div>
+                            : undefined
+                        }
+                      />
                     </div>
 
                     {(() => {
@@ -2142,87 +2106,54 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             }
             const viewingAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.id === viewingAttemptId);
             if (!viewingAttempt) return null;
-            const viewingSides = buildRunActaSidesForStageAttempt(dynamicOrderRun, viewingAttempt.id);
-            const viewEntregaLines = viewingSides.entregaLines;
-            const viewRecepcionLines = viewingSides.recepcionLines;
             const viewMaterialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
+            const viewingModel = buildOrdenProduccion([dynamicOrderRun], buildItemNameMap(viewMaterialItems), viewingAttempt.id);
+            const viewEntregaLines = viewingModel.entregaLines;
+            const viewRecepcionLines = viewingModel.recepcionLines;
             return (
               <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true" aria-label="Acta de la etapa">
                 <section className="modalWindow processViewWindow">
                   <div className="modalHeader">
                     <div>
-                      <h2>{viewingAttempt.process_name}</h2>
-                      <p>
-                        {viewingAttempt.code ?? "—"} · Responsable: {viewingAttempt.responsable_name ?? "—"} ·{" "}
-                        {viewingAttempt.status === "APROBADA" ? "Aprobada" : viewingAttempt.status === "RECHAZADA" ? "Rechazada" : "En proceso"}
-                      </p>
+                      <h2>Acta de la etapa</h2>
+                      <p>{viewingAttempt.status === "APROBADA" ? "Aprobada" : viewingAttempt.status === "RECHAZADA" ? "Rechazada" : "En proceso"}</p>
                     </div>
                     <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingAttemptId(null)} type="button">
                       <X aria-hidden="true" size={18} />
                     </button>
                   </div>
                   <div className="actaDocFrame">
-                    <div className="opDocWrap">
-                      <article className="opDoc actaDoc">
-                        <header className="opHeader">
-                          <div className="opTitleBar">ORDEN DE PRODUCCIÓN</div>
-                          <div className="opCategoryBar">
-                            {viewMaterialItems.find((item) => item.id === dynamicOrderRun.raw_material_item_id)?.name ?? "—"}
-                          </div>
-                          <div className="opFolio">Nº {dynamicOrderRun.production_code ?? "—"}</div>
-                        </header>
-                        <div className="opResponsable">
-                          RESPONSABLE: <span>{dynamicOrderRun.created_by_name ?? "—"}</span>
-                        </div>
-                        <div className="opBody">
-                          <ActaSide
-                            actions={
-                              <AdminAddActaLineControl
-                                isAdmin
-                                items={viewMaterialItems}
-                                onChanged={() => void refreshViewingOrder()}
-                                onError={setError}
-                                onSuccess={setSuccess}
-                                runId={dynamicOrderRun.id}
-                                side="ENTREGA"
-                                stageAttemptId={viewingAttempt.id}
-                              />
-                            }
-                            fecha={viewingAttempt.started_at}
-                            lines={viewEntregaLines}
-                            onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refreshViewingOrder())}
-                            onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
-                            onError={setError}
-                            responsable={viewingAttempt.started_by_name ?? "—"}
-                            title="ENTREGADO"
-                            totalRows={viewingSides.entregaTotalRows}
-                          />
-                          <div className="opDivider" aria-hidden="true" />
-                          <ActaSide
-                            actions={
-                              <StageRecepcionControl
-                                entregaLines={viewEntregaLines}
-                                materialItems={viewMaterialItems}
-                                onChanged={() => void refreshViewingOrder()}
-                                onError={setError}
-                                onSuccess={setSuccess}
-                                recepcionLines={viewRecepcionLines}
-                                runId={dynamicOrderRun.id}
-                                stageAttemptId={viewingAttempt.id}
-                              />
-                            }
-                            fecha={viewingAttempt.finished_at ?? null}
-                            lines={viewRecepcionLines}
-                            onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refreshViewingOrder())}
-                            onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
-                            onError={setError}
-                            responsable={viewingAttempt.finished_by_name ?? "—"}
-                            title="RECIBIDO"
-                            totalRows={viewingSides.recepcionTotalRows}
-                          />
-                        </div>
-                      </article>
-                    </div>
+                    <OrdenProduccionDoc
+                      entregaActions={
+                        <AdminAddActaLineControl
+                          isAdmin
+                          items={viewMaterialItems}
+                          onChanged={() => void refreshViewingOrder()}
+                          onError={setError}
+                          onSuccess={setSuccess}
+                          runId={dynamicOrderRun.id}
+                          side="ENTREGA"
+                          stageAttemptId={viewingAttempt.id}
+                        />
+                      }
+                      mode="completo"
+                      model={viewingModel}
+                      onDeleteLine={(lineId) => deleteActaLine(lineId).then(() => refreshViewingOrder())}
+                      onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
+                      onError={setError}
+                      recepcionFooter={
+                        <StageRecepcionControl
+                          entregaLines={viewEntregaLines}
+                          materialItems={viewMaterialItems}
+                          onChanged={() => void refreshViewingOrder()}
+                          onError={setError}
+                          onSuccess={setSuccess}
+                          recepcionLines={viewRecepcionLines}
+                          runId={dynamicOrderRun.id}
+                          stageAttemptId={viewingAttempt.id}
+                        />
+                      }
+                    />
                   </div>
                   {canCancelRun ? (
                     <div className="modalActions">

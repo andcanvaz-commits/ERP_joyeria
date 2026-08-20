@@ -473,10 +473,10 @@ export function buildOrdenProduccion(
     const sides = buildRunActaSidesForStageAttempt(root, effectiveStageAttemptId);
     return {
       folio: root.production_code ?? DASH,
-      // Nombre de la orden (paso 1 al crearla) por sobre el nombre del
-      // proceso -- son cosas distintas, "el nombre del acta" es el que se le
-      // puso a la orden (Rodrigo, 2026-08-20).
-      procesoNombre: root.name ?? attempt?.process_name ?? root.process_name ?? DASH,
+      // El nombre del acta es el nombre del proceso de ESA etapa (Rodrigo,
+      // 2026-08-20: "el nombre el nombre del proceso") -- el nombre de la
+      // orden solo entra como ultimo recurso si el proceso no lo tiene.
+      procesoNombre: attempt?.process_name ?? root.process_name ?? root.name ?? DASH,
       categoria: materialName,
       responsableProduccion: attempt?.responsable_name ?? root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
@@ -499,7 +499,7 @@ export function buildOrdenProduccion(
     const sides = buildRunActaSides(root);
     return {
       folio: root.root_production_code ?? root.production_code ?? DASH,
-      procesoNombre: root.name ?? root.process_name ?? DASH,
+      procesoNombre: root.process_name ?? root.name ?? DASH,
       categoria: materialName,
       responsableProduccion: root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
@@ -520,7 +520,7 @@ export function buildOrdenProduccion(
   const sides = buildFamilyActaSides(family);
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
-    procesoNombre: root.name ?? root.process_name ?? DASH,
+    procesoNombre: root.process_name ?? root.name ?? DASH,
     categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entregaLines: sides.entregaLines,
