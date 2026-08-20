@@ -58,7 +58,7 @@ export function StageRecepcionControl({
   entregaLines: ActaSideLine[];
   recepcionLines: ActaSideLine[];
   materialItems: InventoryItem[];
-  onChanged: () => void;
+  onChanged: () => void | Promise<void>;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
 }) {
@@ -96,8 +96,8 @@ export function StageRecepcionControl({
         quantity,
         stage_attempt_id: stageAttemptId,
       });
+      await onChanged();
       close();
-      onChanged();
       onSuccess("Recibido registrado.");
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "No se pudo registrar lo recibido.";
@@ -146,6 +146,12 @@ export function StageRecepcionControl({
                   onChange={(e) => {
                     setQuantity(e.target.value);
                     setLocalError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !isSaving) {
+                      e.preventDefault();
+                      void handleConfirm();
+                    }
                   }}
                   placeholder={pending.unitCode}
                   step="0.0001"

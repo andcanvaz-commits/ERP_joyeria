@@ -5262,8 +5262,11 @@ textarea:disabled {
   gap: 4px;
   border: none;
   background: none;
-  color: var(--doc-ink);
-  opacity: 0.45;
+  /* Negro, no el azul tinta del resto del documento (Rodrigo, 2026-08-20:
+     "las letras salen azules en vez de negras") -- es un control, no texto
+     del acta. */
+  color: var(--text);
+  opacity: 0.55;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;

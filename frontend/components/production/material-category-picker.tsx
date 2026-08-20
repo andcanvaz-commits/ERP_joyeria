@@ -151,6 +151,12 @@ export function MaterialCategoryPicker({
               className="field"
               min="0.0001"
               onChange={(e) => quantityStep.onQuantityChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !quantityStep.isSaving) {
+                  e.preventDefault();
+                  quantityStep.onConfirm();
+                }
+              }}
               placeholder={quantityStep.item.unit_code}
               step="0.0001"
               style={{ width: 110 }}

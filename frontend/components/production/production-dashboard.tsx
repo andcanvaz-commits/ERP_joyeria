@@ -1768,10 +1768,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
               {runningAttempt ? (() => {
                 const orderId = dynamicOrderRun.id;
+                // isSaving prendido durante el refresh (Rodrigo, 2026-08-20:
+                // "cuando agrego el valor no se adjunta a la sumatoria antes
+                // de poner finalizar etapa") -- Agregar/Recibir disparaban el
+                // refresco sin esperarlo, asi que se podia tocar Finalizar
+                // etapa con la suma todavia vieja. isSaving ya deshabilita
+                // ese boton, asi que prenderlo aca lo bloquea hasta que la
+                // orden este de verdad al dia.
                 async function refreshDynamicOrder() {
-                  await reload();
-                  const fresh = (await listProductionRuns()).find((r) => r.id === orderId);
-                  if (fresh) setDynamicOrderRun(fresh);
+                  setIsSaving(true);
+                  try {
+                    await reload();
+                    const fresh = (await listProductionRuns()).find((r) => r.id === orderId);
+                    if (fresh) setDynamicOrderRun(fresh);
+                  } finally {
+                    setIsSaving(false);
+                  }
                 }
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
                 const runningModel = buildOrdenProduccion([dynamicOrderRun], runningAttempt.id);
@@ -2100,9 +2112,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           {viewingAttemptId ? (() => {
             const viewingOrderId = dynamicOrderRun.id;
             async function refreshViewingOrder() {
-              await reload();
-              const fresh = (await listProductionRuns()).find((r) => r.id === viewingOrderId);
-              if (fresh) setDynamicOrderRun(fresh);
+              setIsSaving(true);
+              try {
+                await reload();
+                const fresh = (await listProductionRuns()).find((r) => r.id === viewingOrderId);
+                if (fresh) setDynamicOrderRun(fresh);
+              } finally {
+                setIsSaving(false);
+              }
             }
             const viewingAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.id === viewingAttemptId);
             if (!viewingAttempt) return null;

@@ -40,7 +40,7 @@ export function AdminAddActaLineControl({
   // del rol fusionado opera el acta directo, ya no es admin-only -- ese gate
   // sigue aplicando solo al boton "+" viejo (linea de nivel de orden).
   stageAttemptId?: string;
-  onChanged: () => void;
+  onChanged: () => void | Promise<void>;
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
 }) {
@@ -72,8 +72,12 @@ export function AdminAddActaLineControl({
     setIsSaving(true);
     try {
       await addAdminActaLine(runId, { side, item_id: pendingItem.id, quantity, stage_attempt_id: stageAttemptId });
+      // Espera a que la orden este al dia ANTES de cerrar/avisar (Rodrigo,
+      // 2026-08-20: la suma no se veia actualizada antes de poder finalizar
+      // etapa) -- si no se espera, el usuario puede seguir de largo con
+      // datos todavia viejos.
+      await onChanged();
       reset();
-      onChanged();
       onSuccess("Línea agregada: se descontó/sumó del inventario real.");
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "No se pudo agregar la línea.";
@@ -92,8 +96,8 @@ export function AdminAddActaLineControl({
     setIsSaving(true);
     try {
       await addAdminActaLine(runId, { side, label: manualLabel.trim(), quantity, unit_code: manualUnit, stage_attempt_id: stageAttemptId });
+      await onChanged();
       reset();
-      onChanged();
       onSuccess("Línea agregada. No se descontó del inventario (es texto libre).");
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "No se pudo agregar la línea.";
@@ -119,6 +123,12 @@ export function AdminAddActaLineControl({
   }
 
   if (mode === "manual") {
+    const submitOnEnter = (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !isSaving) {
+        e.preventDefault();
+        void submitManual();
+      }
+    };
     return (
       <div className="actaDocAction">
         <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 10 }}>
@@ -126,6 +136,7 @@ export function AdminAddActaLineControl({
             aria-label="Detalle"
             className="field"
             onChange={(e) => setManualLabel(e.target.value)}
+            onKeyDown={submitOnEnter}
             placeholder="Detalle"
             style={{ flex: 1 }}
             type="text"
@@ -136,6 +147,7 @@ export function AdminAddActaLineControl({
             className="field"
             min="0.0001"
             onChange={(e) => setQuantity(e.target.value)}
+            onKeyDown={submitOnEnter}
             step="0.0001"
             style={{ width: 100 }}
             type="number"
