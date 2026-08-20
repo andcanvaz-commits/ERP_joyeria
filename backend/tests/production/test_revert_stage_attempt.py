@@ -20,9 +20,8 @@ from backend.modules.production.schemas import (
     AdminActaLineCreate,
     ProductionOrderCreate,
     StageAttemptCreate,
-    StageAttemptFinish,
     StageAttemptMaterialLine,
-    StageAttemptProductTarget,
+    StageAttemptProductLine,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 from backend.tests.production.test_cancel_run import _run_with_consumed_material
@@ -33,9 +32,7 @@ def test_revert_stage_attempt_restores_material_and_removes_conversion(
 ):
     run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
     attempt_id = run.stage_attempts[0].id
-    production_service.finish_stage_attempt(
-        attempt_id, StageAttemptFinish(product_quantity=Decimal("100")), current_user
-    )
+    production_service.approve_stage_attempt(attempt_id, current_user)
     db_session.refresh(raw_material)
     db_session.refresh(target_complement)
     assert raw_material.current_stock == Decimal("0")
@@ -68,7 +65,7 @@ def test_revert_stage_attempt_reverts_admin_stock_supply_return(
         StageAttemptCreate(
             process_id=process.id,
             responsable_name="Ana",
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("60"))],
         ),
         current_user,
     )
@@ -83,9 +80,7 @@ def test_revert_stage_attempt_reverts_admin_stock_supply_return(
         AdminActaLineCreate(side="RECEPCION", item_id=supply.id, quantity=Decimal("40"), stage_attempt_id=attempt_id),
         current_user,
     )
-    production_service.finish_stage_attempt(
-        attempt_id, StageAttemptFinish(product_quantity=Decimal("60")), current_user
-    )
+    production_service.approve_stage_attempt(attempt_id, current_user)
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("940")  # 1000 - 100 entregado + 40 devuelto
 
@@ -104,7 +99,7 @@ def test_revert_stage_attempt_rejects_in_progress(
         StageAttemptCreate(
             process_id=process.id,
             responsable_name="Ana",
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
         ),
         current_user,
     )
@@ -119,9 +114,7 @@ def test_revert_stage_attempt_blocks_when_product_already_moved(
 ):
     run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
     attempt_id = run.stage_attempts[0].id
-    production_service.finish_stage_attempt(
-        attempt_id, StageAttemptFinish(product_quantity=Decimal("100")), current_user
-    )
+    production_service.approve_stage_attempt(attempt_id, current_user)
 
     # Ya se movio de ahi (ej. se vendio/salio): no queda suficiente para revertir.
     target_complement.current_stock = Decimal("0")
@@ -150,35 +143,30 @@ def test_revert_then_cancel_run_does_not_double_revert(
     raw_material.current_stock = Decimal("200")
     db_session.flush()
     order = production_service.create_order(ProductionOrderCreate(name="Orden doble reversion"), current_user)
-    product = StageAttemptProductTarget(target_item_id=target_complement.id)
 
     started1 = production_service.start_stage_attempt(
         order.id,
         StageAttemptCreate(
             process_id=process.id, responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=product,
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("100"))],
         ),
         current_user,
     )
     attempt1_id = started1.stage_attempts[0].id
-    production_service.finish_stage_attempt(
-        attempt1_id, StageAttemptFinish(product_quantity=Decimal("100")), current_user
-    )
+    production_service.approve_stage_attempt(attempt1_id, current_user)
 
     started2 = production_service.start_stage_attempt(
         order.id,
         StageAttemptCreate(
             process_id=process.id, responsable_name="Luis",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=product,
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("100"))],
         ),
         current_user,
     )
     attempt2_id = next(a.id for a in started2.stage_attempts if a.status == "EN_PROCESO")
-    production_service.finish_stage_attempt(
-        attempt2_id, StageAttemptFinish(product_quantity=Decimal("100")), current_user
-    )
+    production_service.approve_stage_attempt(attempt2_id, current_user)
 
     db_session.refresh(raw_material)
     db_session.refresh(target_complement)

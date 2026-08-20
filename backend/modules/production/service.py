@@ -1,12 +1,11 @@
 from datetime import datetime
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 from uuid import UUID
 
 from backend.modules.auth.dependencies import CurrentUser
 from backend.modules.inventory.schemas import InventoryMovementCreate
 from backend.modules.inventory.service import (
     InventoryDomainError,
-    InventoryNotFoundError,
     InventoryService,
 )
 from backend.modules.shared.formatting import format_qty
@@ -18,6 +17,7 @@ from backend.modules.production.models import (
     ProductionRunActaLine,
     ProductionRunProduct,
     ProductionRunStageAttempt,
+    ProductionRunStageAttemptDecision,
     ProductionRunStageAttemptMaterial,
     ProductionRunStageStatus,
     ProductionRunStatus,
@@ -36,8 +36,9 @@ from backend.modules.production.schemas import (
     ProductionRunRead,
     RunProductsUpdate,
     StageAttemptCreate,
-    StageAttemptFinish,
+    StageAttemptDecisionRead,
     StageAttemptMaterialRead,
+    StageAttemptReject,
     StageAttemptRead,
     SupplyConsumptionRead,
 )
@@ -231,19 +232,6 @@ class ProductionService:
                 f"El plan de productos suma {total} y la orden fabrica {quantity}: deben coincidir."
             )
 
-    def _material_coverage_ratio(self, lines: list[tuple["InventoryItem", Decimal]]) -> Decimal:
-        """Minimo entre disponible/pedido de cada linea -- el recurso mas
-        corto manda para TODAS las lineas por igual (si el complemento solo
-        cubre 30%, la materia prima tambien arranca al 30%, no al 100%)."""
-        if not lines:
-            return Decimal("1")
-        ratio = Decimal("1")
-        for item, quantity in lines:
-            available = self.inventory_service.available_stock(item)
-            line_ratio = min(Decimal("1"), available / quantity) if quantity > 0 else Decimal("1")
-            ratio = min(ratio, max(Decimal("0"), line_ratio))
-        return ratio
-
     def create_process(self, payload: ProductionProcessCreate) -> ProductionProcessRead:
         process = ProductionProcess(
             name=payload.name,
@@ -355,7 +343,18 @@ class ProductionService:
                 f"No se puede cancelar: {exc} Parte de lo producido ya se movio en inventario."
             ) from exc
 
-        self._revert_admin_stock_lines(run, current_user)
+        # Idem para las lineas PLAN/ADMIN_STOCK de un intento de etapa del
+        # flujo nuevo (start_stage_attempt/add_admin_acta_line): si ya no
+        # queda suficiente stock del item para revertir (se movio de ahi),
+        # _apply_admin_acta_line_delta lanza ProductionDomainError directo
+        # (no InventoryDomainError) -- se re-envuelve igual que arriba para
+        # dar el mismo mensaje "No se puede cancelar" sin importar la causa.
+        try:
+            self._revert_admin_stock_lines(run, current_user)
+        except ProductionDomainError as exc:
+            raise ProductionDomainError(
+                f"No se puede cancelar: {exc} Parte de lo que esta orden movio ya no esta disponible."
+            ) from exc
 
         run.status = ProductionRunStatus.CANCELLED
         run.rejected_by_user_id = current_user.id
@@ -364,14 +363,22 @@ class ProductionService:
         run.is_cancellation = True
 
     def _revert_admin_stock_lines(self, run: ProductionRun, current_user: CurrentUser) -> None:
-        """Lineas ADMIN_STOCK mueven stock por su propio rastro
+        """Lineas ADMIN_STOCK, y desde este spec tambien las PLAN de un
+        intento de etapa (Entrada/Producto resultante, que ahora mueven stock
+        de inmediato via start_stage_attempt -- ver
+        docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md,
+        adendo), mueven stock por su propio rastro
         (reference_type="production_run_acta_line"), fuera de
         reverse_production_consumption -- cualquier camino que cancele la
         orden las revierte a cero igual, sin importar si llego a aprobar
         materiales (una linea de admin puede existir en casi cualquier estado
-        de la orden, incluido PENDIENTE_INVENTARIO via reject_materials)."""
+        de la orden, incluido PENDIENTE_INVENTARIO via reject_materials).
+        Seguro para ordenes del flujo VIEJO: sus lineas PLAN nunca generaron
+        un movimiento referenciado por esta linea especifica (usaban
+        reference_id=run.id via consume_material_for_production), asi que
+        _apply_admin_acta_line_delta calcula net_so_far=0 y no hace nada."""
         for line in run.acta_lines:
-            if line.source == ActaLineSource.ADMIN_STOCK and line.item_id is not None:
+            if line.item_id is not None:
                 if self.inventory_service is None:
                     raise ProductionDomainError(
                         "Inventario no esta disponible para revertir el consumo de esta orden."
@@ -597,12 +604,17 @@ class ProductionService:
         from backend.modules.inventory.models import InventoryItem
         from backend.modules.product_types.models import ProductType
 
+        attempt_decisions: dict = {
+            attempt.id: self.repository.list_stage_attempt_decisions(attempt.id)
+            for run in runs
+            for attempt in run.stage_attempts
+        }
         user_ids = [
             uid
             for run in runs
             for attempt in run.stage_attempts
             for uid in (attempt.started_by_user_id, attempt.finished_by_user_id)
-        ]
+        ] + [d.decided_by_user_id for decisions in attempt_decisions.values() for d in decisions]
         user_names = _resolve_run_user_names(self.repository.session, user_ids)
         material_item_ids = list({
             m.item_id for run in runs for attempt in run.stage_attempts for m in attempt.materials
@@ -678,6 +690,15 @@ class ProductionService:
                             quantity_pending=m.quantity_pending,
                         )
                         for m in attempt.materials
+                    ],
+                    decisions=[
+                        StageAttemptDecisionRead(
+                            decision=d.decision,
+                            reason=d.reason,
+                            decided_by_name=user_names.get(str(d.decided_by_user_id)),
+                            decided_at=d.decided_at,
+                        )
+                        for d in attempt_decisions.get(attempt.id, [])
                     ],
                 )
                 for attempt in sorted(run.stage_attempts, key=lambda a: a.sequence_order)
@@ -830,6 +851,18 @@ class ProductionService:
         except InventoryDomainError as exc:
             raise ProductionDomainError(f"'{line.label}': {exc}") from exc
 
+    def _resolve_or_create_finished_item(
+        self, product_type_id: UUID, material_code: str | None, unit_code: str | None
+    ) -> "InventoryItem":
+        """Resuelve (o crea) el item real detras de un product_type_id sin
+        stock todavia -- compartido por add_admin_acta_line y
+        start_stage_attempt (Producto resultante)."""
+        if not material_code or not unit_code:
+            raise ProductionDomainError("Elige el material y la unidad de la pieza nueva.")
+        return self.inventory_service.get_or_create_finished_item(
+            product_type_id, material_code, unit_code.strip()
+        )
+
     def add_admin_acta_line(
         self, run_id: UUID, payload: AdminActaLineCreate, current_user: CurrentUser
     ) -> ProductionRunRead:
@@ -887,10 +920,8 @@ class ProductionService:
                 raise ProductionDomainError(
                     "Un producto de catalogo sin stock solo se puede agregar por el lado RECIBIDO."
                 )
-            if not payload.material_code or not payload.unit_code:
-                raise ProductionDomainError("Elige el material y la unidad de la pieza nueva.")
-            item = self.inventory_service.get_or_create_finished_item(
-                payload.product_type_id, payload.material_code, payload.unit_code.strip()
+            item = self._resolve_or_create_finished_item(
+                payload.product_type_id, payload.material_code, payload.unit_code
             )
 
         if payload.side == ActaLineSide.RECEPCION and payload.stage_attempt_id is not None:
@@ -1117,7 +1148,6 @@ class ProductionService:
             raise ProductionNotFoundError("Orden de produccion no encontrada.")
         if run.status != ProductionRunStatus.IN_PROGRESS:
             raise ProductionDomainError("Solo se puede iniciar una etapa en una orden en proceso.")
-        # Secuencial simple (confirmado): una sola etapa activa a la vez.
         if self.repository.get_active_stage_attempt(run_id) is not None:
             raise ProductionDomainError(
                 "Ya hay una etapa en curso para esta orden -- finalizala antes de iniciar otra."
@@ -1128,84 +1158,81 @@ class ProductionService:
             raise ProductionNotFoundError("Proceso no encontrado en el banco.")
         if not process.is_active:
             raise ProductionDomainError("El proceso no esta activo.")
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible para iniciar esta etapa.")
+
+        from backend.modules.inventory.models import InventoryItem
+
+        # Fase 1: resolver todo ANTES de mover nada -- si algo falla (item
+        # inexistente, material/unidad faltante), no queda ningun intento a
+        # medias. El tope de stock lo valida _apply_admin_acta_line_delta en
+        # la fase 2 (chequeo unico, ver Task 2).
+        resolved_materials: list[tuple[InventoryItem, Decimal]] = []
+        for line in payload.materials:
+            item = self.repository.session.get(InventoryItem, line.item_id)
+            if item is None:
+                raise ProductionNotFoundError("Un material declarado para la etapa no existe en inventario.")
+            resolved_materials.append((item, line.quantity))
+
+        resolved_products: list[tuple[InventoryItem, Decimal]] = []
+        for line in payload.products:
+            if line.target_item_id is not None:
+                item = self.repository.session.get(InventoryItem, line.target_item_id)
+                if item is None:
+                    raise ProductionNotFoundError("Un producto resultante declarado no existe en inventario.")
+            else:
+                item = self._resolve_or_create_finished_item(line.product_type_id, line.material_code, "g")
+            resolved_products.append((item, line.quantity))
 
         sequence_order = len(run.stage_attempts) + 1
         attempt_no = (
             self.repository.count_stage_attempts_for_process(run_id, process.id, process.name) + 1
         )
         order_code = run.production_code or run.root_production_code
-        responsable = payload.responsable_name.strip()
+        attempt_code = _stage_attempt_code_for(order_code, process.name, attempt_no) if order_code else None
 
-        def _new_attempt(status: str, attempt_no_for_process: int, order_index: int) -> ProductionRunStageAttempt:
-            attempt_code = (
-                _stage_attempt_code_for(order_code, process.name, attempt_no_for_process) if order_code else None
-            )
-            new_attempt = ProductionRunStageAttempt(
+        # Fase 2: crear el intento y aplicar cada linea dentro de un
+        # SAVEPOINT -- si una entrada no alcanza el stock disponible
+        # (_apply_admin_acta_line_delta lo valida), se revierte TODO lo de
+        # esta llamada (el intento y cualquier linea/movimiento ya aplicado),
+        # no queda ningun intento a medias.
+        with self.repository.session.begin_nested():
+            attempt = ProductionRunStageAttempt(
                 run_id=run.id,
                 process_id=process.id,
                 process_name=process.name,
-                sequence_order=sequence_order + order_index,
-                attempt_no_for_process=attempt_no_for_process,
+                sequence_order=sequence_order,
+                attempt_no_for_process=attempt_no,
                 code=attempt_code,
-                responsable_name=responsable,
-                status=status,
+                responsable_name=payload.responsable_name.strip(),
+                status=StageAttemptStatus.IN_PROGRESS,
                 started_by_user_id=current_user.id,
                 started_at=datetime.utcnow(),
             )
-            run.stage_attempts.append(new_attempt)
-            return new_attempt
-
-        def _store_product_target(attempt: ProductionRunStageAttempt) -> None:
-            """Producto resultante obligatorio al elegir la etapa: solo guarda
-            el destino (que producto va a salir). La cantidad real y la
-            conversion de inventario se hacen al finalizar la etapa (Rodrigo,
-            2026-08-20 -- no debe salir pre-llena)."""
-            attempt.target_product_type_id = payload.product.product_type_id
-            attempt.target_item_id = payload.product.target_item_id
-
-        if not payload.materials:
-            new_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
-            _store_product_target(new_attempt)
+            run.stage_attempts.append(attempt)
             self.repository.flush()
-            return self._read_with_names(run)
 
-        from backend.modules.inventory.models import InventoryItem
+            def _add_line(item: InventoryItem, quantity: Decimal, side: str) -> None:
+                line = ProductionRunActaLine(
+                    side=side,
+                    label=item.name,
+                    quantity=Decimal("0"),
+                    unit_code=item.unit_code,
+                    item_id=item.id,
+                    source=ActaLineSource.PLAN,
+                    line_order=sum(1 for l in run.acta_lines if l.side == side),
+                    created_by_user_id=current_user.id,
+                    stage_attempt_id=attempt.id,
+                )
+                run.acta_lines.append(line)
+                self.repository.flush()
+                self._apply_admin_acta_line_delta(line, quantity, current_user)
+                line.quantity = quantity
+                self.repository.flush()
 
-        resolved: list[tuple[InventoryItem, Decimal]] = []
-        for line in payload.materials:
-            item = self.repository.session.get(InventoryItem, line.item_id)
-            if item is None:
-                raise ProductionNotFoundError("Un material declarado para la etapa no existe en inventario.")
-            resolved.append((item, line.quantity))
-
-        ratio = self._material_coverage_ratio(resolved)
-
-        def _consume_line(attempt: ProductionRunStageAttempt, item: "InventoryItem", quantity: Decimal) -> None:
-            self.inventory_service.consume_material_for_production(
-                item_id=item.id,
-                quantity=quantity,
-                production_run_id=run.id,
-                user_id=current_user.id,
-                production_code=order_code,
-                reason=f"Consumo en etapa {process.name} ({attempt.code or attempt.id}).",
-            )
-            self._add_or_merge_acta_line(
-                run,
-                side=ActaLineSide.ENTREGA,
-                label=item.name,
-                quantity=quantity,
-                unit_code=item.unit_code,
-                source=ActaLineSource.PLAN,
-                item_id=item.id,
-                stage_attempt_id=attempt.id,
-                created_by_user_id=current_user.id,
-            )
-
-        if ratio >= 1:
-            covered_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
-            for item, quantity in resolved:
-                _consume_line(covered_attempt, item, quantity)
-                covered_attempt.materials.append(
+            for item, quantity in resolved_materials:
+                _add_line(item, quantity, ActaLineSide.ENTREGA)
+                attempt.materials.append(
                     ProductionRunStageAttemptMaterial(
                         item_id=item.id,
                         unit_code=item.unit_code,
@@ -1213,208 +1240,97 @@ class ProductionService:
                         quantity_pending=Decimal("0"),
                     )
                 )
-            _store_product_target(covered_attempt)
-        elif ratio <= 0:
-            waiting_attempt = _new_attempt(StageAttemptStatus.WAITING_MATERIAL, attempt_no, 0)
-            for item, quantity in resolved:
-                waiting_attempt.materials.append(
-                    ProductionRunStageAttemptMaterial(
-                        item_id=item.id,
-                        unit_code=item.unit_code,
-                        quantity_requested=quantity,
-                        quantity_pending=quantity,
-                    )
-                )
-            _store_product_target(waiting_attempt)
-        else:
-            covered_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
-            waiting_attempt = _new_attempt(StageAttemptStatus.WAITING_MATERIAL, attempt_no + 1, 1)
-            for item, quantity in resolved:
-                covered_qty = (quantity * ratio).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
-                remainder = quantity - covered_qty
-                if covered_qty > 0:
-                    _consume_line(covered_attempt, item, covered_qty)
-                covered_attempt.materials.append(
-                    ProductionRunStageAttemptMaterial(
-                        item_id=item.id,
-                        unit_code=item.unit_code,
-                        quantity_requested=covered_qty,
-                        quantity_pending=Decimal("0"),
-                    )
-                )
-                waiting_attempt.materials.append(
-                    ProductionRunStageAttemptMaterial(
-                        item_id=item.id,
-                        unit_code=item.unit_code,
-                        quantity_requested=remainder,
-                        quantity_pending=remainder,
-                    )
-                )
-            _store_product_target(covered_attempt)
+            for item, quantity in resolved_products:
+                _add_line(item, quantity, ActaLineSide.RECEPCION)
 
-        self.repository.flush()
+            self.repository.flush()
+
         return self._read_with_names(run)
 
-    def finish_stage_attempt(
-        self, attempt_id: UUID, payload: StageAttemptFinish, current_user: CurrentUser
-    ) -> ProductionRunRead:
+    def approve_stage_attempt(self, attempt_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
+        """✔: cierra el intento. La merma es entrega_total - recepcion_total
+        de ESTE intento -- ambos ya estan en el acta (Entrada y Producto
+        resultante mueven stock de inmediato desde start_stage_attempt/
+        Agregar), no hay 'cantidad' que pedir ni lote que convertir aca."""
         attempt = self.repository.get_stage_attempt(attempt_id)
         if attempt is None:
             raise ProductionNotFoundError("Etapa no encontrada.")
         if attempt.status != StageAttemptStatus.IN_PROGRESS:
-            raise ProductionDomainError("Solo se puede finalizar una etapa en curso.")
+            raise ProductionDomainError("Solo se puede aprobar una etapa en curso.")
         run = attempt.run
 
-        process = self.repository.get(attempt.process_id) if attempt.process_id else None
-        quality_control = bool(process and process.quality_control)
-
         entrega_lines = [
-            line
-            for line in run.acta_lines
+            line for line in run.acta_lines
             if line.stage_attempt_id == attempt.id and line.side == ActaLineSide.ENTREGA
         ]
         recepcion_lines = [
-            line
-            for line in run.acta_lines
+            line for line in run.acta_lines
             if line.stage_attempt_id == attempt.id and line.side == ActaLineSide.RECEPCION
         ]
         if entrega_lines:
             attempt.unit_code = entrega_lines[0].unit_code
+        entrega_total = sum((l.quantity for l in entrega_lines), Decimal("0"))
+        recepcion_total = sum((l.quantity for l in recepcion_lines), Decimal("0"))
 
-        # Rodrigo, 2026-08-20: "no se trabaja por peso por unidad, todo es
-        # por la unidad de medida de la materia prima -- si puse 100 gramos
-        # de X para X producto, es la misma cantidad de gramos para el
-        # producto". O sea: el numero entregado (menos lo ya devuelto del
-        # mismo item, ej. sobrante de insumos) es el TOPE de lo que puede
-        # salir como producto resultante -- misma cantidad, sin tabla de
-        # conversion aparte. Lo que no se convierte en producto ni se
-        # devuelve es la merma.
-        entrega_by_item: dict = {}
-        for line in entrega_lines:
-            entrega_by_item[line.item_id] = entrega_by_item.get(line.item_id, Decimal("0")) + line.quantity
-        entrega_total = sum(entrega_by_item.values(), Decimal("0"))
-        recepcion_matched = sum(
-            (
-                line.quantity
-                for line in recepcion_lines
-                if line.item_id is not None and line.item_id in entrega_by_item
-            ),
-            Decimal("0"),
-        )
+        attempt.status = StageAttemptStatus.APPROVED
         if entrega_total > 0:
-            disponible = entrega_total - recepcion_matched
-            if payload.product_quantity > disponible:
-                raise ProductionDomainError(
-                    f"La cantidad del producto resultante ({format_qty(payload.product_quantity)}) supera lo "
-                    f"que en realidad se entrego a esta etapa ({format_qty(disponible)})."
+            loss = max(Decimal("0"), entrega_total - recepcion_total)
+            attempt.merma_weight = loss
+            attempt.merma_percent = loss / entrega_total * Decimal("100")
+            if loss > 0:
+                from backend.modules.inventory.models import InventoryItem
+
+                first_entrega = next((l for l in entrega_lines if l.item_id is not None), None)
+                raw_material = (
+                    self.repository.session.get(InventoryItem, first_entrega.item_id)
+                    if first_entrega is not None else None
                 )
-
-        # Producto resultante: el destino ya se eligio al iniciar la etapa
-        # (start_stage_attempt); la cantidad real recien se sabe aca (Rodrigo,
-        # 2026-08-20 -- no debe salir pre-llena del picker). Convierte el lote
-        # y deja la linea RECEPCION del producto lista, pase lo que pase con
-        # la decision de calidad (un producto rechazado igual se registra,
-        # queda disponible para usarse en otra etapa despues).
-        if self.inventory_service is None:
-            raise ProductionDomainError("Inventario no esta disponible para finalizar esta etapa.")
-
-        from backend.modules.inventory.models import InventoryItem
-        from backend.modules.inventory.schemas import LotConversionCreate
-
-        first_entrega = next(
-            (line for line in run.acta_lines if line.side == ActaLineSide.ENTREGA and line.item_id is not None),
-            None,
-        )
-        raw_material = (
-            self.repository.session.get(InventoryItem, first_entrega.item_id)
-            if first_entrega is not None else None
-        )
-        lot = self.inventory_service.get_or_create_finished_product_lot(
-            run=run,
-            quantity=payload.product_quantity,
-            material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
-            purity=raw_material.purity if raw_material else None,
-            received_by_user_id=current_user.id,
-            unit_code=attempt.unit_code or "g",
-        )
-        try:
-            if attempt.target_item_id is not None:
-                target = self.repository.session.get(InventoryItem, attempt.target_item_id)
-                if target is not None and target.item_type == "COMPLEMENT":
-                    self.inventory_service.convert_lot_to_complement(
-                        lot.id, attempt.target_item_id, payload.product_quantity, user_id=current_user.id
-                    )
-                    target_id = attempt.target_item_id
-                else:
-                    conversion = LotConversionCreate(
-                        target_item_id=attempt.target_item_id, quantity=payload.product_quantity
-                    )
-                    converted = self.inventory_service.convert_lot_to_product(
-                        lot.id, conversion, user_id=current_user.id
-                    )
-                    target_id = converted.id
-            else:
-                conversion = LotConversionCreate(
-                    product_type_id=attempt.target_product_type_id, quantity=payload.product_quantity
+                self.inventory_service.get_or_create_waste_item(
+                    process_name=attempt.process_name,
+                    quantity=loss,
+                    unit_code=attempt.unit_code or "g",
+                    material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
+                    purity=raw_material.purity if raw_material else None,
+                    created_by_user_id=current_user.id,
+                    stage_attempt_id=attempt.id,
                 )
-                converted = self.inventory_service.convert_lot_to_product(
-                    lot.id, conversion, user_id=current_user.id
-                )
-                target_id = converted.id
-        except (InventoryDomainError, InventoryNotFoundError) as exc:
-            raise ProductionDomainError(f"No se pudo convertir el lote al producto resultante: {exc}") from exc
-
-        target_item = self.repository.session.get(InventoryItem, target_id)
-        self._add_or_merge_acta_line(
-            run,
-            side=ActaLineSide.RECEPCION,
-            label=target_item.name if target_item else "Producto",
-            quantity=payload.product_quantity,
-            # La unidad de la materia prima (gramos), no la del catalogo del
-            # destino (Rodrigo, 2026-08-20: "todos los productos terminados
-            # van a trabajar con su unidad de medida que son los gramos...
-            # nada de unidades") -- la cantidad ya esta en esos terminos.
-            unit_code=attempt.unit_code or "g",
-            source=ActaLineSource.PLAN,
-            item_id=target_id,
-            stage_attempt_id=attempt.id,
-            created_by_user_id=current_user.id,
-        )
-
-        decision = payload.decision if quality_control else "APROBADA"
-        if decision == "RECHAZADA":
-            attempt.status = StageAttemptStatus.REJECTED
-            attempt.rejection_reason = (payload.rejection_reason or "").strip() or None
-        else:
-            attempt.status = StageAttemptStatus.APPROVED
-            # Merma propia de ESTE intento: lo entregado menos lo recibido de
-            # vuelta del mismo item (ej. sobrante de insumos) menos lo que se
-            # convirtio en producto resultante -- misma cantidad, sin tabla
-            # de conversion aparte (Rodrigo, 2026-08-20). Nunca se compara
-            # contra otro intento.
-            if entrega_total > 0:
-                loss = max(Decimal("0"), entrega_total - recepcion_matched - payload.product_quantity)
-                attempt.merma_weight = loss
-                attempt.merma_percent = loss / entrega_total * Decimal("100")
-                # La merma real tambien se guarda en Inventario > Merma, no
-                # solo como numero en el acta (Rodrigo, 2026-08-20: "deben
-                # guardarse en inventario seccion merma, como merma 'nombre
-                # proceso de donde salio'"). Un item WASTE por proceso+
-                # material, igual criterio de consolidacion que los
-                # productos terminados del catalogo.
-                if loss > 0:
-                    self.inventory_service.get_or_create_waste_item(
-                        process_name=attempt.process_name,
-                        quantity=loss,
-                        unit_code=attempt.unit_code or "g",
-                        material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
-                        purity=raw_material.purity if raw_material else None,
-                        created_by_user_id=current_user.id,
-                        stage_attempt_id=attempt.id,
-                    )
 
         attempt.finished_by_user_id = current_user.id
         attempt.finished_at = datetime.utcnow()
+        self.repository.session.add(
+            ProductionRunStageAttemptDecision(
+                stage_attempt_id=attempt.id,
+                decision="APROBADA",
+                reason=None,
+                decided_by_user_id=current_user.id,
+                decided_at=datetime.utcnow(),
+            )
+        )
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def reject_stage_attempt(
+        self, attempt_id: UUID, payload: StageAttemptReject, current_user: CurrentUser
+    ) -> ProductionRunRead:
+        """✘: NO cierra el intento -- solo deja registro en la bitacora. El
+        acta sigue editable y se puede volver a intentar (aprobar o
+        rechazar de nuevo) despues de corregir."""
+        attempt = self.repository.get_stage_attempt(attempt_id)
+        if attempt is None:
+            raise ProductionNotFoundError("Etapa no encontrada.")
+        if attempt.status != StageAttemptStatus.IN_PROGRESS:
+            raise ProductionDomainError("Solo se puede rechazar una etapa en curso.")
+        run = attempt.run
+
+        self.repository.session.add(
+            ProductionRunStageAttemptDecision(
+                stage_attempt_id=attempt.id,
+                decision="RECHAZADA",
+                reason=(payload.reason or "").strip() or None,
+                decided_by_user_id=current_user.id,
+                decided_at=datetime.utcnow(),
+            )
+        )
         self.repository.flush()
         return self._read_with_names(run)
 
@@ -1467,16 +1383,28 @@ class ProductionService:
                         user_id=current_user.id,
                     )
                 elif line.side == ActaLineSide.RECEPCION and line.source == ActaLineSource.PLAN:
-                    self.inventory_service.reverse_stage_attempt_product(
-                        run_id=run.id,
-                        target_id=line.item_id,
-                        quantity=line.quantity,
+                    # Producto resultante: desde este spec ya no hay lote
+                    # intermedio (start_stage_attempt mueve stock directo al
+                    # item destino via _apply_admin_acta_line_delta), asi que
+                    # reverse_stage_attempt_product (el mecanismo del lote
+                    # viejo) ya no aplica -- reversion plana simetrica a la
+                    # rama ENTREGA de arriba: resta line.quantity del destino.
+                    # create_movement bloquea (InventoryDomainError) si ya no
+                    # queda suficiente porque se movio de ahi.
+                    self.inventory_service.create_movement(
+                        InventoryMovementCreate(
+                            item_id=line.item_id,
+                            movement_type="AJUSTE_NEGATIVO",
+                            quantity=line.quantity,
+                            reason=revert_reason,
+                            reference_type="production_run",
+                            reference_id=run.id,
+                        ),
                         user_id=current_user.id,
-                        reason=revert_reason,
                     )
             # La merma real que esta etapa haya sumado a Inventario > Merma
             # tambien se revierte (simetria con get_or_create_waste_item en
-            # finish_stage_attempt) -- si no, revertir dejaba stock de merma
+            # approve_stage_attempt) -- si no, revertir dejaba stock de merma
             # huerfano que ya no corresponde a ninguna etapa real.
             self.inventory_service.reverse_waste_item(
                 stage_attempt_id=attempt.id, reason=revert_reason, user_id=current_user.id
@@ -1491,62 +1419,6 @@ class ProductionService:
             self.repository.session.delete(line)
         run.stage_attempts.remove(attempt)
         self.repository.session.delete(attempt)
-        self.repository.flush()
-        return self._read_with_names(run)
-
-    def allocate_stage_attempt_material(self, attempt_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
-        """Asigna stock recien disponible a un intento PENDIENTE_MATERIAL --
-        consume lo que alcance ahora y, si queda 100% cubierto y no hay otro
-        intento EN_PROCESO en la orden, lo arranca. Es la aprobacion manual
-        puntual que reemplaza al viejo allocate_material, pero por intento de
-        etapa en vez de por orden completa."""
-        attempt = self.repository.get_stage_attempt(attempt_id)
-        if attempt is None:
-            raise ProductionNotFoundError("Intento de etapa no encontrado.")
-        if attempt.status != StageAttemptStatus.WAITING_MATERIAL:
-            raise ProductionDomainError("Solo se puede asignar material a un intento en PENDIENTE_MATERIAL.")
-        run = attempt.run
-
-        from backend.modules.inventory.models import InventoryItem
-
-        pending_lines = [line for line in attempt.materials if line.quantity_pending > 0]
-        resolved = [(self.repository.session.get(InventoryItem, line.item_id), line) for line in pending_lines]
-        for item, line in resolved:
-            if item is None:
-                raise ProductionDomainError("Un material pendiente de este intento ya no existe en inventario.")
-
-        ratio = self._material_coverage_ratio([(item, line.quantity_pending) for item, line in resolved])
-        if ratio > 0:
-            for item, line in resolved:
-                covered_qty = (line.quantity_pending * ratio).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
-                if covered_qty <= 0:
-                    continue
-                self.inventory_service.consume_material_for_production(
-                    item_id=item.id,
-                    quantity=covered_qty,
-                    production_run_id=run.id,
-                    user_id=current_user.id,
-                    production_code=run.production_code or run.root_production_code,
-                    reason=f"Material asignado a etapa {attempt.process_name} ({attempt.code or attempt.id}).",
-                )
-                self._add_or_merge_acta_line(
-                    run,
-                    side=ActaLineSide.ENTREGA,
-                    label=item.name,
-                    quantity=covered_qty,
-                    unit_code=item.unit_code,
-                    source=ActaLineSource.AUTO,
-                    item_id=item.id,
-                    stage_attempt_id=attempt.id,
-                    created_by_user_id=current_user.id,
-                )
-                line.quantity_pending -= covered_qty
-
-        if all(line.quantity_pending <= 0 for line in attempt.materials):
-            if self.repository.get_active_stage_attempt(run.id) is None:
-                attempt.status = StageAttemptStatus.IN_PROGRESS
-                attempt.started_at = datetime.utcnow()
-
         self.repository.flush()
         return self._read_with_names(run)
 

@@ -450,7 +450,7 @@ def test_cancel_run_reverts_admin_stock_line_alongside_stage_attempt_consumption
 ):
     """La linea ADMIN_STOCK se revierte pase lo que pase con el consumo
     normal de la orden (flujo nuevo: start_stage_attempt)."""
-    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductTarget
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
 
     raw_material.current_stock = Decimal("1000")
     db_session.flush()
@@ -461,7 +461,7 @@ def test_cancel_run_reverts_admin_stock_line_alongside_stage_attempt_consumption
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
         ),
         current_user,
     )
@@ -521,7 +521,7 @@ def _start_with_entrega(db_session, production_service, current_user, process, r
     insumo (SUPPLY) -- la materia prima ya no se puede devolver por RECEPCION
     (pasa a formar parte del producto), solo insumos/complementos."""
     from backend.modules.inventory.models import InventoryItem
-    from backend.modules.production.schemas import AdminActaLineCreate, StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductTarget
+    from backend.modules.production.schemas import AdminActaLineCreate, StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
 
     raw_material.current_stock = Decimal("1000")
     db_session.flush()
@@ -532,7 +532,7 @@ def _start_with_entrega(db_session, production_service, current_user, process, r
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal(entregado))],
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
         ),
         current_user,
     )

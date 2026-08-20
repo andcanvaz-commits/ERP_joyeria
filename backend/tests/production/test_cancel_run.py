@@ -15,13 +15,14 @@ from backend.modules.production.schemas import (
     ProductionOrderCreate,
     StageAttemptCreate,
     StageAttemptMaterialLine,
-    StageAttemptProductTarget,
+    StageAttemptProductLine,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 
 
 def _run_with_consumed_material(
-    db_session, production_service, current_user, process, raw_material, target_item, quantity=Decimal("100")
+    db_session, production_service, current_user, process, raw_material, target_item,
+    quantity=Decimal("100"), product_quantity=Decimal("100"),
 ):
     raw_material.current_stock = quantity
     db_session.flush()
@@ -32,7 +33,7 @@ def _run_with_consumed_material(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=quantity)],
-            product=StageAttemptProductTarget(target_item_id=target_item.id),
+            products=[StageAttemptProductLine(target_item_id=target_item.id, quantity=product_quantity)],
         ),
         current_user,
     )
@@ -104,11 +105,18 @@ def test_cancel_from_in_progress_restores_consumed_stock(
     assert result.is_cancellation is True
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("100")
+    # Flujo nuevo: start_stage_attempt mueve el consumo via
+    # _apply_admin_acta_line_delta, referenciado por la propia linea de acta
+    # (reference_type="production_run_acta_line"), no por la orden -- la
+    # reversion de cancel_run sigue esa misma referencia y usa
+    # DEVOLUCION_PRODUCCION (el "decrease_type" del lado ENTREGA), no
+    # REVERSION_PRODUCCION (eso es solo del mecanismo del flujo viejo).
     reversions = [
         m for m in raw_material.movements
-        if m.movement_type == "REVERSION_PRODUCCION" and m.reference_id == run.id
+        if m.movement_type == "DEVOLUCION_PRODUCCION" and m.reference_type == "production_run_acta_line"
     ]
     assert len(reversions) == 1
+    assert reversions[0].quantity == Decimal("100")
     assert reversions[0].quantity == Decimal("100")
 
 
@@ -137,7 +145,7 @@ def test_cancel_does_not_touch_average_cost(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
         ),
         current_user,
     )
@@ -248,11 +256,10 @@ def test_cancel_run_reverts_finished_product_conversion(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     from backend.modules.production.models import ProductionRunStatus
-    from backend.modules.production.schemas import StageAttemptFinish
 
-    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
-    production_service.finish_stage_attempt(
-        run.stage_attempts[0].id, StageAttemptFinish(product_quantity=Decimal("1")), current_user
+    run = _run_with_consumed_material(
+        db_session, production_service, current_user, process, raw_material, target_complement,
+        product_quantity=Decimal("1"),
     )
     db_session.refresh(target_complement)
     assert target_complement.current_stock == Decimal("1")
@@ -272,11 +279,10 @@ def test_cancel_run_blocks_when_converted_stock_already_moved(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     from backend.modules.production.models import ProductionRunStatus
-    from backend.modules.production.schemas import StageAttemptFinish
 
-    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
-    production_service.finish_stage_attempt(
-        run.stage_attempts[0].id, StageAttemptFinish(product_quantity=Decimal("1")), current_user
+    run = _run_with_consumed_material(
+        db_session, production_service, current_user, process, raw_material, target_complement,
+        product_quantity=Decimal("1"),
     )
     run.status = ProductionRunStatus.FINISHED
     db_session.flush()

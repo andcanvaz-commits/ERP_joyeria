@@ -65,7 +65,7 @@ def test_update_acta_line_changes_only_given_fields(
 def test_update_acta_line_allows_editing_plan_line(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductTarget
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
 
     raw_material.current_stock = Decimal("100")
     db_session.flush()
@@ -76,7 +76,7 @@ def test_update_acta_line_allows_editing_plan_line(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
         ),
         current_user,
     )
@@ -112,7 +112,7 @@ def test_delete_manual_line_removes_it(
 def test_delete_rejects_plan_line(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductTarget
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
 
     raw_material.current_stock = Decimal("100")
     db_session.flush()
@@ -123,7 +123,7 @@ def test_delete_rejects_plan_line(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
         ),
         current_user,
     )

@@ -19,7 +19,7 @@ from backend.modules.production.schemas import (
     RunCancelPayload,
     RunProductsUpdate,
     StageAttemptCreate,
-    StageAttemptFinish,
+    StageAttemptReject,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError, ProductionService
 from backend.modules.security.permissions import require_permission
@@ -135,18 +135,33 @@ def start_stage_attempt(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.post("/runs/stage-attempts/{attempt_id}/finish", response_model=ProductionRunRead)
-def finish_stage_attempt(
+@router.post("/runs/stage-attempts/{attempt_id}/approve", response_model=ProductionRunRead)
+def approve_stage_attempt(
     attempt_id: UUID,
-    payload: StageAttemptFinish,
     current_user: CurrentUser = Depends(get_current_user),
     service: ProductionService = Depends(get_production_service),
 ) -> ProductionRunRead:
-    """Seccion 4: ✔ (APROBADA, calcula merma propia del intento) o ✘
-    (RECHAZADA, motivo opcional, no repite el proceso automaticamente)."""
+    """Control de calidad universal: ✔ cierra la etapa y calcula la merma."""
     ensure_permission(current_user, "production.runs.update")
     try:
-        return service.finish_stage_attempt(attempt_id, payload, current_user)
+        return service.approve_stage_attempt(attempt_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/runs/stage-attempts/{attempt_id}/reject", response_model=ProductionRunRead)
+def reject_stage_attempt(
+    attempt_id: UUID,
+    payload: StageAttemptReject,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """✘: no cierra la etapa, solo deja registro (motivo opcional)."""
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.reject_stage_attempt(attempt_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:
@@ -166,24 +181,6 @@ def revert_stage_attempt(
     ensure_permission(current_user, "production.runs.delete")
     try:
         return service.revert_stage_attempt(attempt_id, current_user, payload.reason)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/stage-attempts/{attempt_id}/allocate-material", response_model=ProductionRunRead)
-def allocate_stage_attempt_material(
-    attempt_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    """Asigna stock recien disponible a un intento PENDIENTE_MATERIAL --
-    consume lo que alcance y, si queda 100% cubierto y no hay otro intento
-    EN_PROCESO en la orden, lo arranca."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.allocate_stage_attempt_material(attempt_id, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

@@ -63,17 +63,23 @@ class RunProductsUpdate(BaseModel):
     products: list[RunProductCreate] = Field(min_length=1)
 
 
-class StageAttemptProductTarget(BaseModel):
-    """Solo el destino del producto resultante -- la cantidad real se llena
-    al finalizar la etapa (Rodrigo, 2026-08-20), no se pide aca."""
+class StageAttemptProductLine(BaseModel):
+    """Una linea de producto resultante: destino (pieza real o tipo del
+    catalogo + material) y su cantidad -- se agrega de inmediato como linea
+    RECEPCION real al iniciar la etapa (Rodrigo, 2026-08-20: ya no se pide
+    la cantidad al finalizar, ni hay lote intermedio)."""
 
     model_config = ConfigDict(extra="forbid")
 
     product_type_id: UUID | None = None
     target_item_id: UUID | None = None
+    # Requerido si product_type_id y el item aun no existe (se crea al
+    # vuelo, ver ProductionService._resolve_or_create_finished_item).
+    material_code: str | None = None
+    quantity: Decimal = Field(gt=0)
 
     @model_validator(mode="after")
-    def _check_one_target(self) -> "StageAttemptProductTarget":
+    def _check_one_target(self) -> "StageAttemptProductLine":
         if (self.product_type_id is None) == (self.target_item_id is None):
             raise ValueError(
                 "El producto resultante debe ser una pieza del inventario o un "
@@ -256,27 +262,18 @@ class StageAttemptCreate(BaseModel):
 
     process_id: UUID
     responsable_name: str = Field(min_length=1, max_length=180)
-    # Opcional: si viene vacio, la etapa arranca directo (igual que antes).
-    # Si trae lineas, se valida contra stock disponible al iniciar -- puede
-    # terminar en split si no alcanza (ver ProductionService.start_stage_attempt).
+    # Entrada: cualquier item de inventario que entra a esta etapa (ya no
+    # solo materia prima). Sin tope de stock aca -- lo valida
+    # _apply_admin_acta_line_delta al aplicar cada linea.
     materials: list[StageAttemptMaterialLine] = Field(default_factory=list)
-    # Obligatorio siempre: QUE va a salir de esta etapa (solo el destino --
-    # la cantidad real se llena al finalizar, Rodrigo 2026-08-20).
-    product: StageAttemptProductTarget
+    # Obligatorio: al menos un producto resultante, cada uno con su cantidad.
+    products: list[StageAttemptProductLine] = Field(min_length=1)
 
 
-class StageAttemptFinish(BaseModel):
+class StageAttemptReject(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # La decision solo aplica si el proceso tiene control de calidad -- si
-    # no, el service la fuerza a APROBADA sin importar lo que venga aca.
-    decision: Literal["APROBADA", "RECHAZADA"] = "APROBADA"
-    # Opcional -- Rodrigo: el motivo de rechazo no es obligatorio.
-    rejection_reason: str | None = Field(default=None, max_length=1000)
-    # Cantidad real del producto resultante elegido al iniciar la etapa
-    # (Rodrigo, 2026-08-20: no debe salir pre-llena, se llena a mano aca).
-    # Convierte el lote y mueve inventario recien en este momento.
-    product_quantity: Decimal = Field(gt=0)
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 class StageAttemptMaterialRead(BaseModel):
