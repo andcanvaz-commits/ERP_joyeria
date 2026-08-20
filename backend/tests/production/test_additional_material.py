@@ -12,6 +12,7 @@ from backend.modules.production.models import ActaLineSide, ActaLineSource
 from backend.modules.production.schemas import (
     AdditionalMaterialRequestCreate,
     ProductionOrderCreate,
+    RunProductCreate,
     StageAttemptCreate,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
@@ -21,7 +22,13 @@ def _in_progress_run(production_service, current_user, process, raw_material, ta
     raw_material.current_stock = Decimal("1000")
     order = production_service.create_order(ProductionOrderCreate(name="Orden adicional test"), current_user)
     production_service.start_stage_attempt(
-        order.id, StageAttemptCreate(process_id=process.id, responsable_name="Ana"), current_user
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            product=RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1")),
+        ),
+        current_user,
     )
     return production_service.repository.get_run(order.id)
 

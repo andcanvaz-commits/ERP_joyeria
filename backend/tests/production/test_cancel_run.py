@@ -13,6 +13,7 @@ from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.models import ProductionRun, ProductionRunStatus
 from backend.modules.production.schemas import (
     ProductionOrderCreate,
+    RunProductCreate,
     StageAttemptCreate,
     StageAttemptMaterialLine,
 )
@@ -20,7 +21,7 @@ from backend.modules.production.service import ProductionDomainError, Production
 
 
 def _run_with_consumed_material(
-    db_session, production_service, current_user, process, raw_material, quantity=Decimal("100")
+    db_session, production_service, current_user, process, raw_material, target_item, quantity=Decimal("100")
 ):
     raw_material.current_stock = quantity
     db_session.flush()
@@ -31,6 +32,7 @@ def _run_with_consumed_material(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=quantity)],
+            product=RunProductCreate(target_item_id=target_item.id, quantity=Decimal("1")),
         ),
         current_user,
     )
@@ -88,9 +90,9 @@ def _create_split_family(db_session, production_service, current_user, process, 
 
 
 def test_cancel_from_in_progress_restores_consumed_stock(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material)
+    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("0")
 
@@ -110,7 +112,9 @@ def test_cancel_from_in_progress_restores_consumed_stock(
     assert reversions[0].quantity == Decimal("100")
 
 
-def test_cancel_does_not_touch_average_cost(db_session, production_service, current_user, process, raw_material):
+def test_cancel_does_not_touch_average_cost(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
     """REVERSION_PRODUCCION devuelve gramos pero no es una compra: el costo
     promedio ponderado (kardex) debe quedar exactamente como estaba."""
     from backend.modules.inventory.schemas import InventoryMovementCreate
@@ -133,6 +137,7 @@ def test_cancel_does_not_touch_average_cost(db_session, production_service, curr
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1")),
         ),
         current_user,
     )
@@ -230,33 +235,27 @@ def test_cancel_run_family_unknown_run_raises_not_found(production_service, curr
 
 
 # ---------------------------------------------------------------------------
-# Cancelar una orden TERMINADA (assign_product ya convirtio el lote a
-# producto/complemento del catalogo): el administrador debe poder cancelar y
-# revertir tambien esa conversion, no solo el consumo de materia prima.
+# Cancelar una orden TERMINADA: el flujo nuevo ya no tiene un boton que
+# cierre la orden (el producto se declara solo al iniciar cada etapa, Task 3
+# de docs/superpowers/plans/2026-08-19-rediseno-acta-y-ux-produccion.md) --
+# pero ordenes TERMINADAS de antes de ese cambio siguen existiendo en la base
+# real y deben poder cancelarse y revertirse igual. Se simula ese estado
+# historico marcando status=TERMINADA a mano tras declarar el producto.
 # ---------------------------------------------------------------------------
 
 
 def test_cancel_run_reverts_finished_product_conversion(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    from backend.modules.production.schemas import AssignProductPayload, RunProductCreate, StageAttemptFinish
+    from backend.modules.production.models import ProductionRunStatus
 
-    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material)
-    finished = production_service.finish_stage_attempt(
-        run.stage_attempts[0].id,
-        StageAttemptFinish(peso_al_finalizar=Decimal("100"), decision="APROBADA"),
-        current_user,
-    )
-    assigned = production_service.assign_product(
-        finished.id,
-        AssignProductPayload(products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))]),
-        current_user,
-    )
-    assert assigned.status == "TERMINADA"
+    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
     db_session.refresh(target_complement)
     assert target_complement.current_stock == Decimal("1")
+    run.status = ProductionRunStatus.FINISHED
+    db_session.flush()
 
-    result = production_service.cancel_run(assigned.id, current_user, "Se asigno por error")
+    result = production_service.cancel_run(run.id, current_user, "Se asigno por error")
 
     assert result.status == "CANCELADA"
     db_session.refresh(target_complement)
@@ -268,26 +267,18 @@ def test_cancel_run_reverts_finished_product_conversion(
 def test_cancel_run_blocks_when_converted_stock_already_moved(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    from backend.modules.production.schemas import AssignProductPayload, RunProductCreate, StageAttemptFinish
+    from backend.modules.production.models import ProductionRunStatus
 
-    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material)
-    finished = production_service.finish_stage_attempt(
-        run.stage_attempts[0].id,
-        StageAttemptFinish(peso_al_finalizar=Decimal("100"), decision="APROBADA"),
-        current_user,
-    )
-    assigned = production_service.assign_product(
-        finished.id,
-        AssignProductPayload(products=[RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))]),
-        current_user,
-    )
+    run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
+    run.status = ProductionRunStatus.FINISHED
+    db_session.flush()
 
     # Ya se movio de ahi (ej. se vendio/salio): no queda suficiente para revertir.
     target_complement.current_stock = Decimal("0")
     db_session.flush()
 
     with pytest.raises(ProductionDomainError, match="No se puede cancelar"):
-        production_service.cancel_run(assigned.id, current_user, "motivo")
+        production_service.cancel_run(run.id, current_user, "motivo")
 
-    reloaded = production_service.repository.get_run(assigned.id)
+    reloaded = production_service.repository.get_run(run.id)
     assert reloaded.status == "TERMINADA"

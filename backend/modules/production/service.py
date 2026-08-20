@@ -1234,8 +1234,73 @@ class ProductionService:
             run.stage_attempts.append(new_attempt)
             return new_attempt
 
+        def _apply_product(attempt: ProductionRunStageAttempt) -> None:
+            """Producto resultante obligatorio (siempre, al elegir la etapa):
+            alimenta el mismo lote FINISHED_PRODUCT de la orden (Task 2) y lo
+            convierte de una, dejando la parte derecha del acta lista -- misma
+            logica que antes tenia el boton "Asignar a producto terminado"
+            (ya eliminado), pero por etapa y sin cerrar la orden."""
+            from backend.modules.inventory.models import InventoryItem
+            from backend.modules.inventory.schemas import LotConversionCreate
+
+            first_entrega = next(
+                (line for line in run.acta_lines if line.side == ActaLineSide.ENTREGA and line.item_id is not None),
+                None,
+            )
+            raw_material = (
+                self.repository.session.get(InventoryItem, first_entrega.item_id)
+                if first_entrega is not None else None
+            )
+            lot = self.inventory_service.get_or_create_finished_product_lot(
+                run=run,
+                quantity=payload.product.quantity,
+                material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
+                purity=raw_material.purity if raw_material else None,
+                received_by_user_id=current_user.id,
+            )
+            try:
+                if payload.product.target_item_id is not None:
+                    target = self.repository.session.get(InventoryItem, payload.product.target_item_id)
+                    if target is not None and target.item_type == "COMPLEMENT":
+                        self.inventory_service.convert_lot_to_complement(
+                            lot.id, payload.product.target_item_id, payload.product.quantity, user_id=current_user.id
+                        )
+                        target_id = payload.product.target_item_id
+                    else:
+                        conversion = LotConversionCreate(
+                            target_item_id=payload.product.target_item_id, quantity=payload.product.quantity
+                        )
+                        converted = self.inventory_service.convert_lot_to_product(
+                            lot.id, conversion, user_id=current_user.id
+                        )
+                        target_id = converted.id
+                else:
+                    conversion = LotConversionCreate(
+                        product_type_id=payload.product.product_type_id, quantity=payload.product.quantity
+                    )
+                    converted = self.inventory_service.convert_lot_to_product(
+                        lot.id, conversion, user_id=current_user.id
+                    )
+                    target_id = converted.id
+            except (InventoryDomainError, InventoryNotFoundError) as exc:
+                raise ProductionDomainError(f"No se pudo convertir el lote al producto resultante: {exc}") from exc
+
+            target_item = self.repository.session.get(InventoryItem, target_id)
+            self._add_or_merge_acta_line(
+                run,
+                side=ActaLineSide.RECEPCION,
+                label=target_item.name if target_item else "Producto",
+                quantity=payload.product.quantity,
+                unit_code=target_item.unit_code if target_item else "und",
+                source=ActaLineSource.PLAN,
+                item_id=target_id,
+                stage_attempt_id=attempt.id,
+                created_by_user_id=current_user.id,
+            )
+
         if not payload.materials:
-            _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
+            new_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
+            _apply_product(new_attempt)
             self.repository.flush()
             return self._read_with_names(run)
 
@@ -1283,6 +1348,7 @@ class ProductionService:
                         quantity_pending=Decimal("0"),
                     )
                 )
+            _apply_product(covered_attempt)
         elif ratio <= 0:
             waiting_attempt = _new_attempt(StageAttemptStatus.WAITING_MATERIAL, attempt_no, 0)
             for item, quantity in resolved:
@@ -1294,6 +1360,7 @@ class ProductionService:
                         quantity_pending=quantity,
                     )
                 )
+            _apply_product(waiting_attempt)
         else:
             covered_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
             waiting_attempt = _new_attempt(StageAttemptStatus.WAITING_MATERIAL, attempt_no + 1, 1)
@@ -1318,6 +1385,7 @@ class ProductionService:
                         quantity_pending=remainder,
                     )
                 )
+            _apply_product(covered_attempt)
 
         self.repository.flush()
         return self._read_with_names(run)

@@ -11,6 +11,7 @@ import pytest
 from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.schemas import (
     ProductionOrderCreate,
+    RunProductCreate,
     StageAttemptCreate,
     StageAttemptMaterialLine,
 )
@@ -21,11 +22,19 @@ def _start_order(production_service, current_user):
     return production_service.create_order(ProductionOrderCreate(name="Orden material test"), current_user)
 
 
-def test_start_stage_attempt_without_materials_starts_directly(production_service, current_user, process):
+def _product(item) -> RunProductCreate:
+    return RunProductCreate(target_item_id=item.id, quantity=Decimal("1"))
+
+
+def test_start_stage_attempt_without_materials_starts_directly(
+    production_service, current_user, process, complement_item
+):
     order = _start_order(production_service, current_user)
 
     result = production_service.start_stage_attempt(
-        order.id, StageAttemptCreate(process_id=process.id, responsable_name="Ana"), current_user
+        order.id,
+        StageAttemptCreate(process_id=process.id, responsable_name="Ana", product=_product(complement_item)),
+        current_user,
     )
 
     assert len(result.stage_attempts) == 1
@@ -33,8 +42,15 @@ def test_start_stage_attempt_without_materials_starts_directly(production_servic
     assert result.stage_attempts[0].materials == []
 
 
+def test_start_stage_attempt_requires_product(process):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        StageAttemptCreate(process_id=process.id, responsable_name="Ana")
+
+
 def test_start_stage_attempt_with_full_stock_consumes_and_starts(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, complement_item
 ):
     raw_material.current_stock = Decimal("100")
     db_session.flush()
@@ -46,6 +62,7 @@ def test_start_stage_attempt_with_full_stock_consumes_and_starts(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -63,7 +80,7 @@ def test_start_stage_attempt_with_full_stock_consumes_and_starts(
 
 
 def test_start_stage_attempt_with_partial_stock_splits_into_two_attempts(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, complement_item
 ):
     raw_material.current_stock = Decimal("60")
     db_session.flush()
@@ -75,6 +92,7 @@ def test_start_stage_attempt_with_partial_stock_splits_into_two_attempts(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -94,7 +112,7 @@ def test_start_stage_attempt_with_partial_stock_splits_into_two_attempts(
 
 
 def test_start_stage_attempt_with_zero_stock_creates_only_waiting_attempt(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, complement_item
 ):
     order = _start_order(production_service, current_user)
 
@@ -104,6 +122,7 @@ def test_start_stage_attempt_with_zero_stock_creates_only_waiting_attempt(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -117,7 +136,7 @@ def test_start_stage_attempt_with_zero_stock_creates_only_waiting_attempt(
 
 
 def test_start_stage_attempt_coverage_is_the_minimum_across_lines(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, process, raw_material, target_complement, complement_item
 ):
     raw_material.current_stock = Decimal("100")
     target_complement.current_stock = Decimal("3")
@@ -133,6 +152,7 @@ def test_start_stage_attempt_coverage_is_the_minimum_across_lines(
                 StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100")),
                 StageAttemptMaterialLine(item_id=target_complement.id, quantity=Decimal("10")),
             ],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -144,7 +164,7 @@ def test_start_stage_attempt_coverage_is_the_minimum_across_lines(
 
 
 def test_allocate_stage_attempt_material_full_stock_starts_it(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, complement_item
 ):
     order = _start_order(production_service, current_user)
     result = production_service.start_stage_attempt(
@@ -153,6 +173,7 @@ def test_allocate_stage_attempt_material_full_stock_starts_it(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -171,7 +192,7 @@ def test_allocate_stage_attempt_material_full_stock_starts_it(
 
 
 def test_allocate_stage_attempt_material_partial_stock_keeps_waiting(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, complement_item
 ):
     order = _start_order(production_service, current_user)
     result = production_service.start_stage_attempt(
@@ -180,6 +201,7 @@ def test_allocate_stage_attempt_material_partial_stock_keeps_waiting(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -198,7 +220,7 @@ def test_allocate_stage_attempt_material_partial_stock_keeps_waiting(
 
 
 def test_allocate_stage_attempt_material_no_stock_is_a_noop(
-    production_service, current_user, process, raw_material
+    production_service, current_user, process, raw_material, complement_item
 ):
     order = _start_order(production_service, current_user)
     result = production_service.start_stage_attempt(
@@ -207,6 +229,7 @@ def test_allocate_stage_attempt_material_no_stock_is_a_noop(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -220,7 +243,7 @@ def test_allocate_stage_attempt_material_no_stock_is_a_noop(
 
 
 def test_allocate_stage_attempt_material_full_stock_but_another_attempt_active_stays_waiting(
-    db_session, production_service, current_user, process, raw_material
+    db_session, production_service, current_user, process, raw_material, complement_item
 ):
     # Stock parcial (60/100) al iniciar: la cubierta arranca EN_PROCESO YA y
     # sigue asi (nunca se finaliza en este test) -- la que queda esperando es
@@ -234,6 +257,7 @@ def test_allocate_stage_attempt_material_full_stock_but_another_attempt_active_s
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=_product(complement_item),
         ),
         current_user,
     )
@@ -254,10 +278,14 @@ def test_allocate_stage_attempt_material_full_stock_but_another_attempt_active_s
     assert raw_material.current_stock == Decimal("0")
 
 
-def test_allocate_stage_attempt_material_wrong_status_raises(production_service, current_user, process):
+def test_allocate_stage_attempt_material_wrong_status_raises(
+    production_service, current_user, process, complement_item
+):
     order = _start_order(production_service, current_user)
     result = production_service.start_stage_attempt(
-        order.id, StageAttemptCreate(process_id=process.id, responsable_name="Ana"), current_user
+        order.id,
+        StageAttemptCreate(process_id=process.id, responsable_name="Ana", product=_product(complement_item)),
+        current_user,
     )
     running = result.stage_attempts[0]
 

@@ -257,6 +257,9 @@ class StageAttemptCreate(BaseModel):
     # Si trae lineas, se valida contra stock disponible al iniciar -- puede
     # terminar en split si no alcanza (ver ProductionService.start_stage_attempt).
     materials: list[StageAttemptMaterialLine] = Field(default_factory=list)
+    # Obligatorio siempre: que va a salir de esta etapa y cuanto -- reusa
+    # RunProductCreate (misma validacion/picker que antes usaba assign_product).
+    product: RunProductCreate
 
 
 class StageAttemptFinish(BaseModel):

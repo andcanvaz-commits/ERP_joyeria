@@ -499,7 +499,7 @@ def test_cancel_run_reverts_admin_stock_line_alongside_stage_attempt_consumption
 ):
     """La linea ADMIN_STOCK se revierte pase lo que pase con el consumo
     normal de la orden (flujo nuevo: start_stage_attempt)."""
-    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine
+    from backend.modules.production.schemas import RunProductCreate, StageAttemptCreate, StageAttemptMaterialLine
 
     raw_material.current_stock = Decimal("1000")
     db_session.flush()
@@ -510,6 +510,7 @@ def test_cancel_run_reverts_admin_stock_line_alongside_stage_attempt_consumption
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1")),
         ),
         current_user,
     )
