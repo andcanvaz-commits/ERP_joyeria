@@ -248,6 +248,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [success, setSuccess] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isProcessesOpen, setIsProcessesOpen] = useState(false);
+  // La misma ventana "Procesos" sirve de picker cuando se abre desde "Elegir
+  // proceso" (iniciar etapa): clickear una fila elige en vez de solo abrir
+  // el detalle. Desde el menu de mantenimiento se abre en modo gestion
+  // normal (false).
+  const [processesPickerMode, setProcessesPickerMode] = useState(false);
   const [isUserCreateOpen, setIsUserCreateOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
   const [dataModal, setDataModal] = useState<{ type: "units" | "materials" | "supplies" | "complements" | "productTypes"; mode: "create" | "view" } | null>(null);
@@ -1215,7 +1220,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               </button>
               <button
                 className="maintenanceTile"
-                onClick={() => setIsProcessesOpen(true)}
+                onClick={() => {
+                  setProcessesPickerMode(false);
+                  setIsProcessesOpen(true);
+                }}
                 type="button"
               >
                 <Eye aria-hidden="true" size={22} />
@@ -1949,12 +1957,17 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   </div>
                   <label className="fieldGroup">
                     <span>Proceso</span>
-                    <select className="field" onChange={(event) => setSelectedProcessId(event.target.value)} value={selectedProcessId}>
-                      <option value="">Elegir...</option>
-                      {activeProcesses.map((process) => (
-                        <option key={process.id} value={process.id}>{process.name}</option>
-                      ))}
-                    </select>
+                    <button
+                      className="button"
+                      disabled={isSaving}
+                      onClick={() => {
+                        setProcessesPickerMode(true);
+                        setIsProcessesOpen(true);
+                      }}
+                      type="button"
+                    >
+                      {selectedProcess ? selectedProcess.name : "Elegir proceso..."}
+                    </button>
                   </label>
                   <label className="fieldGroup">
                     <span>Responsable</span>
@@ -2729,68 +2742,103 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {dataModal?.type === "complements" ? <ComplementsManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
       {dataModal?.type === "productTypes" ? <ProductTypesManager mode={dataModal.mode} onClose={() => setDataModal(null)} /> : null}
 
-      {isProcessesOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Procesos creados">
-          <section className="modalWindow processesWindow">
-            <div className="modalHeader">
-              <div>
-                <h2>Procesos</h2>
-                <p>{processes.length} procesos creados</p>
+      {isProcessesOpen ? (() => {
+        const listedProcesses = processesPickerMode ? activeProcesses : processes;
+        return (
+          <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Procesos creados">
+            <section className="modalWindow processesWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>{processesPickerMode ? "Elegir proceso" : "Procesos"}</h2>
+                  <p>{listedProcesses.length} procesos {processesPickerMode ? "disponibles" : "creados"}</p>
+                </div>
+                <button
+                  aria-label="Cerrar"
+                  className="iconOnlyButton"
+                  onClick={() => {
+                    setIsProcessesOpen(false);
+                    setProcessesPickerMode(false);
+                  }}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={18} />
+                </button>
               </div>
-              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsProcessesOpen(false)} type="button">
-                <X aria-hidden="true" size={18} />
-              </button>
-            </div>
 
-            <div className="processesLayout">
-              <div className="processList">
-                {processes.map((process) => (
-                  <article className="processRow" key={process.id} {...openableProps(() => setViewingProcess(process), `Ver proceso ${process.name}`)}>
-                    <button
-                      className="linkButton"
-                      onClick={() => {
-                        setViewingProcess(process);
-                      }}
-                      type="button"
-                    >
-                      {process.code ? <span className="orderCodeTag">{process.code}</span> : null}
-                      {process.name}
-                    </button>
-                    <span>{process.is_active ? "Activo" : "Inactivo"}</span>
-                    <div className="rowActions" onClick={stopClick}>
-                      <button
-                        className="iconTextButton"
-                        onClick={() => {
-                          setViewingProcess(process);
-                        }}
-                        type="button"
+              <div className="processesLayout">
+                <div className="processList">
+                  {listedProcesses.map((process) =>
+                    processesPickerMode ? (
+                      <article
+                        className="processRow"
+                        key={process.id}
+                        {...openableProps(
+                          () => {
+                            setSelectedProcessId(process.id);
+                            setIsProcessesOpen(false);
+                            setProcessesPickerMode(false);
+                          },
+                          `Elegir proceso ${process.name}`,
+                        )}
                       >
-                        <Eye aria-hidden="true" size={15} />
-                        Visualizar
-                      </button>
-                      <button className="iconTextButton" disabled={!canUpdate} onClick={() => openEditForm(process)} type="button">
-                        <Pencil aria-hidden="true" size={15} />
-                        Editar
-                      </button>
-                      <button
-                        className="iconTextButton dangerText"
-                        disabled={!canDelete}
-                        onClick={() => void handleDelete(process)}
-                        type="button"
-                      >
-                        <Trash2 aria-hidden="true" size={15} />
-                        Eliminar
-                      </button>
+                        <span className="linkButton">
+                          {process.code ? <span className="orderCodeTag">{process.code}</span> : null}
+                          {process.name}
+                        </span>
+                      </article>
+                    ) : (
+                      <article className="processRow" key={process.id} {...openableProps(() => setViewingProcess(process), `Ver proceso ${process.name}`)}>
+                        <button
+                          className="linkButton"
+                          onClick={() => {
+                            setViewingProcess(process);
+                          }}
+                          type="button"
+                        >
+                          {process.code ? <span className="orderCodeTag">{process.code}</span> : null}
+                          {process.name}
+                        </button>
+                        <span>{process.is_active ? "Activo" : "Inactivo"}</span>
+                        <div className="rowActions" onClick={stopClick}>
+                          <button
+                            className="iconTextButton"
+                            onClick={() => {
+                              setViewingProcess(process);
+                            }}
+                            type="button"
+                          >
+                            <Eye aria-hidden="true" size={15} />
+                            Visualizar
+                          </button>
+                          <button className="iconTextButton" disabled={!canUpdate} onClick={() => openEditForm(process)} type="button">
+                            <Pencil aria-hidden="true" size={15} />
+                            Editar
+                          </button>
+                          <button
+                            className="iconTextButton dangerText"
+                            disabled={!canDelete}
+                            onClick={() => void handleDelete(process)}
+                            type="button"
+                          >
+                            <Trash2 aria-hidden="true" size={15} />
+                            Eliminar
+                          </button>
+                        </div>
+                      </article>
+                    ),
+                  )}
+                  {!isLoading && listedProcesses.length === 0 ? (
+                    <div className="emptyState">
+                      {processesPickerMode ? "No hay procesos activos." : "No hay procesos creados."}
                     </div>
-                  </article>
-                ))}
-                {!isLoading && processes.length === 0 ? <div className="emptyState">No hay procesos creados.</div> : null}
-              </div>
+                  ) : null}
+                </div>
 
-            </div>
-          </section>
-        </div>
-      ) : null}
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
 
       {viewingProcess ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle del proceso">
