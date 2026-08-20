@@ -6,6 +6,8 @@ import { Plus } from "lucide-react";
 import { addAdminActaLine } from "@/lib/production-api";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { listUnits } from "@/lib/units-api";
+import { listCatalogSegments } from "@/lib/catalog-api";
+import type { ProductType } from "@/lib/product-types-api";
 import type { InventoryItem, InventoryItemType } from "@/types/inventory";
 
 const ADMIN_PICKER_TYPES: InventoryItemType[] = [
@@ -46,21 +48,36 @@ export function AdminAddActaLineControl({
 }) {
   const [mode, setMode] = useState<"closed" | "search" | "manual">("closed");
   const [pendingItem, setPendingItem] = useState<InventoryItem | null>(null);
+  const [pendingProductType, setPendingProductType] = useState<ProductType | null>(null);
+  const [materialCode, setMaterialCode] = useState("");
   const [quantity, setQuantity] = useState("");
   const [manualLabel, setManualLabel] = useState("");
   const [manualUnit, setManualUnit] = useState("");
+  const [newPieceUnit, setNewPieceUnit] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits, enabled: mode === "manual" });
+  const { data: units = [] } = useQuery({
+    queryKey: ["units"],
+    queryFn: listUnits,
+    enabled: mode === "manual" || !!pendingProductType,
+  });
+  const { data: segments = [] } = useQuery({
+    queryKey: ["catalog-segments"],
+    queryFn: listCatalogSegments,
+    enabled: mode === "search",
+  });
 
   if (!isAdmin && !stageAttemptId) return null;
 
   function reset() {
     setMode("closed");
     setPendingItem(null);
+    setPendingProductType(null);
+    setMaterialCode("");
     setQuantity("");
     setManualLabel("");
     setManualUnit("");
+    setNewPieceUnit("");
     setLocalError(null);
   }
 
@@ -81,6 +98,34 @@ export function AdminAddActaLineControl({
       onSuccess("Línea agregada: se descontó/sumó del inventario real.");
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "No se pudo agregar la línea.";
+      setLocalError(message);
+      onError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function submitNewPiece() {
+    if (!pendingProductType) return;
+    if (!materialCode || !newPieceUnit || !quantity || Number(quantity) <= 0) {
+      setLocalError("Elige el material, la unidad y la cantidad.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await addAdminActaLine(runId, {
+        side,
+        product_type_id: pendingProductType.id,
+        material_code: materialCode,
+        unit_code: newPieceUnit,
+        quantity,
+        stage_attempt_id: stageAttemptId,
+      });
+      await onChanged();
+      reset();
+      onSuccess("Pieza creada y sumada al inventario.");
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "No se pudo crear la pieza.";
       setLocalError(message);
       onError(message);
     } finally {
@@ -168,10 +213,13 @@ export function AdminAddActaLineControl({
     );
   }
 
+  const materials = segments.filter((s) => s.kind === "MATERIAL" && s.is_active);
+
   return (
     <div className="actaDocAction">
       <MaterialCategoryPicker
         allowedTypes={ADMIN_PICKER_TYPES}
+        allowProductTypeCreation={side === "RECEPCION"}
         description="Busca el item real que se pasó registrar."
         error={localError}
         items={items}
@@ -179,6 +227,13 @@ export function AdminAddActaLineControl({
         onDismissError={() => setLocalError(null)}
         onSelect={(item) => {
           setPendingItem(item);
+          setQuantity("");
+          setLocalError(null);
+        }}
+        onSelectProductType={(productType) => {
+          setPendingProductType(productType);
+          setMaterialCode("");
+          setNewPieceUnit("");
           setQuantity("");
           setLocalError(null);
         }}
@@ -200,6 +255,64 @@ export function AdminAddActaLineControl({
                 quantity,
               }
             : undefined
+        }
+        extraStep={
+          pendingProductType ? (
+            <div className="materialRow" style={{ alignItems: "flex-start", gap: 8 }}>
+              <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                {pendingProductType.name ?? "—"} · {pendingProductType.category_label} · sin stock
+              </div>
+              <select
+                aria-label="Material"
+                className="field"
+                onChange={(e) => setMaterialCode(e.target.value)}
+                style={{ width: 120 }}
+                value={materialCode}
+              >
+                <option value="">Material...</option>
+                {materials.map((m) => (
+                  <option key={m.id} value={m.code}>{m.label}</option>
+                ))}
+              </select>
+              <select
+                aria-label="Unidad"
+                className="field"
+                onChange={(e) => setNewPieceUnit(e.target.value)}
+                style={{ width: 90 }}
+                value={newPieceUnit}
+              >
+                <option value="">Unidad...</option>
+                {units.filter((u) => u.is_active).map((u) => (
+                  <option key={u.id} value={u.code}>{u.label}</option>
+                ))}
+              </select>
+              <input
+                aria-label="Cantidad"
+                autoFocus
+                className="field"
+                min="0.0001"
+                onChange={(e) => setQuantity(e.target.value)}
+                step="0.0001"
+                style={{ width: 100 }}
+                type="number"
+                value={quantity}
+              />
+              <button
+                className="button"
+                disabled={isSaving}
+                onClick={() => {
+                  setPendingProductType(null);
+                  setLocalError(null);
+                }}
+                type="button"
+              >
+                Elegir otro
+              </button>
+              <button className="button buttonPrimary" disabled={isSaving} onClick={() => void submitNewPiece()} type="button">
+                Crear y sumar stock
+              </button>
+            </div>
+          ) : undefined
         }
         title="Agregar línea de acta"
       />
