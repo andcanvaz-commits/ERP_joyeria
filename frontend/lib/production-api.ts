@@ -113,10 +113,10 @@ export function createProductionOrder(name: string) {
 }
 
 /** Elige un proceso del banco y arranca un intento de etapa (secuencial: una
- * etapa activa a la vez por orden). Si vienen `materials`, valida stock: si
- * alcanza arranca directo (consume ya); si falta, hace split automatico --
- * la parte cubierta arranca EN_PROCESO y el resto queda PENDIENTE_MATERIAL
- * hasta que alguien lo asigne con allocateStageAttemptMaterial. */
+ * etapa activa a la vez por orden). `materials` (Entrada) y `products`
+ * (Producto resultante) mueven stock de inmediato -- sin split ni reserva:
+ * si una Entrada pide mas de lo que hay en stock, el backend rechaza la
+ * llamada entera (nada queda a medias). */
 export function startStageAttempt(
   runId: string,
   payload: {
