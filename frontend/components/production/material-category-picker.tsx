@@ -4,12 +4,14 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { listComplementTypes } from "@/lib/inventory-api";
+import { listCatalogSegments } from "@/lib/catalog-api";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import type { InventoryItem, InventoryItemType } from "@/types/inventory";
 
 const PAGE_SIZE = 10;
 const SIN_TIPO = "__sin_tipo__";
+const SIN_CATEGORIA = "__sin_categoria__";
 
 const TAB_LABEL: Record<InventoryItemType, string> = {
   RAW_MATERIAL: "Materia prima",
@@ -74,6 +76,7 @@ export function MaterialCategoryPicker({
   const [search, setSearch] = useState("");
   const [drillType, setDrillType] = useState<string | null>(null);
   const { data: complementTypes = [] } = useQuery({ queryKey: ["complement-types"], queryFn: listComplementTypes });
+  const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
 
   const candidates = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -90,14 +93,16 @@ export function MaterialCategoryPicker({
 
   const pager = usePagination(candidates, PAGE_SIZE, `${activeTab}-${search}`);
 
-  // Complementos se agrupan por tipo (broches, cadenas base, etc.) igual que
-  // ComplementPicker: una lista plana de decenas de complementos sin
-  // distinguir categoria era imposible de recorrer. Al buscar se aplana de
-  // vuelta (el termino ya filtra lo suficiente).
+  // Complementos se agrupan por tipo (broches, cadenas base, etc.) y
+  // terminados por categoria del catalogo -- una lista plana de piezas que
+  // comparten el mismo nombre (la categoria, ej. "ANILLOS") era indistinguible,
+  // solo se diferenciaban por stock (Rodrigo, 2026-08-20). Al buscar se
+  // aplana de vuelta (el termino ya filtra lo suficiente).
   const isComplementTab = activeTab === "COMPLEMENT";
-  const showGrouped = isComplementTab && search.trim() === "";
-  const typeGroups = useMemo(() => {
-    if (!showGrouped) return [];
+  const isFinishedTab = activeTab === "FINISHED_PRODUCT";
+  const showGrouped = (isComplementTab || isFinishedTab) && search.trim() === "";
+  const complementTypeGroups = useMemo(() => {
+    if (!isComplementTab || !showGrouped) return [];
     const byType = new Map<string, InventoryItem[]>();
     for (const item of candidates) {
       const key = item.complement_type_id ?? SIN_TIPO;
@@ -116,7 +121,35 @@ export function MaterialCategoryPicker({
       return a.label.localeCompare(b.label);
     });
     return groups;
-  }, [showGrouped, candidates, complementTypes]);
+  }, [isComplementTab, showGrouped, candidates, complementTypes]);
+  // Categoria = segundo/tercer digito del codigo de 7 (material+categoria+
+  // modelo), igual que FinishedItemPicker (referencia ya usada en Inventario).
+  const finishedTypeGroups = useMemo(() => {
+    if (!isFinishedTab || !showGrouped) return [];
+    const catLabel = (code: string) => segments.find((s) => s.kind === "CATEGORY" && s.code === code)?.label ?? code;
+    const byType = new Map<string, InventoryItem[]>();
+    for (const item of candidates) {
+      const code = item.product_code ?? "";
+      const key = code.length === 7 ? code.slice(1, 3) : SIN_CATEGORIA;
+      const list = byType.get(key);
+      if (list) list.push(item);
+      else byType.set(key, [item]);
+    }
+    const groups = [...byType.entries()].map(([key, pieces]) => ({
+      code: key,
+      label: key === SIN_CATEGORIA ? "Sin categoría" : catLabel(key),
+      pieces: [...pieces].sort(
+        (a, b) => (a.product_code ?? "").localeCompare(b.product_code ?? "") || a.sku.localeCompare(b.sku),
+      ),
+    }));
+    groups.sort((a, b) => {
+      if (a.code === SIN_CATEGORIA) return 1;
+      if (b.code === SIN_CATEGORIA) return -1;
+      return a.label.localeCompare(b.label);
+    });
+    return groups;
+  }, [isFinishedTab, showGrouped, candidates, segments]);
+  const typeGroups = isComplementTab ? complementTypeGroups : finishedTypeGroups;
   const drilledGroup = typeGroups.find((g) => g.code === drillType) ?? null;
   const typesPager = usePagination(typeGroups, PAGE_SIZE, activeTab);
   const piecesPager = usePagination(drilledGroup?.pieces ?? [], PAGE_SIZE, drillType ?? "");
@@ -220,7 +253,9 @@ export function MaterialCategoryPicker({
                     <table className="table tableAuto">
                       <thead>
                         <tr>
-                          <th>Nombre</th>
+                          {isFinishedTab ? <th style={{ width: 110 }}>Código</th> : null}
+                          <th>{isFinishedTab ? "Producto" : "Nombre"}</th>
+                          {isFinishedTab ? <th>Material</th> : null}
                           <th className="num">Stock</th>
                         </tr>
                       </thead>
@@ -234,7 +269,9 @@ export function MaterialCategoryPicker({
                               onClick={isOut ? undefined : () => onSelect(item)}
                               style={{ cursor: isOut ? "not-allowed" : "pointer" }}
                             >
-                              <td>{item.name}</td>
+                              {isFinishedTab ? <td>#{item.product_code}</td> : null}
+                              <td>{isFinishedTab ? (item.description ?? "").trim() || item.name : item.name}</td>
+                              {isFinishedTab ? <td>{item.material_type ?? "—"}</td> : null}
                               <td className="num">
                                 {Number(item.current_stock).toLocaleString("es-EC")} {item.unit_code}
                                 {isOut ? " — agotado" : ""}
@@ -252,8 +289,8 @@ export function MaterialCategoryPicker({
                   <table className="table tableAuto">
                     <thead>
                       <tr>
-                        <th>Tipo</th>
-                        <th className="num">Complementos</th>
+                        <th>{isFinishedTab ? "Categoría" : "Tipo"}</th>
+                        <th className="num">Piezas</th>
                         <th aria-label="Abrir" />
                       </tr>
                     </thead>
@@ -268,7 +305,7 @@ export function MaterialCategoryPicker({
                       {typeGroups.length === 0 ? (
                         <tr>
                           <td colSpan={3}>
-                            <div className="emptyState">No hay complementos disponibles.</div>
+                            <div className="emptyState">No hay {isFinishedTab ? "productos terminados" : "complementos"} disponibles.</div>
                           </td>
                         </tr>
                       ) : null}
@@ -282,7 +319,9 @@ export function MaterialCategoryPicker({
                 <table className="table tableAuto">
                   <thead>
                     <tr>
-                      <th>Nombre</th>
+                      {isFinishedTab ? <th style={{ width: 110 }}>Código</th> : null}
+                      <th>{isFinishedTab ? "Producto" : "Nombre"}</th>
+                      {isFinishedTab ? <th>Material</th> : null}
                       <th className="num">Stock</th>
                     </tr>
                   </thead>
@@ -296,7 +335,9 @@ export function MaterialCategoryPicker({
                           onClick={isOut ? undefined : () => onSelect(item)}
                           style={{ cursor: isOut ? "not-allowed" : "pointer" }}
                         >
-                          <td>{item.name}</td>
+                          {isFinishedTab ? <td>#{item.product_code}</td> : null}
+                          <td>{isFinishedTab ? (item.description ?? "").trim() || item.name : item.name}</td>
+                          {isFinishedTab ? <td>{item.material_type ?? "—"}</td> : null}
                           <td className="num">
                             {Number(item.current_stock).toLocaleString("es-EC")} {item.unit_code}
                             {isOut ? " — agotado" : ""}
@@ -306,7 +347,7 @@ export function MaterialCategoryPicker({
                     })}
                     {candidates.length === 0 ? (
                       <tr>
-                        <td colSpan={2}>
+                        <td colSpan={isFinishedTab ? 4 : 2}>
                           <div className="emptyState">No hay {TAB_LABEL[activeTab].toLowerCase()} disponibles.</div>
                         </td>
                       </tr>
