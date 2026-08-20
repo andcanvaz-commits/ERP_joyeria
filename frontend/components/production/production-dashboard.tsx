@@ -419,8 +419,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // trabajo activo de piso: no deben aparecer en las vistas operativas de
   // Produccion (terminados/recibidos/pendientes), solo existen para su
   // certificado en Documentos.
+  // TERMINADA es el estado del flujo nuevo (finish_order) -- sin esto las
+  // ordenes dinamicas terminadas nunca aparecian en el historial (Rodrigo,
+  // 2026-08-20: "no esta en el historial de produccion").
   const finishedRuns = runs.filter(
-    (run) => (run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA") && (run.event_lines ?? []).length === 0
+    (run) =>
+      (run.status === "PENDIENTE_RECEPCION" || run.status === "RECIBIDA" || run.status === "TERMINADA") &&
+      (run.event_lines ?? []).length === 0
   );
   // Igual que "En proceso": una orden dividida cuenta una sola vez entre las
   // recientes, con boton para ver las demas partes en ventana.
@@ -1007,7 +1012,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setIsSaving(true);
     try {
       const updated = await finishOrder(dynamicOrderRun.id);
-      setDynamicOrderRun(updated);
+      // Mismo comportamiento que el flujo viejo (Rodrigo, 2026-08-20: "se
+      // abria sola al terminar y se quedaba en el visualizar del
+      // historial") -- cierra el panel en vivo y abre el reporte de merma.
+      setDynamicOrderRun(null);
+      openStatsModal(updated);
       setSuccess("Orden finalizada.");
       await reload();
     } catch (nextError) {
@@ -1598,8 +1607,18 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   const otherParts = family.filter((r) => r.id !== root.id);
                   const isSplit = otherParts.length > 0;
                   const primaryAction = () => (isSplit ? setFamilyRuns(family) : openStatsModal(root));
+                  // Flujo nuevo: process_name/quantity/waste_percent son de
+                  // nivel de orden y no existen (viven por etapa, en
+                  // stage_attempts) -- root.name es el titulo y la merma se
+                  // suma de cada intento (Rodrigo, 2026-08-20).
+                  const rootLabel = root.process_name ?? root.name ?? "—";
+                  const rootIsDynamic = Boolean(root.name);
+                  const rootWaste = rootIsDynamic
+                    ? (root.stage_attempts ?? []).reduce((sum, a) => sum + Number(a.merma_weight ?? 0), 0)
+                    : Number(root.waste_weight ?? 0);
+                  const rootUnit = root.raw_material_unit_code ?? root.stage_attempts?.[0]?.unit_code ?? "g";
                   return (
-                    <div className="readyToStartRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Ver resumen de"} ${root.process_name}`)}>
+                    <div className="readyToStartRow" key={key} {...openableProps(primaryAction, `${isSplit ? "Ver partes de" : "Ver resumen de"} ${rootLabel}`)}>
                       <div className="readyToStartInfo">
                         <strong>
                           {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : null}
@@ -1610,9 +1629,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           ) : (
                             rootBadge(root)
                           )}
-                          {root.process_name}
+                          {rootLabel}
                         </strong>
-                        <span>{numericText(root.quantity)} {root.raw_material_unit_code} · Merma: {percentText(root.waste_percent)}% · Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}</span>
+                        <span>
+                          {rootIsDynamic
+                            ? `Merma: ${numericText(rootWaste)} ${rootUnit}`
+                            : `${numericText(root.quantity)} ${root.raw_material_unit_code} · Merma: ${percentText(root.waste_percent)}%`}
+                          {" "}· Finalizado: {timeLabel(root.finished_at)} · Finalizó: {runFinisherName(root)}
+                        </span>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={stopClick}>
                         {isSplit ? (
@@ -2610,8 +2634,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           <section className="modalWindow processViewWindow">
             <div className="modalHeader">
               <div>
-                <h2>{selectedStatsRun.process_name}</h2>
-                <p>{numericText(selectedStatsRun.quantity)} {selectedStatsRun.raw_material_unit_code}</p>
+                <h2>{selectedStatsRun.process_name ?? selectedStatsRun.name ?? "—"}</h2>
+                {selectedStatsRun.name ? null : <p>{numericText(selectedStatsRun.quantity)} {selectedStatsRun.raw_material_unit_code}</p>}
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={closeStatsModal} type="button">
                 <X aria-hidden="true" size={18} />
@@ -2670,10 +2694,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               <div className="wasteReportPrint">
                 <h1>Reporte de merma</h1>
                 <h2>
-                  {printingWasteRun.production_code ?? printingWasteRun.process_name} · {printingWasteRun.process_name}
+                  {printingWasteRun.production_code ?? printingWasteRun.process_name ?? printingWasteRun.name} · {printingWasteRun.process_name ?? printingWasteRun.name}
                 </h2>
                 <p>
-                  {numericText(printingWasteRun.quantity)} {printingWasteRun.raw_material_unit_code} · Estado: {runStatusLabel(printingWasteRun.status)}
+                  {printingWasteRun.name ? null : <>{numericText(printingWasteRun.quantity)} {printingWasteRun.raw_material_unit_code} · </>}
+                  Estado: {runStatusLabel(printingWasteRun.status)}
                   {printingWasteRun.finished_at ? ` · Finalizó: ${timeLabel(printingWasteRun.finished_at)}` : ""}
                 </p>
                 <div className="userPreviewGrid">
@@ -2745,13 +2770,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <p>{selectedDateRuns.length} procesos registrados</p>
                 </div>
                 <div className="movementList movementHistoryEntries">
-                  {historyRunsPager.pageItems.map((run) => (
-                    <article className="movementRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${run.process_name}`)}>
+                  {historyRunsPager.pageItems.map((run) => {
+                    const runLabel = run.process_name ?? run.name ?? "—";
+                    const runIsDynamic = Boolean(run.name);
+                    const runWaste = runIsDynamic
+                      ? (run.stage_attempts ?? []).reduce((sum, a) => sum + Number(a.merma_weight ?? 0), 0)
+                      : Number(run.waste_weight ?? 0);
+                    const runUnit = run.raw_material_unit_code ?? run.stage_attempts?.[0]?.unit_code ?? "g";
+                    return (
+                    <article className="movementRow" key={run.id} {...openableProps(() => openStatsModal(run), `Ver resumen de ${runLabel}`)}>
                       <div style={{ gridColumn: "1 / -2" }}>
-                        <strong>{run.production_code ? `${run.production_code} · ` : ""}{run.process_name}</strong>
+                        <strong>{run.production_code ? `${run.production_code} · ` : ""}{runLabel}</strong>
                         <span>
-                          {numericText(run.quantity)} {run.raw_material_unit_code} · Merma: {numericText(run.waste_weight)} {run.raw_material_unit_code} ·{" "}
-                          {percentText(run.waste_percent)}% · {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}
+                          {runIsDynamic ? null : <>{numericText(run.quantity)} {run.raw_material_unit_code} · </>}
+                          Merma: {numericText(runWaste)} {runUnit}
+                          {runIsDynamic ? null : <> · {percentText(run.waste_percent)}%</>}
+                          {" "}· {timeLabel(run.finished_at)} · Finalizó: {runFinisherName(run)}
                         </span>
                       </div>
                       <button
@@ -2763,7 +2797,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         Visualizar
                       </button>
                     </article>
-                  ))}
+                    );
+                  })}
                   {selectedDateRuns.length === 0 ? <div className="emptyState">No hay procesos en esta fecha.</div> : null}
                 </div>
                 <Pager {...historyRunsPager} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { Pager, usePagination } from "@/components/shared/pager";
+import { buildOrdenProduccion } from "@/lib/orden-produccion";
 import type { ProductionRun } from "@/types/production";
 
 function num(value: string | number | null | undefined) {
@@ -16,20 +17,113 @@ function percentText(value: string | number | null | undefined) {
   return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 2 }) : String(value);
 }
 
+// Fila normalizada, comun a las dos formas de merma que existen en el
+// sistema (Rodrigo, 2026-08-20: el reporte de merma nunca se adapto al
+// flujo nuevo -- "no se quedo en el historial ni se abrio el reporte"):
+// flujo viejo = ProductionRunStage (run.stages), flujo nuevo = un intento de
+// etapa (run.stage_attempts). Los dos componentes de abajo arman esta forma
+// y listo, sin repetir la logica de por-etapa dos veces.
+type WasteRow = {
+  id: string;
+  order: number;
+  name: string;
+  phaseName?: string | null;
+  pending: boolean;
+  initial: number;
+  hasInitial: boolean;
+  final: number;
+  hasFinal: boolean;
+  waste: number;
+  wastePercent: number;
+  decisionLabel: "Aprobada" | "Rechazada" | null;
+  decisionBy: string | null;
+  decisionNote: string | null;
+  attemptNo: number | null;
+};
+
+function rowsFromOldStages(run: ProductionRun): WasteRow[] {
+  const stages = [...run.stages].sort((a, b) => a.stage_order - b.stage_order);
+  let carried = Number(run.total_required_material ?? 0);
+  return stages.map((stage) => {
+    const pending = stage.status === "PENDIENTE";
+    const hasInitial = stage.initial_weight !== null && stage.initial_weight !== "";
+    const initial = hasInitial ? Number(stage.initial_weight) : carried;
+    const hasFinal = stage.final_weight !== null && stage.final_weight !== "";
+    const final = hasFinal ? Number(stage.final_weight) : initial;
+    if (!pending) carried = final;
+    const decisions = stage.decisions ?? [];
+    const decision = decisions.length > 0 ? decisions[decisions.length - 1] : null;
+    return {
+      id: stage.id,
+      order: stage.stage_order,
+      name: stage.stage_name,
+      phaseName: stage.phase_name,
+      pending,
+      initial,
+      hasInitial,
+      final,
+      hasFinal,
+      waste: Number(stage.waste_weight ?? 0),
+      wastePercent: Number(stage.waste_percent ?? 0),
+      decisionLabel: decision ? (decision.decision === "APPROVED" ? "Aprobada" : "Rechazada") : null,
+      decisionBy: decision?.decided_by_name ?? null,
+      decisionNote: decision?.justification ?? null,
+      attemptNo: decision && decision.attempt_no > 1 ? decision.attempt_no : null,
+    };
+  });
+}
+
+function rowsFromStageAttempts(run: ProductionRun): WasteRow[] {
+  const attempts = [...(run.stage_attempts ?? [])].sort((a, b) => a.sequence_order - b.sequence_order);
+  return attempts.map((attempt) => {
+    const model = buildOrdenProduccion([run], attempt.id);
+    const initialRow = model.entregaTotalRows[0];
+    const initial = initialRow ? initialRow.quantity : 0;
+    const hasFinal = attempt.peso_al_finalizar !== null && attempt.peso_al_finalizar !== undefined;
+    const final = hasFinal ? Number(attempt.peso_al_finalizar) : initial;
+    return {
+      id: attempt.id,
+      order: attempt.sequence_order,
+      name: attempt.process_name,
+      phaseName: null,
+      pending: attempt.status === "EN_PROCESO",
+      initial,
+      hasInitial: Boolean(initialRow),
+      final,
+      hasFinal,
+      waste: Number(attempt.merma_weight ?? 0),
+      wastePercent: Number(attempt.merma_percent ?? 0),
+      decisionLabel: attempt.status === "APROBADA" ? "Aprobada" : attempt.status === "RECHAZADA" ? "Rechazada" : null,
+      decisionBy: attempt.finished_by_name ?? null,
+      decisionNote: attempt.rejection_reason ?? null,
+      attemptNo: null,
+    };
+  });
+}
+
+// Fuente unica de filas por-etapa: el flujo nuevo (root.name presente,
+// mismo discriminador que usa el resto de production-dashboard.tsx) usa
+// stage_attempts; el viejo usa stages.
+function wasteRows(run: ProductionRun): WasteRow[] {
+  return run.name ? rowsFromStageAttempts(run) : rowsFromOldStages(run);
+}
+
 // Tarjetas de merma de una orden: total, promedio por etapa con merma y etapa
 // con mayor merma. Compartidas entre el resumen de producción y "Merma por
 // fase" de inventario.
 export function RunWasteHero({ run }: { run: ProductionRun }) {
   const unit = run.raw_material_unit_code || "g";
-  const stagesWithWaste = run.stages.filter((stage) => Number(stage.waste_weight ?? "0") > 0);
-  const totalWaste = stagesWithWaste.reduce((total, stage) => total + Number(stage.waste_weight ?? "0"), 0);
+  const rows = wasteRows(run);
+  const stagesWithWaste = rows.filter((row) => row.waste > 0);
+  const totalWaste = stagesWithWaste.reduce((total, row) => total + row.waste, 0);
   const averageWaste = stagesWithWaste.length > 0 ? totalWaste / stagesWithWaste.length : 0;
-  const worstStage = stagesWithWaste.reduce<ProductionRun["stages"][number] | null>(
-    (worst, stage) => (!worst || Number(stage.waste_weight ?? "0") > Number(worst.waste_weight ?? "0") ? stage : worst),
+  const worstStage = stagesWithWaste.reduce<WasteRow | null>(
+    (worst, row) => (!worst || row.waste > worst.waste ? row : worst),
     null,
   );
-  // Devuelve solo filas: el llamador las mete en su propio .userPreviewGrid
-  // para que todo el resumen comparta espaciado y líneas separadoras.
+  // waste_percent de nivel de orden solo lo calcula el flujo viejo (_finish_run)
+  // -- el nuevo no inventa un porcentaje sin la base real (Rodrigo: nada de
+  // datos de prueba/inventados).
   return (
     <>
       <span>
@@ -42,7 +136,7 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
       </span>
       <span>
         <strong>Mayor merma</strong>
-        {worstStage ? `${worstStage.stage_name} (${num(worstStage.waste_weight ?? "0")} ${unit})` : "—"}
+        {worstStage ? `${worstStage.name} (${num(worstStage.waste)} ${unit})` : "—"}
       </span>
     </>
   );
@@ -53,20 +147,8 @@ export function RunWasteHero({ run }: { run: ProductionRun }) {
 // En etapas que no pesan, el peso se hereda de la última etapa pesada anterior
 // (el material sigue siendo el mismo) y se muestra atenuado.
 export function RunStageSummaryTable({ run, pageSize = 5, print = false }: { run: ProductionRun; pageSize?: number; print?: boolean }) {
-  const stages = [...run.stages].sort((a, b) => a.stage_order - b.stage_order);
   const unit = run.raw_material_unit_code || "g";
-  let carried = Number(run.total_required_material ?? 0);
-  const rows = stages.map((stage) => {
-    const pending = stage.status === "PENDIENTE";
-    const hasInitial = stage.initial_weight !== null && stage.initial_weight !== "";
-    const initial = hasInitial ? Number(stage.initial_weight) : carried;
-    const hasFinal = stage.final_weight !== null && stage.final_weight !== "";
-    const final = hasFinal ? Number(stage.final_weight) : initial;
-    if (!pending) carried = final;
-    const decisions = stage.decisions ?? [];
-    const decision = decisions.length > 0 ? decisions[decisions.length - 1] : null;
-    return { stage, pending, initial, hasInitial, final, hasFinal, decision };
-  });
+  const rows = wasteRows(run);
   const pager = usePagination(rows, pageSize, run.id);
   // Impresion: todas las filas de una, sin paginar.
   const visibleRows = print ? rows : pager.pageItems;
@@ -98,20 +180,20 @@ export function RunStageSummaryTable({ run, pageSize = 5, print = false }: { run
           </tr>
         </thead>
         <tbody>
-          {visibleRows.map(({ stage, pending, initial, hasInitial, final, hasFinal, decision }) => (
-            <tr key={stage.id} style={{ height: ROW_HEIGHT }}>
-              <td style={oneLine} title={stage.phase_name ? `${stage.stage_name} · ${stage.phase_name}` : stage.stage_name}>
-                {stage.stage_order}. {stage.stage_name}
+          {visibleRows.map((row) => (
+            <tr key={row.id} style={{ height: ROW_HEIGHT }}>
+              <td style={oneLine} title={row.phaseName ? `${row.name} · ${row.phaseName}` : row.name}>
+                {row.order}. {row.name}
               </td>
-              <td className="num" style={hasInitial ? oneLine : { ...oneLine, ...muted }}>{pending ? "—" : `${num(initial)} ${unit}`}</td>
-              <td className="num" style={hasFinal ? oneLine : { ...oneLine, ...muted }}>{pending ? "—" : `${num(final)} ${unit}`}</td>
-              <td className="num" style={oneLine}>{pending ? "—" : `${num(stage.waste_weight ?? 0)} ${unit} · ${percentText(stage.waste_percent ?? 0)}%`}</td>
+              <td className="num" style={row.hasInitial ? oneLine : { ...oneLine, ...muted }}>{row.pending ? "—" : `${num(row.initial)} ${unit}`}</td>
+              <td className="num" style={row.hasFinal ? oneLine : { ...oneLine, ...muted }}>{row.pending ? "—" : `${num(row.final)} ${unit}`}</td>
+              <td className="num" style={oneLine}>{row.pending ? "—" : `${num(row.waste)} ${unit} · ${percentText(row.wastePercent)}%`}</td>
               <td style={oneLine}>
-                {decision ? (
-                  <span title={`${decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}${decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}${decision.justification ? ` — ${decision.justification}` : ""}`}>
-                    {decision.decision === "APPROVED" ? "Aprobada" : "Rechazada"}
-                    {decision.attempt_no > 1 ? ` (intento ${decision.attempt_no})` : ""}
-                    {decision.decided_by_name ? ` · ${decision.decided_by_name}` : ""}
+                {row.decisionLabel ? (
+                  <span title={`${row.decisionLabel}${row.decisionBy ? ` · ${row.decisionBy}` : ""}${row.decisionNote ? ` — ${row.decisionNote}` : ""}`}>
+                    {row.decisionLabel}
+                    {row.attemptNo ? ` (intento ${row.attemptNo})` : ""}
+                    {row.decisionBy ? ` · ${row.decisionBy}` : ""}
                   </span>
                 ) : (
                   "—"
