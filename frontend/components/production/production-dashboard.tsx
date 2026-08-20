@@ -60,7 +60,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
-import { buildItemNameMap, buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 import { useCountUp } from "@/hooks/use-count-up";
 
@@ -1774,7 +1774,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   if (fresh) setDynamicOrderRun(fresh);
                 }
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
-                const runningModel = buildOrdenProduccion([dynamicOrderRun], buildItemNameMap(materialItems), runningAttempt.id);
+                const runningModel = buildOrdenProduccion([dynamicOrderRun], runningAttempt.id);
                 const entregaLines = runningModel.entregaLines;
                 const recepcionLines = runningModel.recepcionLines;
                 return (
@@ -2107,7 +2107,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             const viewingAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.id === viewingAttemptId);
             if (!viewingAttempt) return null;
             const viewMaterialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
-            const viewingModel = buildOrdenProduccion([dynamicOrderRun], buildItemNameMap(viewMaterialItems), viewingAttempt.id);
+            const viewingModel = buildOrdenProduccion([dynamicOrderRun], viewingAttempt.id);
             const viewEntregaLines = viewingModel.entregaLines;
             const viewRecepcionLines = viewingModel.recepcionLines;
             return (

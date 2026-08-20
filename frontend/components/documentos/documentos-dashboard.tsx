@@ -9,7 +9,6 @@ import { listInventoryItems } from "@/lib/inventory-api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { openableProps } from "@/lib/a11y";
 import {
-  buildItemNameMap,
   buildOrdenProduccion,
   canPrintEntrega,
   canPrintRecepcion,
@@ -120,7 +119,6 @@ export function DocumentosDashboard() {
     ].join(" ").toLowerCase();
   }
 
-  const itemNames = useMemo(() => buildItemNameMap(items), [items]);
   const families = useMemo(() => groupRunFamilies(runs), [runs]);
   const familyEntries = useMemo(() => Array.from(families.entries()), [families]);
   const familyList = useMemo(() => {
@@ -226,9 +224,9 @@ export function DocumentosDashboard() {
   const model = useMemo(
     () =>
       selectedFamily && (!needsStageList || selectedStageAttemptId)
-        ? buildOrdenProduccion(selectedFamily, itemNames, selectedStageAttemptId ?? undefined)
+        ? buildOrdenProduccion(selectedFamily, selectedStageAttemptId ?? undefined)
         : null,
-    [selectedFamily, itemNames, needsStageList, selectedStageAttemptId]
+    [selectedFamily, needsStageList, selectedStageAttemptId]
   );
   const selectedRootRunId = selectedFamily
     ? (selectedFamily.find((r) => !r.parent_run_id) ?? selectedFamily[0]).id

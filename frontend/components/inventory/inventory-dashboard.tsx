@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { isAuthenticated } from "@/lib/api";
 import { openableProps, stopClick } from "@/lib/a11y";
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
-import { buildItemNameMap, buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
 import { OrdenProduccionDoc, type DocMode } from "@/components/documentos/orden-produccion-doc";
 import { ActaView } from "@/components/production/acta-view";
 import { getCurrentUser, listUsers } from "@/lib/auth-api";
@@ -1473,7 +1473,6 @@ export function InventoryDashboard() {
   );
   const historyResultsPager = usePagination(historySearchEntries, 4, historySearch);
 
-  const docItemNames = useMemo(() => buildItemNameMap(items), [items]);
 
   useEffect(() => {
     if (!printingMode) return;
@@ -4565,7 +4564,7 @@ export function InventoryDashboard() {
               </button>
             </div>
             <div className="documentosPreviewFrame">
-              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.family, docItemNames)} mode="completo" />
+              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.family)} mode="completo" />
             </div>
             <div className="modalActions">
               <button className="button" onClick={() => setPrintPreview(null)} type="button">
@@ -4583,7 +4582,7 @@ export function InventoryDashboard() {
       {printingMode && printPreview
         ? createPortal(
             <div className="printArea">
-              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.family, docItemNames)} mode={printingMode} />
+              <OrdenProduccionDoc model={buildOrdenProduccion(printPreview.family)} mode={printingMode} />
             </div>,
             document.body
           )

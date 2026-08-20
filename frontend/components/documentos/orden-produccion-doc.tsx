@@ -47,13 +47,14 @@ export function OrdenProduccionDoc({
       <article className="opDoc">
         <header className="opHeader">
           <div className="opTitleBar">ORDEN DE PRODUCCIÓN</div>
-          <div className="opCategoryBar">{model.categoria}</div>
+          {/* El nombre del acta es el del proceso que se hace ahi, no un
+              renglon aparte (Rodrigo, 2026-08-20: "el nombre va a salir al
+              lado de donde dice orden de producción"). El nombre de la orden
+              (paso 1 al crearla) es solo para agrupar, no sale en el acta. */}
+          <div className="opCategoryBar">{model.procesoNombre}</div>
           <div className="opFolio">Nº {model.folio}</div>
         </header>
 
-        <div className="opResponsable">
-          NOMBRE: <span>{model.procesoNombre}</span>
-        </div>
         <div className="opResponsable">
           RESPONSABLE: <span>{model.responsableProduccion}</span>
         </div>

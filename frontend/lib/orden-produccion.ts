@@ -1,5 +1,4 @@
 import type { ProductionRun, StageAttempt } from "@/types/production";
-import type { InventoryItem } from "@/types/inventory";
 
 // Tipos compartidos por el UNICO componente que renderiza una columna del
 // certificado/acta (components/production/acta-side.tsx), usado tanto por
@@ -29,7 +28,6 @@ export type ActaSideTotal = { label: string; quantity: number; unit: string; kin
 export type OrdenProduccionModel = {
   folio: string;
   procesoNombre: string;
-  categoria: string;
   responsableProduccion: string;
   entregaLines: ActaSideLine[];
   entregaFecha: string | null;
@@ -315,11 +313,6 @@ export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemp
   };
 }
 
-/** Mapa inventory_item_id → nombre, a partir de la lista de inventario. */
-export function buildItemNameMap(items: InventoryItem[]): Map<string, string> {
-  return new Map(items.map((item) => [item.id, item.name]));
-}
-
 /** Clave de familia: el folio raiz si esta corrida es parte de un split,
  * si no su propio folio (o su id como ultimo recurso). */
 export function runFamilyKey(run: ProductionRun): string {
@@ -449,7 +442,6 @@ function buildSide(
  * es identico a lo que Ver Acta mostraria para ese unico run. */
 export function buildOrdenProduccion(
   family: ProductionRun[],
-  itemNames: Map<string, string>,
   // Acota el acta a UN intento de etapa (flujo nuevo, Documentos Task 13):
   // cuando una orden tiene mas de una etapa, se elige cual ver antes de
   // armar el modelo. Sin esto, el comportamiento es el de siempre (toda la
@@ -457,7 +449,6 @@ export function buildOrdenProduccion(
   stageAttemptId?: string
 ): OrdenProduccionModel {
   const root = family.find((run) => !run.parent_run_id) ?? family[0];
-  const materialName = (root.raw_material_item_id ? itemNames.get(root.raw_material_item_id) : undefined) ?? root.process_name ?? root.name ?? DASH;
   const isHistorical = family.some((run) => (run.event_lines ?? []).length > 0);
   // Flujo nuevo con una sola etapa (el caso normal): no hay eleccion que
   // hacer (needsStageList en Documentos solo pide elegir con 2+), pero el
@@ -477,7 +468,6 @@ export function buildOrdenProduccion(
       // 2026-08-20: "el nombre el nombre del proceso") -- el nombre de la
       // orden solo entra como ultimo recurso si el proceso no lo tiene.
       procesoNombre: attempt?.process_name ?? root.process_name ?? root.name ?? DASH,
-      categoria: materialName,
       responsableProduccion: attempt?.responsable_name ?? root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
       entregaFecha: sides.entregaFecha,
@@ -500,7 +490,6 @@ export function buildOrdenProduccion(
     return {
       folio: root.root_production_code ?? root.production_code ?? DASH,
       procesoNombre: root.process_name ?? root.name ?? DASH,
-      categoria: materialName,
       responsableProduccion: root.created_by_name ?? DASH,
       entregaLines: sides.entregaLines,
       entregaFecha: sides.entregaFecha,
@@ -521,7 +510,6 @@ export function buildOrdenProduccion(
   return {
     folio: root.root_production_code ?? root.production_code ?? DASH,
     procesoNombre: root.process_name ?? root.name ?? DASH,
-    categoria: materialName,
     responsableProduccion: root.created_by_name ?? DASH,
     entregaLines: sides.entregaLines,
     entregaFecha: sides.entregaFecha,
