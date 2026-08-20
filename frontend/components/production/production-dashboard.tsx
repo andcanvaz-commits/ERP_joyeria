@@ -1768,6 +1768,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     editable: true,
                     source: line.source,
                     fecha: line.created_at,
+                    item_id: line.item_id,
                   }));
                 const recepcionLines: ActaSideLine[] = activeActaLines
                   .filter((line) => line.side === "RECEPCION")
@@ -1780,8 +1781,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     editable: true,
                     source: line.source,
                     fecha: line.created_at,
+                    item_id: line.item_id,
                   }));
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
+                // RECEPCION solo admite items que ya se entregaron en ESTA etapa
+                // (el backend lo exige igual -- ver add_admin_acta_line Task 7).
+                const entregaItemIds = new Set(
+                  entregaLines.filter((line) => line.kind === "row").map((line) => line.item_id).filter(Boolean),
+                );
+                const recepcionPickerItems = materialItems.filter((item) => entregaItemIds.has(item.id));
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
                     <div className="panelHeader">
@@ -1823,7 +1831,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                               actions={
                                 <AdminAddActaLineControl
                                   isAdmin
-                                  items={materialItems}
+                                  items={recepcionPickerItems}
                                   onChanged={refreshDynamicOrder}
                                   onError={setError}
                                   onSuccess={setSuccess}

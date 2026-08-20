@@ -555,3 +555,107 @@ def test_admin_stock_line_allows_consuming_unreserved_stock(
     assert raw_material.current_stock == Decimal("90")
     lines = [l for l in result.acta_lines if l.item_id == raw_material.id and l.source == "ADMIN_STOCK"]
     assert len(lines) == 1
+
+
+# ---------------------------------------------------------------------------
+# RECEPCION acotada a lo entregado en la misma etapa (docs/superpowers/plans/
+# 2026-08-19-rediseno-acta-y-ux-produccion.md Task 7): solo se puede recibir
+# un item que ya se entrego en ese intento, y como maximo lo que quede sin
+# recibir todavia.
+# ---------------------------------------------------------------------------
+
+
+def _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement, entregado="100"):
+    from backend.modules.production.schemas import RunProductCreate, StageAttemptCreate, StageAttemptMaterialLine
+
+    raw_material.current_stock = Decimal("1000")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden recepcion test"), current_user)
+    started = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal(entregado))],
+            product=RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1")),
+        ),
+        current_user,
+    )
+    return order, started.stage_attempts[0]
+
+
+def test_add_admin_acta_line_recepcion_rejects_item_never_entregado(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    from backend.modules.inventory.models import InventoryItem
+
+    order, attempt = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
+    other_item = InventoryItem(
+        item_type="RAW_MATERIAL", name="Otro material", sku=f"MP-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="g", current_stock=Decimal("10"),
+    )
+    db_session.add(other_item)
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError, match="ya se entrego en esta etapa"):
+        production_service.add_admin_acta_line(
+            order.id,
+            AdminActaLineCreate(side="RECEPCION", item_id=other_item.id, quantity=Decimal("1"), stage_attempt_id=attempt.id),
+            current_user,
+        )
+
+
+def test_add_admin_acta_line_recepcion_caps_at_entregado_minus_recibido(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    order, attempt = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
+
+    with pytest.raises(ProductionDomainError, match="supera lo que en realidad se entrego"):
+        production_service.add_admin_acta_line(
+            order.id,
+            AdminActaLineCreate(side="RECEPCION", item_id=raw_material.id, quantity=Decimal("101"), stage_attempt_id=attempt.id),
+            current_user,
+        )
+
+    production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(side="RECEPCION", item_id=raw_material.id, quantity=Decimal("60"), stage_attempt_id=attempt.id),
+        current_user,
+    )
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("960")  # 1000 - 100 entregado + 60 recibido
+
+    # Ya recibio 60 de 100 -- solo quedan 40 disponibles para recibir.
+    with pytest.raises(ProductionDomainError, match="supera lo que en realidad se entrego"):
+        production_service.add_admin_acta_line(
+            order.id,
+            AdminActaLineCreate(side="RECEPCION", item_id=raw_material.id, quantity=Decimal("41"), stage_attempt_id=attempt.id),
+            current_user,
+        )
+
+    production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(side="RECEPCION", item_id=raw_material.id, quantity=Decimal("40"), stage_attempt_id=attempt.id),
+        current_user,
+    )
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("1000")  # todo devuelto
+
+
+def test_add_admin_acta_line_recepcion_without_stage_attempt_id_skips_check(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """La restriccion solo aplica a lineas de RECEPCION ligadas a una etapa
+    (stage_attempt_id) -- las de nivel de orden (ActaView, admin-only) no
+    tienen ese concepto y siguen sin tope."""
+    order, attempt = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
+
+    result = production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(side="RECEPCION", item_id=raw_material.id, quantity=Decimal("500")),
+        current_user,
+    )
+
+    lines = [l for l in result.acta_lines if l.item_id == raw_material.id and l.side == "RECEPCION" and l.stage_attempt_id is None]
+    assert len(lines) == 1
+    assert lines[0].quantity == Decimal("500")

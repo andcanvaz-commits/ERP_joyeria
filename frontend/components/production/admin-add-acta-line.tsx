@@ -109,7 +109,7 @@ export function AdminAddActaLineControl({
       <div className="actaDocAction" style={{ display: "flex", gap: 14 }}>
         <button className="actaDocAddRow" onClick={() => setMode("search")} type="button">
           <Plus aria-hidden="true" size={13} />
-          Agregar línea (admin)
+          Agregar
         </button>
         <button className="actaDocAddRow" onClick={() => setMode("manual")} type="button">
           Escribir a mano

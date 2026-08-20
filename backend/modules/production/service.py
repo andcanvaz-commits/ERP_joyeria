@@ -1006,6 +1006,36 @@ class ProductionService:
         if item is None:
             raise ProductionNotFoundError("Item de inventario no encontrado.")
 
+        if payload.side == ActaLineSide.RECEPCION and payload.stage_attempt_id is not None:
+            entregado = sum(
+                (
+                    l.quantity
+                    for l in run.acta_lines
+                    if l.side == ActaLineSide.ENTREGA
+                    and l.item_id == item.id
+                    and l.stage_attempt_id == payload.stage_attempt_id
+                ),
+                Decimal("0"),
+            )
+            if entregado <= 0:
+                raise ProductionDomainError("Solo se puede recibir un material que ya se entrego en esta etapa.")
+            recibido = sum(
+                (
+                    l.quantity
+                    for l in run.acta_lines
+                    if l.side == ActaLineSide.RECEPCION
+                    and l.item_id == item.id
+                    and l.stage_attempt_id == payload.stage_attempt_id
+                ),
+                Decimal("0"),
+            )
+            disponible = entregado - recibido
+            if payload.quantity > disponible:
+                raise ProductionDomainError(
+                    f"La cantidad ({format_qty(payload.quantity)} {item.unit_code}) supera lo que en realidad "
+                    f"se entrego para este material ({format_qty(disponible)} {item.unit_code})."
+                )
+
         line = ProductionRunActaLine(
             side=payload.side,
             label=item.name,

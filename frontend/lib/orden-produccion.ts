@@ -7,7 +7,17 @@ import type { InventoryItem } from "@/types/inventory";
 // viven aca (no en acta-side.tsx) para que ninguno de los dos importe del
 // otro en circulo.
 export type ActaSideLine =
-  | { kind: "row"; id: string; label: string; quantity: string; unit_code: string; editable: boolean; source: string; fecha: string | null }
+  | {
+      kind: "row";
+      id: string;
+      label: string;
+      quantity: string;
+      unit_code: string;
+      editable: boolean;
+      source: string;
+      fecha: string | null;
+      item_id?: string | null;
+    }
   | { kind: "group"; fecha: string | null; responsable: string };
 
 // Fila de total/balance: mismo lugar que una fila real, con su propia
