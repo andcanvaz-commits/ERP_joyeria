@@ -66,8 +66,9 @@ function MessageThread({
 }) {
   const [replyText, setReplyText] = useState("");
   const senderName = message.sender_name ?? "Admin";
+  const isMine = message.sender_user_id === currentUserId;
   return (
-    <div className="messageCard">
+    <div className={`messageCard${isMine ? " messageCardMine" : ""}`}>
       <div className="messageCardHead">
         <span className="messageAvatar" aria-hidden="true">{initials(senderName)}</span>
         <div className="messageCardMeta">
@@ -88,15 +89,19 @@ function MessageThread({
         ) : null}
       </div>
       <p className="messageBody">{message.body}</p>
-      {message.replies.map((reply) => (
-        <div className={`messageReply${reply.sender_user_id === currentUserId ? " messageReplyMine" : ""}`} key={reply.id}>
-          <div className="messageCardMeta">
-            <strong>{reply.sender_name ?? "Respuesta"}</strong>
-            <span>{dateTimeLabel(reply.created_at)}</span>
-          </div>
-          <p className="messageBody">{reply.body}</p>
+      {message.replies.length > 0 ? (
+        <div className="messageReplies">
+          {message.replies.map((reply) => (
+            <div className={`messageReply${reply.sender_user_id === currentUserId ? " messageReplyMine" : ""}`} key={reply.id}>
+              <div className="messageCardMeta">
+                <strong>{reply.sender_name ?? "Respuesta"}</strong>
+                <span>{dateTimeLabel(reply.created_at)}</span>
+              </div>
+              <p className="messageBody">{reply.body}</p>
+            </div>
+          ))}
         </div>
-      ))}
+      ) : null}
       <div className="messageReplyPending">
         <textarea
           className="field"
