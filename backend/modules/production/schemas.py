@@ -265,8 +265,10 @@ class StageAttemptCreate(BaseModel):
 class StageAttemptFinish(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    peso_al_finalizar: Decimal = Field(ge=0)
-    decision: Literal["APROBADA", "RECHAZADA"]
+    # Sin peso: la merma sale de ENTREGA-RECEPCION de la propia etapa. La
+    # decision solo aplica si el proceso tiene control de calidad -- si no,
+    # el service la fuerza a APROBADA sin importar lo que venga aca.
+    decision: Literal["APROBADA", "RECHAZADA"] = "APROBADA"
     # Opcional -- Rodrigo: el motivo de rechazo no es obligatorio.
     rejection_reason: str | None = Field(default=None, max_length=1000)
 

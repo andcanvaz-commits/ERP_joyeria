@@ -1399,27 +1399,49 @@ class ProductionService:
             raise ProductionDomainError("Solo se puede finalizar una etapa en curso.")
         run = attempt.run
 
-        attempt.peso_al_finalizar = payload.peso_al_finalizar
+        process = self.repository.get(attempt.process_id) if attempt.process_id else None
+        quality_control = bool(process and process.quality_control)
+
         entrega_lines = [
             line
             for line in run.acta_lines
             if line.stage_attempt_id == attempt.id and line.side == ActaLineSide.ENTREGA
         ]
-        entrega_total = sum((line.quantity for line in entrega_lines), Decimal("0"))
+        recepcion_lines = [
+            line
+            for line in run.acta_lines
+            if line.stage_attempt_id == attempt.id and line.side == ActaLineSide.RECEPCION
+        ]
         if entrega_lines:
             attempt.unit_code = entrega_lines[0].unit_code
 
-        if payload.decision == "RECHAZADA":
+        decision = payload.decision if quality_control else "APROBADA"
+        if decision == "RECHAZADA":
             attempt.status = StageAttemptStatus.REJECTED
             attempt.rejection_reason = (payload.rejection_reason or "").strip() or None
         else:
             attempt.status = StageAttemptStatus.APPROVED
-            # Merma propia de ESTE intento: lo que entro a esta misma etapa
-            # (su propia acta) menos el peso al finalizar -- nunca se compara
-            # contra otro intento (Rodrigo: "cada etapa es independiente,
-            # tiene su propia merma como su propio certificado").
+            # Merma propia de ESTE intento: lo entregado menos lo recibido de
+            # VUELTA del mismo item (sin peso_al_finalizar) -- nunca se
+            # compara contra otro intento. La linea RECEPCION del producto
+            # resultante (Task 3) es un item totalmente distinto a la materia
+            # prima entregada (el producto terminado, no la materia prima) y
+            # NO cuenta como "recuperado" -- solo cuenta lo devuelto del
+            # MISMO item que se entrego (ej. sobrante agregado a mano).
+            entrega_by_item: dict = {}
+            for line in entrega_lines:
+                entrega_by_item[line.item_id] = entrega_by_item.get(line.item_id, Decimal("0")) + line.quantity
+            entrega_total = sum(entrega_by_item.values(), Decimal("0"))
+            recepcion_matched = sum(
+                (
+                    line.quantity
+                    for line in recepcion_lines
+                    if line.item_id is not None and line.item_id in entrega_by_item
+                ),
+                Decimal("0"),
+            )
             if entrega_total > 0:
-                loss = max(Decimal("0"), entrega_total - payload.peso_al_finalizar)
+                loss = max(Decimal("0"), entrega_total - recepcion_matched)
                 attempt.merma_weight = loss
                 attempt.merma_percent = loss / entrega_total * Decimal("100")
 

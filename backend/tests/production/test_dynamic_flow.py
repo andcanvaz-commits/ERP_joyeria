@@ -60,8 +60,20 @@ def test_full_happy_path_two_attempts_same_process(
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("1900")
 
+    # Devuelve 95 del mismo item (sobrante) -- la merma sale de esta resta,
+    # no de un peso al finalizar (Task 5). La linea RECEPCION del producto
+    # resultante (target_complement, declarada al iniciar la etapa) es un
+    # item distinto y no cuenta para esta merma.
+    production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(
+            side="RECEPCION", item_id=raw_material.id, quantity=Decimal("95"), stage_attempt_id=running.id
+        ),
+        current_user,
+    )
+
     finished1 = production_service.finish_stage_attempt(
-        running.id, StageAttemptFinish(peso_al_finalizar=Decimal("95"), decision="APROBADA"), current_user
+        running.id, StageAttemptFinish(decision="APROBADA"), current_user
     )
     done_attempt = finished1.stage_attempts[0]
     assert done_attempt.status == "APROBADA"
@@ -86,8 +98,15 @@ def test_full_happy_path_two_attempts_same_process(
         ),
         current_user,
     )
+    production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(
+            side="RECEPCION", item_id=raw_material.id, quantity=Decimal("90"), stage_attempt_id=running2.id
+        ),
+        current_user,
+    )
     finished2 = production_service.finish_stage_attempt(
-        running2.id, StageAttemptFinish(peso_al_finalizar=Decimal("90"), decision="APROBADA"), current_user
+        running2.id, StageAttemptFinish(decision="APROBADA"), current_user
     )
     second_attempt = next(a for a in finished2.stage_attempts if a.code and a.code.endswith("-02"))
     assert second_attempt.merma_weight == Decimal("5")  # 95 - 90, independiente del primer intento
@@ -105,6 +124,7 @@ def test_reject_stage_attempt_optional_reason_and_restart_with_different_process
 ):
     from backend.modules.production.models import ProductionProcess
 
+    process.quality_control = True
     other_process = ProductionProcess(name="Laminado test", is_active=True)
     db_session.add(other_process)
     db_session.flush()
@@ -120,7 +140,7 @@ def test_reject_stage_attempt_optional_reason_and_restart_with_different_process
 
     # Motivo opcional -- Rodrigo: "no, opcional". No debe exigirlo.
     rejected = production_service.finish_stage_attempt(
-        running.id, StageAttemptFinish(peso_al_finalizar=Decimal("10"), decision="RECHAZADA"), current_user
+        running.id, StageAttemptFinish(decision="RECHAZADA"), current_user
     )
     rejected_attempt = rejected.stage_attempts[0]
     assert rejected_attempt.status == "RECHAZADA"
