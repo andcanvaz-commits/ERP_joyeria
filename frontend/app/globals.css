@@ -2343,7 +2343,9 @@ textarea {
 }
 
 .processViewWindow {
-  width: min(680px, 100%);
+  /* 900px porque aloja el acta de la etapa activa (opDoc pide 720px minimo
+     de ancho) -- con 680px quedaba cortando y forzando scroll horizontal. */
+  width: min(900px, 96vw);
   overflow-y: auto;
 }
 
@@ -4998,7 +5000,7 @@ textarea:disabled {
   text-align: center;
 }
 
-.opThFecha { width: 22%; }
+.opThFecha { width: 28%; }
 .opThGramos { width: 22%; }
 
 .opTable td {

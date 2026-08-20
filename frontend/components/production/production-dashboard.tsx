@@ -280,6 +280,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // producto terminado", disponible en cualquier momento de la orden).
   const [runQuantity, setRunQuantity] = useState("1");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
+  // Reporte de etapas ya terminadas de la orden (codigo/proceso/responsable/
+  // estado/merma) -- ventana aparte, ya no ocupa espacio arriba del acta.
+  const [isStageReportOpen, setIsStageReportOpen] = useState(false);
   const [selectedRunForStages, setSelectedRunForStages] = useState<ProductionRun | null>(null);
   const [cancelRun, setCancelRun] = useState<ProductionRun | null>(null);
   const [cancelRunReason, setCancelRunReason] = useState("");
@@ -1642,7 +1645,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>Crear orden</h2>
-                <p>Nombre libre -- el proceso se elige despues, etapa por etapa</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCreateOrderOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
@@ -1656,7 +1658,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 disabled={isSaving}
                 maxLength={255}
                 onChange={(event) => setNewOrderName(event.target.value)}
-                placeholder="Ej: Cadenas cubanas lote agosto"
                 value={newOrderName}
               />
             </label>
@@ -1687,6 +1688,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           : [];
         const isTerminada = dynamicOrderRun.status === "TERMINADA" || dynamicOrderRun.status === "CANCELADA";
         return (
+          <>
           <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Orden">
             <section className="modalWindow processViewWindow">
               <div className="modalHeader">
@@ -1694,37 +1696,30 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <h2>{dynamicOrderRun.name ?? dynamicOrderRun.production_code}</h2>
                   <p>{dynamicOrderRun.production_code} · <StatusPunch label={runStatusLabel(dynamicOrderRun.status)} tone={runStatusTone(dynamicOrderRun.status)} /></p>
                 </div>
-                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setDynamicOrderRun(null)} type="button">
-                  <X aria-hidden="true" size={18} />
-                </button>
-              </div>
-
-              {pastAttempts.length > 0 ? (
-                <div className="tableWrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Codigo</th>
-                        <th>Proceso</th>
-                        <th>Responsable</th>
-                        <th>Estado</th>
-                        <th className="num">Merma</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pastAttempts.map((attempt) => (
-                        <tr key={attempt.id}>
-                          <td>{attempt.code ?? "—"}</td>
-                          <td>{attempt.process_name}</td>
-                          <td>{attempt.responsable_name ?? "—"}</td>
-                          <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : "Rechazada"}</span></td>
-                          <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {pastAttempts.length > 0 ? (
+                    <button
+                      aria-label="Ver reporte de etapas"
+                      className="iconOnlyButton"
+                      onClick={() => setIsStageReportOpen(true)}
+                      type="button"
+                    >
+                      <FileText aria-hidden="true" size={18} />
+                    </button>
+                  ) : null}
+                  <button
+                    aria-label="Cerrar"
+                    className="iconOnlyButton"
+                    onClick={() => {
+                      setDynamicOrderRun(null);
+                      setIsStageReportOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={18} />
+                  </button>
                 </div>
-              ) : null}
+              </div>
 
               {waitingMaterialAttempts.length > 0 ? (
                 <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
@@ -2059,6 +2054,47 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               ) : null}
             </section>
           </div>
+
+          {isStageReportOpen ? (
+            <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true" aria-label="Reporte de etapas">
+              <section className="modalWindow processViewWindow">
+                <div className="modalHeader">
+                  <div>
+                    <h2>Reporte de etapas</h2>
+                    <p>{dynamicOrderRun.name ?? dynamicOrderRun.production_code}</p>
+                  </div>
+                  <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsStageReportOpen(false)} type="button">
+                    <X aria-hidden="true" size={18} />
+                  </button>
+                </div>
+                <div className="tableWrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Codigo</th>
+                        <th>Proceso</th>
+                        <th>Responsable</th>
+                        <th>Estado</th>
+                        <th className="num">Merma</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pastAttempts.map((attempt) => (
+                        <tr key={attempt.id}>
+                          <td>{attempt.code ?? "—"}</td>
+                          <td>{attempt.process_name}</td>
+                          <td>{attempt.responsable_name ?? "—"}</td>
+                          <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : "Rechazada"}</span></td>
+                          <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          ) : null}
+          </>
         );
       })() : null}
 
