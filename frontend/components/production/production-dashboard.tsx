@@ -1996,9 +1996,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
                   {isStageMaterialPickerOpen ? (
                     <MaterialCategoryPicker
-                      allowedTypes={["RAW_MATERIAL"]}
-                      description="Elige la materia prima que entra a esta etapa"
-                      items={rawMaterials}
+                      allowedTypes={["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WASTE", "FINISHED_PRODUCT"]}
+                      description="Elige la materia prima o cualquier item de inventario que entra a esta etapa"
+                      items={[...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems]}
                       onClose={closeStageMaterialPicker}
                       onSelect={(item) => {
                         setStagePickerPendingItem(item);
@@ -2017,7 +2017,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             }
                           : undefined
                       }
-                      title="Materia prima de la etapa"
+                      title="Materia prima o insumo de la etapa"
                     />
                   ) : null}
                 </section>
