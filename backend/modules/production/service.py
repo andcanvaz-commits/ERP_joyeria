@@ -376,13 +376,27 @@ class ProductionService:
         Seguro para ordenes del flujo VIEJO: sus lineas PLAN nunca generaron
         un movimiento referenciado por esta linea especifica (usaban
         reference_id=run.id via consume_material_for_production), asi que
-        _apply_admin_acta_line_delta calcula net_so_far=0 y no hace nada."""
+        _apply_admin_acta_line_delta calcula net_so_far=0 y no hace nada.
+
+        Dos pasadas, no una: primero TODAS las reversiones del lado ENTREGA
+        (le devuelven stock a su item) y recien despues las del lado
+        RECEPCION (se lo restan al suyo). Si se procesaran mezcladas en el
+        orden en que quedaron guardadas, una etapa que produjo el item X y
+        otra (posterior) que lo consumio como Entrada pueden toparse: revertir
+        primero la RECEPCION que produjo X lo resta cuando X esta en 0 (el
+        consumo de la otra etapa ya lo bajo), y el chequeo de stock de
+        _apply_admin_acta_line_delta lo bloquea sin que haya, en neto, ningun
+        problema real -- devolver primero lo que hay que devolver evita el
+        falso bloqueo."""
+        if any(line.item_id is not None for line in run.acta_lines) and self.inventory_service is None:
+            raise ProductionDomainError(
+                "Inventario no esta disponible para revertir el consumo de esta orden."
+            )
         for line in run.acta_lines:
-            if line.item_id is not None:
-                if self.inventory_service is None:
-                    raise ProductionDomainError(
-                        "Inventario no esta disponible para revertir el consumo de esta orden."
-                    )
+            if line.item_id is not None and line.side == ActaLineSide.ENTREGA:
+                self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
+        for line in run.acta_lines:
+            if line.item_id is not None and line.side == ActaLineSide.RECEPCION:
                 self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
 
     def cancel_run(self, run_id: UUID, current_user: CurrentUser, reason: str | None) -> ProductionRunRead:
@@ -1364,13 +1378,37 @@ class ProductionService:
         )
         lines = [line for line in run.acta_lines if line.stage_attempt_id == attempt.id]
 
+        # Un run o tiene lote (flujo VIEJO: finish_stage_attempt, ya borrado,
+        # era lo unico que llamaba get_or_create_finished_product_lot) o no
+        # lo tiene (flujo NUEVO: start_stage_attempt mueve stock directo al
+        # destino, nunca crea lote) -- no hay mezcla de mecanismos dentro de
+        # una misma corrida, asi que este chequeo alcanza para decidir como
+        # revertir TODAS las lineas RECEPCION/PLAN de este intento.
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryMovement
+
+        has_lot = self.repository.session.execute(
+            select(InventoryMovement.id).where(
+                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == run.id,
+            )
+        ).first() is not None
+
         try:
+            # Dos pasadas: primero ENTREGA (devuelve stock a su item), recien
+            # despues RECEPCION (lo resta del suyo) -- mismo motivo que en
+            # _revert_admin_stock_lines (Bug 2 de la revision): si se
+            # procesaran en el orden guardado, revertir la RECEPCION de un
+            # producto resultante que otra etapa ya consumio como Entrada
+            # puede toparlo en 0 y bloquear sin que haya, en neto, ningun
+            # problema real.
             for line in lines:
-                if line.item_id is None:
+                if line.item_id is None or line.side != ActaLineSide.ENTREGA:
                     continue
                 if line.source == ActaLineSource.ADMIN_STOCK:
                     self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
-                elif line.side == ActaLineSide.ENTREGA and line.source in (ActaLineSource.PLAN, ActaLineSource.AUTO):
+                elif line.source in (ActaLineSource.PLAN, ActaLineSource.AUTO):
                     self.inventory_service.create_movement(
                         InventoryMovementCreate(
                             item_id=line.item_id,
@@ -1382,26 +1420,38 @@ class ProductionService:
                         ),
                         user_id=current_user.id,
                     )
-                elif line.side == ActaLineSide.RECEPCION and line.source == ActaLineSource.PLAN:
-                    # Producto resultante: desde este spec ya no hay lote
-                    # intermedio (start_stage_attempt mueve stock directo al
-                    # item destino via _apply_admin_acta_line_delta), asi que
-                    # reverse_stage_attempt_product (el mecanismo del lote
-                    # viejo) ya no aplica -- reversion plana simetrica a la
-                    # rama ENTREGA de arriba: resta line.quantity del destino.
-                    # create_movement bloquea (InventoryDomainError) si ya no
-                    # queda suficiente porque se movio de ahi.
-                    self.inventory_service.create_movement(
-                        InventoryMovementCreate(
-                            item_id=line.item_id,
-                            movement_type="AJUSTE_NEGATIVO",
+            for line in lines:
+                if line.item_id is None or line.side != ActaLineSide.RECEPCION:
+                    continue
+                if line.source == ActaLineSource.ADMIN_STOCK:
+                    self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
+                elif line.source == ActaLineSource.PLAN:
+                    if has_lot:
+                        # Flujo VIEJO: el producto resultante paso por el
+                        # lote de la orden (convert_lot_to_product/
+                        # convert_lot_to_complement) -- revertirlo con un
+                        # AJUSTE_NEGATIVO plano (reference_type=
+                        # "production_run") bypasea por completo la
+                        # referencia "production_order" que
+                        # reverse_finished_product_lot necesita para no
+                        # duplicar la resta si despues se cancela la orden
+                        # entera. reverse_stage_attempt_product usa esa
+                        # MISMA referencia a proposito.
+                        self.inventory_service.reverse_stage_attempt_product(
+                            run_id=run.id,
+                            target_id=line.item_id,
                             quantity=line.quantity,
+                            user_id=current_user.id,
                             reason=revert_reason,
-                            reference_type="production_run",
-                            reference_id=run.id,
-                        ),
-                        user_id=current_user.id,
-                    )
+                        )
+                    else:
+                        # Flujo NUEVO: la linea movio stock directo al
+                        # destino via _apply_admin_acta_line_delta -- se
+                        # revierte por su propio ledger
+                        # (reference_type="production_run_acta_line"), no por
+                        # line.quantity (puede estar desactualizado si la
+                        # linea se edito despues via update_acta_line).
+                        self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
             # La merma real que esta etapa haya sumado a Inventario > Merma
             # tambien se revierte (simetria con get_or_create_waste_item en
             # approve_stage_attempt) -- si no, revertir dejaba stock de merma
@@ -1410,6 +1460,14 @@ class ProductionService:
                 stage_attempt_id=attempt.id, reason=revert_reason, user_id=current_user.id
             )
         except InventoryDomainError as exc:
+            raise ProductionDomainError(
+                f"No se puede revertir: {exc} Parte de lo que produjo esta etapa ya se movio en inventario."
+            ) from exc
+        except ProductionDomainError as exc:
+            # _apply_admin_acta_line_delta (mecanismo del flujo NUEVO, arriba)
+            # lanza ProductionDomainError directo, no InventoryDomainError --
+            # se re-envuelve igual que el except de arriba para dar el mismo
+            # mensaje sin importar cual de los dos mecanismos fue.
             raise ProductionDomainError(
                 f"No se puede revertir: {exc} Parte de lo que produjo esta etapa ya se movio en inventario."
             ) from exc
