@@ -335,6 +335,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }, []);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [selectedStatsRun, setSelectedStatsRun] = useState<ProductionRun | null>(null);
+  // Acta de un intento puntual, vista de solo lectura desde el resumen/
+  // historial (Rodrigo, 2026-08-20: "deberia poder ver todos los procesos y
+  // las actas individuales") -- flujo nuevo, la orden ya esta TERMINADA asi
+  // que no hay nada que editar aca.
+  const [viewingStatsAttemptId, setViewingStatsAttemptId] = useState<string | null>(null);
   // Acta editable: disponible en cualquier etapa de la orden y tambien
   // despues de recibida (ver ActaView).
   const [actaRun, setActaRun] = useState<ProductionRun | null>(null);
@@ -752,6 +757,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   function closeStatsModal() {
     setIsStatsModalOpen(false);
     setSelectedStatsRun(null);
+    setViewingStatsAttemptId(null);
   }
 
   function closeActaModal() {
@@ -2675,10 +2681,47 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               ) : null}
             </div>
             <RunStageSummaryTable run={selectedStatsRun} />
+            {/* Flujo nuevo: cada intento tiene su propia acta -- "Ver acta"
+                (una sola, de toda la orden) no aplicaba (Rodrigo, 2026-08-20:
+                "deberia poder ver todos los procesos y las actas
+                individuales"). Click en la fila abre el acta de ESE
+                intento, solo lectura (la orden ya esta TERMINADA). */}
+            {selectedStatsRun.stage_attempts && selectedStatsRun.stage_attempts.length > 0 ? (
+              <div className="tableWrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Codigo</th>
+                      <th>Proceso</th>
+                      <th>Responsable</th>
+                      <th>Estado</th>
+                      <th className="num">Merma</th>
+                      <th aria-label="Ver acta"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...selectedStatsRun.stage_attempts]
+                      .sort((a, b) => a.sequence_order - b.sequence_order)
+                      .map((attempt) => (
+                        <tr key={attempt.id} onClick={() => setViewingStatsAttemptId(attempt.id)} style={{ cursor: "pointer" }}>
+                          <td>{attempt.code ?? "—"}</td>
+                          <td>{attempt.process_name}</td>
+                          <td>{attempt.started_by_name ?? "—"}</td>
+                          <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : attempt.status === "RECHAZADA" ? "Rechazada" : "En proceso"}</span></td>
+                          <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
+                          <td><Eye aria-hidden="true" size={15} /></td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             <div className="modalActions">
-              <button className="button" onClick={() => setActaRun(selectedStatsRun)} type="button">
-                Ver acta
-              </button>
+              {selectedStatsRun.stage_attempts && selectedStatsRun.stage_attempts.length > 0 ? null : (
+                <button className="button" onClick={() => setActaRun(selectedStatsRun)} type="button">
+                  Ver acta
+                </button>
+              )}
               <button className="button buttonPrimary" onClick={() => setPrintingWasteRun(selectedStatsRun)} type="button">
                 <Printer aria-hidden="true" size={14} />
                 Imprimir
@@ -2687,6 +2730,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           </section>
         </div>
       ) : null}
+
+      {viewingStatsAttemptId && selectedStatsRun ? (() => {
+        const model = buildOrdenProduccion([selectedStatsRun], viewingStatsAttemptId);
+        return (
+          <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true" aria-label="Acta de la etapa">
+            <section className="modalWindow processViewWindow">
+              <div className="modalHeader">
+                <div>
+                  <h2>Acta de la etapa</h2>
+                </div>
+                <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingStatsAttemptId(null)} type="button">
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="actaDocFrame">
+                <OrdenProduccionDoc model={model} mode="completo" />
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
 
       {printingWasteRun
         ? createPortal(
