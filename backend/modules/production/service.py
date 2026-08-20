@@ -799,6 +799,12 @@ class ProductionService:
 
             item = self.repository.session.get(InventoryItem, line.item_id)
             if item is not None:
+                if item.current_stock - abs(delta) < 0:
+                    raise ProductionDomainError(
+                        f"'{line.label}': no hay suficiente stock de '{item.name}'. "
+                        f"Disponible: {format_qty(item.current_stock)} {item.unit_code}, "
+                        f"se pidio {format_qty(abs(delta))} {item.unit_code}."
+                    )
                 reserved = self.inventory_service.reserved_stock(item.id)
                 next_stock = item.current_stock - abs(delta)
                 if reserved > 0 and next_stock < reserved:

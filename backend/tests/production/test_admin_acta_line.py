@@ -748,3 +748,33 @@ def test_add_admin_acta_line_entrega_rejects_product_type_id(
             ),
             current_user,
         )
+
+
+def test_add_admin_acta_line_entrega_blocks_when_quantity_exceeds_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Rodrigo, 2026-08-20: 'solo puedo ingresar maximo la cantidad que hay
+    en inventario, para la parte izquierda del acta' -- ENTREGA nunca puede
+    dejar el stock negativo, sin importar reservas."""
+    run = _create_run(production_service, current_user, process, raw_material, target_complement)
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo topado", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="und", current_stock=Decimal("10"),
+    )
+    db_session.add(supply)
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError, match="no hay suficiente stock"):
+        production_service.add_admin_acta_line(
+            run.id,
+            AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("11")),
+            current_user,
+        )
+
+    production_service.add_admin_acta_line(
+        run.id,
+        AdminActaLineCreate(side="ENTREGA", item_id=supply.id, quantity=Decimal("10")),
+        current_user,
+    )
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("0")
