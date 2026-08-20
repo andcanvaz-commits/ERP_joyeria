@@ -1751,10 +1751,6 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.messageCalendarWindow {
-  width: min(360px, 100%);
-}
-
 /* Altura fija: la ventana de historial no cambia de tamaño según el día
    (3 movimientos por página + pager). */
 .movementHistoryEntries {

@@ -10,6 +10,7 @@ import { deleteMessage, listMessages, replyMessage, sendMessage, type AdminMessa
 import { markMessagesSeen, type MessagesScope } from "@/lib/messages-read-state";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
+import { openableProps } from "@/lib/a11y";
 
 function timeLabel(value: string | null) {
   if (!value) return "-";
@@ -44,13 +45,17 @@ function groupMessagesByDay(messages: AdminMessage[]): Array<{ key: string; labe
 // Aprobar/Rechazar con comentario opcional, una sola vez por solicitud.
 function MessageThread({
   message,
-  role,
+  canRespond,
   isSaving,
   onReply,
   onDelete,
 }: {
   message: AdminMessage;
-  role: "admin" | "operaciones";
+  // Producción/Inventario siempre puede; admin solo desde la superficie
+  // Inventario (Rodrigo, 2026-08-20: "en inventario no me deja responder" --
+  // en equipos chicos la misma cuenta admin hace de inventario). Calculado
+  // por MessagesPanel (role + scope), ver ahi.
+  canRespond: boolean;
   isSaving: boolean;
   onReply: (messageId: string, decision: MessageDecision, body: string) => void | Promise<void>;
   onDelete?: (messageId: string) => void | Promise<void>;
@@ -86,7 +91,7 @@ function MessageThread({
           </strong>
           {reply.body ? <p>{reply.body}</p> : null}
         </div>
-      ) : role === "operaciones" ? (
+      ) : canRespond ? (
         <div className="requestActions">
           <textarea
             className="field"
@@ -138,8 +143,17 @@ export function MessagesPanel({
   const [body, setBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Historial por calendario: mismo patron que Inventario > Movimientos y
+  // Documentos (Rodrigo, 2026-08-20: "debe ser la reutilizacion del que ya
+  // usamos") -- calendario a la izquierda (solo previsualiza, no filtra la
+  // vista de atras), lista de esa fecha a la derecha; elegir un mensaje de
+  // la lista si aplica el filtro y cierra. `selectedDate` (aplicado) y
+  // `calendarDate` (cursor dentro del modal) son cosas distintas: abrir el
+  // calendario no cambia lo que ya esta filtrado afuera.
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
+  const [calendarDate, setCalendarDate] = useState(() => dateKey(new Date()));
+  const [calendarSearch, setCalendarSearch] = useState("");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
 
@@ -161,10 +175,38 @@ export function MessagesPanel({
     const [year, month] = calendarMonth.split("-").map(Number);
     return new Date(year, month - 1, 1).toLocaleDateString("es-EC", { month: "long", year: "numeric" });
   }, [calendarMonth]);
+  const calendarSearchActive = calendarSearch.trim().length > 0;
+  const calendarSearchResults = useMemo(() => {
+    if (!calendarSearchActive) return [] as AdminMessage[];
+    const term = calendarSearch.trim().toLowerCase();
+    return messages.filter((m) => `${m.sender_name ?? ""} ${m.body}`.toLowerCase().includes(term));
+  }, [calendarSearch, calendarSearchActive, messages]);
+  const calendarDayEntries = useMemo(
+    () => messages.filter((m) => dateKey(new Date(m.created_at)) === calendarDate),
+    [messages, calendarDate]
+  );
 
   function moveCalendarMonth(direction: -1 | 1) {
     const [year, month] = calendarMonth.split("-").map(Number);
-    setCalendarMonth(monthKey(new Date(year, month - 1 + direction, 1)));
+    const nextDate = new Date(year, month - 1 + direction, 1);
+    const nextMonth = monthKey(nextDate);
+    setCalendarMonth(nextMonth);
+    const firstInMonth = messages.find((m) => dateKey(new Date(m.created_at)).startsWith(nextMonth));
+    setCalendarDate(firstInMonth ? dateKey(new Date(firstInMonth.created_at)) : `${nextMonth}-01`);
+  }
+
+  function openCalendar() {
+    const mostRecent = [...messageCountsByDate.keys()].sort().pop();
+    const startDate = mostRecent ?? dateKey(new Date());
+    setCalendarDate(startDate);
+    setCalendarMonth(startDate.slice(0, 7));
+    setCalendarSearch("");
+    setIsCalendarOpen(true);
+  }
+
+  function selectDateFromCalendar(key: string) {
+    setSelectedDate(key);
+    setIsCalendarOpen(false);
   }
 
   // Mandar o responder desde ACA cuenta como haber visto esta superficie: el
@@ -260,10 +302,7 @@ export function MessagesPanel({
           aria-label="Abrir historial por calendario"
           className="iconTextButton"
           disabled={messages.length === 0}
-          onClick={() => {
-            setCalendarMonth(selectedDate ? selectedDate.slice(0, 7) : monthKey(new Date()));
-            setIsCalendarOpen(true);
-          }}
+          onClick={openCalendar}
           title="Historial por calendario"
           type="button"
         >
@@ -278,12 +317,12 @@ export function MessagesPanel({
               <div className="messageDaySeparator"><span>{group.label}</span></div>
               {group.items.map((m) => (
                 <MessageThread
+                  canRespond={role === "operaciones" || (role === "admin" && scope === "inventario")}
                   isSaving={isSaving}
                   key={m.id}
                   message={m}
                   onDelete={role === "admin" ? handleDelete : undefined}
                   onReply={handleReply}
-                  role={role}
                 />
               ))}
             </div>
@@ -293,52 +332,98 @@ export function MessagesPanel({
       </div>
       {isCalendarOpen ? (
         <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de mensajes por calendario">
-          <section className="modalWindow messageCalendarWindow">
+          <section className="modalWindow movementHistoryWindow">
             <div className="modalHeader">
               <div>
                 <h2>Historial de mensajes</h2>
-                <p>Selecciona una fecha</p>
+                <p>Selecciona una fecha para revisar sus solicitudes</p>
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCalendarOpen(false)} type="button">
                 <X aria-hidden="true" size={18} />
               </button>
             </div>
-            <section className="movementCalendarPanel" aria-label="Calendario de mensajes">
-              <div className="movementCalendarHeader">
-                <button aria-label="Mes anterior" className="iconOnlyButton" onClick={() => moveCalendarMonth(-1)} type="button">
-                  <ChevronLeft aria-hidden="true" size={18} />
-                </button>
-                <strong>{calendarMonthLabel}</strong>
-                <button aria-label="Mes siguiente" className="iconOnlyButton" onClick={() => moveCalendarMonth(1)} type="button">
-                  <ChevronRight aria-hidden="true" size={18} />
-                </button>
-              </div>
-              <div className="movementCalendarWeekdays">
-                {WEEK_DAYS.map((day) => <span key={day}>{day}</span>)}
-              </div>
-              <div className="movementCalendarGrid">
-                {calendarDays.map((day) => {
-                  const count = messageCountsByDate.get(day.key) ?? 0;
-                  return day.isEmpty ? (
-                    <span className="movementCalendarEmpty" key={day.key} />
+            <div className="movementHistoryLayout">
+              <section className="movementCalendarPanel" aria-label="Calendario de mensajes">
+                <div className="movementCalendarHeader">
+                  <button aria-label="Mes anterior" className="iconOnlyButton" onClick={() => moveCalendarMonth(-1)} type="button">
+                    <ChevronLeft aria-hidden="true" size={18} />
+                  </button>
+                  <strong>{calendarMonthLabel}</strong>
+                  <button aria-label="Mes siguiente" className="iconOnlyButton" onClick={() => moveCalendarMonth(1)} type="button">
+                    <ChevronRight aria-hidden="true" size={18} />
+                  </button>
+                </div>
+                <div className="movementCalendarWeekdays">
+                  {WEEK_DAYS.map((day) => <span key={day}>{day}</span>)}
+                </div>
+                <div className="movementCalendarGrid">
+                  {calendarDays.map((day) => {
+                    const count = messageCountsByDate.get(day.key) ?? 0;
+                    return day.isEmpty ? (
+                      <span className="movementCalendarEmpty" key={day.key} />
+                    ) : (
+                      <button
+                        className={`movementCalendarDay ${calendarDate === day.key ? "movementCalendarSelected" : ""} ${count > 0 ? "movementCalendarHasMovements" : ""}`}
+                        key={day.key}
+                        onClick={() => setCalendarDate(day.key)}
+                        type="button"
+                      >
+                        <span>{day.label}</span>
+                        {count > 0 ? <strong>{count}</strong> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="movementDateDetail">
+                <input
+                  className="field searchField"
+                  onChange={(event) => setCalendarSearch(event.target.value)}
+                  placeholder="Buscar por remitente o texto"
+                  value={calendarSearch}
+                />
+                <div>
+                  {calendarSearchActive ? (
+                    <>
+                      <h3>Resultados de búsqueda</h3>
+                      <p>{calendarSearchResults.length} solicitudes en todo el historial</p>
+                    </>
                   ) : (
-                    <button
-                      className={`movementCalendarDay ${selectedDate === day.key ? "movementCalendarSelected" : ""} ${count > 0 ? "movementCalendarHasMovements" : ""}`}
-                      disabled={count === 0}
-                      key={day.key}
-                      onClick={() => {
-                        setSelectedDate(day.key);
-                        setIsCalendarOpen(false);
-                      }}
-                      type="button"
+                    <>
+                      <h3>{dayLabel(`${calendarDate}T00:00:00`)}</h3>
+                      <p>{calendarDayEntries.length} solicitudes</p>
+                    </>
+                  )}
+                </div>
+                <div className="movementList movementHistoryEntries pagedListFloor">
+                  {(calendarSearchActive ? calendarSearchResults : calendarDayEntries).map((m) => (
+                    <article
+                      className="movementRow"
+                      key={m.id}
+                      {...openableProps(
+                        () => selectDateFromCalendar(dateKey(new Date(m.created_at))),
+                        `Ver solicitud de ${m.sender_name ?? "Admin"}`
+                      )}
                     >
-                      <span>{day.label}</span>
-                      {count > 0 ? <strong>{count}</strong> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
+                      <div>
+                        <strong>{m.sender_name ?? "Admin"} solicita</strong>
+                        <span>
+                          {calendarSearchActive ? `${dayLabel(m.created_at)} · ` : ""}
+                          {m.body.slice(0, 60)}
+                        </span>
+                      </div>
+                      <div />
+                    </article>
+                  ))}
+                  {(calendarSearchActive ? calendarSearchResults : calendarDayEntries).length === 0 ? (
+                    <div className="emptyState">
+                      {calendarSearchActive ? "Ninguna solicitud coincide con la búsqueda." : "No hay solicitudes en esta fecha."}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            </div>
           </section>
         </div>
       ) : null}

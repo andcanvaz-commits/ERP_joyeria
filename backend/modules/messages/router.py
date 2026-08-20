@@ -31,7 +31,11 @@ def _ensure_admin(current_user: CurrentUser) -> None:
 
 
 def _ensure_responder(current_user: CurrentUser) -> None:
-    if current_user.role not in {"Producción/Inventario"}:
+    # Admin tambien puede responder (Rodrigo, 2026-08-20: "en inventario no me
+    # deja responder") -- en equipos chicos la misma cuenta admin hace de
+    # inventario. El frontend solo muestra el boton en la superficie de
+    # Inventario para no invitar a auto-aprobarse desde Solicitudes.
+    if current_user.role not in {"admin", "Admin", "Producción/Inventario"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo Producción/Inventario puede responder una solicitud.",
