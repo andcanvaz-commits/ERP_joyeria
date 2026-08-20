@@ -622,6 +622,39 @@ def test_add_admin_acta_line_entrega_post_arranque_requires_note(
     )
 
 
+def test_add_admin_acta_line_free_text_entrega_post_arranque_requires_note(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Bug encontrado en review de 6ebcd83: una linea libre (sin item_id ni
+    product_type_id) devolvia antes de llegar al chequeo de motivo, asi que
+    un admin podia agregar ENTREGA post-arranque sin auditoria con solo
+    escribir label/unit_code en vez de enlazar un item real. El chequeo debe
+    aplicar igual sin importar el tipo de linea."""
+    order, attempt, _supply = _start_with_entrega(db_session, production_service, current_user, process, raw_material, target_complement)
+
+    with pytest.raises(ProductionDomainError, match="motivo"):
+        production_service.add_admin_acta_line(
+            order.id,
+            AdminActaLineCreate(
+                side="ENTREGA", label="Tornillo prestado", quantity=Decimal("2"), unit_code="und",
+                stage_attempt_id=attempt.id,
+            ),
+            current_user,
+        )
+
+    result = production_service.add_admin_acta_line(
+        order.id,
+        AdminActaLineCreate(
+            side="ENTREGA", label="Tornillo prestado", quantity=Decimal("2"), unit_code="und",
+            stage_attempt_id=attempt.id, note="Se me olvido",
+        ),
+        current_user,
+    )
+    lines = [l for l in result.acta_lines if l.source == "MANUAL" and l.label == "Tornillo prestado"]
+    assert len(lines) == 1
+    assert lines[0].item_id is None
+
+
 def test_add_admin_acta_line_entrega_sin_stage_attempt_no_requires_note(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
@@ -782,6 +815,11 @@ def test_add_admin_acta_line_entrega_rejects_product_type_id(
                 quantity=Decimal("1"),
                 unit_code="und",
                 stage_attempt_id=attempt.id,
+                # Nota presente para que el chequeo de motivo (que ahora corre
+                # antes que cualquier validacion de branch, ver fix del review
+                # de 6ebcd83) no tape el error que este test en realidad
+                # quiere probar.
+                note="Se me olvido",
             ),
             current_user,
         )

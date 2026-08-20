@@ -896,6 +896,12 @@ class ProductionService:
                 "Esta orden ya tiene su acta cargada desde papel; no se pueden agregar lineas nuevas por este flujo."
             )
 
+        if payload.side == ActaLineSide.ENTREGA and payload.stage_attempt_id is not None:
+            if not payload.note or not payload.note.strip():
+                raise ProductionDomainError(
+                    "Indica el motivo: esta linea se agrega despues de haber iniciado la etapa."
+                )
+
         if payload.item_id is None and payload.product_type_id is None:
             if not payload.label or not payload.unit_code:
                 raise ProductionDomainError("Escribe el detalle y la unidad de la linea.")
@@ -948,12 +954,6 @@ class ProductionService:
         # tope de stock real (que nunca quede negativo) ya lo cubre
         # _apply_admin_acta_line_delta para el lado ENTREGA, que es el unico
         # que puede dejar stock negativo.
-
-        if payload.side == ActaLineSide.ENTREGA and payload.stage_attempt_id is not None:
-            if not payload.note or not payload.note.strip():
-                raise ProductionDomainError(
-                    "Indica el motivo: esta linea se agrega despues de haber iniciado la etapa."
-                )
 
         line = ProductionRunActaLine(
             side=payload.side,
