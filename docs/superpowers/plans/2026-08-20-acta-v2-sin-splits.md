@@ -252,7 +252,7 @@ git commit -m "feat(produccion): bitacora de decisiones (aprobar/rechazar) por i
 - Consumes: nada nuevo.
 - Produces: `_apply_admin_acta_line_delta` ahora bloquea cualquier consumo
   (`CONSUMO_PRODUCCION`, ENTREGA) que deje `current_stock` negativo, sin
-  importar quién la llame (Task 3, 5 y 6 dependen de este chequeo único).
+  importar quién la llame (Task 3, 4 y 5 dependen de este chequeo único).
 
 - [ ] **Step 1: Escribir el test que falla**
 
@@ -350,19 +350,55 @@ git commit -m "feat(produccion): tope de stock disponible centralizado en _apply
 
 ---
 
-### Task 3: `start_stage_attempt` sin split — Entrada y Producto multi-línea
+### Task 3: `start_stage_attempt` sin split + control de calidad universal — cambio atómico
+
+**Nota de alcance (corrección post-revisión, ver `.superpowers/sdd/task-3-report.md`
+de la ejecución con subagentes):** esta tarea absorbe lo que originalmente era
+la Task 4 separada. Razón: `start_stage_attempt` reescrito ya NO llena
+`attempt.target_item_id`/`target_product_type_id` (el producto resultante
+mueve stock de inmediato, no queda "destino pendiente" para convertir
+después); pero el `finish_stage_attempt` viejo depende exactamente de esos
+dos campos para convertir su lote. Dejar el rewrite de `start_stage_attempt`
+solo, sin reemplazar `finish_stage_attempt` en el mismo cambio, deja el
+código en un estado roto en tiempo de ejecución (y, peor, borrar
+`StageAttemptFinish` sin tocar `finish_stage_attempt`/su import en
+`router.py` en el mismo cambio rompe la carga del módulo completo — la app
+entera no arranca). Por eso todo esto es una sola tarea, un solo lote de
+commits, revisado junto.
+
+Además, el grep amplio que hizo el subagente encontró más archivos de test
+que usan la forma vieja (`product=`/`StageAttemptProductTarget`/
+`StageAttemptFinish`) de los que el plan original anticipaba — se listan
+abajo en Files.
 
 **Files:**
 - Modify: `backend/modules/production/schemas.py`
 - Modify: `backend/modules/production/service.py`
+- Modify: `backend/modules/production/router.py`
 - Modify: `backend/tests/production/test_stage_attempt_material.py` (reescritura completa)
-- Modify: `backend/tests/production/test_stage_quality_control.py` (solo los usos de `product=`/`StageAttemptMaterialLine` que rompan de import — el resto de este archivo lo reescribe Task 4)
+- Modify: `backend/tests/production/test_stage_quality_control.py` (reescritura completa)
+- Modify (rename mecánico `product=StageAttemptProductTarget(...)` →
+  `products=[StageAttemptProductLine(..., quantity=...)]`, y
+  `StageAttemptFinish(...)`/`finish_stage_attempt(...)` →
+  `StageAttemptReject(...)`/`reject_stage_attempt(...)` o
+  `approve_stage_attempt(...)` según corresponda al caso de cada test):
+  `backend/tests/production/test_admin_acta_line.py`,
+  `backend/tests/production/test_stage_attempt_decisions.py`,
+  `backend/tests/production/test_revert_stage_attempt.py`,
+  `backend/tests/production/test_cancel_run.py`,
+  `backend/tests/production/test_acta_edit.py`
+  (`backend/tests/production/test_dynamic_flow.py` queda para Task 6 —
+  tiene su propia tarea dedicada porque el volumen de usos ahí es mayor).
 
 **Interfaces:**
-- Consumes: `_apply_admin_acta_line_delta` con tope de stock (Task 2).
+- Consumes: `_apply_admin_acta_line_delta` con tope de stock (Task 2),
+  `ProductionRunStageAttemptDecision` (Task 1).
 - Produces: `StageAttemptProductLine` (schema), `StageAttemptCreate.products: list[StageAttemptProductLine]`,
-  `ProductionService._resolve_or_create_finished_item(item_id, product_type_id, material_code) -> InventoryItem`
-  (reusado por Task 5), `start_stage_attempt` reescrito sin split.
+  `StageAttemptReject` (schema), `ProductionService._resolve_or_create_finished_item(item_id, product_type_id, material_code) -> InventoryItem`
+  (reusado por Task 4), `start_stage_attempt` reescrito sin split,
+  `ProductionService.approve_stage_attempt(attempt_id, current_user)`,
+  `ProductionService.reject_stage_attempt(attempt_id, payload, current_user)`,
+  endpoints `POST /runs/stage-attempts/{id}/approve` y `.../reject`.
 
 - [ ] **Step 1: Cambiar el schema**
 
@@ -410,7 +446,8 @@ class StageAttemptCreate(BaseModel):
     products: list[StageAttemptProductLine] = Field(min_length=1)
 ```
 
-Elimina `StageAttemptFinish` (Task 4 la reemplaza por `StageAttemptReject`).
+Elimina `StageAttemptFinish` (más abajo, en este mismo task, la reemplaza
+`StageAttemptReject` — Step 9).
 Si `StageAttemptProductTarget` se usa en otro lado del archivo (busca
 `grep -n StageAttemptProductTarget backend/modules/production/schemas.py`
 antes de borrar la clase), ajusta esos usos también.
@@ -742,61 +779,24 @@ confirma con
 `grep -rn "_material_coverage_ratio" backend/` antes de borrar; si algo más
 lo llama, no lo borres y avisa en el commit).
 
-Borra también `allocate_stage_attempt_material` completo (Task 4 quita su
-endpoint del router; aquí solo el método del service, ya que su unico
-proposito -- el split -- desaparece con este task). Si prefieres, puedes
-dejar el borrado de `allocate_stage_attempt_material` para Task 4 en vez de
-aquí; lo importante es que quede borrado antes de terminar el plan.
+Borra también `allocate_stage_attempt_material` completo del service (su
+único propósito -- el split -- desaparece con este task); el endpoint
+correspondiente en el router se quita más abajo, en el Step 11 de este
+mismo task.
 
 - [ ] **Step 6: Correr el test del Step 2**
 
 Run: `docker-compose exec api pytest backend/tests/production/test_stage_attempt_material.py -v`
 Expected: PASS (todos).
 
-- [ ] **Step 7: Arreglar imports rotos en otros tests por el cambio de schema**
+**No hagas commit todavía — el schema y el service quedan en un estado que
+no importa hasta que los Steps 9-11 (abajo) reemplacen `finish_stage_attempt`
+en el mismo cambio. Sigue directo con el Step 7.**
 
-`test_stage_quality_control.py` y `test_dynamic_flow.py` importan
-`StageAttemptProductTarget` y llaman `product=...` — van a fallar en
-colección. Por ahora (Task 4 y Task 7 los reescriben del todo), solo
-confirma con:
-
-```bash
-docker-compose exec api pytest backend/tests/production -q 2>&1 | tail -30
-```
-
-Expected: fallos ÚNICAMENTE en `test_stage_quality_control.py` y
-`test_dynamic_flow.py` (por `product=`/`StageAttemptFinish` inexistentes) --
-ningún otro archivo debe fallar. Si falla algo más, para y revisa antes de
-continuar.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add backend/modules/production/schemas.py backend/modules/production/service.py backend/tests/production/test_stage_attempt_material.py
-git commit -m "feat(produccion): start_stage_attempt sin split -- Entrada/Producto multi-linea mueven stock de inmediato"
-```
-
----
-
-### Task 4: Control de calidad universal — `approve_stage_attempt`/`reject_stage_attempt`
-
-**Files:**
-- Modify: `backend/modules/production/schemas.py`
-- Modify: `backend/modules/production/service.py`
-- Modify: `backend/modules/production/router.py`
-- Modify: `backend/tests/production/test_stage_quality_control.py` (reescritura completa)
-
-**Interfaces:**
-- Consumes: `ProductionRunStageAttemptDecision` (Task 1),
-  `_resolve_or_create_finished_item`/stock centralizado (Tasks 2-3).
-- Produces: `ProductionService.approve_stage_attempt(attempt_id, current_user)`,
-  `ProductionService.reject_stage_attempt(attempt_id, payload: StageAttemptReject, current_user)`,
-  endpoints `POST /runs/stage-attempts/{id}/approve` y `.../reject`.
-
-- [ ] **Step 1: Schema `StageAttemptReject`**
+- [ ] **Step 7: Schema `StageAttemptReject`**
 
 En `backend/modules/production/schemas.py`, borra `StageAttemptFinish` (si
-no lo borraste ya en Task 3) y agrega:
+no lo borraste ya en el Step 1) y agrega:
 
 ```python
 class StageAttemptReject(BaseModel):
@@ -805,7 +805,7 @@ class StageAttemptReject(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 ```
 
-- [ ] **Step 2: Reescribir el test de calidad (falla primero)**
+- [ ] **Step 8: Reescribir el test de calidad (falla primero)**
 
 Reemplaza **todo el contenido** de
 `backend/tests/production/test_stage_quality_control.py` por:
@@ -974,12 +974,12 @@ merma usa `raw_material` como Entrada y `target_complement` como Producto:
 100 entregado - 90 convertido a producto = 10 de merma, sin que la materia
 prima aparezca del lado RECEPCION.
 
-- [ ] **Step 3: Correr el test, debe fallar**
+- [ ] **Step 9: Correr el test, debe fallar**
 
 Run: `docker-compose exec api pytest backend/tests/production/test_stage_quality_control.py -v`
 Expected: FAIL (`approve_stage_attempt`/`reject_stage_attempt` no existen todavia).
 
-- [ ] **Step 4: Implementar `approve_stage_attempt`/`reject_stage_attempt`**
+- [ ] **Step 10: Implementar `approve_stage_attempt`/`reject_stage_attempt`**
 
 En `backend/modules/production/service.py`, reemplaza el método
 `finish_stage_attempt` completo (desde `def finish_stage_attempt` hasta su
@@ -1077,7 +1077,7 @@ En `backend/modules/production/service.py`, reemplaza el método
 (Importa `ProductionRunStageAttemptDecision` y `StageAttemptReject` en los
 imports de módulo si no están ya.)
 
-- [ ] **Step 5: `_attach_stage_attempts` debe traer `decisions`**
+- [ ] **Step 11: `_attach_stage_attempts` debe traer `decisions`, y router**
 
 Busca el método `_attach_stage_attempts` en `service.py`
 (`grep -n "_attach_stage_attempts" backend/modules/production/service.py`)
@@ -1099,8 +1099,6 @@ dentro del loop que ya arma cada `StageAttemptRead` (sigue el patrón que ya
 usa ese método para `materials`/`acta_lines` — resuelve `names` con el mismo
 mecanismo de `_resolve_user_names` que ya usa el resto del archivo para
 `decided_by_user_id`).
-
-- [ ] **Step 6: Router**
 
 En `backend/modules/production/router.py`, reemplaza el endpoint
 `finish_stage_attempt` (import de `StageAttemptFinish` incluido) por:
@@ -1143,23 +1141,59 @@ Quita también el endpoint `allocate_stage_attempt_material` completo y el
 import de `StageAttemptFinish` (reemplázalo por `StageAttemptReject` en el
 bloque de imports de `schemas`).
 
-- [ ] **Step 7: Correr el test del Step 2 y toda la suite**
+- [ ] **Step 12: Correr el test del Step 8**
 
-Run: `docker-compose exec api pytest backend/tests/production -q`
-Expected: PASS. Si `test_dynamic_flow.py` sigue fallando por
-`product=`/`StageAttemptFinish`, eso es Task 7 — confírmalo pero no lo
-arregles aquí.
+Run: `docker-compose exec api pytest backend/tests/production/test_stage_quality_control.py -v`
+Expected: PASS todos.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 13: Arreglar el rename mecánico en los 5 archivos de test adicionales**
+
+`test_admin_acta_line.py`, `test_stage_attempt_decisions.py`,
+`test_revert_stage_attempt.py`, `test_cancel_run.py` y `test_acta_edit.py`
+usan la forma vieja y van a fallar en colección/ejecución tras los Steps
+1-12. Por cada uso:
+
+- `StageAttemptCreate(..., product=StageAttemptProductTarget(target_item_id=X))`
+  → `StageAttemptCreate(..., products=[StageAttemptProductLine(target_item_id=X, quantity=Decimal("1"))])`
+  (usa `Decimal("1")` salvo que el test verifique el valor exacto del
+  producto, en cuyo caso usa la cantidad que el test necesite).
+- `production_service.finish_stage_attempt(id, StageAttemptFinish(product_quantity=Decimal(N)), user)`
+  → si el test esperaba `APROBADA`: `production_service.approve_stage_attempt(id, user)`.
+  → si el test esperaba `RECHAZADA` con motivo: `production_service.reject_stage_attempt(id, StageAttemptReject(reason=...), user)`
+    — y AJUSTA la aserción: el intento queda `EN_PROCESO`, no `RECHAZADA`
+    (la regla cambió, ver Step 10 — si el test dependía de que quedara
+    cerrado tras el rechazo, esa aserción ya no aplica).
+
+Corre cada archivo por separado hasta que pase:
 
 ```bash
-git add backend/modules/production/schemas.py backend/modules/production/service.py backend/modules/production/router.py backend/tests/production/test_stage_quality_control.py
-git commit -m "feat(produccion): control de calidad universal -- aprobar cierra, rechazar solo deja registro"
+docker-compose exec api pytest backend/tests/production/test_admin_acta_line.py backend/tests/production/test_stage_attempt_decisions.py backend/tests/production/test_revert_stage_attempt.py backend/tests/production/test_cancel_run.py backend/tests/production/test_acta_edit.py -v
+```
+
+Expected: PASS todos.
+
+- [ ] **Step 14: Suite completa de producción**
+
+Run: `docker-compose exec api pytest backend/tests/production -q`
+Expected: PASS en todo, salvo `test_dynamic_flow.py` (tarea dedicada, ver
+Task 6 más abajo — confirma que ES el único archivo que sigue fallando y
+por qué, antes de continuar).
+
+- [ ] **Step 15: Commit**
+
+Uno o más commits está bien (ej. uno para el schema+start_stage_attempt,
+otro para approve/reject+router, otro para los renames mecánicos de test)
+-- lo que importa es que todos queden aplicados antes de reportar, ya que
+el estado intermedio entre ellos no compila. Sugerido:
+
+```bash
+git add backend/modules/production/schemas.py backend/modules/production/service.py backend/modules/production/router.py backend/tests/production/test_stage_attempt_material.py backend/tests/production/test_stage_quality_control.py backend/tests/production/test_admin_acta_line.py backend/tests/production/test_stage_attempt_decisions.py backend/tests/production/test_revert_stage_attempt.py backend/tests/production/test_cancel_run.py backend/tests/production/test_acta_edit.py
+git commit -m "feat(produccion): start_stage_attempt sin split + control de calidad universal (aprobar/rechazar) -- cambio atomico"
 ```
 
 ---
 
-### Task 5: `add_admin_acta_line` — quita tope RECEPCION, exige motivo en ENTREGA post-arranque
+### Task 4: `add_admin_acta_line` — quita tope RECEPCION, exige motivo en ENTREGA post-arranque
 
 **Files:**
 - Modify: `backend/modules/production/schemas.py` (nada nuevo si Task 3 ya
@@ -1290,7 +1324,7 @@ git commit -m "feat(produccion): RECEPCION sin tope de stock, ENTREGA post-arran
 
 ---
 
-### Task 6: Unifica edición/reversión/cancelación bajo `_apply_admin_acta_line_delta`
+### Task 5: Unifica edición/reversión/cancelación bajo `_apply_admin_acta_line_delta`
 
 **Files:**
 - Modify: `backend/modules/production/service.py`
@@ -1524,7 +1558,7 @@ caller en `_cancel_run_core`.)
 - [ ] **Step 10: Suite completa de producción**
 
 Run: `docker-compose exec api pytest backend/tests/production -q`
-Expected: PASS completo (salvo `test_dynamic_flow.py`, que es Task 7).
+Expected: PASS completo (salvo `test_dynamic_flow.py`, que es Task 6).
 
 - [ ] **Step 11: Commit**
 
@@ -1535,7 +1569,7 @@ git commit -m "fix(produccion): unifica edicion/reversion/cancelacion de lineas 
 
 ---
 
-### Task 7: `test_dynamic_flow.py` y suite completa verde
+### Task 6: `test_dynamic_flow.py` y suite completa verde
 
 **Files:**
 - Modify: `backend/tests/production/test_dynamic_flow.py`
@@ -1584,13 +1618,13 @@ git commit -m "test(produccion): actualiza test_dynamic_flow.py al nuevo schema 
 
 ---
 
-### Task 8: Frontend — lib de API
+### Task 7: Frontend — lib de API
 
 **Files:**
 - Modify: `frontend/lib/production-api.ts`
 
 **Interfaces:**
-- Consumes: endpoints de Task 4 (`approve`/`reject`) y schema de Task 3
+- Consumes: endpoints de Task 3 (`approve`/`reject`) y schema de Task 3
   (`products`).
 - Produces: `approveStageAttempt(attemptId)`, `rejectStageAttempt(attemptId, {reason})`,
   `startStageAttempt(runId, payload)` con `products` en vez de `product`.
@@ -1633,7 +1667,7 @@ Run: `docker-compose exec web npm run build 2>&1 | tail -60`
 Expected: errores de TypeScript en `production-dashboard.tsx` por los
 nombres/formas que cambiaron aquí (`finishStageAttempt`,
 `allocateStageAttemptMaterial`, `product:` en vez de `products:`) — eso es
-esperado, Task 9 los arregla. Anota la lista de errores para Task 9.
+esperado, Task 8 los arregla. Anota la lista de errores para Task 8.
 
 - [ ] **Step 4: Commit**
 
@@ -1644,13 +1678,13 @@ git commit -m "feat(produccion): approveStageAttempt/rejectStageAttempt reemplaz
 
 ---
 
-### Task 9: Frontend — Entrada/Producto multi-línea, ✓/✗ universal, quita checkbox QC
+### Task 8: Frontend — Entrada/Producto multi-línea, ✓/✗ universal, quita checkbox QC
 
 **Files:**
 - Modify: `frontend/components/production/production-dashboard.tsx`
 
 **Interfaces:**
-- Consumes: Task 8 (`approveStageAttempt`/`rejectStageAttempt`,
+- Consumes: Task 7 (`approveStageAttempt`/`rejectStageAttempt`,
   `startStageAttempt` con `products`).
 - Produces: UI actualizada; no expone nada a otras tareas.
 
@@ -1771,7 +1805,7 @@ git commit -m "feat(produccion): Entrada/Producto resultante como listas editabl
 
 ---
 
-### Task 10: Verificación final
+### Task 9: Verificación final
 
 **Files:** ninguno.
 
