@@ -230,23 +230,25 @@ export function MessagesPanel({
           </button>
         </div>
       ) : null}
-      <div className="messageList">
-        {groups.map((group) => (
-          <div key={group.key}>
-            <div className="messageDaySeparator">{group.label}</div>
-            {group.items.map((m) => (
-              <MessageThread
-                currentUserId={userId}
-                isSaving={isSaving}
-                key={m.id}
-                message={m}
-                onDelete={role === "admin" ? handleDelete : undefined}
-                onReply={handleReply}
-              />
-            ))}
-          </div>
-        ))}
-        {messages.length === 0 ? <div className="emptyState">Sin mensajes.</div> : null}
+      <div className="messageListShell">
+        <div className="messageList">
+          {groups.map((group) => (
+            <div key={group.key}>
+              <div className="messageDaySeparator">{group.label}</div>
+              {group.items.map((m) => (
+                <MessageThread
+                  currentUserId={userId}
+                  isSaving={isSaving}
+                  key={m.id}
+                  message={m}
+                  onDelete={role === "admin" ? handleDelete : undefined}
+                  onReply={handleReply}
+                />
+              ))}
+            </div>
+          ))}
+          {messages.length === 0 ? <div className="emptyState">Sin mensajes.</div> : null}
+        </div>
       </div>
       {dialog}
     </section>

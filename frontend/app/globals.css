@@ -2243,30 +2243,20 @@ textarea {
   display: flex;
   gap: 10px;
   align-items: flex-end;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 10px 12px;
-  box-shadow: 0 1px 2px rgba(74, 58, 20, 0.06);
 }
 
 .messageComposer .field {
   flex: 1;
-  border: none;
-  background: transparent;
-  resize: none;
-  box-shadow: none;
-  padding: 6px 4px;
 }
 
-.messageComposer .field:focus {
-  outline: none;
-  box-shadow: none;
-}
-
-.messageComposer .button {
-  border-radius: 999px;
-  flex-shrink: 0;
+.messageListShell {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 12px;
 }
 
 .messageList {
@@ -2279,7 +2269,12 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 18px 0 12px;
+  margin: 14px 0 10px;
+  padding: 6px 0;
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 1;
   font-size: 11.5px;
   font-weight: 800;
   color: var(--muted);
@@ -2408,11 +2403,9 @@ textarea {
 
 .messageReplyPending textarea {
   flex: 1;
-  border-radius: 12px;
 }
 
 .messageReplyPending .button {
-  border-radius: 999px;
   flex-shrink: 0;
 }
 
