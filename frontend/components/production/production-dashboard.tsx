@@ -278,9 +278,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // banco al iniciar un intento de etapa -- ya no hay wizard de creacion con
   // proceso+material+insumos de un tiron.
   const [selectedProcessId, setSelectedProcessId] = useState("");
-  // Cantidad a asignar a producto terminado (flujo nuevo, "Asignar a
-  // producto terminado", disponible en cualquier momento de la orden).
-  const [runQuantity, setRunQuantity] = useState("1");
+  // Cantidad real del producto resultante, llenada a mano al FINALIZAR la
+  // etapa (Rodrigo, 2026-08-20 -- no debe salir pre-llena, el picker de
+  // iniciar etapa solo elige el destino, no la cantidad).
+  const [runQuantity, setRunQuantity] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   // Reporte de etapas ya terminadas de la orden (codigo/proceso/responsable/
   // estado/merma) -- ventana aparte, ya no ocupa espacio arriba del acta.
@@ -887,8 +888,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Convierte el producto elegido al shape que espera el backend: solo se
   // manda la clave del identificador realmente elegido (nunca ambas, nunca
   // undefined) para no pisar la regla del backend de una sola referencia por fila.
-  function productRowToPayload(product: ProductChoice, quantity: string) {
-    const payload: { product_type_id?: string; target_item_id?: string; quantity: string } = { quantity };
+  function productRowToTarget(product: ProductChoice) {
+    const payload: { product_type_id?: string; target_item_id?: string } = {};
     if (product.targetItemId) payload.target_item_id = product.targetItemId;
     else if (product.productTypeId) payload.product_type_id = product.productTypeId;
     return payload;
@@ -950,10 +951,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Elige el producto resultante de esta etapa.");
       return;
     }
-    if (!runQuantity || Number(runQuantity) <= 0) {
-      setError("Ingresa una cantidad valida para el producto resultante.");
-      return;
-    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
@@ -966,7 +963,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         process_id: selectedProcessId,
         responsable_name: stageResponsableName.trim(),
         materials,
-        product: productRowToPayload(orderProduct, runQuantity),
+        product: productRowToTarget(orderProduct),
       });
       setDynamicOrderRun(started);
       setSelectedProcessId("");
@@ -974,7 +971,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setStageMaterialItem(null);
       setStageMaterialQuantity("");
       setOrderProduct(null);
-      setRunQuantity("1");
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la etapa.");
@@ -1018,15 +1014,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   async function handleFinishStageAttempt(attemptId: string, decision: "APROBADA" | "RECHAZADA") {
+    if (!runQuantity || Number(runQuantity) <= 0) {
+      setError("Ingresa la cantidad real del producto resultante.");
+      return;
+    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
       const updated = await finishStageAttempt(attemptId, {
+        product_quantity: runQuantity,
         decision,
         rejection_reason: decision === "RECHAZADA" ? stageAttemptRejectReason.trim() || null : null,
       });
       setDynamicOrderRun(updated);
+      setRunQuantity("");
       setStageAttemptRejectReason("");
       setIsRejectingStage(false);
       setSuccess(decision === "APROBADA" ? "Etapa aprobada." : "Etapa rechazada.");
@@ -1771,6 +1773,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     fecha: line.created_at,
                     item_id: line.item_id,
                   }));
+                // Producto resultante elegido al iniciar la etapa: la cantidad
+                // real se llena recien al finalizar (Rodrigo, 2026-08-20), asi
+                // que todavia no hay linea real -- se muestra un aviso de que
+                // va a salir por aca, sin numero inventado.
+                if (runningAttempt.target_label && recepcionLines.length === 0) {
+                  recepcionLines.push({
+                    kind: "row",
+                    id: "pending-product",
+                    label: `Pendiente: ${runningAttempt.target_label}`,
+                    quantity: "0",
+                    unit_code: "",
+                    editable: false,
+                    source: "PLAN",
+                    fecha: null,
+                  });
+                }
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
@@ -1834,6 +1852,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         </article>
                       </div>
                     </div>
+
+                    <label className="fieldGroup" style={{ marginTop: 10 }}>
+                      <span>Cantidad real de {runningAttempt.target_label ?? "producto resultante"}</span>
+                      <input
+                        className="field"
+                        disabled={isSaving}
+                        min="0.0001"
+                        onChange={(event) => setRunQuantity(event.target.value)}
+                        step="0.0001"
+                        style={{ width: 140 }}
+                        type="number"
+                        value={runQuantity}
+                      />
+                    </label>
 
                     {(() => {
                       const attemptProcess = processes.find((p) => p.id === runningAttempt.process_id);
@@ -1975,19 +2007,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       {orderProduct ? orderProduct.label : "Elegir..."}
                     </button>
                   </label>
-                  {orderProduct ? (
-                    <label className="fieldGroup">
-                      <span>Cantidad</span>
-                      <input
-                        className="field"
-                        min="0.0001"
-                        onChange={(event) => setRunQuantity(event.target.value)}
-                        step="0.0001"
-                        type="number"
-                        value={runQuantity}
-                      />
-                    </label>
-                  ) : null}
                   <div className="modalActions">
                     <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleStartStageAttempt()} type="button">
                       Iniciar etapa

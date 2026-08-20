@@ -15,9 +15,9 @@ from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.schemas import (
     AdminActaLineCreate,
     ProductionOrderCreate,
-    RunProductCreate,
     StageAttemptCreate,
     StageAttemptFinish,
+    StageAttemptProductTarget,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 
@@ -43,7 +43,7 @@ def test_full_happy_path_two_attempts_same_process(
     )
     db_session.add(supply)
     db_session.flush()
-    product = RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))
+    product = StageAttemptProductTarget(target_item_id=target_complement.id)
 
     order = production_service.create_order(ProductionOrderCreate(name="Orden dinamica test"), current_user)
 
@@ -84,7 +84,7 @@ def test_full_happy_path_two_attempts_same_process(
     )
 
     finished1 = production_service.finish_stage_attempt(
-        running.id, StageAttemptFinish(decision="APROBADA"), current_user
+        running.id, StageAttemptFinish(decision="APROBADA", product_quantity=Decimal("1")), current_user
     )
     done_attempt = finished1.stage_attempts[0]
     assert done_attempt.status == "APROBADA"
@@ -117,7 +117,7 @@ def test_full_happy_path_two_attempts_same_process(
         current_user,
     )
     finished2 = production_service.finish_stage_attempt(
-        running2.id, StageAttemptFinish(decision="APROBADA"), current_user
+        running2.id, StageAttemptFinish(decision="APROBADA", product_quantity=Decimal("1")), current_user
     )
     second_attempt = next(a for a in finished2.stage_attempts if a.code and a.code.endswith("-02"))
     assert second_attempt.merma_weight == Decimal("5")  # 95 - 90, independiente del primer intento
@@ -139,7 +139,7 @@ def test_reject_stage_attempt_optional_reason_and_restart_with_different_process
     other_process = ProductionProcess(name="Laminado test", is_active=True)
     db_session.add(other_process)
     db_session.flush()
-    product = RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))
+    product = StageAttemptProductTarget(target_item_id=target_complement.id)
 
     order = production_service.create_order(ProductionOrderCreate(name="Orden rechazo test"), current_user)
     attempt = production_service.start_stage_attempt(
@@ -151,7 +151,7 @@ def test_reject_stage_attempt_optional_reason_and_restart_with_different_process
 
     # Motivo opcional -- Rodrigo: "no, opcional". No debe exigirlo.
     rejected = production_service.finish_stage_attempt(
-        running.id, StageAttemptFinish(decision="RECHAZADA"), current_user
+        running.id, StageAttemptFinish(decision="RECHAZADA", product_quantity=Decimal("1")), current_user
     )
     rejected_attempt = rejected.stage_attempts[0]
     assert rejected_attempt.status == "RECHAZADA"
@@ -173,7 +173,7 @@ def test_reject_stage_attempt_optional_reason_and_restart_with_different_process
 def test_cannot_start_a_second_attempt_while_one_is_in_progress(
     db_session, production_service, current_user, process, target_complement
 ):
-    product = RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))
+    product = StageAttemptProductTarget(target_item_id=target_complement.id)
     order = production_service.create_order(ProductionOrderCreate(name="Orden secuencial test"), current_user)
     production_service.start_stage_attempt(
         order.id,
@@ -193,7 +193,7 @@ def test_start_stage_attempt_unknown_process_raises_not_found(production_service
     import uuid
 
     order = production_service.create_order(ProductionOrderCreate(name="Orden test"), current_user)
-    product = RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))
+    product = StageAttemptProductTarget(target_item_id=target_complement.id)
 
     with pytest.raises(ProductionNotFoundError):
         production_service.start_stage_attempt(
@@ -213,14 +213,14 @@ def test_start_stage_attempt_unknown_process_raises_not_found(production_service
 def test_finish_order_closes_run_without_active_stage(
     db_session, production_service, current_user, process, target_complement
 ):
-    product = RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))
+    product = StageAttemptProductTarget(target_item_id=target_complement.id)
     order = production_service.create_order(ProductionOrderCreate(name="Orden a finalizar"), current_user)
     started = production_service.start_stage_attempt(
         order.id,
         StageAttemptCreate(process_id=process.id, responsable_name="Ana", product=product),
         current_user,
     )
-    production_service.finish_stage_attempt(started.stage_attempts[0].id, StageAttemptFinish(), current_user)
+    production_service.finish_stage_attempt(started.stage_attempts[0].id, StageAttemptFinish(product_quantity=Decimal("1")), current_user)
 
     finished = production_service.finish_order(order.id, current_user)
 
@@ -230,7 +230,7 @@ def test_finish_order_closes_run_without_active_stage(
 def test_finish_order_rejects_with_active_stage(
     db_session, production_service, current_user, process, target_complement
 ):
-    product = RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1"))
+    product = StageAttemptProductTarget(target_item_id=target_complement.id)
     order = production_service.create_order(ProductionOrderCreate(name="Orden con etapa activa"), current_user)
     production_service.start_stage_attempt(
         order.id,

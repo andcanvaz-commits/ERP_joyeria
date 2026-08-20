@@ -595,6 +595,7 @@ class ProductionService:
         cada linea -- aca solo se filtra por intento)."""
         from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
+        from backend.modules.product_types.models import ProductType
 
         user_ids = [
             uid
@@ -612,6 +613,24 @@ class ProductionService:
                 select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(material_item_ids))
             ).all()
             material_item_names = {row[0]: row[1] for row in rows}
+        target_item_ids = list({
+            a.target_item_id for run in runs for a in run.stage_attempts if a.target_item_id
+        })
+        target_item_names: dict = {}
+        if target_item_ids:
+            rows = self.repository.session.execute(
+                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(target_item_ids))
+            ).all()
+            target_item_names = {row[0]: row[1] for row in rows}
+        target_type_ids = list({
+            a.target_product_type_id for run in runs for a in run.stage_attempts if a.target_product_type_id
+        })
+        target_type_names: dict = {}
+        if target_type_ids:
+            rows = self.repository.session.execute(
+                select(ProductType.id, ProductType.name).where(ProductType.id.in_(target_type_ids))
+            ).all()
+            target_type_names = {row[0]: row[1] for row in rows}
         for read, run in zip(reads, runs):
             acta_lines_by_read = {line.id: line for line in read.acta_lines}
             read.stage_attempts = [
@@ -630,6 +649,13 @@ class ProductionService:
                     unit_code=attempt.unit_code,
                     merma_weight=attempt.merma_weight,
                     merma_percent=attempt.merma_percent,
+                    target_product_type_id=attempt.target_product_type_id,
+                    target_item_id=attempt.target_item_id,
+                    target_label=(
+                        target_item_names.get(attempt.target_item_id)
+                        if attempt.target_item_id
+                        else target_type_names.get(attempt.target_product_type_id)
+                    ),
                     started_by_name=(
                         user_names.get(str(attempt.started_by_user_id)) if attempt.started_by_user_id else None
                     ),
@@ -1104,73 +1130,17 @@ class ProductionService:
             run.stage_attempts.append(new_attempt)
             return new_attempt
 
-        def _apply_product(attempt: ProductionRunStageAttempt) -> None:
-            """Producto resultante obligatorio (siempre, al elegir la etapa):
-            alimenta el mismo lote FINISHED_PRODUCT de la orden (Task 2) y lo
-            convierte de una, dejando la parte derecha del acta lista -- misma
-            logica que antes tenia el boton "Asignar a producto terminado"
-            (ya eliminado), pero por etapa y sin cerrar la orden."""
-            from backend.modules.inventory.models import InventoryItem
-            from backend.modules.inventory.schemas import LotConversionCreate
-
-            first_entrega = next(
-                (line for line in run.acta_lines if line.side == ActaLineSide.ENTREGA and line.item_id is not None),
-                None,
-            )
-            raw_material = (
-                self.repository.session.get(InventoryItem, first_entrega.item_id)
-                if first_entrega is not None else None
-            )
-            lot = self.inventory_service.get_or_create_finished_product_lot(
-                run=run,
-                quantity=payload.product.quantity,
-                material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
-                purity=raw_material.purity if raw_material else None,
-                received_by_user_id=current_user.id,
-            )
-            try:
-                if payload.product.target_item_id is not None:
-                    target = self.repository.session.get(InventoryItem, payload.product.target_item_id)
-                    if target is not None and target.item_type == "COMPLEMENT":
-                        self.inventory_service.convert_lot_to_complement(
-                            lot.id, payload.product.target_item_id, payload.product.quantity, user_id=current_user.id
-                        )
-                        target_id = payload.product.target_item_id
-                    else:
-                        conversion = LotConversionCreate(
-                            target_item_id=payload.product.target_item_id, quantity=payload.product.quantity
-                        )
-                        converted = self.inventory_service.convert_lot_to_product(
-                            lot.id, conversion, user_id=current_user.id
-                        )
-                        target_id = converted.id
-                else:
-                    conversion = LotConversionCreate(
-                        product_type_id=payload.product.product_type_id, quantity=payload.product.quantity
-                    )
-                    converted = self.inventory_service.convert_lot_to_product(
-                        lot.id, conversion, user_id=current_user.id
-                    )
-                    target_id = converted.id
-            except (InventoryDomainError, InventoryNotFoundError) as exc:
-                raise ProductionDomainError(f"No se pudo convertir el lote al producto resultante: {exc}") from exc
-
-            target_item = self.repository.session.get(InventoryItem, target_id)
-            self._add_or_merge_acta_line(
-                run,
-                side=ActaLineSide.RECEPCION,
-                label=target_item.name if target_item else "Producto",
-                quantity=payload.product.quantity,
-                unit_code=target_item.unit_code if target_item else "und",
-                source=ActaLineSource.PLAN,
-                item_id=target_id,
-                stage_attempt_id=attempt.id,
-                created_by_user_id=current_user.id,
-            )
+        def _store_product_target(attempt: ProductionRunStageAttempt) -> None:
+            """Producto resultante obligatorio al elegir la etapa: solo guarda
+            el destino (que producto va a salir). La cantidad real y la
+            conversion de inventario se hacen al finalizar la etapa (Rodrigo,
+            2026-08-20 -- no debe salir pre-llena)."""
+            attempt.target_product_type_id = payload.product.product_type_id
+            attempt.target_item_id = payload.product.target_item_id
 
         if not payload.materials:
             new_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
-            _apply_product(new_attempt)
+            _store_product_target(new_attempt)
             self.repository.flush()
             return self._read_with_names(run)
 
@@ -1218,7 +1188,7 @@ class ProductionService:
                         quantity_pending=Decimal("0"),
                     )
                 )
-            _apply_product(covered_attempt)
+            _store_product_target(covered_attempt)
         elif ratio <= 0:
             waiting_attempt = _new_attempt(StageAttemptStatus.WAITING_MATERIAL, attempt_no, 0)
             for item, quantity in resolved:
@@ -1230,7 +1200,7 @@ class ProductionService:
                         quantity_pending=quantity,
                     )
                 )
-            _apply_product(waiting_attempt)
+            _store_product_target(waiting_attempt)
         else:
             covered_attempt = _new_attempt(StageAttemptStatus.IN_PROGRESS, attempt_no, 0)
             waiting_attempt = _new_attempt(StageAttemptStatus.WAITING_MATERIAL, attempt_no + 1, 1)
@@ -1255,7 +1225,7 @@ class ProductionService:
                         quantity_pending=remainder,
                     )
                 )
-            _apply_product(covered_attempt)
+            _store_product_target(covered_attempt)
 
         self.repository.flush()
         return self._read_with_names(run)
@@ -1285,6 +1255,73 @@ class ProductionService:
         ]
         if entrega_lines:
             attempt.unit_code = entrega_lines[0].unit_code
+
+        # Producto resultante: el destino ya se eligio al iniciar la etapa
+        # (start_stage_attempt); la cantidad real recien se sabe aca (Rodrigo,
+        # 2026-08-20 -- no debe salir pre-llena del picker). Convierte el lote
+        # y deja la linea RECEPCION del producto lista, pase lo que pase con
+        # la decision de calidad (un producto rechazado igual se registra,
+        # queda disponible para usarse en otra etapa despues).
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible para finalizar esta etapa.")
+
+        from backend.modules.inventory.models import InventoryItem
+        from backend.modules.inventory.schemas import LotConversionCreate
+
+        first_entrega = next(
+            (line for line in run.acta_lines if line.side == ActaLineSide.ENTREGA and line.item_id is not None),
+            None,
+        )
+        raw_material = (
+            self.repository.session.get(InventoryItem, first_entrega.item_id)
+            if first_entrega is not None else None
+        )
+        lot = self.inventory_service.get_or_create_finished_product_lot(
+            run=run,
+            quantity=payload.product_quantity,
+            material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
+            purity=raw_material.purity if raw_material else None,
+            received_by_user_id=current_user.id,
+        )
+        try:
+            if attempt.target_item_id is not None:
+                target = self.repository.session.get(InventoryItem, attempt.target_item_id)
+                if target is not None and target.item_type == "COMPLEMENT":
+                    self.inventory_service.convert_lot_to_complement(
+                        lot.id, attempt.target_item_id, payload.product_quantity, user_id=current_user.id
+                    )
+                    target_id = attempt.target_item_id
+                else:
+                    conversion = LotConversionCreate(
+                        target_item_id=attempt.target_item_id, quantity=payload.product_quantity
+                    )
+                    converted = self.inventory_service.convert_lot_to_product(
+                        lot.id, conversion, user_id=current_user.id
+                    )
+                    target_id = converted.id
+            else:
+                conversion = LotConversionCreate(
+                    product_type_id=attempt.target_product_type_id, quantity=payload.product_quantity
+                )
+                converted = self.inventory_service.convert_lot_to_product(
+                    lot.id, conversion, user_id=current_user.id
+                )
+                target_id = converted.id
+        except (InventoryDomainError, InventoryNotFoundError) as exc:
+            raise ProductionDomainError(f"No se pudo convertir el lote al producto resultante: {exc}") from exc
+
+        target_item = self.repository.session.get(InventoryItem, target_id)
+        self._add_or_merge_acta_line(
+            run,
+            side=ActaLineSide.RECEPCION,
+            label=target_item.name if target_item else "Producto",
+            quantity=payload.product_quantity,
+            unit_code=target_item.unit_code if target_item else "und",
+            source=ActaLineSource.PLAN,
+            item_id=target_id,
+            stage_attempt_id=attempt.id,
+            created_by_user_id=current_user.id,
+        )
 
         decision = payload.decision if quality_control else "APROBADA"
         if decision == "RECHAZADA":

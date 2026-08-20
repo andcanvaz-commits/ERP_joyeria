@@ -319,6 +319,11 @@ class ProductionRunStageAttempt(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=StageAttemptStatus.IN_PROGRESS)
     # Motivo del rechazo (✘) -- opcional, no obligatorio.
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Cantidad real del producto resultante, llenada a mano al finalizar la
+    # etapa (Rodrigo, 2026-08-20) -- ya no viene pre-llena del picker de
+    # iniciar etapa. El nombre de columna es historico (antes era "peso al
+    # finalizar" a secas); el sentido nuevo es la cantidad real de
+    # target_item_id/target_product_type_id que salio de esta etapa.
     peso_al_finalizar: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     unit_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Merma de ESTE intento unicamente: suma(ENTREGA de este intento) - peso
@@ -329,6 +334,14 @@ class ProductionRunStageAttempt(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     finished_by_user_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Producto resultante elegido al iniciar la etapa (Rodrigo, 2026-08-20):
+    # solo el destino, la cantidad real se llena al finalizar -- ver
+    # peso_al_finalizar, reusado con ese nuevo sentido (ya no es "peso" a
+    # secas, es la cantidad real del producto resultante).
+    target_product_type_id: Mapped[PyUUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("product_types.id", ondelete="SET NULL"), nullable=True
+    )
+    target_item_id: Mapped[PyUUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
     materials: Mapped[list["ProductionRunStageAttemptMaterial"]] = relationship(
         back_populates="stage_attempt",

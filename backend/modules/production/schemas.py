@@ -63,6 +63,25 @@ class RunProductsUpdate(BaseModel):
     products: list[RunProductCreate] = Field(min_length=1)
 
 
+class StageAttemptProductTarget(BaseModel):
+    """Solo el destino del producto resultante -- la cantidad real se llena
+    al finalizar la etapa (Rodrigo, 2026-08-20), no se pide aca."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_type_id: UUID | None = None
+    target_item_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _check_one_target(self) -> "StageAttemptProductTarget":
+        if (self.product_type_id is None) == (self.target_item_id is None):
+            raise ValueError(
+                "El producto resultante debe ser una pieza del inventario o un "
+                "tipo del catalogo (uno de los dos)."
+            )
+        return self
+
+
 class RunCancelPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -224,20 +243,23 @@ class StageAttemptCreate(BaseModel):
     # Si trae lineas, se valida contra stock disponible al iniciar -- puede
     # terminar en split si no alcanza (ver ProductionService.start_stage_attempt).
     materials: list[StageAttemptMaterialLine] = Field(default_factory=list)
-    # Obligatorio siempre: que va a salir de esta etapa y cuanto -- reusa
-    # RunProductCreate (misma validacion/picker que antes usaba assign_product).
-    product: RunProductCreate
+    # Obligatorio siempre: QUE va a salir de esta etapa (solo el destino --
+    # la cantidad real se llena al finalizar, Rodrigo 2026-08-20).
+    product: StageAttemptProductTarget
 
 
 class StageAttemptFinish(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Sin peso: la merma sale de ENTREGA-RECEPCION de la propia etapa. La
-    # decision solo aplica si el proceso tiene control de calidad -- si no,
-    # el service la fuerza a APROBADA sin importar lo que venga aca.
+    # La decision solo aplica si el proceso tiene control de calidad -- si
+    # no, el service la fuerza a APROBADA sin importar lo que venga aca.
     decision: Literal["APROBADA", "RECHAZADA"] = "APROBADA"
     # Opcional -- Rodrigo: el motivo de rechazo no es obligatorio.
     rejection_reason: str | None = Field(default=None, max_length=1000)
+    # Cantidad real del producto resultante elegido al iniciar la etapa
+    # (Rodrigo, 2026-08-20: no debe salir pre-llena, se llena a mano aca).
+    # Convierte el lote y mueve inventario recien en este momento.
+    product_quantity: Decimal = Field(gt=0)
 
 
 class StageAttemptMaterialRead(BaseModel):
@@ -265,6 +287,12 @@ class StageAttemptRead(BaseModel):
     rejection_reason: str | None = None
     peso_al_finalizar: Decimal | None = None
     unit_code: str | None = None
+    # Producto resultante elegido al iniciar (destino, sin cantidad todavia
+    # -- ver peso_al_finalizar, que aca hace de cantidad real una vez que se
+    # finaliza la etapa).
+    target_product_type_id: UUID | None = None
+    target_item_id: UUID | None = None
+    target_label: str | None = None
     merma_weight: Decimal | None = None
     merma_percent: Decimal | None = None
     started_by_name: str | None = None

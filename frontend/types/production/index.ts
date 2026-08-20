@@ -41,6 +41,11 @@ export type StageAttempt = {
   unit_code?: string | null;
   merma_weight?: string | null;
   merma_percent?: string | null;
+  // Producto resultante elegido al iniciar (solo destino -- la cantidad real
+  // se llena al finalizar, Rodrigo 2026-08-20).
+  target_product_type_id?: string | null;
+  target_item_id?: string | null;
+  target_label?: string | null;
   started_by_name?: string | null;
   started_at: string;
   finished_by_name?: string | null;

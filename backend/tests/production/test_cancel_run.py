@@ -13,9 +13,9 @@ from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.models import ProductionRun, ProductionRunStatus
 from backend.modules.production.schemas import (
     ProductionOrderCreate,
-    RunProductCreate,
     StageAttemptCreate,
     StageAttemptMaterialLine,
+    StageAttemptProductTarget,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 
@@ -32,7 +32,7 @@ def _run_with_consumed_material(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=quantity)],
-            product=RunProductCreate(target_item_id=target_item.id, quantity=Decimal("1")),
+            product=StageAttemptProductTarget(target_item_id=target_item.id),
         ),
         current_user,
     )
@@ -137,7 +137,7 @@ def test_cancel_does_not_touch_average_cost(
             process_id=process.id,
             responsable_name="Ana",
             materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
-            product=RunProductCreate(target_item_id=target_complement.id, quantity=Decimal("1")),
+            product=StageAttemptProductTarget(target_item_id=target_complement.id),
         ),
         current_user,
     )
@@ -248,8 +248,12 @@ def test_cancel_run_reverts_finished_product_conversion(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     from backend.modules.production.models import ProductionRunStatus
+    from backend.modules.production.schemas import StageAttemptFinish
 
     run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
+    production_service.finish_stage_attempt(
+        run.stage_attempts[0].id, StageAttemptFinish(product_quantity=Decimal("1")), current_user
+    )
     db_session.refresh(target_complement)
     assert target_complement.current_stock == Decimal("1")
     run.status = ProductionRunStatus.FINISHED
@@ -268,8 +272,12 @@ def test_cancel_run_blocks_when_converted_stock_already_moved(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     from backend.modules.production.models import ProductionRunStatus
+    from backend.modules.production.schemas import StageAttemptFinish
 
     run = _run_with_consumed_material(db_session, production_service, current_user, process, raw_material, target_complement)
+    production_service.finish_stage_attempt(
+        run.stage_attempts[0].id, StageAttemptFinish(product_quantity=Decimal("1")), current_user
+    )
     run.status = ProductionRunStatus.FINISHED
     db_session.flush()
 

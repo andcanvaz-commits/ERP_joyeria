@@ -11,9 +11,9 @@ import pytest
 from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.schemas import (
     ProductionOrderCreate,
-    RunProductCreate,
     StageAttemptCreate,
     StageAttemptMaterialLine,
+    StageAttemptProductTarget,
 )
 from backend.modules.production.service import ProductionDomainError, ProductionNotFoundError
 
@@ -22,8 +22,8 @@ def _start_order(production_service, current_user):
     return production_service.create_order(ProductionOrderCreate(name="Orden material test"), current_user)
 
 
-def _product(item) -> RunProductCreate:
-    return RunProductCreate(target_item_id=item.id, quantity=Decimal("1"))
+def _product(item) -> StageAttemptProductTarget:
+    return StageAttemptProductTarget(target_item_id=item.id)
 
 
 def test_start_stage_attempt_without_materials_starts_directly(
