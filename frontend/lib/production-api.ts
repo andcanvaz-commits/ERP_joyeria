@@ -134,6 +134,7 @@ export function startStageAttempt(
     process_id: string;
     responsable_name: string;
     materials?: Array<{ item_id: string; quantity: string }>;
+    product: { product_type_id?: string; target_item_id?: string; quantity: string };
   },
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/stage-attempts`, {
@@ -151,27 +152,16 @@ export function allocateStageAttemptMaterial(attemptId: string) {
   });
 }
 
-/** Termina el intento activo: ✔ (APROBADA, calcula merma propia) o ✘
- * (RECHAZADA, motivo siempre opcional). */
+/** Termina el intento activo: sin peso -- la merma sale de comparar ENTREGA
+ * contra lo devuelto del mismo item en RECEPCION. decision solo importa si
+ * el proceso tiene control de calidad; si no, el backend fuerza APROBADA. */
 export function finishStageAttempt(
   attemptId: string,
-  payload: { peso_al_finalizar: string; decision: "APROBADA" | "RECHAZADA"; rejection_reason?: string | null },
+  payload?: { decision?: "APROBADA" | "RECHAZADA"; rejection_reason?: string | null },
 ) {
   return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/finish`, {
     method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-/** Asigna el avance actual a producto terminado, disponible en cualquier
- * momento de la orden (no solo al final) -- cierra la orden (TERMINADA). */
-export function assignProduct(
-  runId: string,
-  products: Array<{ product_type_id?: string; target_item_id?: string; quantity: string }>,
-) {
-  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/assign-product`, {
-    method: "POST",
-    body: JSON.stringify({ products }),
+    body: JSON.stringify(payload ?? {}),
   });
 }
 

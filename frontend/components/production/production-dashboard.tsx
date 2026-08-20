@@ -35,7 +35,6 @@ import { listUnits } from "@/lib/units-api";
 import {
   addAdminActaLine,
   allocateStageAttemptMaterial,
-  assignProduct,
   cancelProductionRun,
   cancelProductionRunFamily,
   createProcess,
@@ -300,7 +299,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   const [stagePickerQuantity, setStagePickerQuantity] = useState("");
   const [stageMaterialItem, setStageMaterialItem] = useState<InventoryItem | null>(null);
   const [stageMaterialQuantity, setStageMaterialQuantity] = useState("");
-  const [stageAttemptPeso, setStageAttemptPeso] = useState("");
   // El motivo de rechazo solo se pide cuando de verdad se va a rechazar (✘):
   // mientras tanto no hay decision tomada, no tiene sentido mostrarlo.
   const [isRejectingStage, setIsRejectingStage] = useState(false);
@@ -969,6 +967,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Escribe el nombre del responsable.");
       return;
     }
+    if (!orderProduct || (!orderProduct.targetItemId && !orderProduct.productTypeId)) {
+      setError("Elige el producto resultante de esta etapa.");
+      return;
+    }
+    if (!runQuantity || Number(runQuantity) <= 0) {
+      setError("Ingresa una cantidad valida para el producto resultante.");
+      return;
+    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
@@ -984,12 +990,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         process_id: selectedProcessId,
         responsable_name: stageResponsableName.trim(),
         materials,
+        product: productRowToPayload(orderProduct, runQuantity),
       });
       setDynamicOrderRun(started);
       setSelectedProcessId("");
       setStageResponsableName("");
       setStageMaterialItem(null);
       setStageMaterialQuantity("");
+      setOrderProduct(null);
+      setRunQuantity("1");
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la etapa.");
@@ -1016,54 +1025,21 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   async function handleFinishStageAttempt(attemptId: string, decision: "APROBADA" | "RECHAZADA") {
-    if (!stageAttemptPeso || Number(stageAttemptPeso) < 0) {
-      setError("Ingresa el peso al finalizar.");
-      return;
-    }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
       const updated = await finishStageAttempt(attemptId, {
-        peso_al_finalizar: stageAttemptPeso,
         decision,
         rejection_reason: decision === "RECHAZADA" ? stageAttemptRejectReason.trim() || null : null,
       });
       setDynamicOrderRun(updated);
-      setStageAttemptPeso("");
       setStageAttemptRejectReason("");
       setIsRejectingStage(false);
       setSuccess(decision === "APROBADA" ? "Etapa aprobada." : "Etapa rechazada.");
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo terminar la etapa.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleAssignProduct() {
-    if (!dynamicOrderRun) return;
-    if (!orderProduct || (!orderProduct.targetItemId && !orderProduct.productTypeId)) {
-      setError("Elige el producto a asignar.");
-      return;
-    }
-    if (!runQuantity || Number(runQuantity) <= 0) {
-      setError("Ingresa una cantidad valida.");
-      return;
-    }
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      const updated = await assignProduct(dynamicOrderRun.id, [productRowToPayload(orderProduct, runQuantity)]);
-      setDynamicOrderRun(updated);
-      setOrderProduct(null);
-      setRunQuantity("1");
-      setSuccess("Producto asignado. Orden terminada.");
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo asignar el producto.");
     } finally {
       setIsSaving(false);
     }
@@ -1191,8 +1167,8 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   // Aplica la selección de un picker (pieza o tipo) al producto único de la
-  // modal correspondiente ("create" = Asignar a producto terminado del flujo
-  // nuevo, "edit" = Editar producto resultante del flujo viejo).
+  // modal correspondiente ("create" = producto resultante obligatorio al
+  // iniciar una etapa, "edit" = Editar producto resultante del flujo viejo).
   function applyProductChoice(kind: "create" | "edit", patch: ProductChoice) {
     if (kind === "create") {
       setOrderProduct(patch);
@@ -1687,8 +1663,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       ) : null}
 
       {/* Panel de la orden del flujo nuevo: etapas anteriores, etapa activa
-          (acta directa + peso al finalizar + ✔/✘), y "Asignar a producto
-          terminado" disponible en cualquier momento (seccion 4). */}
+          (acta directa + finalizar, con Aprobado/Denegado solo si el
+          proceso tiene control de calidad), y el formulario de elegir
+          proceso + producto resultante obligatorio (seccion 4). */}
       {dynamicOrderRun ? (() => {
         const runningAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.status === "EN_PROCESO") ?? null;
         const waitingMaterialAttempts = (dynamicOrderRun.stage_attempts ?? []).filter(
@@ -1868,81 +1845,90 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </div>
                     </div>
 
-                    <label className="fieldGroup" style={{ marginTop: 10 }}>
-                      <span>Peso al finalizar</span>
-                      <input
-                        className="field"
-                        disabled={isSaving}
-                        min="0"
-                        onChange={(event) => setStageAttemptPeso(event.target.value)}
-                        step="0.0001"
-                        style={{ width: 140 }}
-                        type="number"
-                        value={stageAttemptPeso}
-                      />
-                    </label>
-                    {/* Motivo de rechazo: solo aparece despues de tocar ✘, nunca antes
-                        (Rodrigo: "motivo de rechazo solo debe salir si se pone la x"). */}
-                    {isRejectingStage ? (
-                      <label className="fieldGroup">
-                        <span>Motivo de rechazo (opcional)</span>
-                        <input
-                          autoFocus
-                          className="field"
-                          disabled={isSaving}
-                          maxLength={1000}
-                          onChange={(event) => setStageAttemptRejectReason(event.target.value)}
-                          value={stageAttemptRejectReason}
-                        />
-                      </label>
-                    ) : null}
-                    <div className="modalActions">
-                      {isRejectingStage ? (
+                    {(() => {
+                      const attemptProcess = processes.find((p) => p.id === runningAttempt.process_id);
+                      const requiresQuality = attemptProcess?.quality_control ?? false;
+                      if (!requiresQuality) {
+                        return (
+                          <div className="modalActions">
+                            <button
+                              className="button buttonPrimary"
+                              disabled={isSaving}
+                              onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
+                              type="button"
+                            >
+                              Finalizar etapa
+                            </button>
+                          </div>
+                        );
+                      }
+                      return (
                         <>
-                          <button
-                            className="button"
-                            disabled={isSaving}
-                            onClick={() => {
-                              setIsRejectingStage(false);
-                              setStageAttemptRejectReason("");
-                            }}
-                            type="button"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            aria-label="Confirmar rechazo"
-                            className="iconOnlyButton dangerIconButton"
-                            disabled={isSaving}
-                            onClick={() => void handleFinishStageAttempt(runningAttempt.id, "RECHAZADA")}
-                            type="button"
-                          >
-                            <X aria-hidden="true" size={18} />
-                          </button>
+                          {/* Motivo de rechazo: solo aparece despues de tocar ✘, nunca antes
+                              (Rodrigo: "motivo de rechazo solo debe salir si se pone la x"). */}
+                          {isRejectingStage ? (
+                            <label className="fieldGroup">
+                              <span>Motivo de rechazo (opcional)</span>
+                              <input
+                                autoFocus
+                                className="field"
+                                disabled={isSaving}
+                                maxLength={1000}
+                                onChange={(event) => setStageAttemptRejectReason(event.target.value)}
+                                value={stageAttemptRejectReason}
+                              />
+                            </label>
+                          ) : null}
+                          <div className="modalActions">
+                            {isRejectingStage ? (
+                              <>
+                                <button
+                                  className="button"
+                                  disabled={isSaving}
+                                  onClick={() => {
+                                    setIsRejectingStage(false);
+                                    setStageAttemptRejectReason("");
+                                  }}
+                                  type="button"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  aria-label="Confirmar rechazo"
+                                  className="iconOnlyButton dangerIconButton"
+                                  disabled={isSaving}
+                                  onClick={() => void handleFinishStageAttempt(runningAttempt.id, "RECHAZADA")}
+                                  type="button"
+                                >
+                                  <X aria-hidden="true" size={18} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  aria-label="Rechazar etapa"
+                                  className="iconOnlyButton dangerIconButton"
+                                  disabled={isSaving}
+                                  onClick={() => setIsRejectingStage(true)}
+                                  type="button"
+                                >
+                                  <X aria-hidden="true" size={18} />
+                                </button>
+                                <button
+                                  aria-label="Aprobar etapa"
+                                  className="iconOnlyButton successIconButton"
+                                  disabled={isSaving}
+                                  onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
+                                  type="button"
+                                >
+                                  <Check aria-hidden="true" size={18} />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </>
-                      ) : (
-                        <>
-                          <button
-                            aria-label="Rechazar etapa"
-                            className="iconOnlyButton dangerIconButton"
-                            disabled={isSaving}
-                            onClick={() => setIsRejectingStage(true)}
-                            type="button"
-                          >
-                            <X aria-hidden="true" size={18} />
-                          </button>
-                          <button
-                            aria-label="Aprobar etapa"
-                            className="iconOnlyButton successIconButton"
-                            disabled={isSaving}
-                            onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
-                            type="button"
-                          >
-                            <Check aria-hidden="true" size={18} />
-                          </button>
-                        </>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </section>
                 );
               })() : !isTerminada ? (
@@ -1979,10 +1965,34 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         ? `${stageMaterialItem.name} · ${numericText(stageMaterialQuantity)} ${stageMaterialItem.unit_code}`
                         : "Elegir..."}
                     </button>
-                    <span className="panelText">
-                      Si el stock no alcanza, la etapa arranca con lo disponible y el resto queda pendiente de asignar.
-                    </span>
                   </label>
+                  <label className="fieldGroup">
+                    <span>Producto resultante</span>
+                    <button
+                      className="button"
+                      disabled={isSaving}
+                      onClick={() => {
+                        setAssignPickerTab("PRODUCTOS");
+                        setItemPickerFor("create");
+                      }}
+                      type="button"
+                    >
+                      {orderProduct ? orderProduct.label : "Elegir..."}
+                    </button>
+                  </label>
+                  {orderProduct ? (
+                    <label className="fieldGroup">
+                      <span>Cantidad</span>
+                      <input
+                        className="field"
+                        min="0.0001"
+                        onChange={(event) => setRunQuantity(event.target.value)}
+                        step="0.0001"
+                        type="number"
+                        value={runQuantity}
+                      />
+                    </label>
+                  ) : null}
                   <div className="modalActions">
                     <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleStartStageAttempt()} type="button">
                       Iniciar etapa
@@ -2018,51 +2028,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </section>
               ) : null}
 
-              {!isTerminada ? (
+              {!isTerminada && canCancelRun && canRunBeCancelled(dynamicOrderRun) ? (
                 <div className="modalActions" style={{ marginTop: 12 }}>
-                  <button
-                    className="button"
-                    disabled={isSaving}
-                    onClick={() => {
-                      setAssignPickerTab("PRODUCTOS");
-                      setItemPickerFor("create");
-                    }}
-                    type="button"
-                  >
-                    Asignar a producto terminado
+                  <button className="button buttonDanger" onClick={() => openCancelRunModal(dynamicOrderRun)} type="button">
+                    <Trash2 aria-hidden="true" size={15} />
+                    Cancelar orden
                   </button>
-                  {/* Faltaba en el flujo nuevo -- solo existia en el modal viejo
-                      (openRunStagesModal). Mismo modal/handler genericos de
-                      siempre (cancelProductionRun ya revierte lineas ADMIN_STOCK
-                      sin importar si estan ligadas a stage_id o stage_attempt_id). */}
-                  {canCancelRun && canRunBeCancelled(dynamicOrderRun) ? (
-                    <button className="button buttonDanger" onClick={() => openCancelRunModal(dynamicOrderRun)} type="button">
-                      <Trash2 aria-hidden="true" size={15} />
-                      Cancelar orden
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {itemPickerFor === "create" && orderProduct ? (
-                <div className="card panelBody" style={{ marginTop: 12 }}>
-                  <p className="panelText">Producto elegido: {orderProduct.label}</p>
-                  <label className="fieldGroup">
-                    <span>Cantidad</span>
-                    <input
-                      className="field"
-                      min="0.0001"
-                      onChange={(event) => setRunQuantity(event.target.value)}
-                      step="0.0001"
-                      type="number"
-                      value={runQuantity}
-                    />
-                  </label>
-                  <div className="modalActions">
-                    <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleAssignProduct()} type="button">
-                      Confirmar asignacion
-                    </button>
-                  </div>
                 </div>
               ) : null}
             </section>
@@ -2071,11 +2042,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       })() : null}
 
       {/* Picker de pieza terminada (o complemento) para el producto único de
-          la orden (Asignar a producto terminado o Editar producto). "Crear
-          producto nuevo" pasa al picker de tipo del catálogo, para productos
-          que aún no tienen piezas. Se muestran dos pestañas: productos
-          terminados y complementos (la joyeria fabrica sus propios
-          complementos). */}
+          la orden (producto resultante obligatorio al iniciar etapa, o
+          Editar producto del flujo viejo). "Crear producto nuevo" pasa al
+          picker de tipo del catálogo, para productos que aún no tienen
+          piezas. Se muestran dos pestañas: productos terminados y
+          complementos (la joyeria fabrica sus propios complementos). */}
       {itemPickerFor ? (() => {
         const tabsBar = (
           <div className="materialRow" style={{ gap: 8 }}>
