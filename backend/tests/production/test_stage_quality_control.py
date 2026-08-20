@@ -2,6 +2,7 @@
 lo devuelto del MISMO item en RECEPCION, y el control de calidad
 (Aprobado/Denegado) solo aplica si el proceso lo tiene marcado en el banco
 (docs/superpowers/plans/2026-08-19-rediseno-acta-y-ux-produccion.md Task 5)."""
+import uuid
 from decimal import Decimal
 
 from backend.modules.product_types.models import ProductType  # noqa: F401
@@ -75,7 +76,16 @@ def test_finish_with_quality_control_can_be_denied(
 def test_merma_computed_from_entrega_minus_same_item_recepcion(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    raw_material.current_stock = Decimal("100")
+    # La materia prima ya no se puede devolver por RECEPCION (fix Rodrigo
+    # 2026-08-20: ya paso a formar parte del producto resultante) -- la merma
+    # se demuestra con un insumo (SUPPLY), que si puede devolverse.
+    from backend.modules.inventory.models import InventoryItem
+
+    supply = InventoryItem(
+        item_type="SUPPLY", name="Insumo test", sku=f"IN-TEST-{uuid.uuid4().hex[:8]}",
+        unit_code="g", current_stock=Decimal("100"),
+    )
+    db_session.add(supply)
     db_session.flush()
     order = production_service.create_order(ProductionOrderCreate(name="Orden merma test"), current_user)
     result = production_service.start_stage_attempt(
@@ -92,7 +102,7 @@ def test_merma_computed_from_entrega_minus_same_item_recepcion(
     production_service.add_admin_acta_line(
         order.id,
         AdminActaLineCreate(
-            side="ENTREGA", item_id=raw_material.id, quantity=Decimal("100"), stage_attempt_id=attempt.id
+            side="ENTREGA", item_id=supply.id, quantity=Decimal("100"), stage_attempt_id=attempt.id
         ),
         current_user,
     )
@@ -102,7 +112,7 @@ def test_merma_computed_from_entrega_minus_same_item_recepcion(
     production_service.add_admin_acta_line(
         order.id,
         AdminActaLineCreate(
-            side="RECEPCION", item_id=raw_material.id, quantity=Decimal("95"), stage_attempt_id=attempt.id
+            side="RECEPCION", item_id=supply.id, quantity=Decimal("95"), stage_attempt_id=attempt.id
         ),
         current_user,
     )

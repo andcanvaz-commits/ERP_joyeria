@@ -1433,6 +1433,58 @@ textarea {
   color: var(--ink);
 }
 
+/* Flujo de etapas con flechas (reporte de etapas de una orden): una tarjeta
+   por intento, en el orden en que se hicieron, conectadas por una flecha. */
+.stageFlow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 16px;
+}
+
+.stageFlowNode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stageFlowCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.stageFlowCard strong {
+  font-size: 14px;
+}
+
+.stageFlowCard-aprobada {
+  border-color: #d9c48f;
+  background: #f5eed9;
+}
+
+.stageFlowCard-rechazada {
+  border-color: #efb8b8;
+  background: #fff2f2;
+}
+
+.stageFlowCard-enProceso {
+  border-color: var(--gold);
+  background: var(--primary-soft);
+}
+
+.stageFlowArrow {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
 .statusBadge {
   display: inline-flex;
   align-items: center;
@@ -2438,12 +2490,6 @@ textarea {
 .actaWindow .actaDocInputs .iconOnlyButton {
   width: 26px;
   height: 26px;
-}
-
-.actaWindow .actaDocInputs .field {
-  min-height: 28px;
-  padding: 4px 8px;
-  font-size: 14px;
 }
 
 .actaWindow .actaDocAddRow {
@@ -5161,10 +5207,10 @@ textarea:disabled {
 }
 
 .actaDocInputs .field {
-  min-height: 24px;
+  min-height: 28px;
   min-width: 0;
-  padding: 2px 6px;
-  font-size: 12px;
+  padding: 4px 8px;
+  font-size: 14px;
   border-radius: 4px;
 }
 

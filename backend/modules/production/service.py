@@ -846,6 +846,10 @@ class ProductionService:
             raise ProductionNotFoundError("Item de inventario no encontrado.")
 
         if payload.side == ActaLineSide.RECEPCION and payload.stage_attempt_id is not None:
+            if item.item_type == "RAW_MATERIAL":
+                raise ProductionDomainError(
+                    "La materia prima no se devuelve por aca -- ya paso a formar parte del producto resultante."
+                )
             entregado = sum(
                 (
                     l.quantity
@@ -1370,6 +1374,27 @@ class ProductionService:
                 attempt.status = StageAttemptStatus.IN_PROGRESS
                 attempt.started_at = datetime.utcnow()
 
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def finish_order(self, run_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
+        """Cierra la orden completa (Rodrigo, 2026-08-20): cada etapa ya
+        declaro su propio producto resultante (seccion 4), asi que cerrar
+        aca no mueve inventario -- solo marca la orden como terminada, para
+        que deje de aparecer como "en curso" y quede en el historial. No se
+        puede cerrar con una etapa todavia activa."""
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ProductionNotFoundError("Orden de produccion no encontrada.")
+        if run.status != ProductionRunStatus.IN_PROGRESS:
+            raise ProductionDomainError("Solo se puede finalizar una orden en proceso.")
+        if self.repository.get_active_stage_attempt(run_id) is not None:
+            raise ProductionDomainError("Finaliza la etapa en curso antes de finalizar la orden.")
+
+        run.status = ProductionRunStatus.FINISHED
+        run.finished_at = datetime.utcnow()
+        run.received_at = datetime.utcnow()
+        run.received_by_user_id = current_user.id
         self.repository.flush()
         return self._read_with_names(run)
 

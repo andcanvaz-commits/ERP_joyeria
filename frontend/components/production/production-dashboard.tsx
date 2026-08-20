@@ -12,6 +12,7 @@ import { ComplementsManager } from "@/components/mantenimiento/complements-manag
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
+import { StageRecepcionControl } from "@/components/production/stage-recepcion-control";
 import { ActaSide } from "@/components/production/acta-side";
 import { ActaView } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
@@ -41,6 +42,7 @@ import {
   createProductionOrder,
   deleteActaLine,
   deleteProcess,
+  finishOrder,
   finishStageAttempt,
   listProcesses,
   listProductionRuns,
@@ -757,11 +759,12 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Historial por calendario: 4 procesos por página, la ventana no se estira.
   const historyRunsPager = usePagination(selectedDateRuns, 4, selectedHistoryDate);
 
-  function openCreateForm() {
+  function openCreateForm(returnToProcessesAfter = false) {
     setForm(emptyProcessForm());
     setFormMode("create");
     setEditingProcessId(null);
-    setReturnToProcesses(false);
+    setReturnToProcesses(returnToProcessesAfter);
+    setIsProcessesOpen(false);
     setError(null);
     setSuccess(null);
     setIsFormOpen(true);
@@ -850,7 +853,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       }
       await reload();
       setIsFormOpen(false);
-      if (formMode === "edit" && returnToProcesses) {
+      if (returnToProcesses) {
         setIsProcessesOpen(true);
         setReturnToProcesses(false);
       }
@@ -939,6 +942,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Escribe el nombre del responsable.");
       return;
     }
+    if (!stageMaterialItem || !stageMaterialQuantity || Number(stageMaterialQuantity) <= 0) {
+      setError("Elige la materia prima de esta etapa.");
+      return;
+    }
     if (!orderProduct || (!orderProduct.targetItemId && !orderProduct.productTypeId)) {
       setError("Elige el producto resultante de esta etapa.");
       return;
@@ -951,13 +958,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     setSuccess(null);
     setIsSaving(true);
     try {
-      // Material opcional: si se elige, el backend valida stock disponible y
-      // hace split automatico si no alcanza (ver start_stage_attempt) -- ya
-      // no se fuerza el movimiento a mano con addAdminActaLine.
-      const materials =
-        stageMaterialItem && stageMaterialQuantity && Number(stageMaterialQuantity) > 0
-          ? [{ item_id: stageMaterialItem.id, quantity: stageMaterialQuantity }]
-          : undefined;
+      // El backend valida stock disponible y hace split automatico si no
+      // alcanza (ver start_stage_attempt) -- ya no se fuerza el movimiento a
+      // mano con addAdminActaLine.
+      const materials = [{ item_id: stageMaterialItem.id, quantity: stageMaterialQuantity }];
       const started = await startStageAttempt(dynamicOrderRun.id, {
         process_id: selectedProcessId,
         responsable_name: stageResponsableName.trim(),
@@ -991,6 +995,23 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo asignar el material.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleFinishOrder() {
+    if (!dynamicOrderRun) return;
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await finishOrder(dynamicOrderRun.id);
+      setDynamicOrderRun(updated);
+      setSuccess("Orden finalizada.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo finalizar la orden.");
     } finally {
       setIsSaving(false);
     }
@@ -1180,7 +1201,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           <section className="maintenanceSection" aria-label="Mantenimientos de produccion">
             <h2>Procesos</h2>
             <div className="maintenanceGrid">
-              <button className="maintenanceTile" disabled={currentUser !== null && !canCreate} onClick={openCreateForm} type="button">
+              <button className="maintenanceTile" disabled={currentUser !== null && !canCreate} onClick={() => openCreateForm()} type="button">
                 <Factory aria-hidden="true" size={22} />
                 <strong>Crear proceso</strong>
                 <span>Nombre del proceso y etapas configurables.</span>
@@ -1644,9 +1665,9 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         const waitingMaterialAttempts = (dynamicOrderRun.stage_attempts ?? []).filter(
           (a) => a.status === "PENDIENTE_MATERIAL",
         );
-        const pastAttempts = (dynamicOrderRun.stage_attempts ?? []).filter(
-          (a) => a.id !== runningAttempt?.id && a.status !== "PENDIENTE_MATERIAL",
-        );
+        const pastAttempts = (dynamicOrderRun.stage_attempts ?? [])
+          .filter((a) => a.id !== runningAttempt?.id && a.status !== "PENDIENTE_MATERIAL")
+          .sort((a, b) => a.sequence_order - b.sequence_order);
         const activeActaLines = runningAttempt
           ? (dynamicOrderRun.acta_lines ?? []).filter((line) => line.stage_attempt_id === runningAttempt.id)
           : [];
@@ -1751,12 +1772,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     item_id: line.item_id,
                   }));
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
-                // RECEPCION solo admite items que ya se entregaron en ESTA etapa
-                // (el backend lo exige igual -- ver add_admin_acta_line Task 7).
-                const entregaItemIds = new Set(
-                  entregaLines.filter((line) => line.kind === "row").map((line) => line.item_id).filter(Boolean),
-                );
-                const recepcionPickerItems = materialItems.filter((item) => entregaItemIds.has(item.id));
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
                     <div className="panelHeader">
@@ -1796,14 +1811,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             <div className="opDivider" aria-hidden="true" />
                             <ActaSide
                               actions={
-                                <AdminAddActaLineControl
-                                  isAdmin
-                                  items={recepcionPickerItems}
+                                <StageRecepcionControl
+                                  entregaLines={entregaLines}
+                                  materialItems={materialItems}
                                   onChanged={refreshDynamicOrder}
                                   onError={setError}
                                   onSuccess={setSuccess}
+                                  recepcionLines={recepcionLines}
                                   runId={dynamicOrderRun.id}
-                                  side="RECEPCION"
                                   stageAttemptId={runningAttempt.id}
                                 />
                               }
@@ -1939,7 +1954,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                     />
                   </label>
                   <label className="fieldGroup">
-                    <span>Materia prima (opcional)</span>
+                    <span>Materia prima</span>
                     <button className="button" disabled={isSaving} onClick={() => setIsStageMaterialPickerOpen(true)} type="button">
                       {stageMaterialItem
                         ? `${stageMaterialItem.name} · ${numericText(stageMaterialQuantity)} ${stageMaterialItem.unit_code}`
@@ -2008,12 +2023,20 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 </section>
               ) : null}
 
-              {!isTerminada && canCancelRun && canRunBeCancelled(dynamicOrderRun) ? (
+              {!isTerminada ? (
                 <div className="modalActions" style={{ marginTop: 12 }}>
-                  <button className="button buttonDanger" onClick={() => openCancelRunModal(dynamicOrderRun)} type="button">
-                    <Trash2 aria-hidden="true" size={15} />
-                    Cancelar orden
-                  </button>
+                  {pastAttempts.length > 0 ? (
+                    <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleFinishOrder()} type="button">
+                      <CheckCheck aria-hidden="true" size={16} />
+                      Finalizar orden
+                    </button>
+                  ) : null}
+                  {canCancelRun && canRunBeCancelled(dynamicOrderRun) ? (
+                    <button className="button buttonDanger" onClick={() => openCancelRunModal(dynamicOrderRun)} type="button">
+                      <Trash2 aria-hidden="true" size={15} />
+                      Cancelar orden
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -2030,6 +2053,35 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsStageReportOpen(false)} type="button">
                     <X aria-hidden="true" size={18} />
                   </button>
+                </div>
+                <div className="stageFlow">
+                  {[...pastAttempts, ...(runningAttempt ? [runningAttempt] : [])]
+                    .sort((a, b) => a.sequence_order - b.sequence_order)
+                    .map((attempt, index, arr) => (
+                      <div className="stageFlowNode" key={attempt.id}>
+                        <div
+                          className={`stageFlowCard stageFlowCard-${
+                            attempt.status === "APROBADA"
+                              ? "aprobada"
+                              : attempt.status === "RECHAZADA"
+                                ? "rechazada"
+                                : "enProceso"
+                          }`}
+                        >
+                          {attempt.code ? <span className="orderCodeTag">{attempt.code}</span> : null}
+                          <strong>{attempt.process_name}</strong>
+                          <span>{attempt.responsable_name ?? "—"}</span>
+                          <span>
+                            {attempt.status === "APROBADA"
+                              ? "Aprobada"
+                              : attempt.status === "RECHAZADA"
+                                ? "Rechazada"
+                                : "En proceso"}
+                          </span>
+                        </div>
+                        {index < arr.length - 1 ? <ArrowRight aria-hidden="true" className="stageFlowArrow" size={20} /> : null}
+                      </div>
+                    ))}
                 </div>
                 <div className="tableWrap">
                   <table className="table">
@@ -2715,17 +2767,25 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   <h2>{processesPickerMode ? "Elegir proceso" : "Procesos"}</h2>
                   <p>{listedProcesses.length} procesos {processesPickerMode ? "disponibles" : "creados"}</p>
                 </div>
-                <button
-                  aria-label="Cerrar"
-                  className="iconOnlyButton"
-                  onClick={() => {
-                    setIsProcessesOpen(false);
-                    setProcessesPickerMode(false);
-                  }}
-                  type="button"
-                >
-                  <X aria-hidden="true" size={18} />
-                </button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {processesPickerMode ? (
+                    <button className="button" onClick={() => openCreateForm(true)} type="button">
+                      <Factory aria-hidden="true" size={15} />
+                      Crear proceso
+                    </button>
+                  ) : null}
+                  <button
+                    aria-label="Cerrar"
+                    className="iconOnlyButton"
+                    onClick={() => {
+                      setIsProcessesOpen(false);
+                      setProcessesPickerMode(false);
+                    }}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={18} />
+                  </button>
+                </div>
               </div>
 
               <div className="processesLayout">

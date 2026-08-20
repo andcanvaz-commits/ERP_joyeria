@@ -48,6 +48,15 @@ export function updateProductionRunProducts(
   });
 }
 
+/** Cierra la orden completa: cada etapa ya declaro su producto resultante,
+ * asi que no mueve inventario -- solo la saca de "en curso". Solo se puede
+ * llamar sin ninguna etapa activa. */
+export function finishOrder(runId: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/${runId}/finish`, {
+    method: "POST",
+  });
+}
+
 export function cancelProductionRun(runId: string, reason?: string) {
   return apiRequest<ProductionRun>(`/api/production/runs/${runId}/cancel`, {
     method: "POST",

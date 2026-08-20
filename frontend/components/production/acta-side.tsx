@@ -156,7 +156,7 @@ export function ActaSide({
                         min="0"
                         onChange={(e) => setEditQuantity(e.target.value)}
                         step="0.0001"
-                        style={{ width: 84 }}
+                        style={{ width: 100 }}
                         type="number"
                         value={editQuantity}
                       />
@@ -166,7 +166,7 @@ export function ActaSide({
                         <input
                           className="field"
                           onChange={(e) => setEditUnit(e.target.value)}
-                          style={{ width: 40 }}
+                          style={{ width: 56 }}
                           value={editUnit}
                         />
                       )}

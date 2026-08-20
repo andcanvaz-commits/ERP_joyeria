@@ -215,6 +215,21 @@ def cancel_run(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.post("/runs/{run_id}/finish", response_model=ProductionRunRead)
+def finish_order(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    ensure_permission(current_user, "production.runs.update")
+    try:
+        return service.finish_order(run_id, current_user)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/runs/{run_id}/cancel-family", response_model=list[ProductionRunRead])
 def cancel_run_family(
     run_id: UUID,
