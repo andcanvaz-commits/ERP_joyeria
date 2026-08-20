@@ -306,12 +306,6 @@ class StageAttemptRead(BaseModel):
     materials: list[StageAttemptMaterialRead] = Field(default_factory=list)
 
 
-class AssignProductPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    products: list[RunProductCreate] = Field(min_length=1)
-
-
 class ProductionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 

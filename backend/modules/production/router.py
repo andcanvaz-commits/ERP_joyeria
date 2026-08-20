@@ -12,7 +12,6 @@ from backend.modules.production.schemas import (
     ActaLineUpdate,
     AdditionalMaterialRequestCreate,
     AdminActaLineCreate,
-    AssignProductPayload,
     MaterialRejectPayload,
     ProductionOrderCreate,
     ProductionProcessCreate,
@@ -168,24 +167,6 @@ def allocate_stage_attempt_material(
     ensure_permission(current_user, "production.runs.update")
     try:
         return service.allocate_stage_attempt_material(attempt_id, current_user)
-    except ProductionNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ProductionDomainError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-
-
-@router.post("/runs/{run_id}/assign-product", response_model=ProductionRunRead)
-def assign_product(
-    run_id: UUID,
-    payload: AssignProductPayload,
-    current_user: CurrentUser = Depends(get_current_user),
-    service: ProductionService = Depends(get_production_service),
-) -> ProductionRunRead:
-    """Seccion 4.3: asigna el resultado a producto terminado en cualquier
-    etapa, no solo al final. Cierra la orden (TERMINADA)."""
-    ensure_permission(current_user, "production.runs.update")
-    try:
-        return service.assign_product(run_id, payload, current_user)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProductionDomainError as exc:

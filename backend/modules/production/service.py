@@ -33,7 +33,6 @@ from backend.modules.production.schemas import (
     AdditionalMaterialRequestCreate,
     AdditionalMaterialRequestRead,
     AdminActaLineCreate,
-    AssignProductPayload,
     ProductionOrderCreate,
     ProductionProcessCreate,
     ProductionProcessRead,
@@ -1482,74 +1481,6 @@ class ProductionService:
                 attempt.status = StageAttemptStatus.IN_PROGRESS
                 attempt.started_at = datetime.utcnow()
 
-        self.repository.flush()
-        return self._read_with_names(run)
-
-    def assign_product(
-        self, run_id: UUID, payload: AssignProductPayload, current_user: CurrentUser
-    ) -> ProductionRunRead:
-        """Asigna el resultado de la orden a producto terminado -- disponible
-        en cualquier etapa (seccion 4.3), no solo al final. Cierra la orden:
-        una vez asignada no se pueden iniciar mas etapas. Mismo patron que
-        receive_finished_product (flujo viejo): crea el lote y lo convierte."""
-        if self.inventory_service is None:
-            raise ProductionDomainError("Inventario no esta disponible para asignar producto terminado.")
-        run = self.repository.get_run(run_id)
-        if run is None:
-            raise ProductionNotFoundError("Orden de produccion no encontrada.")
-        if run.status != ProductionRunStatus.IN_PROGRESS:
-            raise ProductionDomainError("Solo se puede asignar producto terminado de una orden en proceso.")
-        if self.repository.get_active_stage_attempt(run_id) is not None:
-            raise ProductionDomainError("Finaliza la etapa en curso antes de asignar producto terminado.")
-
-        from backend.modules.inventory.models import InventoryItem
-        from backend.modules.inventory.schemas import LotConversionCreate
-
-        piece_count = sum((p.quantity for p in payload.products), Decimal("0"))
-
-        # Hereda material/pureza del primer item real que entro a la orden
-        # (misma regla de herencia dominante que el resto del sistema).
-        first_entrega = next(
-            (line for line in run.acta_lines if line.side == ActaLineSide.ENTREGA and line.item_id is not None),
-            None,
-        )
-        raw_material = (
-            self.repository.session.get(InventoryItem, first_entrega.item_id) if first_entrega is not None else None
-        )
-
-        lot = self.inventory_service.create_finished_product_lot(
-            name=run.name or "Producto",
-            unit_code="und",
-            production_order_id=run.id,
-            production_code=run.production_code,
-            quantity=piece_count,
-            material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
-            purity=raw_material.purity if raw_material else None,
-            received_by_user_id=current_user.id,
-        )
-        for product in payload.products:
-            try:
-                if product.target_item_id is not None:
-                    target = self.repository.session.get(InventoryItem, product.target_item_id)
-                    if target is not None and target.item_type == "COMPLEMENT":
-                        self.inventory_service.convert_lot_to_complement(
-                            lot.id, product.target_item_id, product.quantity, user_id=current_user.id
-                        )
-                        continue
-                    conversion = LotConversionCreate(target_item_id=product.target_item_id, quantity=product.quantity)
-                else:
-                    conversion = LotConversionCreate(
-                        product_type_id=product.product_type_id, quantity=product.quantity
-                    )
-                self.inventory_service.convert_lot_to_product(lot.id, conversion, user_id=current_user.id)
-            except (InventoryDomainError, InventoryNotFoundError) as exc:
-                raise ProductionDomainError(f"No se pudo convertir el lote al producto: {exc}") from exc
-
-        run.status = ProductionRunStatus.FINISHED
-        run.finished_at = run.finished_at or datetime.utcnow()
-        run.received_at = datetime.utcnow()
-        run.received_by_user_id = current_user.id
-        run.actual_finished_weight = piece_count
         self.repository.flush()
         return self._read_with_names(run)
 
