@@ -266,7 +266,67 @@ class ProductionRunStageAttemptDecision(Base):
 - `backend/tests/production/test_revert_stage_attempt.py`: revisar que
   `revert_stage_attempt` siga funcionando con productos ya movidos como
   líneas normales (probablemente sin cambios, pero confirmar).
-- Nuevo test: `add_admin_acta_line` con `side=ENTREGA`, `stage_attempt_id`
+
+## Addendum: unificación necesaria (encontrado al investigar el código actual)
+
+Leyendo `update_acta_line`/`delete_acta_line`/`revert_stage_attempt`/
+`_cancel_run_core` con detalle aparecen tres inconsistencias que rompen la
+promesa de "editable tal y como si lo hubiera agregado desde el Agregar" si
+no se corrigen junto con el resto de este spec:
+
+1. **`update_acta_line` hoy NO mueve inventario para líneas `PLAN`** (solo
+   lo hace para `ADMIN_STOCK`) — editar la cantidad de una línea `PLAN`
+   (Entrada o, con este spec, Producto resultante) cambiaría el número en
+   pantalla sin tocar el stock real. Además, para RECEPCION con `item_id`
+   aplica hoy `_acta_line_max_quantity` (el tope "no más de lo entregado"
+   que este spec elimina en `add_admin_acta_line`, pero que seguía vivo acá).
+   **Fix:** cualquier línea con `item_id is not None` (sin importar
+   `source`) mueve inventario vía `_apply_admin_acta_line_delta` al editar
+   `quantity`; se borra `_acta_line_max_quantity` y su uso (código muerto
+   tras esto). El gate admin-only sigue igual (solo aplica cuando
+   `stage_attempt_id is None`, nivel de orden).
+2. **`start_stage_attempt` usa `consume_material_for_production` (Entrada)
+   y un lote intermedio vía `get_or_create_finished_product_lot`/
+   `convert_lot_to_product` (Producto resultante) en vez de
+   `_apply_admin_acta_line_delta`.** Con Producto resultante moviendo stock
+   de inmediato (punto 3 de este spec), ya no hace falta el lote — así que
+   tanto Entrada como Producto deben crear su línea (quantity=0), append,
+   flush, y luego `_apply_admin_acta_line_delta(line, quantity, user)` +
+   `line.quantity = quantity` + flush — el MISMO patrón que ya usa
+   `add_admin_acta_line`. Esto also hace que el tope de stock (punto 5,
+   ENTREGA) se valide en un solo lugar: dentro de
+   `_apply_admin_acta_line_delta`, en el bloque `if movement_type ==
+   "CONSUMO_PRODUCCION"` ya existente (junto al chequeo de reserva) se
+   agrega `if item.current_stock - abs(delta) < 0: raise
+   ProductionDomainError(...)`. Ni `add_admin_acta_line` ni
+   `start_stage_attempt` necesitan repetir esta validación por su cuenta.
+3. **`revert_stage_attempt` y `_cancel_run_core` deben generalizarse** para
+   que revertir/cancelar funcione con el nuevo mecanismo:
+   - `revert_stage_attempt`: el `elif` que hoy llama
+     `reverse_stage_attempt_product` (mecanismo del lote, quedaría roto/
+     no-op sin lote) se reemplaza — **cualquier** línea con `item_id` (sea
+     `PLAN`, `AUTO` o `ADMIN_STOCK`) se revierte con
+     `_apply_admin_acta_line_delta(line, Decimal("0"), current_user)`. El
+     `if/elif` completo del loop colapsa a un solo `if line.item_id is not
+     None:` con esa única llamada.
+   - `_cancel_run_core`/`_revert_admin_stock_lines`: el filtro
+     `line.source == ActaLineSource.ADMIN_STOCK` se amplía a
+     `line.item_id is not None` (cualquier fuente). Es seguro para órdenes
+     del flujo VIEJO: sus líneas `PLAN` nunca generaron un movimiento
+     referenciado por `production_run_acta_line`+línea (usaban
+     `reference_id=run.id`), así que `_apply_admin_acta_line_delta` calcula
+     `net_so_far=0` y no hace nada — no-op, no rompe nada histórico. Se
+     sigue llamando `reverse_production_consumption`/
+     `reverse_finished_product_lot` igual que hoy (no-op para órdenes del
+     flujo nuevo, que ya no generan esos movimientos/lote).
+   - `consume_material_for_production`, `get_or_create_finished_product_lot`,
+     `convert_lot_to_product`, `convert_lot_to_complement`,
+     `reverse_stage_attempt_product` (en `inventory/service.py`) **no se
+     borran** — sirven al flujo viejo y a `_cancel_run_core`/
+     `reverse_finished_product_lot`. Simplemente dejan de ser llamados
+     desde `start_stage_attempt`/`revert_stage_attempt` del flujo nuevo.
+
+Nuevo test: `add_admin_acta_line` con `side=ENTREGA`, `stage_attempt_id`
   no nulo, sin `note` → error; con `note` → ok. Con `side=RECEPCION` nunca
   exige `note`.
 - Nuevo test: `add_admin_acta_line` ENTREGA con `quantity > current_stock`
