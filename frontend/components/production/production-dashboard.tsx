@@ -70,7 +70,6 @@ import { useCountUp } from "@/hooks/use-count-up";
 type ProcessForm = {
   name: string;
   description: string;
-  isActive: boolean;
   qualityControl: boolean;
 };
 
@@ -103,7 +102,6 @@ const stageTypeLabel = (value: string): string =>
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  isActive: true,
   qualityControl: false,
 });
 
@@ -117,7 +115,6 @@ function processToForm(process: ProductionProcess): ProcessForm {
   return {
     name: process.name,
     description: process.description ?? "",
-    isActive: process.is_active,
     qualityControl: process.quality_control,
   };
 }
@@ -837,7 +834,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return {
       name: processName,
       description: form.description.trim() || null,
-      is_active: form.isActive,
+      // Ya no se maneja desde el mantenimiento (Rodrigo, 2026-08-20) --
+      // siempre activo; si algun proceso viejo quedo inactivo, guardarlo de
+      // nuevo lo reactiva (no hay otra forma de tocarlo sin este checkbox).
+      is_active: true,
       quality_control: form.qualityControl,
     };
   }
@@ -2833,16 +2833,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
             <label className="checkboxRow">
               <input
-                checked={form.isActive}
-                disabled={isSaving}
-                onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}
-                type="checkbox"
-              />
-              <span>Activo</span>
-            </label>
-
-            <label className="checkboxRow">
-              <input
                 checked={form.qualityControl}
                 disabled={isSaving}
                 onChange={(event) => setForm((current) => ({ ...current, qualityControl: event.target.checked }))}
@@ -2931,7 +2921,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           {process.code ? <span className="orderCodeTag">{process.code}</span> : null}
                           {process.name}
                         </button>
-                        <span>{process.is_active ? "Activo" : "Inactivo"}</span>
                         <div className="rowActions" onClick={stopClick}>
                           <button
                             className="iconTextButton"
@@ -2979,10 +2968,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             <div className="modalHeader">
               <div>
                 <h2>{viewingProcess.name}</h2>
-                <p>
-                  {viewingProcess.code ? `Proceso ${viewingProcess.code} · ` : ""}
-                  {viewingProcess.is_active ? "Activo" : "Inactivo"}
-                </p>
+                {viewingProcess.code ? <p>Proceso {viewingProcess.code}</p> : null}
               </div>
               <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setViewingProcess(null)} type="button">
                 <X aria-hidden="true" size={18} />
