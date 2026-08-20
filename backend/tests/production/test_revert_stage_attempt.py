@@ -94,6 +94,35 @@ def test_revert_stage_attempt_reverts_admin_stock_supply_return(
     assert supply.current_stock == Decimal("1000")  # entrega y devolucion, ambas revertidas
 
 
+def test_revert_stage_attempt_reverts_producto_resultante(
+    db_session, production_service, current_user, process, target_complement
+):
+    """Regresion (Task 5): revertir un intento del flujo NUEVO (sin lote,
+    start_stage_attempt movio stock directo al Producto resultante) debe
+    devolverlo a cero -- ya cubierto por el fix de Task 3 (rama has_lot=False
+    de revert_stage_attempt usa _apply_admin_acta_line_delta), este test solo
+    lo confirma como regresion explicita."""
+    order = production_service.create_order(ProductionOrderCreate(name="Orden revert producto"), current_user)
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("5"))],
+        ),
+        current_user,
+    )
+    attempt_id = result.stage_attempts[0].id
+    db_session.refresh(target_complement)
+    assert target_complement.current_stock == Decimal("5")
+
+    production_service.approve_stage_attempt(attempt_id, current_user)
+    production_service.revert_stage_attempt(attempt_id, current_user, "prueba")
+
+    db_session.refresh(target_complement)
+    assert target_complement.current_stock == Decimal("0")
+
+
 def test_revert_stage_attempt_rejects_in_progress(
     db_session, production_service, current_user, process, target_complement
 ):
@@ -384,16 +413,21 @@ def test_cancel_run_chained_stages_does_not_spuriously_fail_on_reversal_order(
     assert complement_item.current_stock == Decimal("0")
 
 
-def test_revert_stage_attempt_after_editing_recepcion_line_uses_ledger_not_stale_quantity(
+def test_revert_stage_attempt_uses_ledger_not_stale_quantity_field(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    """Bug 3: revert_stage_attempt revertia por line.quantity en vez de por
-    el ledger de movimientos (reference_type="production_run_acta_line").
-    update_acta_line, para una linea PLAN, solo cambia el campo quantity --
-    no vuelve a mover stock -- asi que despues de editarla, line.quantity
-    (lo que dice el acta) y el ledger (lo que en verdad se movio) quedan
-    desalineados. _apply_admin_acta_line_delta(line, 0, ...) revierte por el
-    ledger, sin importar que diga line.quantity."""
+    """Bug 3: revert_stage_attempt debe revertir por el ledger de
+    movimientos (reference_type="production_run_acta_line"), no por el
+    campo line.quantity -- que podria estar desalineado del stock real que
+    en verdad se movio (ej. datos historicos, o cualquier camino que edite
+    el campo sin pasar por _apply_admin_acta_line_delta).
+
+    Nota (Task 5, Steps 1-4 de este spec): update_acta_line, para una linea
+    PLAN con item_id, ahora SI mueve stock real al editar su cantidad (era
+    justo el bug que ese fix corrigio) -- por eso ya no sirve para
+    desalinear el campo del ledger a proposito. Este test desalinea
+    quantity a mano en vez de usar update_acta_line, para seguir probando
+    que revert_stage_attempt lee el ledger real y no ese campo."""
     raw_material.current_stock = Decimal("100")
     db_session.flush()
     order = production_service.create_order(ProductionOrderCreate(name="Orden edicion + revert"), current_user)
@@ -415,10 +449,11 @@ def test_revert_stage_attempt_after_editing_recepcion_line_uses_ledger_not_stale
     db_session.refresh(target_complement)
     assert target_complement.current_stock == Decimal("50")  # lo que en verdad se movio
 
-    # Editar la linea a mano: el campo cambia (40), pero el ledger real de
-    # movimientos sigue en 50 -- update_acta_line no vuelve a mover stock
-    # para una linea PLAN.
-    production_service.update_acta_line(recepcion_line.id, ActaLineUpdate(quantity=Decimal("40")), current_user)
+    # Desalinea el campo a mano (sin pasar por update_acta_line, que ahora
+    # mantiene campo y ledger sincronizados): el ledger real de movimientos
+    # sigue en 50, pero el campo dice 40.
+    recepcion_line.quantity = Decimal("40")
+    db_session.flush()
     db_session.refresh(target_complement)
     assert target_complement.current_stock == Decimal("50")  # sin cambios reales de stock
 
@@ -427,7 +462,7 @@ def test_revert_stage_attempt_after_editing_recepcion_line_uses_ledger_not_stale
 
     db_session.refresh(target_complement)
     db_session.refresh(raw_material)
-    # Si revirtiera por line.quantity (40, el valor editado y stale) en vez
+    # Si revirtiera por line.quantity (40, el valor desalineado) en vez
     # del ledger (50, lo que en verdad se movio), target_complement quedaria
     # en 10 -- 1 unidad de menos que nunca se devolvio.
     assert target_complement.current_stock == Decimal("0")

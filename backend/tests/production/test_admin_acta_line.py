@@ -825,6 +825,36 @@ def test_add_admin_acta_line_entrega_rejects_product_type_id(
         )
 
 
+def test_update_acta_line_plan_line_moves_stock(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Una linea PLAN (Entrada/Producto de start_stage_attempt) se edita
+    igual que una ADMIN_STOCK -- el stock se ajusta al delta (design doc
+    2026-08-20, addendum de unificacion, punto 1)."""
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden edit plan test"), current_user)
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("50"))],
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
+        ),
+        current_user,
+    )
+    attempt = result.stage_attempts[0]
+    entrega_line = next(l for l in attempt.acta_lines if l.side == "ENTREGA")
+
+    production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("70")), current_user)
+
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("30")  # 100 - 70
+
+
 def test_add_admin_acta_line_entrega_blocks_when_quantity_exceeds_stock(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):

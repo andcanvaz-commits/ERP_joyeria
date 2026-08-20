@@ -139,13 +139,18 @@ def test_update_missing_line_raises_not_found(production_service, current_user):
         production_service.update_acta_line(uuid.uuid4(), ActaLineUpdate(quantity=Decimal("1")), current_user)
 
 
-def test_update_recepcion_line_rejects_quantity_above_what_the_item_delivered(
+def test_update_recepcion_line_with_item_moves_stock_no_cap(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    """Bug reportado: se entregaron 9 de un insumo, se anoto un uso de 8 en el
-    acta (RECEPCION, MANUAL), y editar esa linea a 25 no debia dejar pasar --
-    nunca se entrego tanto de ese insumo a la orden."""
-    from backend.modules.inventory.models import InventoryItem, InventoryMovement
+    """Reemplaza al viejo test_update_recepcion_line_rejects_quantity_above_
+    what_the_item_delivered: el tope "no mas de lo entregado"
+    (_acta_line_max_quantity) se elimino como parte de la unificacion
+    (docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md, addendum,
+    punto 1) -- mismo criterio que add_admin_acta_line, que ya no lo tenia.
+    Editar una linea RECEPCION con item_id (aunque su source sea MANUAL)
+    ahora mueve inventario real por el delta via _apply_admin_acta_line_delta,
+    sin techo."""
+    from backend.modules.inventory.models import InventoryItem
 
     run = _create_run(production_service, current_user, process, raw_material, target_complement)
     supply = InventoryItem(
@@ -154,13 +159,6 @@ def test_update_recepcion_line_rejects_quantity_above_what_the_item_delivered(
     )
     db_session.add(supply)
     db_session.flush()
-    db_session.add(
-        InventoryMovement(
-            item_id=supply.id, movement_type="CONSUMO_PRODUCCION", quantity=Decimal("9"),
-            unit_code="und", reason="test", reference_type="production_run", reference_id=run.id,
-        )
-    )
-    db_session.flush()
 
     run_read = production_service.add_acta_line(
         run.id,
@@ -168,11 +166,12 @@ def test_update_recepcion_line_rejects_quantity_above_what_the_item_delivered(
         current_user,
     )
     line_id = [line for line in run_read.acta_lines if line.item_id == supply.id][0].id
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("0")  # add_acta_line (MANUAL) no mueve stock al crear
 
-    with pytest.raises(ProductionDomainError, match="supera lo que en realidad"):
-        production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("25")), current_user)
+    updated = production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("25")), current_user)
 
-    # 9 es el techo real (lo unico que entro): si cabe.
-    updated = production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("9")), current_user)
     edited = next(line for line in updated.acta_lines if line.id == line_id)
-    assert edited.quantity == Decimal("9")
+    assert edited.quantity == Decimal("25")
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("25")  # ahora si mueve inventario, sin tope

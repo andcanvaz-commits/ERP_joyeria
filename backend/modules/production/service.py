@@ -996,8 +996,15 @@ class ProductionService:
         return self._read_with_names(run)
 
     def update_acta_line(self, line_id: UUID, payload: ActaLineUpdate, current_user: CurrentUser) -> ProductionRunRead:
-        """Edita una linea existente (de cualquier origen: plan, automatica o
-        manual). Solo actualiza los campos que vengan en el payload."""
+        """Edita una linea existente. Si esta enlazada a un item real
+        (cualquier source: PLAN, AUTO o ADMIN_STOCK), el cambio de cantidad
+        mueve inventario -- editable "tal y como si se hubiera agregado
+        desde el Agregar" (Rodrigo, 2026-08-20; design doc
+        2026-08-20-acta-v2-sin-splits-design.md, addendum de unificacion,
+        punto 1). El tope viejo "no mas de lo entregado" (_acta_line_max_quantity)
+        se elimina: mismo criterio que add_admin_acta_line, que ya no lo tiene.
+        Solo las lineas MANUAL sin item_id son texto puro, sin efecto en
+        stock."""
         line = self.repository.get_acta_line(line_id)
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
@@ -1013,6 +1020,8 @@ class ProductionService:
                 raise ProductionDomainError(
                     "Esta linea esta enlazada a un item de inventario: el detalle y la unidad no se editan a mano."
                 )
+
+        if line.item_id is not None:
             if payload.quantity is not None:
                 self._apply_admin_acta_line_delta(line, payload.quantity, current_user)
                 line.quantity = payload.quantity
@@ -1021,13 +1030,6 @@ class ProductionService:
             self.repository.flush()
             return self._read_with_names(line.run)
 
-        if payload.quantity is not None and line.side == ActaLineSide.RECEPCION and line.item_id is not None:
-            cap = self._acta_line_max_quantity(line)
-            if cap is not None and payload.quantity > cap:
-                raise ProductionDomainError(
-                    f"La cantidad ({format_qty(payload.quantity)} {line.unit_code}) supera lo que en realidad "
-                    f"se entrego para este material ({format_qty(cap)} {line.unit_code})."
-                )
         if payload.label is not None:
             line.label = payload.label.strip()
         if payload.quantity is not None:
@@ -1038,39 +1040,6 @@ class ProductionService:
             line.note = payload.note.strip() or None
         self.repository.flush()
         return self._read_with_names(line.run)
-
-    def _acta_line_max_quantity(self, line: ProductionRunActaLine) -> Decimal | None:
-        """Techo real para editar una linea RECEPCION ligada a un item (uso o
-        devolucion de insumo): no puede quedar, sumada a las demas lineas
-        RECEPCION del mismo item, por encima de lo que de verdad se le
-        entrego a la orden. Materia prima queda fuera -- esa se corrige por
-        edit_stage_weight, que ya tiene su propia regla. Si el item no es un
-        insumo conocido de esta orden, no hay techo (linea libre, sin
-        identidad de inventario real detras)."""
-        run = line.run
-        if line.item_id == run.raw_material_item_id:
-            return None
-        other_logged = sum(
-            (
-                other.quantity
-                for other in run.acta_lines
-                if other.id != line.id and other.side == line.side and other.item_id == line.item_id
-            ),
-            Decimal("0"),
-        )
-        from sqlalchemy import select
-        from backend.modules.inventory.models import InventoryMovement
-
-        delivered = self.repository.session.execute(
-            select(InventoryMovement.quantity).where(
-                InventoryMovement.movement_type == "CONSUMO_PRODUCCION",
-                InventoryMovement.reference_id == run.id,
-                InventoryMovement.item_id == line.item_id,
-            )
-        ).scalars().all()
-        if not delivered:
-            return None
-        return max(Decimal("0"), sum(delivered, Decimal("0")) - other_logged)
 
     def delete_acta_line(self, line_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
         """Borra una linea agregada a mano (libre o enlazada a inventario).
