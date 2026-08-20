@@ -1,21 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Send, Trash2, X } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth-api";
 import { normalizeRole } from "@/lib/roles";
 import { deleteMessage, listMessages, replyMessage, sendMessage, type AdminMessage } from "@/lib/messages-api";
 import { markMessagesSeen, type MessagesScope } from "@/lib/messages-read-state";
 import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
-import { dateKey } from "@/lib/calendar";
+import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar";
 
-function dateTimeLabel(value: string | null) {
+function timeLabel(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("es-EC", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
 }
 
 function dayLabel(value: string) {
@@ -41,16 +41,8 @@ function groupMessagesByDay(messages: AdminMessage[]): Array<{ key: string; labe
 
 // Mensaje libre Admin <-> Produccion/Inventario (docs/cambios-sistema-produccion.md
 // seccion 2.2): una ida y una vuelta de texto, no una orden ni un aceptar/
-// rechazar. Historial permanente, misma lista para los dos lados.
-function initials(name: string | null | undefined) {
-  if (!name) return "?";
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
-}
-
-// Un hilo por mensaje: cualquiera de los dos lados (admin o Produccion/
-// Inventario) puede seguir agregando respuestas, no hay un unico round-trip.
+// rechazar. Historial permanente, misma lista para los dos lados. Estilo
+// chat (Rodrigo, 2026-08-20): burbujas simples, sin tarjeta/boton grande.
 function MessageThread({
   message,
   currentUserId,
@@ -65,61 +57,56 @@ function MessageThread({
   onDelete?: (messageId: string) => void | Promise<void>;
 }) {
   const [replyText, setReplyText] = useState("");
-  const senderName = message.sender_name ?? "Admin";
-  const isMine = message.sender_user_id === currentUserId;
+  const bubbles = [
+    { id: message.id, body: message.body, created_at: message.created_at, senderName: message.sender_name ?? "Admin", mine: message.sender_user_id === currentUserId },
+    ...message.replies.map((reply) => ({
+      id: reply.id,
+      body: reply.body,
+      created_at: reply.created_at,
+      senderName: reply.sender_name ?? "Respuesta",
+      mine: reply.sender_user_id === currentUserId,
+    })),
+  ];
   return (
-    <div className={`messageCard${isMine ? " messageCardMine" : ""}`}>
-      <div className="messageCardHead">
-        <span className="messageAvatar" aria-hidden="true">{initials(senderName)}</span>
-        <div className="messageCardMeta">
-          <strong>{senderName}</strong>
-          <span>{dateTimeLabel(message.created_at)}</span>
-        </div>
-        {onDelete ? (
-          <button
-            aria-label="Eliminar mensaje"
-            className="iconOnlyButton"
-            disabled={isSaving}
-            onClick={() => void onDelete(message.id)}
-            title="Eliminar mensaje"
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={16} />
-          </button>
-        ) : null}
-      </div>
-      <p className="messageBody">{message.body}</p>
-      {message.replies.length > 0 ? (
-        <div className="messageReplies">
-          {message.replies.map((reply) => (
-            <div className={`messageReply${reply.sender_user_id === currentUserId ? " messageReplyMine" : ""}`} key={reply.id}>
-              <div className="messageCardMeta">
-                <strong>{reply.sender_name ?? "Respuesta"}</strong>
-                <span>{dateTimeLabel(reply.created_at)}</span>
-              </div>
-              <p className="messageBody">{reply.body}</p>
-            </div>
-          ))}
-        </div>
+    <div className="chatThread">
+      {onDelete ? (
+        <button
+          aria-label="Eliminar mensaje"
+          className="chatThreadDelete iconOnlyButton"
+          disabled={isSaving}
+          onClick={() => void onDelete(message.id)}
+          title="Eliminar mensaje"
+          type="button"
+        >
+          <Trash2 aria-hidden="true" size={14} />
+        </button>
       ) : null}
-      <div className="messageReplyPending">
+      {bubbles.map((bubble) => (
+        <div className={`chatBubble${bubble.mine ? " chatBubbleMine" : ""}`} key={bubble.id}>
+          <span className="chatBubbleMeta">{bubble.senderName} · {timeLabel(bubble.created_at)}</span>
+          <p>{bubble.body}</p>
+        </div>
+      ))}
+      <div className="chatReplyRow">
         <textarea
-          className="field"
+          className="field chatReplyField"
           onChange={(e) => setReplyText(e.target.value)}
           placeholder="Escribe tu respuesta..."
-          rows={2}
+          rows={1}
           value={replyText}
         />
         <button
-          className="button buttonPrimary"
+          aria-label="Responder"
+          className="chatSendButton"
           disabled={isSaving || !replyText.trim()}
           onClick={() => {
             void onReply(message.id, replyText.trim());
             setReplyText("");
           }}
+          title="Responder"
           type="button"
         >
-          Responder
+          <Send aria-hidden="true" size={16} />
         </button>
       </div>
     </div>
@@ -143,12 +130,34 @@ export function MessagesPanel({
   const [body, setBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
 
   const { data: messages = [] } = useQuery({
     queryKey: ["admin-messages", scope],
     queryFn: () => listMessages(scope),
   });
+
+  const messageCountsByDate = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const message of messages) {
+      const key = dateKey(new Date(message.created_at));
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [messages]);
+  const calendarDays = useMemo(() => buildCalendarDays(calendarMonth), [calendarMonth]);
+  const calendarMonthLabel = useMemo(() => {
+    const [year, month] = calendarMonth.split("-").map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString("es-EC", { month: "long", year: "numeric" });
+  }, [calendarMonth]);
+
+  function moveCalendarMonth(direction: -1 | 1) {
+    const [year, month] = calendarMonth.split("-").map(Number);
+    setCalendarMonth(monthKey(new Date(year, month - 1 + direction, 1)));
+  }
 
   // Mandar o responder desde ACA cuenta como haber visto esta superficie: el
   // punto de aviso de esta pantalla se apaga, pero el de la otra queda
@@ -205,7 +214,8 @@ export function MessagesPanel({
 
   const resolvedTitle =
     title === null ? null : title ?? (role === "admin" ? "Mensajes con Producción/Inventario" : "Mensajes del Admin");
-  const groups = groupMessagesByDay(messages);
+  const allGroups = groupMessagesByDay(messages);
+  const groups = selectedDate ? allGroups.filter((group) => group.key === selectedDate) : allGroups;
 
   return (
     <section className="card panelBody">
@@ -222,19 +232,42 @@ export function MessagesPanel({
           <textarea
             className="field"
             onChange={(e) => setBody(e.target.value)}
-            rows={2}
+            placeholder="Escribe un mensaje..."
+            rows={1}
             value={body}
           />
-          <button className="button buttonPrimary" disabled={isSaving || !body.trim()} onClick={() => void handleSend()} type="button">
-            Enviar
+          <button aria-label="Enviar" className="chatSendButton" disabled={isSaving || !body.trim()} onClick={() => void handleSend()} title="Enviar" type="button">
+            <Send aria-hidden="true" size={16} />
           </button>
         </div>
       ) : null}
+      <div className="messagesToolbar">
+        {selectedDate ? (
+          <button className="iconTextButton" onClick={() => setSelectedDate(null)} type="button">
+            <X aria-hidden="true" size={15} />
+            Ver todos
+          </button>
+        ) : <span />}
+        <button
+          aria-label="Abrir historial por calendario"
+          className="iconTextButton"
+          disabled={messages.length === 0}
+          onClick={() => {
+            setCalendarMonth(selectedDate ? selectedDate.slice(0, 7) : monthKey(new Date()));
+            setIsCalendarOpen(true);
+          }}
+          title="Historial por calendario"
+          type="button"
+        >
+          <CalendarDays aria-hidden="true" size={16} />
+          Historial
+        </button>
+      </div>
       <div className="messageListShell">
         <div className="messageList">
           {groups.map((group) => (
             <div key={group.key}>
-              <div className="messageDaySeparator">{group.label}</div>
+              <div className="messageDaySeparator"><span>{group.label}</span></div>
               {group.items.map((m) => (
                 <MessageThread
                   currentUserId={userId}
@@ -247,9 +280,60 @@ export function MessagesPanel({
               ))}
             </div>
           ))}
-          {messages.length === 0 ? <div className="emptyState">Sin mensajes.</div> : null}
+          {groups.length === 0 ? <div className="emptyState">Sin mensajes{selectedDate ? " ese día" : ""}.</div> : null}
         </div>
       </div>
+      {isCalendarOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Historial de mensajes por calendario">
+          <section className="modalWindow messageCalendarWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Historial de mensajes</h2>
+                <p>Selecciona una fecha</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setIsCalendarOpen(false)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <section className="movementCalendarPanel" aria-label="Calendario de mensajes">
+              <div className="movementCalendarHeader">
+                <button aria-label="Mes anterior" className="iconOnlyButton" onClick={() => moveCalendarMonth(-1)} type="button">
+                  <ChevronLeft aria-hidden="true" size={18} />
+                </button>
+                <strong>{calendarMonthLabel}</strong>
+                <button aria-label="Mes siguiente" className="iconOnlyButton" onClick={() => moveCalendarMonth(1)} type="button">
+                  <ChevronRight aria-hidden="true" size={18} />
+                </button>
+              </div>
+              <div className="movementCalendarWeekdays">
+                {WEEK_DAYS.map((day) => <span key={day}>{day}</span>)}
+              </div>
+              <div className="movementCalendarGrid">
+                {calendarDays.map((day) => {
+                  const count = messageCountsByDate.get(day.key) ?? 0;
+                  return day.isEmpty ? (
+                    <span className="movementCalendarEmpty" key={day.key} />
+                  ) : (
+                    <button
+                      className={`movementCalendarDay ${selectedDate === day.key ? "movementCalendarSelected" : ""} ${count > 0 ? "movementCalendarHasMovements" : ""}`}
+                      disabled={count === 0}
+                      key={day.key}
+                      onClick={() => {
+                        setSelectedDate(day.key);
+                        setIsCalendarOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <span>{day.label}</span>
+                      {count > 0 ? <strong>{count}</strong> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </section>
+        </div>
+      ) : null}
       {dialog}
     </section>
   );
