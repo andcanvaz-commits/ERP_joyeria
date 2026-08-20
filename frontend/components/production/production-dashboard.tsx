@@ -46,6 +46,7 @@ import {
   finishStageAttempt,
   listProcesses,
   listProductionRuns,
+  revertStageAttempt,
   startStageAttempt,
   updateActaLine,
   updateProcess,
@@ -1012,6 +1013,24 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo finalizar la orden.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRevertStageAttempt(attemptId: string) {
+    if (!dynamicOrderRun) return;
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await revertStageAttempt(attemptId);
+      setDynamicOrderRun(updated);
+      setViewingAttemptId(null);
+      setSuccess("Etapa revertida y eliminada.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo revertir la etapa.");
     } finally {
       setIsSaving(false);
     }
@@ -2077,12 +2096,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           {attempt.code ? <span className="orderCodeTag">{attempt.code}</span> : null}
                           <strong>{attempt.process_name}</strong>
                           <span>{attempt.responsable_name ?? "—"}</span>
-                          <span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                             {attempt.status === "APROBADA"
                               ? "Aprobada"
                               : attempt.status === "RECHAZADA"
                                 ? "Rechazada"
                                 : "En proceso"}
+                            {attempt.status !== "EN_PROCESO" ? <Eye aria-hidden="true" size={13} /> : null}
                           </span>
                         </div>
                         {index < arr.length - 1 ? <ArrowRight aria-hidden="true" className="stageFlowArrow" size={20} /> : null}
@@ -2098,6 +2118,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <th>Responsable</th>
                         <th>Estado</th>
                         <th className="num">Merma</th>
+                        <th aria-label="Ver acta"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2108,6 +2129,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <td>{attempt.responsable_name ?? "—"}</td>
                           <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : "Rechazada"}</span></td>
                           <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
+                          <td><Eye aria-hidden="true" size={15} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -2222,6 +2244,27 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       </article>
                     </div>
                   </div>
+                  {canCancelRun ? (
+                    <div className="modalActions">
+                      <button
+                        className="button buttonDanger"
+                        disabled={isSaving}
+                        onClick={() =>
+                          showConfirm(
+                            "Eliminar y revertir etapa",
+                            `Esto deshace el consumo de materia prima y la conversion del producto resultante de "${viewingAttempt.process_name}" (${viewingAttempt.code ?? "sin codigo"}), y borra la etapa por completo. No se puede deshacer.`,
+                            () => void handleRevertStageAttempt(viewingAttempt.id),
+                            true,
+                            "Eliminar y revertir",
+                          )
+                        }
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={15} />
+                        Eliminar y revertir etapa
+                      </button>
+                    </div>
+                  ) : null}
                 </section>
               </div>
             );

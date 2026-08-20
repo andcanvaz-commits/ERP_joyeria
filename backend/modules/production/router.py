@@ -153,6 +153,25 @@ def finish_stage_attempt(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+@router.post("/runs/stage-attempts/{attempt_id}/revert", response_model=ProductionRunRead)
+def revert_stage_attempt(
+    attempt_id: UUID,
+    payload: RunCancelPayload,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: ProductionService = Depends(get_production_service),
+) -> ProductionRunRead:
+    """Revierte y elimina un intento de etapa ya terminado por error: deshace
+    su consumo/conversion y borra sus lineas y el intento mismo (a
+    diferencia de cancelar una orden, que conserva la fila)."""
+    ensure_permission(current_user, "production.runs.delete")
+    try:
+        return service.revert_stage_attempt(attempt_id, current_user, payload.reason)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ProductionDomainError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
 @router.post("/runs/stage-attempts/{attempt_id}/allocate-material", response_model=ProductionRunRead)
 def allocate_stage_attempt_material(
     attempt_id: UUID,

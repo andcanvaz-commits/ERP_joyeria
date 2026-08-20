@@ -88,8 +88,9 @@ def test_full_happy_path_two_attempts_same_process(
     )
     done_attempt = finished1.stage_attempts[0]
     assert done_attempt.status == "APROBADA"
-    assert done_attempt.merma_weight == Decimal("5")
-    assert done_attempt.merma_percent == Decimal("5")
+    # 100 entregado - 95 devuelto - 1 que se convirtio en producto = 4.
+    assert done_attempt.merma_weight == Decimal("4")
+    assert done_attempt.merma_percent == Decimal("4")
 
     # Segunda etapa, MISMO proceso: attempt_no_for_process debe ser 2, con
     # su propio codigo -02 (seccion 8), y su propia merma independiente.
@@ -120,7 +121,8 @@ def test_full_happy_path_two_attempts_same_process(
         running2.id, StageAttemptFinish(decision="APROBADA", product_quantity=Decimal("1")), current_user
     )
     second_attempt = next(a for a in finished2.stage_attempts if a.code and a.code.endswith("-02"))
-    assert second_attempt.merma_weight == Decimal("5")  # 95 - 90, independiente del primer intento
+    # 95 - 90 - 1 = 4, independiente del primer intento.
+    assert second_attempt.merma_weight == Decimal("4")
 
     # El producto resultante ya se declaro al iniciar cada etapa (Task 3):
     # la orden sigue EN_PROCESO -- ya no cierra sola -- y el target acumulo

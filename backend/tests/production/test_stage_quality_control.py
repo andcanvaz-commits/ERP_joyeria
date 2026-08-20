@@ -1,9 +1,12 @@
 """Finalizar etapa: la cantidad real del producto resultante se llena aca
 (Rodrigo, 2026-08-20 -- ya no viene pre-llena del picker de iniciar etapa) y
-recien aca se convierte el lote/mueve inventario. La merma sale de comparar
-ENTREGA contra lo devuelto del MISMO item en RECEPCION, y el control de
-calidad (Aprobado/Denegado) solo aplica si el proceso lo tiene marcado en el
-banco (docs/superpowers/plans/2026-08-19-rediseno-acta-y-ux-produccion.md)."""
+recien aca se convierte el lote/mueve inventario. Tope y merma: "no se
+trabaja por peso por unidad, es la misma cantidad de la unidad de medida de
+la materia prima" (Rodrigo) -- el producto resultante no puede superar lo
+entregado menos lo devuelto del mismo item, y la merma es lo que sobra sin
+convertirse en producto ni devolverse. El control de calidad
+(Aprobado/Denegado) solo aplica si el proceso lo tiene marcado en el banco
+(docs/superpowers/plans/2026-08-19-rediseno-acta-y-ux-produccion.md)."""
 import uuid
 from decimal import Decimal
 
@@ -127,9 +130,8 @@ def test_merma_computed_from_entrega_minus_same_item_recepcion(
         ),
         current_user,
     )
-    # Devuelve 95 del mismo item -- 5g de merma real. La linea RECEPCION del
-    # producto resultante (target_complement, cantidad real llenada aca al
-    # finalizar) es un item distinto y no debe contarse para esta merma.
+    # Devuelve 95 del mismo item -- queda 5 disponible, del cual 1 se
+    # convierte en producto resultante y 4 quedan como merma real.
     production_service.add_admin_acta_line(
         order.id,
         AdminActaLineCreate(
@@ -144,5 +146,45 @@ def test_merma_computed_from_entrega_minus_same_item_recepcion(
 
     done = finished.stage_attempts[0]
     assert done.status == "APROBADA"
-    assert done.merma_weight == Decimal("5")
-    assert done.merma_percent == Decimal("5")
+    # 100 entregado - 95 devuelto - 1 que se convirtio en producto = 4.
+    assert done.merma_weight == Decimal("4")
+    assert done.merma_percent == Decimal("4")
+
+
+def test_finish_rejects_product_quantity_above_what_was_delivered(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Rodrigo, 2026-08-20: "si puse 100 gramos de X para X producto, es la
+    misma cantidad de gramos para el producto" -- 1000 unidades de un
+    producto no pueden salir de 100g de materia prima entregados."""
+    import pytest
+    from backend.modules.production.service import ProductionDomainError
+    from backend.modules.production.schemas import StageAttemptMaterialLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden tope test"), current_user)
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+        ),
+        current_user,
+    )
+    attempt = result.stage_attempts[0]
+
+    with pytest.raises(ProductionDomainError, match="supera lo que en realidad se entrego"):
+        production_service.finish_stage_attempt(
+            attempt.id, StageAttemptFinish(product_quantity=Decimal("1000")), current_user
+        )
+
+    # Exactamente el tope (100) si pasa.
+    finished = production_service.finish_stage_attempt(
+        attempt.id, StageAttemptFinish(product_quantity=Decimal("100")), current_user
+    )
+    done = finished.stage_attempts[0]
+    assert done.status == "APROBADA"
+    assert done.merma_weight == Decimal("0")

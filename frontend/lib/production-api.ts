@@ -157,3 +157,15 @@ export function finishStageAttempt(
   });
 }
 
+/** Revierte y elimina un intento de etapa ya terminado (Rodrigo, 2026-08-20):
+ * deshace su consumo de materia prima y la conversion de su producto
+ * resultante, y borra sus lineas y el intento mismo -- a diferencia de
+ * cancelar una orden (conserva la fila), una etapa mal cargada deja de
+ * existir. Solo aplica a intentos APROBADA/RECHAZADA. */
+export function revertStageAttempt(attemptId: string, reason?: string) {
+  return apiRequest<ProductionRun>(`/api/production/runs/stage-attempts/${attemptId}/revert`, {
+    method: "POST",
+    body: JSON.stringify({ reason: reason?.trim() || null }),
+  });
+}
+

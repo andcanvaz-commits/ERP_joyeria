@@ -1256,6 +1256,34 @@ class ProductionService:
         if entrega_lines:
             attempt.unit_code = entrega_lines[0].unit_code
 
+        # Rodrigo, 2026-08-20: "no se trabaja por peso por unidad, todo es
+        # por la unidad de medida de la materia prima -- si puse 100 gramos
+        # de X para X producto, es la misma cantidad de gramos para el
+        # producto". O sea: el numero entregado (menos lo ya devuelto del
+        # mismo item, ej. sobrante de insumos) es el TOPE de lo que puede
+        # salir como producto resultante -- misma cantidad, sin tabla de
+        # conversion aparte. Lo que no se convierte en producto ni se
+        # devuelve es la merma.
+        entrega_by_item: dict = {}
+        for line in entrega_lines:
+            entrega_by_item[line.item_id] = entrega_by_item.get(line.item_id, Decimal("0")) + line.quantity
+        entrega_total = sum(entrega_by_item.values(), Decimal("0"))
+        recepcion_matched = sum(
+            (
+                line.quantity
+                for line in recepcion_lines
+                if line.item_id is not None and line.item_id in entrega_by_item
+            ),
+            Decimal("0"),
+        )
+        if entrega_total > 0:
+            disponible = entrega_total - recepcion_matched
+            if payload.product_quantity > disponible:
+                raise ProductionDomainError(
+                    f"La cantidad del producto resultante ({format_qty(payload.product_quantity)}) supera lo "
+                    f"que en realidad se entrego a esta etapa ({format_qty(disponible)})."
+                )
+
         # Producto resultante: el destino ya se eligio al iniciar la etapa
         # (start_stage_attempt); la cantidad real recien se sabe aca (Rodrigo,
         # 2026-08-20 -- no debe salir pre-llena del picker). Convierte el lote
@@ -1330,31 +1358,86 @@ class ProductionService:
         else:
             attempt.status = StageAttemptStatus.APPROVED
             # Merma propia de ESTE intento: lo entregado menos lo recibido de
-            # VUELTA del mismo item (sin peso_al_finalizar) -- nunca se
-            # compara contra otro intento. La linea RECEPCION del producto
-            # resultante (Task 3) es un item totalmente distinto a la materia
-            # prima entregada (el producto terminado, no la materia prima) y
-            # NO cuenta como "recuperado" -- solo cuenta lo devuelto del
-            # MISMO item que se entrego (ej. sobrante agregado a mano).
-            entrega_by_item: dict = {}
-            for line in entrega_lines:
-                entrega_by_item[line.item_id] = entrega_by_item.get(line.item_id, Decimal("0")) + line.quantity
-            entrega_total = sum(entrega_by_item.values(), Decimal("0"))
-            recepcion_matched = sum(
-                (
-                    line.quantity
-                    for line in recepcion_lines
-                    if line.item_id is not None and line.item_id in entrega_by_item
-                ),
-                Decimal("0"),
-            )
+            # vuelta del mismo item (ej. sobrante de insumos) menos lo que se
+            # convirtio en producto resultante -- misma cantidad, sin tabla
+            # de conversion aparte (Rodrigo, 2026-08-20). Nunca se compara
+            # contra otro intento.
             if entrega_total > 0:
-                loss = max(Decimal("0"), entrega_total - recepcion_matched)
+                loss = max(Decimal("0"), entrega_total - recepcion_matched - payload.product_quantity)
                 attempt.merma_weight = loss
                 attempt.merma_percent = loss / entrega_total * Decimal("100")
 
         attempt.finished_by_user_id = current_user.id
         attempt.finished_at = datetime.utcnow()
+        self.repository.flush()
+        return self._read_with_names(run)
+
+    def revert_stage_attempt(
+        self, attempt_id: UUID, current_user: CurrentUser, reason: str | None
+    ) -> ProductionRunRead:
+        """Revierte y elimina un intento de etapa ya terminado (Rodrigo,
+        2026-08-20): deshace el consumo de materia prima, las devoluciones
+        de insumos/complementos y la conversion del producto resultante de
+        ESE intento puntual, y borra sus lineas de acta y el intento mismo
+        -- a diferencia de cancelar una orden (que conserva la fila para no
+        perder trazabilidad), una etapa mal cargada simplemente deja de
+        existir. Solo aplica a intentos ya terminados (APROBADA/RECHAZADA);
+        uno en curso se termina primero. Si algo que este intento produjo
+        ya se movio de ahi (vendido, combinado con otro lote), la reversion
+        se bloquea entera -- mismo criterio que cancelar una orden
+        TERMINADA (ver InventoryService.reverse_finished_product_lot)."""
+        if self.inventory_service is None:
+            raise ProductionDomainError("Inventario no esta disponible para revertir esta etapa.")
+        attempt = self.repository.get_stage_attempt(attempt_id)
+        if attempt is None:
+            raise ProductionNotFoundError("Etapa no encontrada.")
+        if attempt.status not in (StageAttemptStatus.APPROVED, StageAttemptStatus.REJECTED):
+            raise ProductionDomainError("Solo se puede revertir una etapa ya terminada (aprobada o rechazada).")
+        run = attempt.run
+        if run.status != ProductionRunStatus.IN_PROGRESS:
+            raise ProductionDomainError("Solo se puede revertir una etapa de una orden en proceso.")
+
+        revert_reason = (
+            f"Reversion de etapa {attempt.code or attempt.id}." + (f" {reason.strip()}" if reason else "")
+        )
+        lines = [line for line in run.acta_lines if line.stage_attempt_id == attempt.id]
+
+        try:
+            for line in lines:
+                if line.item_id is None:
+                    continue
+                if line.source == ActaLineSource.ADMIN_STOCK:
+                    self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
+                elif line.side == ActaLineSide.ENTREGA and line.source in (ActaLineSource.PLAN, ActaLineSource.AUTO):
+                    self.inventory_service.create_movement(
+                        InventoryMovementCreate(
+                            item_id=line.item_id,
+                            movement_type="REVERSION_PRODUCCION",
+                            quantity=line.quantity,
+                            reason=revert_reason,
+                            reference_type="production_run",
+                            reference_id=run.id,
+                        ),
+                        user_id=current_user.id,
+                    )
+                elif line.side == ActaLineSide.RECEPCION and line.source == ActaLineSource.PLAN:
+                    self.inventory_service.reverse_stage_attempt_product(
+                        run_id=run.id,
+                        target_id=line.item_id,
+                        quantity=line.quantity,
+                        user_id=current_user.id,
+                        reason=revert_reason,
+                    )
+        except InventoryDomainError as exc:
+            raise ProductionDomainError(
+                f"No se puede revertir: {exc} Parte de lo que produjo esta etapa ya se movio en inventario."
+            ) from exc
+
+        for line in lines:
+            run.acta_lines.remove(line)
+            self.repository.session.delete(line)
+        run.stage_attempts.remove(attempt)
+        self.repository.session.delete(attempt)
         self.repository.flush()
         return self._read_with_names(run)
 

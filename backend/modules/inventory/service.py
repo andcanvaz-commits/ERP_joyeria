@@ -472,18 +472,26 @@ class InventoryService(InventoryIntegrationPort):
         insumos por etapa, complementos): cubre los tres porque
         consume_material_for_production siempre guarda reference_id=run_id sin
         importar el item. No toca el costo promedio -- REVERSION_PRODUCCION no
-        es ENTRADA, solo devuelve gramos/unidades al stock fisico."""
+        es ENTRADA, solo devuelve gramos/unidades al stock fisico.
+
+        Neto de lo ya revertido (no solo la suma de consumos): si antes se
+        revirtio UNA etapa puntual (ver ProductionService.revert_stage_attempt,
+        que emite REVERSION_PRODUCCION con esta misma referencia), esta
+        funcion no vuelve a devolver esos gramos -- solo lo que de verdad
+        sigue sin revertir. Sin eso, cancelar la orden completa despues de
+        revertir una etapa duplicaria la devolucion."""
         movements = self.repository.session.execute(
             select(InventoryMovement).where(
-                InventoryMovement.movement_type == "CONSUMO_PRODUCCION",
+                InventoryMovement.movement_type.in_(["CONSUMO_PRODUCCION", "REVERSION_PRODUCCION"]),
                 InventoryMovement.reference_type == "production_run",
                 InventoryMovement.reference_id == run_id,
             )
         ).scalars().all()
-        consumed: dict[UUID, Decimal] = {}
+        net: dict[UUID, Decimal] = {}
         for movement in movements:
-            consumed[movement.item_id] = consumed.get(movement.item_id, Decimal("0")) + movement.quantity
-        for item_id, quantity in consumed.items():
+            delta = movement.quantity if movement.movement_type == "CONSUMO_PRODUCCION" else -movement.quantity
+            net[movement.item_id] = net.get(movement.item_id, Decimal("0")) + delta
+        for item_id, quantity in net.items():
             if quantity <= 0:
                 continue
             self.create_movement(
@@ -510,7 +518,14 @@ class InventoryService(InventoryIntegrationPort):
         create_movement rechaza esa resta por dejar el stock en negativo --
         la cancelacion se bloquea entera en vez de dejar el kardex
         inconsistente (mismo criterio que el resto del dominio: nunca stock
-        negativo)."""
+        negativo).
+
+        Neto de lo ya revertido: si antes se revirtio UNA etapa puntual (ver
+        ProductionService.revert_stage_attempt, que emite AJUSTE_NEGATIVO/
+        REVERSION_PRODUCCION con esta misma referencia de orden), esta
+        funcion solo termina de revertir lo que quede -- sin esto, cancelar
+        la orden completa despues de revertir una etapa duplicaria la
+        reversion de esa etapa."""
         ingreso_movements = self.repository.session.execute(
             select(InventoryMovement).where(
                 InventoryMovement.movement_type == "INGRESO_PRODUCCION",
@@ -535,14 +550,30 @@ class InventoryService(InventoryIntegrationPort):
                 converted_by_target.get(movement.reference_id, Decimal("0")) + movement.quantity
             )
 
+        # Ya revertido por target: AJUSTE_NEGATIVO previos sobre cada destino
+        # con esta misma referencia de orden (los emite tanto esta funcion en
+        # una corrida anterior como revert_stage_attempt).
+        already_reversed_rows = self.repository.session.execute(
+            select(InventoryMovement.item_id, InventoryMovement.quantity).where(
+                InventoryMovement.movement_type == "AJUSTE_NEGATIVO",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == run_id,
+                InventoryMovement.item_id != lot_id,
+            )
+        ).all()
+        already_reversed_by_target: dict[UUID, Decimal] = {}
+        for item_id, quantity in already_reversed_rows:
+            already_reversed_by_target[item_id] = already_reversed_by_target.get(item_id, Decimal("0")) + quantity
+
         for target_id, quantity in converted_by_target.items():
-            if quantity <= 0:
+            net_quantity = quantity - already_reversed_by_target.get(target_id, Decimal("0"))
+            if net_quantity <= 0:
                 continue
             self.create_movement(
                 InventoryMovementCreate(
                     item_id=target_id,
                     movement_type="AJUSTE_NEGATIVO",
-                    quantity=quantity,
+                    quantity=net_quantity,
                     reason=reason,
                     reference_type="production_order",
                     reference_id=run_id,
@@ -553,7 +584,7 @@ class InventoryService(InventoryIntegrationPort):
                 InventoryMovementCreate(
                     item_id=lot_id,
                     movement_type="REVERSION_PRODUCCION",
-                    quantity=quantity,
+                    quantity=net_quantity,
                     reason=reason,
                     reference_type="production_order",
                     reference_id=run_id,
@@ -562,18 +593,88 @@ class InventoryService(InventoryIntegrationPort):
             )
 
         ingreso_total = sum((m.quantity for m in ingreso_movements), Decimal("0"))
-        if ingreso_total > 0:
+        # Ya revertido del lado del lote: AJUSTE_NEGATIVO previos sobre el
+        # lote mismo con esta misma referencia (la parte de "ingreso_total"
+        # que otra corrida de esta funcion, o revert_stage_attempt, ya bajo).
+        already_reversed_lot = self.repository.session.execute(
+            select(func.coalesce(func.sum(InventoryMovement.quantity), 0)).where(
+                InventoryMovement.item_id == lot_id,
+                InventoryMovement.movement_type == "AJUSTE_NEGATIVO",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == run_id,
+            )
+        ).scalar_one()
+        remaining_ingreso = ingreso_total - Decimal(already_reversed_lot)
+        if remaining_ingreso > 0:
             self.create_movement(
                 InventoryMovementCreate(
                     item_id=lot_id,
                     movement_type="AJUSTE_NEGATIVO",
-                    quantity=ingreso_total,
+                    quantity=remaining_ingreso,
                     reason=reason,
                     reference_type="production_order",
                     reference_id=run_id,
                 ),
                 user_id=user_id,
             )
+
+    def reverse_stage_attempt_product(
+        self, *, run_id: UUID, target_id: UUID, quantity: Decimal, user_id: UUID | None, reason: str
+    ) -> None:
+        """Revierte la conversion del producto resultante de UN intento de
+        etapa puntual (ver ProductionService.revert_stage_attempt): resta
+        `quantity` del destino y la devuelve al lote de la orden, y de una
+        la saca del lote otra vez (la ingreso de ESTE intento nunca paso).
+        Usa la MISMA referencia (reference_type="production_order",
+        reference_id=run_id) que reverse_finished_product_lot -- si despues
+        se cancela la orden completa, esa funcion ve este movimiento ya
+        hecho (es neta de lo ya revertido) y no lo repite. No-op si la
+        orden nunca genero un lote."""
+        if quantity <= 0:
+            return
+        ingreso_movement = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == run_id,
+            )
+        ).scalars().first()
+        if ingreso_movement is None:
+            return
+        lot_id = ingreso_movement.item_id
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=target_id,
+                movement_type="AJUSTE_NEGATIVO",
+                quantity=quantity,
+                reason=reason,
+                reference_type="production_order",
+                reference_id=run_id,
+            ),
+            user_id=user_id,
+        )
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=lot_id,
+                movement_type="REVERSION_PRODUCCION",
+                quantity=quantity,
+                reason=reason,
+                reference_type="production_order",
+                reference_id=run_id,
+            ),
+            user_id=user_id,
+        )
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=lot_id,
+                movement_type="AJUSTE_NEGATIVO",
+                quantity=quantity,
+                reason=reason,
+                reference_type="production_order",
+                reference_id=run_id,
+            ),
+            user_id=user_id,
+        )
 
     def list_movements(self, item_id: UUID | None = None) -> list[InventoryMovementRead]:
         movements = self.repository.list_movements(item_id)
