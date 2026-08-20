@@ -41,9 +41,6 @@ export function OrdenProduccionDoc({
         </header>
 
         <div className="opResponsable">
-          NOMBRE: <span>{model.procesoNombre}</span>
-        </div>
-        <div className="opResponsable">
           RESPONSABLE: <span>{model.responsableProduccion}</span>
         </div>
 
