@@ -61,7 +61,6 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
 import { buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
-import { runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 import { useCountUp } from "@/hooks/use-count-up";
 
 // Banco de procesos (docs/cambios-sistema-produccion.md seccion 3): un paso
@@ -435,22 +434,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Igual que "En proceso": una orden dividida cuenta una sola vez entre las
   // recientes, con boton para ver las demas partes en ventana.
   const recentFinishedFamilies = Array.from(groupRunFamilies(finishedRuns).entries()).slice(0, 3);
-  const receivedRuns = runs
-    .filter((run) => run.status === "RECIBIDA" && (run.event_lines ?? []).length === 0)
-    .sort((a, b) => (b.received_at ?? "").localeCompare(a.received_at ?? ""));
-  const pendingReceptionRuns = runs
-    .filter((run) => run.status === "PENDIENTE_RECEPCION" && (run.event_lines ?? []).length === 0)
-    .sort((a, b) => (b.finished_at ?? "").localeCompare(a.finished_at ?? ""));
-  // Tabla unificada "Procesos": listos para iniciar, en curso y terminados, en ese orden.
-  const processRows = [
-    ...[...approvedMaterialRuns].sort((a, b) => (b.materials_approved_at ?? "").localeCompare(a.materials_approved_at ?? "")),
-    ...[...inProgressRuns].sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? "")),
-    ...pendingReceptionRuns,
-    ...receivedRuns,
-  ];
-  // Agrupa "Procesos" por familia: una orden partida se colapsa en la fila de
-  // su raiz, con las demas partes desplegables debajo.
-  const processFamilies = Array.from(groupRunFamilies(processRows).entries());
 
   useEffect(() => {
     if (finishedRuns.length === 0 || hasInitializedHistory) {
@@ -526,23 +509,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     return groupRunFamilies(list).size;
   }
 
-  function processRowDate(run: ProductionRun) {
-    if (run.status === "MATERIALES_APROBADOS") return timeLabel(run.materials_approved_at);
-    if (run.status === "EN_PROCESO") return timeLabel(run.started_at);
-    if (run.status === "RECIBIDA") return timeLabel(run.received_at);
-    return timeLabel(run.finished_at);
-  }
-
-  // Merma solo cuando hay dato registrado; evita "0 g" ruidoso en filas sin merma aun.
-  function processRowWaste(run: ProductionRun) {
-    if (!run.waste_weight && !run.waste_percent) return "—";
-    const parts: string[] = [];
-    if (run.waste_weight) parts.push(`${numericText(run.waste_weight)} g`);
-    if (run.waste_percent) parts.push(`${percentText(run.waste_percent)}%`);
-    return parts.join(" · ");
-  }
-
-  // Acciones por fila de "Procesos": reutilizada tanto para la fila raiz
+  // Acciones por fila: reutilizada tanto para la fila raiz
   // como para las partes desplegadas de una orden dividida.
   function processRowActions(run: ProductionRun) {
     return (
@@ -1507,84 +1474,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 <div className="emptyState">No hay procesos en transcurso.</div>
               )}
             </article>
-          </section>
-
-          {/* Procesos: listos para iniciar, en curso y terminados, en un solo lugar. */}
-          <section className="card panelBody" aria-label="Procesos">
-            <div className="panelHeader">
-              <div>
-                <h2 className="panelTitle">Procesos</h2>
-                <p className="panelText">Ordenes listas para iniciar, en curso y terminadas</p>
-              </div>
-            </div>
-            {processRows.length > 0 ? (
-              <div className="tableWrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Proceso</th>
-                      <th className="num">Cantidad</th>
-                      <th className="num">Peso actual</th>
-                      <th>Etapa actual</th>
-                      <th>Estado</th>
-                      <th>Fecha</th>
-                      <th className="num">Merma</th>
-                      <th aria-label="Acciones" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {processFamilies.map(([key, family]) => {
-                      const root = family.find((r) => !r.parent_run_id) ?? family[0];
-                      const otherParts = family.filter((r) => r.id !== root.id);
-                      // Orden del flujo nuevo: siempre tiene `name` (seccion 4.1), aun
-                      // antes de iniciar su primera etapa (stage_attempts todavia vacio
-                      // en ese momento -- no sirve como discriminador).
-                      const isDynamic = Boolean(root.name);
-                      const rootStage = runCurrentStage(root);
-                      const lastAttempt = isDynamic
-                        ? [...(root.stage_attempts ?? [])].sort((a, b) => b.sequence_order - a.sequence_order)[0]
-                        : null;
-                      const rowClick = isDynamic
-                        ? () => setDynamicOrderRun(root)
-                        : otherParts.length > 0
-                          ? () => setFamilyRuns(family)
-                          : undefined;
-                      return (
-                        <tr key={key} onClick={rowClick} style={rowClick ? { cursor: "pointer" } : undefined}>
-                          <td>
-                            {root.production_code ? <span className="orderCodeTag">{root.production_code}</span> : "—"}
-                            {otherParts.length > 0 ? (
-                              <span className="rootBadgeTag">+{otherParts.length} partes</span>
-                            ) : (
-                              rootBadge(root)
-                            )}
-                          </td>
-                          <td>{isDynamic ? (root.name ?? root.production_code) : root.process_name}</td>
-                          <td className="num">{isDynamic ? "—" : `${numericText(root.quantity)} ${root.raw_material_unit_code}`}</td>
-                          <td className="num">{isDynamic ? "—" : `${numericText(runCurrentWeight(root))} ${root.raw_material_unit_code}`}</td>
-                          <td>
-                            {isDynamic
-                              ? lastAttempt
-                                ? `${lastAttempt.process_name} (${lastAttempt.attempt_no_for_process})`
-                                : "Sin etapas todavia"
-                              : rootStage
-                                ? `${rootStage.stage_order}. ${rootStage.stage_name}`
-                                : "—"}
-                          </td>
-                          <td><StatusPunch label={runStatusLabel(root.status)} tone={runStatusTone(root.status)} /></td>
-                          <td>{processRowDate(root)}</td>
-                          <td className="num">{processRowWaste(root)}</td>
-                          <td onClick={stopClick}>{isDynamic ? null : processRowActions(root)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="emptyState">No hay procesos.</div>
-            )}
           </section>
 
           {/* History */}
