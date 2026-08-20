@@ -14,7 +14,6 @@ import { CreateItemTabs } from "@/components/mantenimiento/create-item-tabs";
 import { FinishedItemPicker } from "@/components/inventory/finished-item-picker";
 import { MaterialCategoryPicker } from "@/components/production/material-category-picker";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
-import { StageRecepcionControl } from "@/components/production/stage-recepcion-control";
 import { OrdenProduccionDoc } from "@/components/documentos/orden-produccion-doc";
 import { ActaView } from "@/components/production/acta-view";
 import { CatalogProductPicker } from "@/components/inventory/catalog-product-picker";
@@ -1728,8 +1727,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 }
                 const materialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
                 const runningModel = buildOrdenProduccion([dynamicOrderRun], runningAttempt.id);
-                const entregaLines = runningModel.entregaLines;
-                const recepcionLines = runningModel.recepcionLines;
                 return (
                   <section className="card panelBody" style={{ marginTop: 12 }}>
                     {/* Mismo componente que arma Documentos (Rodrigo, 2026-08-20:
@@ -1758,14 +1755,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(refreshDynamicOrder)}
                         onError={setError}
                         recepcionFooter={
-                          <StageRecepcionControl
-                            entregaLines={entregaLines}
-                            materialItems={materialItems}
+                          <AdminAddActaLineControl
+                            isAdmin
+                            items={materialItems}
                             onChanged={refreshDynamicOrder}
                             onError={setError}
                             onSuccess={setSuccess}
-                            recepcionLines={recepcionLines}
                             runId={dynamicOrderRun.id}
+                            side="RECEPCION"
                             stageAttemptId={runningAttempt.id}
                           />
                         }
@@ -2066,8 +2063,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             if (!viewingAttempt) return null;
             const viewMaterialItems = [...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems];
             const viewingModel = buildOrdenProduccion([dynamicOrderRun], viewingAttempt.id);
-            const viewEntregaLines = viewingModel.entregaLines;
-            const viewRecepcionLines = viewingModel.recepcionLines;
             return (
               <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true" aria-label="Acta de la etapa">
                 <section className="modalWindow processViewWindow">
@@ -2100,14 +2095,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       onEditLine={(lineId, patch) => updateActaLine(lineId, patch).then(() => refreshViewingOrder())}
                       onError={setError}
                       recepcionFooter={
-                        <StageRecepcionControl
-                          entregaLines={viewEntregaLines}
-                          materialItems={viewMaterialItems}
+                        <AdminAddActaLineControl
+                          isAdmin
+                          items={viewMaterialItems}
                           onChanged={() => void refreshViewingOrder()}
                           onError={setError}
                           onSuccess={setSuccess}
-                          recepcionLines={viewRecepcionLines}
                           runId={dynamicOrderRun.id}
+                          side="RECEPCION"
                           stageAttemptId={viewingAttempt.id}
                         />
                       }

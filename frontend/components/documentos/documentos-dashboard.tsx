@@ -19,7 +19,6 @@ import { WEEK_DAYS, buildCalendarDays, dateKey, monthKey } from "@/lib/calendar"
 import type { ProductionRun } from "@/types/production";
 import type { InventoryItem } from "@/types/inventory";
 import { AdminAddActaLineControl } from "@/components/production/admin-add-acta-line";
-import { StageRecepcionControl } from "@/components/production/stage-recepcion-control";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { DocMode, OrdenProduccionDoc } from "./orden-produccion-doc";
 
@@ -449,28 +448,16 @@ export function DocumentosDashboard() {
                     onError={setDocError}
                     recepcionFooter={
                       selectedRootRunId && !isHistoricalFamily(selectedFamily) ? (
-                        selectedStageAttemptId ? (
-                          <StageRecepcionControl
-                            entregaLines={model.entregaLines}
-                            materialItems={items}
-                            onChanged={() => void refetch()}
-                            onError={setDocError}
-                            onSuccess={setDocSuccess}
-                            recepcionLines={model.recepcionLines}
-                            runId={selectedRootRunId}
-                            stageAttemptId={selectedStageAttemptId}
-                          />
-                        ) : (
-                          <AdminAddActaLineControl
-                            isAdmin={isAdmin}
-                            items={items}
-                            onChanged={() => void refetch()}
-                            onError={setDocError}
-                            onSuccess={setDocSuccess}
-                            runId={selectedRootRunId}
-                            side="RECEPCION"
-                          />
-                        )
+                        <AdminAddActaLineControl
+                          isAdmin={isAdmin}
+                          items={items}
+                          onChanged={() => void refetch()}
+                          onError={setDocError}
+                          onSuccess={setDocSuccess}
+                          runId={selectedRootRunId}
+                          side="RECEPCION"
+                          stageAttemptId={selectedStageAttemptId ?? undefined}
+                        />
                       ) : null
                     }
                   />

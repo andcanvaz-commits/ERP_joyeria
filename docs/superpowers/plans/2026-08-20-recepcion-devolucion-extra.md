@@ -182,6 +182,7 @@ git commit -m "fix(produccion): permite devolucion extra en RECEPCION sin tope c
 - Modify: `frontend/components/production/production-dashboard.tsx:17` (import)
 - Modify: `frontend/components/production/production-dashboard.tsx:1729-1771` (vista de etapa corriendo)
 - Modify: `frontend/components/production/production-dashboard.tsx:2067-2113` (vista "ver etapa")
+- Modify: `frontend/components/documentos/documentos-dashboard.tsx` (import + recepcionFooter de la vista de Documentos — **tercer caller descubierto durante la ejecución, no listado en el diseño original**: mismo patrón, colapsa el condicional `selectedStageAttemptId ? <StageRecepcionControl .../> : <AdminAddActaLineControl side="RECEPCION" .../>` en un solo `<AdminAddActaLineControl side="RECEPCION" stageAttemptId={selectedStageAttemptId ?? undefined} />`, igual que ya hace `entregaActions` en el mismo archivo)
 - Delete: `frontend/components/production/stage-recepcion-control.tsx`
 
 **Interfaces:**
