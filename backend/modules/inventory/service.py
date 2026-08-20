@@ -770,6 +770,53 @@ class InventoryService(InventoryIntegrationPort):
         self.create_movement(payload, user_id=received_by_user_id, lot_code=production_code)
         return item
 
+    def get_or_create_finished_product_lot(
+        self,
+        *,
+        run: "ProductionRun",
+        quantity: Decimal,
+        material_type: str | None,
+        purity: str | None,
+        received_by_user_id: UUID | None,
+    ) -> InventoryItem:
+        """Un solo lote FINISHED_PRODUCT por orden, alimentado de a poco por
+        cada etapa: si la orden ya tiene un INGRESO_PRODUCCION propio, le suma
+        otro; si no, lo crea. Nunca crea un segundo item -- create_finished_product_lot
+        llamado dos veces generaria un SKU de respaldo distinto en la segunda
+        llamada (el SKU real ya esta tomado), fragmentando el lote."""
+        existing = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == run.id,
+            )
+        ).scalars().first()
+        if existing is None:
+            return self.create_finished_product_lot(
+                name=run.name or "Producto",
+                unit_code="und",
+                production_order_id=run.id,
+                production_code=run.production_code,
+                quantity=quantity,
+                material_type=material_type,
+                purity=purity,
+                received_by_user_id=received_by_user_id,
+            )
+        lot = self._get_item_or_raise(existing.item_id)
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=lot.id,
+                movement_type="INGRESO_PRODUCCION",
+                quantity=quantity,
+                reason="Ingreso de producto terminado desde produccion.",
+                reference_type="production_order",
+                reference_id=run.id,
+            ),
+            user_id=received_by_user_id,
+            lot_code=run.production_code,
+        )
+        return lot
+
     def _resolve_catalog_target(self, material_code: str, product_type_id: UUID):
         """Valida material y tipo de producto del catálogo y devuelve
         (product_code, product_type). Compartido por conversión y ensamble."""
