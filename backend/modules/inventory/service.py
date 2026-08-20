@@ -79,8 +79,10 @@ ITEM_TYPE_PREFIXES = {
 }
 
 # Tipos que el usuario gestiona directamente (crear/editar/eliminar);
-# los demás los administra el flujo de producción.
-MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "FINISHED_PRODUCT")
+# los demás los administra el flujo de producción. WASTE tambien es
+# manual (Rodrigo, 2026-08-20: mantenimiento de mermas) ademas de
+# alimentarse solo desde produccion via get_or_create_waste_item.
+MANUALLY_MANAGED_TYPES = ("RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "FINISHED_PRODUCT", "WASTE")
 
 
 class InventoryService(InventoryIntegrationPort):
@@ -90,7 +92,7 @@ class InventoryService(InventoryIntegrationPort):
     def create_item(self, payload: InventoryItemCreate) -> InventoryItemRead:
         if payload.item_type not in MANUALLY_MANAGED_TYPES:
             raise InventoryDomainError(
-                "Solo se pueden crear manualmente materias primas, insumos o productos terminados."
+                "Solo se pueden crear manualmente materias primas, insumos, complementos, productos terminados o mermas."
             )
         item = InventoryItem(
             item_type=payload.item_type,
@@ -114,7 +116,7 @@ class InventoryService(InventoryIntegrationPort):
         editable = MANUALLY_MANAGED_TYPES
         if item.item_type not in editable or payload.item_type not in editable:
             raise InventoryDomainError(
-                "Solo se pueden editar manualmente materias primas, insumos o productos terminados."
+                "Solo se pueden editar manualmente materias primas, insumos, complementos, productos terminados o mermas."
             )
 
         item.item_type = payload.item_type
@@ -145,7 +147,7 @@ class InventoryService(InventoryIntegrationPort):
     def delete_item(self, item_id: UUID) -> None:
         item = self._get_item_or_raise(item_id)
         if item.item_type not in MANUALLY_MANAGED_TYPES:
-            raise InventoryDomainError("Solo se pueden eliminar materias primas, insumos o productos terminados.")
+            raise InventoryDomainError("Solo se pueden eliminar materias primas, insumos, complementos, productos terminados o mermas.")
         if item.current_stock > 0:
             raise InventoryDomainError(
                 "No se puede eliminar un item con stock. Deja el stock en cero primero."
@@ -922,6 +924,83 @@ class InventoryService(InventoryIntegrationPort):
             lot_code=run.production_code,
         )
         return lot
+
+    def get_or_create_waste_item(
+        self,
+        *,
+        process_name: str,
+        quantity: Decimal,
+        unit_code: str,
+        material_type: str | None,
+        purity: str | None,
+        created_by_user_id: UUID | None,
+        stage_attempt_id: UUID,
+    ) -> InventoryItem:
+        """Merma real de una etapa terminada, guardada en Inventario > Merma
+        (Rodrigo, 2026-08-20: antes solo quedaba como numero en el acta). Un
+        item WASTE por proceso + material -- mismo criterio de consolidacion
+        que los productos terminados del catalogo (ver convert_lot_to_product):
+        la merma de oro de "Fundicion" no se mezcla con la de plata."""
+        name = f"Merma {process_name}".strip()
+        item = self.repository.session.execute(
+            select(InventoryItem).where(
+                InventoryItem.item_type == "WASTE",
+                InventoryItem.name == name,
+                InventoryItem.material_type == material_type,
+            )
+        ).scalar_one_or_none()
+        if item is None:
+            item = InventoryItem(
+                item_type="WASTE",
+                name=name,
+                sku=self._generate_sku("WASTE"),
+                material_type=material_type,
+                purity=purity,
+                unit_code=unit_code,
+            )
+            self.repository.add_item(item)
+            self.repository.flush()
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=item.id,
+                movement_type="INGRESO_PRODUCCION",
+                quantity=quantity,
+                reason=f"Merma real de la etapa {process_name}.",
+                reference_type="production_stage_attempt",
+                reference_id=stage_attempt_id,
+            ),
+            user_id=created_by_user_id,
+        )
+        return item
+
+    def reverse_waste_item(self, *, stage_attempt_id: UUID, reason: str, user_id: UUID | None) -> None:
+        """Revierte la merma real que esta etapa sumo a Inventario > Merma
+        (ver get_or_create_waste_item), para ProductionService.revert_stage_attempt.
+        Busca el ingreso que dejo ESE intento puntual (no toca lo que hayan
+        sumado otros intentos al mismo item de merma) y le resta lo mismo --
+        si ya se movio de ahi (se vendio/refinó), create_movement bloquea con
+        stock insuficiente, igual que revertir el producto resultante.
+        No-op si esta etapa no genero merma."""
+        ingreso = self.repository.session.execute(
+            select(InventoryMovement).where(
+                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
+                InventoryMovement.reference_type == "production_stage_attempt",
+                InventoryMovement.reference_id == stage_attempt_id,
+            )
+        ).scalars().first()
+        if ingreso is None:
+            return
+        self.create_movement(
+            InventoryMovementCreate(
+                item_id=ingreso.item_id,
+                movement_type="AJUSTE_NEGATIVO",
+                quantity=ingreso.quantity,
+                reason=reason,
+                reference_type="production_stage_attempt",
+                reference_id=stage_attempt_id,
+            ),
+            user_id=user_id,
+        )
 
     def _resolve_catalog_target(self, material_code: str, product_type_id: UUID):
         """Valida material y tipo de producto del catálogo y devuelve

@@ -10,6 +10,8 @@ convertirse en producto ni devolverse. El control de calidad
 import uuid
 from decimal import Decimal
 
+from sqlalchemy import select
+
 from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.schemas import (
     AdminActaLineCreate,
@@ -185,6 +187,53 @@ def test_recepcion_line_unit_is_raw_material_unit_not_target_catalog_unit(
     recepcion_lines = [l for l in finished.acta_lines if l.side == "RECEPCION" and l.stage_attempt_id == attempt.id]
     assert len(recepcion_lines) == 1
     assert recepcion_lines[0].unit_code == "g"
+
+
+def test_merma_real_se_guarda_en_inventario_como_waste(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Rodrigo, 2026-08-20: "deben guardarse en inventario seccion merma,
+    como merma 'nombre proceso de donde salio'" -- antes la merma solo
+    quedaba como numero en el acta (attempt.merma_weight), nunca como stock
+    real de un item WASTE."""
+    from backend.modules.inventory.models import InventoryItem
+    from backend.modules.production.schemas import StageAttemptMaterialLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden merma inventario"), current_user)
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            product=StageAttemptProductTarget(target_item_id=target_complement.id),
+        ),
+        current_user,
+    )
+    attempt_id = result.stage_attempts[0].id
+
+    production_service.finish_stage_attempt(
+        attempt_id, StageAttemptFinish(product_quantity=Decimal("90")), current_user
+    )
+
+    waste_item = db_session.execute(
+        select(InventoryItem).where(
+            InventoryItem.item_type == "WASTE",
+            InventoryItem.name == f"Merma {process.name}",
+        )
+    ).scalar_one_or_none()
+    assert waste_item is not None
+    assert waste_item.current_stock == Decimal("10")
+    assert waste_item.unit_code == "g"
+    assert waste_item.material_type == raw_material.name
+
+    # Revertir la etapa tambien revierte la merma real (simetria) -- si no,
+    # quedaba stock de merma huerfano de una etapa que ya no existe.
+    production_service.revert_stage_attempt(attempt_id, current_user, "prueba")
+    db_session.refresh(waste_item)
+    assert waste_item.current_stock == Decimal("0")
 
 
 def test_finish_rejects_product_quantity_above_what_was_delivered(

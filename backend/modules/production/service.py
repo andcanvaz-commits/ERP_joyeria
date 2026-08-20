@@ -1371,6 +1371,22 @@ class ProductionService:
                 loss = max(Decimal("0"), entrega_total - recepcion_matched - payload.product_quantity)
                 attempt.merma_weight = loss
                 attempt.merma_percent = loss / entrega_total * Decimal("100")
+                # La merma real tambien se guarda en Inventario > Merma, no
+                # solo como numero en el acta (Rodrigo, 2026-08-20: "deben
+                # guardarse en inventario seccion merma, como merma 'nombre
+                # proceso de donde salio'"). Un item WASTE por proceso+
+                # material, igual criterio de consolidacion que los
+                # productos terminados del catalogo.
+                if loss > 0:
+                    self.inventory_service.get_or_create_waste_item(
+                        process_name=attempt.process_name,
+                        quantity=loss,
+                        unit_code=attempt.unit_code or "g",
+                        material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
+                        purity=raw_material.purity if raw_material else None,
+                        created_by_user_id=current_user.id,
+                        stage_attempt_id=attempt.id,
+                    )
 
         attempt.finished_by_user_id = current_user.id
         attempt.finished_at = datetime.utcnow()
@@ -1433,6 +1449,13 @@ class ProductionService:
                         user_id=current_user.id,
                         reason=revert_reason,
                     )
+            # La merma real que esta etapa haya sumado a Inventario > Merma
+            # tambien se revierte (simetria con get_or_create_waste_item en
+            # finish_stage_attempt) -- si no, revertir dejaba stock de merma
+            # huerfano que ya no corresponde a ninguna etapa real.
+            self.inventory_service.reverse_waste_item(
+                stage_attempt_id=attempt.id, reason=revert_reason, user_id=current_user.id
+            )
         except InventoryDomainError as exc:
             raise ProductionDomainError(
                 f"No se puede revertir: {exc} Parte de lo que produjo esta etapa ya se movio en inventario."
