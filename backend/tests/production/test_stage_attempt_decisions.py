@@ -1,8 +1,6 @@
 """Bitacora de decisiones (aprobar/rechazar) por intento de etapa -- ver
 docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md."""
-import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from backend.modules.product_types.models import ProductType  # noqa: F401
 from backend.modules.production.models import ProductionRunStageAttemptDecision
