@@ -351,12 +351,10 @@ class ProductionService:
         # dar el mismo mensaje "No se puede cancelar" sin importar la causa.
         try:
             self._revert_admin_stock_lines(run, current_user)
-            # La merma real que cada etapa aprobada sumo a Inventario > Merma
-            # (get_or_create_waste_item en approve_stage_attempt) tambien se
-            # devuelve: si no, cancelar la orden dejaba stock de merma
-            # huerfano, sin ninguna etapa real detras. Misma simetria que ya
-            # hace revert_stage_attempt para una etapa sola; no-op para las
-            # etapas que no generaron merma.
+            # Desde 2026-08-21 aprobar una etapa ya no da de alta la merma en
+            # Inventario > Desperdicios, asi que esto es no-op para runs
+            # nuevos -- se mantiene solo para poder cancelar ordenes viejas
+            # que si dejaron ese stock huerfano.
             for attempt in run.stage_attempts:
                 self.inventory_service.reverse_waste_item(
                     stage_attempt_id=attempt.id, reason=revert_reason, user_id=current_user.id
@@ -886,15 +884,15 @@ class ProductionService:
             )
 
     def _recompute_stage_attempt_merma(self, attempt: "ProductionRunStageAttempt", current_user: CurrentUser) -> None:
-        """Recalcula merma_weight/merma_percent y el stock real de Inventario >
-        Merma de un intento YA APROBADO, despues de editar/borrar una de sus
-        lineas (Rodrigo, 2026-08-20: "edite pero nunca se actualizo la merma
-        con respecto a si cambio algun total" -- corregir una etapa aprobada
-        es un caso real, permitido, pero la merma no se recalculaba sola).
-        Aplica solo el DELTA contra lo que ya se movio a Inventario > Merma
-        para este intento puntual (mismo criterio que _apply_admin_acta_line_delta):
-        nunca un ingreso de la cantidad completa de nuevo, que duplicaria
-        stock si se edita mas de una vez."""
+        """Recalcula merma_weight/merma_percent de un intento YA APROBADO,
+        despues de editar/borrar una de sus lineas (Rodrigo, 2026-08-20:
+        "edite pero nunca se actualizo la merma con respecto a si cambio
+        algun total" -- corregir una etapa aprobada es un caso real,
+        permitido, pero la merma no se recalculaba sola).
+        Desde 2026-08-21 la merma calculada no vive en Inventario >
+        Desperdicios (desaparece, no queda como stock de nada) -- este metodo
+        solo toca los campos del intento, ya no crea ni ajusta movimientos de
+        inventario."""
         if attempt.status != StageAttemptStatus.APPROVED:
             return
         run = attempt.run
@@ -912,83 +910,10 @@ class ProductionService:
         if entrega_total <= 0:
             attempt.merma_weight = None
             attempt.merma_percent = None
-            new_loss = Decimal("0")
         else:
             new_loss = max(Decimal("0"), entrega_total - recepcion_total)
             attempt.merma_weight = new_loss
             attempt.merma_percent = new_loss / entrega_total * Decimal("100")
-
-        from sqlalchemy import select as _select
-        from backend.modules.inventory.models import InventoryItem, InventoryMovement
-
-        existing = self.repository.session.execute(
-            _select(InventoryMovement).where(
-                InventoryMovement.reference_type == "production_stage_attempt",
-                InventoryMovement.reference_id == attempt.id,
-            )
-        ).scalars().all()
-        net_so_far = sum(
-            (m.quantity if m.movement_type == "INGRESO_PRODUCCION" else -m.quantity for m in existing),
-            Decimal("0"),
-        )
-        delta = new_loss - net_so_far
-        if delta == 0:
-            return
-
-        # Si ESTE intento ya genero merma antes, el item real es el que ya
-        # recibio esos movimientos -- usarlo directo, nunca volver a adivinar
-        # el material_type a partir de entrega_lines[0] (que puede cambiar de
-        # orden o de item si se agregaron/editaron lineas despues de aprobar,
-        # y silenciosamente apuntar a OTRO item de merma con distinto
-        # material -- fantasma real: merma_weight se actualizaba pero el
-        # stock de Inventario > Merma quedaba huerfano en el item viejo).
-        if existing:
-            item = self.repository.session.get(InventoryItem, existing[0].item_id)
-            if item is None:
-                raise ProductionDomainError(
-                    f"No se pudo recalcular la merma de la etapa {attempt.code or attempt.id}: "
-                    "el item de merma que ya tenia movimientos ya no existe en inventario."
-                )
-        else:
-            first_entrega = next((l for l in entrega_lines if l.item_id is not None), None)
-            raw_material = (
-                self.repository.session.get(InventoryItem, first_entrega.item_id)
-                if first_entrega is not None else None
-            )
-            material_type = (raw_material.material_type or raw_material.name) if raw_material else None
-            name = f"Merma {attempt.process_name}".strip()
-            item = self.repository.session.execute(
-                _select(InventoryItem).where(
-                    InventoryItem.item_type == "WASTE",
-                    InventoryItem.name == name,
-                    InventoryItem.material_type == material_type,
-                )
-            ).scalar_one_or_none()
-            if item is None:
-                if delta <= 0:
-                    return
-                item = InventoryItem(
-                    item_type="WASTE",
-                    name=name,
-                    sku=self.inventory_service._generate_sku("WASTE"),
-                    material_type=material_type,
-                    purity=raw_material.purity if raw_material else None,
-                    unit_code=attempt.unit_code or "g",
-                )
-                self.repository.add_item(item)
-                self.repository.flush()
-
-        self.inventory_service.create_movement(
-            InventoryMovementCreate(
-                item_id=item.id,
-                movement_type="INGRESO_PRODUCCION" if delta > 0 else "AJUSTE_NEGATIVO",
-                quantity=abs(delta),
-                reason=f"Recalculo de merma tras editar el acta de la etapa {attempt.code or attempt.id}.",
-                reference_type="production_stage_attempt",
-                reference_id=attempt.id,
-            ),
-            user_id=current_user.id,
-        )
 
     def _line_has_own_movements(self, line: ProductionRunActaLine) -> bool:
         """¿Esta linea puntual tiene movimientos propios, referenciados por
@@ -1271,20 +1196,27 @@ class ProductionService:
         return self._read_with_names(line.run)
 
     def delete_acta_line(self, line_id: UUID, current_user: CurrentUser) -> ProductionRunRead:
-        """Borra una linea agregada a mano (libre o enlazada a inventario).
-        Las lineas planeadas o generadas automaticamente por un evento real
-        no se borran -- son el rastro de lo que de verdad paso; si estan
-        mal, se editan, no se esconden. Si la linea esta enlazada a un item de
-        inventario (cualquier source), revierte el stock neto que esa linea
-        haya movido antes de borrarla -- desde la unificacion (addendum, punto
-        1) una linea MANUAL con item_id tambien mueve stock al editarle la
-        cantidad, asi que revertir solo las ADMIN_STOCK dejaba stock creado de
-        la nada al borrarla."""
+        """Borra una linea del acta (libre, enlazada a inventario, o PLAN de
+        un intento de etapa). Rodrigo, 2026-08-21: "todas las filas que
+        existan en el acta deben permitir editar o eliminar, mientras no se
+        finalice un proceso" -- PLAN entra al set de borrables (antes solo se
+        podia editar, nunca borrar); AUTO se queda afuera a proposito: es el
+        rastro de un evento real ya ocurrido (flujo viejo a nivel de orden, o
+        historico importado de papel), no una declaracion que se pueda
+        deshacer sin mentir sobre lo que de verdad paso. Si la linea esta
+        enlazada a un item de inventario (cualquier source), revierte el
+        stock neto que esa linea haya movido antes de borrarla -- desde la
+        unificacion (addendum, punto 1) una linea MANUAL con item_id tambien
+        mueve stock al editarle la cantidad, asi que revertir solo las
+        ADMIN_STOCK dejaba stock creado de la nada al borrarla.
+        _ensure_acta_line_stock_edit_allowed (abajo) es el gate real de
+        "mientras no se finalice un proceso": bloquea si la orden ya esta
+        CANCELADA o RECIBIDA."""
         line = self.repository.get_acta_line(line_id)
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
-        if line.source not in (ActaLineSource.MANUAL, ActaLineSource.ADMIN_STOCK):
-            raise ProductionDomainError("Solo se pueden borrar lineas agregadas a mano.")
+        if line.source not in (ActaLineSource.MANUAL, ActaLineSource.ADMIN_STOCK, ActaLineSource.PLAN):
+            raise ProductionDomainError("Esta linea es el rastro de un evento real (historico o del flujo viejo) -- no se puede borrar.")
         if line.item_id is not None:
             # Mismo gate que update_acta_line: borrar una linea enlazada a
             # inventario a nivel de orden mueve stock real, asi que es
@@ -1292,6 +1224,18 @@ class ProductionService:
             if line.stage_attempt_id is None and current_user.role not in {"admin", "Admin"}:
                 raise ProductionDomainError("Solo el administrador puede borrar una linea enlazada a inventario.")
             self._ensure_acta_line_stock_edit_allowed(line)
+            if self._line_stock_lives_in_legacy_reference(line):
+                # Igual que update_acta_line: si el consumo real quedo a
+                # nombre de la ORDEN (flujo viejo), esta linea "nunca movio
+                # nada" para _apply_admin_acta_line_delta -- borrarla sin este
+                # chequeo la sacaria del acta sin revertir el stock real que
+                # de verdad se consumio, perdiendo la trazabilidad.
+                raise ProductionDomainError(
+                    f"'{line.label}': esta linea pertenece a una orden del flujo viejo -- su consumo real "
+                    "quedo registrado a nombre de la orden, no de la linea, asi que borrarla aca no revertiria "
+                    "ese stock. Corrige el peso final de la etapa en su lugar, o cancela la orden si el dato "
+                    "esta mal de raiz."
+                )
             self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
         run = line.run
         deleted_stage_attempt_id = line.stage_attempt_id
@@ -1504,23 +1448,11 @@ class ProductionService:
             loss = max(Decimal("0"), entrega_total - recepcion_total)
             attempt.merma_weight = loss
             attempt.merma_percent = loss / entrega_total * Decimal("100")
-            if loss > 0:
-                from backend.modules.inventory.models import InventoryItem
-
-                first_entrega = next((l for l in entrega_lines if l.item_id is not None), None)
-                raw_material = (
-                    self.repository.session.get(InventoryItem, first_entrega.item_id)
-                    if first_entrega is not None else None
-                )
-                self.inventory_service.get_or_create_waste_item(
-                    process_name=attempt.process_name,
-                    quantity=loss,
-                    unit_code=attempt.unit_code or "g",
-                    material_type=(raw_material.material_type or raw_material.name) if raw_material else None,
-                    purity=raw_material.purity if raw_material else None,
-                    created_by_user_id=current_user.id,
-                    stage_attempt_id=attempt.id,
-                )
+            # Rodrigo, 2026-08-21: la merma calculada ya NO se da de alta en
+            # Inventario > Desperdicios -- desaparece (no queda como stock
+            # real de nada). merma_weight/merma_percent siguen siendo el
+            # registro de cuanto se perdio, solo que ya no hay item ni
+            # movimiento de inventario detras.
 
         attempt.finished_by_user_id = current_user.id
         attempt.finished_at = datetime.utcnow()
@@ -1653,10 +1585,10 @@ class ProductionService:
                         user_id=current_user.id,
                         reason=revert_reason,
                     )
-            # La merma real que esta etapa haya sumado a Inventario > Merma
-            # tambien se revierte (simetria con get_or_create_waste_item en
-            # approve_stage_attempt) -- si no, revertir dejaba stock de merma
-            # huerfano que ya no corresponde a ninguna etapa real.
+            # Desde 2026-08-21 aprobar una etapa ya no da de alta la merma en
+            # Inventario > Desperdicios, asi que esto es no-op para intentos
+            # nuevos -- se mantiene solo para poder revertir intentos viejos
+            # que si dejaron ese stock.
             self.inventory_service.reverse_waste_item(
                 stage_attempt_id=attempt.id, reason=revert_reason, user_id=current_user.id
             )

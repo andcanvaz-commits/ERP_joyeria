@@ -122,9 +122,12 @@ def test_merma_computed_from_entrega_minus_recepcion_totals(
     assert done.merma_weight == Decimal("4")
 
 
-def test_merma_real_se_guarda_en_inventario_como_waste(
+def test_merma_calculada_ya_no_se_da_de_alta_en_inventario(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
+    """Rodrigo, 2026-08-21: la merma calculada desaparece -- ya no se crea ni
+    actualiza un item WASTE (Desperdicios) en inventario al aprobar la
+    etapa; merma_weight/merma_percent siguen siendo el registro."""
     from backend.modules.inventory.models import InventoryItem
     from backend.modules.production.schemas import StageAttemptMaterialLine
 
@@ -143,7 +146,9 @@ def test_merma_real_se_guarda_en_inventario_como_waste(
     )
     attempt_id = result.stage_attempts[0].id
 
-    production_service.approve_stage_attempt(attempt_id, current_user)
+    approved = production_service.approve_stage_attempt(attempt_id, current_user)
+
+    assert approved.stage_attempts[0].merma_weight == Decimal("10")
 
     waste_item = db_session.execute(
         select(InventoryItem).where(
@@ -151,8 +156,7 @@ def test_merma_real_se_guarda_en_inventario_como_waste(
             InventoryItem.name == f"Merma {process.name}",
         )
     ).scalar_one_or_none()
-    assert waste_item is not None
-    assert waste_item.current_stock == Decimal("10")
+    assert waste_item is None
 
 
 def test_producto_resultante_line_is_stamped_with_the_material_unit(
@@ -204,7 +208,7 @@ def test_producto_resultante_unit_falls_back_to_grams_without_entrada(
 ):
     """Sin Entrada no hay unidad de material que heredar: se usa "g", nunca
     la unidad propia del producto (misma regla que el default de
-    approve_stage_attempt/get_or_create_waste_item)."""
+    approve_stage_attempt)."""
     order = production_service.create_order(ProductionOrderCreate(name="Orden sin entrada"), current_user)
 
     result = production_service.start_stage_attempt(

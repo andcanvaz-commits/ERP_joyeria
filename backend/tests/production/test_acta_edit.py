@@ -109,9 +109,13 @@ def test_delete_manual_line_removes_it(
     assert all(line.id != line_id for line in result.acta_lines)
 
 
-def test_delete_rejects_plan_line(
+def test_delete_allows_deleting_plan_line(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
+    """Rodrigo, 2026-08-21: "todas las filas que existan en el acta deben
+    permitir editar o eliminar, mientras no se finalice un proceso" -- una
+    linea PLAN (Entrada/Producto resultante de start_stage_attempt) ahora
+    tambien se puede borrar, no solo editar, y revierte el stock que movio."""
     from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
 
     raw_material.current_stock = Decimal("100")
@@ -129,9 +133,14 @@ def test_delete_rejects_plan_line(
     )
     run = production_service.repository.get_run(started.id)
     plan_line = run.acta_lines[0]
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")  # 100 - 100 entregado
 
-    with pytest.raises(ProductionDomainError, match="a mano"):
-        production_service.delete_acta_line(plan_line.id, current_user)
+    result = production_service.delete_acta_line(plan_line.id, current_user)
+
+    assert all(line.id != plan_line.id for line in result.acta_lines)
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("100")  # se revirtio
 
 
 def test_update_missing_line_raises_not_found(production_service, current_user):

@@ -303,13 +303,13 @@ def test_cancel_run_blocks_when_converted_stock_already_moved(
     assert reloaded.status == "TERMINADA"
 
 
-def test_cancel_run_reverts_the_waste_stock_of_every_approved_stage(
+def test_cancel_run_does_not_create_waste_stock_for_the_merma_of_any_approved_stage(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    """Review final: aprobar una etapa con merma da de alta esa merma en
-    Inventario > Merma (get_or_create_waste_item). Cancelar la orden entera
-    tiene que devolverla, igual que ya hacia revert_stage_attempt para una
-    etapa sola -- si no, queda stock de merma sin ninguna etapa real detras."""
+    """Rodrigo, 2026-08-21: la merma calculada ya no se da de alta en
+    Inventario > Desperdicios -- aprobar una etapa con merma NO crea ningun
+    item WASTE, asi que cancelar la orden entera tampoco tiene nada que
+    revertir de ese lado (reverse_waste_item queda como no-op)."""
     from sqlalchemy import select
 
     from backend.modules.inventory.models import InventoryItem
@@ -327,13 +327,10 @@ def test_cancel_run_reverts_the_waste_stock_of_every_approved_stage(
             InventoryItem.name == f"Merma {process.name}",
         )
     ).scalar_one_or_none()
-    assert waste_item is not None
-    assert waste_item.current_stock == Decimal("10")  # 100 entregados - 90 producidos
+    assert waste_item is None
 
     production_service.cancel_run(run.id, current_user, "la etapa estaba mal cargada")
 
-    db_session.refresh(waste_item)
-    assert waste_item.current_stock == Decimal("0")
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("100")
     db_session.refresh(target_complement)

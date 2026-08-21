@@ -132,7 +132,7 @@ def test_reclassify_waste_rejects_target_that_is_not_waste_type(db_session, inve
     db_session.flush()
     movement = _make_ingreso_produccion_movement(db_session, source, 10, uuid4())
 
-    with pytest.raises(InventoryDomainError, match="tipo merma"):
+    with pytest.raises(InventoryDomainError, match="tipo desperdicio"):
         inventory_service.reclassify_waste_movement(
             movement.id, target_item_id=not_waste.id, quantity=None, user_id=None
         )

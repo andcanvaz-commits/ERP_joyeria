@@ -280,6 +280,37 @@ def test_update_acta_line_refuses_legacy_run_scoped_line(
     assert refreshed.quantity == Decimal("100")  # el campo tampoco se toco
 
 
+def test_delete_acta_line_refuses_legacy_run_scoped_line(
+    db_session, production_service, current_user, process, raw_material
+):
+    """Mismo riesgo que test_update_acta_line_refuses_legacy_run_scoped_line
+    pero al borrar (Rodrigo, 2026-08-21: PLAN ahora es borrable en general) --
+    sin esta guarda, borrar la linea la sacaria del acta sin revertir los 100 g
+    que de verdad se consumieron a nombre de la ORDEN, perdiendo la
+    trazabilidad de ese stock para siempre."""
+    from sqlalchemy import select
+
+    from backend.modules.inventory.models import InventoryMovement
+
+    _run, line = _old_flow_run_with_run_scoped_consumption(
+        db_session, production_service, current_user, process, raw_material
+    )
+    movements_before = db_session.execute(
+        select(InventoryMovement.id).where(InventoryMovement.item_id == raw_material.id)
+    ).all()
+
+    with pytest.raises(ProductionDomainError, match="flujo viejo"):
+        production_service.delete_acta_line(line.id, current_user)
+
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")  # sin reversion fantasma
+    movements_after = db_session.execute(
+        select(InventoryMovement.id).where(InventoryMovement.item_id == raw_material.id)
+    ).all()
+    assert len(movements_after) == len(movements_before)
+    assert production_service.repository.get_acta_line(line.id) is not None  # no se borro
+
+
 def test_update_acta_line_allows_new_flow_line_of_the_same_item(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
@@ -344,10 +375,9 @@ def test_update_acta_line_rejects_on_cancelled_order(
 def test_delete_acta_line_rejects_on_cancelled_order(
     db_session, production_service, current_user, admin_user, process
 ):
-    """delete_acta_line solo borra MANUAL/ADMIN_STOCK (una PLAN se rechaza
-    antes, por un motivo distinto -- "Solo se pueden borrar lineas agregadas a
-    mano"), asi que esta linea tiene que ser MANUAL para probar de verdad la
-    guarda nueva de estado."""
+    """MANUAL alcanza para probar la guarda de estado (orden cancelada) sin
+    depender de si el source de la linea es o no borrable -- ese chequeo lo
+    cubre test_delete_allows_deleting_plan_line en test_acta_edit.py."""
     supply = _supply(db_session, "Insumo borrar orden cancelada")
     run, line = _order_level_line_with_item(
         db_session, production_service, current_user, ActaLineSource.MANUAL, supply
@@ -409,11 +439,9 @@ def test_update_acta_line_allows_editing_on_approved_stage_attempt(
 def test_delete_acta_line_allows_deleting_on_approved_stage_attempt(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
-    """delete_acta_line solo borra MANUAL/ADMIN_STOCK -- la linea PLAN que crea
-    start_stage_attempt no serviria para probar esta guarda (se rechaza antes,
-    por "Solo se pueden borrar lineas agregadas a mano"). Se agrega una
-    ADMIN_STOCK enlazada al mismo intento y se aprueba el intento: borrarla
-    debe seguir funcionando y revertir el stock."""
+    """Se agrega una ADMIN_STOCK enlazada al mismo intento y se aprueba el
+    intento: borrarla debe seguir funcionando y revertir el stock (mismo
+    caso que una PLAN, cubierto en test_acta_edit.py)."""
     from backend.modules.production.schemas import AdminActaLineCreate
 
     run_id, attempt_id, _entrega_line, _recepcion_line = _started_attempt(
@@ -513,7 +541,9 @@ def test_update_acta_line_refuses_legacy_return_only_line(
 # Fix (Rodrigo, 2026-08-21): "edite pero nunca se actualizo la merma con
 # respecto a si cambio algun total" -- ahora que editar/borrar una linea de
 # una etapa ya APROBADA esta permitido, la merma (attempt.merma_weight/
-# merma_percent) y el stock real de Inventario > Merma se recalculan solos.
+# merma_percent) se recalcula sola. Ya no vive en Inventario > Desperdicios --
+# desde el mismo dia, la merma calculada desaparece en vez de darse de alta
+# como stock.
 # ---------------------------------------------------------------------------
 
 
@@ -533,24 +563,19 @@ def test_editing_entrega_line_on_approved_attempt_recomputes_merma(
 
     waste_item = db_session.execute(
         select(_InventoryItem).where(_InventoryItem.item_type == "WASTE", _InventoryItem.name == f"Merma {process.name}")
-    ).scalar_one()
-    assert waste_item.current_stock == Decimal("49")
+    ).scalar_one_or_none()
+    assert waste_item is None
 
     # Se corrige la entrada real: en realidad solo se entregaron 60, no 100.
     updated = production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("60")), current_user)
     attempt_after = next(a for a in updated.stage_attempts if a.id == attempt_id)
 
     assert attempt_after.merma_weight == Decimal("59")  # 60 - 1
-    db_session.refresh(waste_item)
-    assert waste_item.current_stock == Decimal("59")  # se ajusto el delta, no se sumo de nuevo
 
-    # Segunda correccion: sube a 80 -- confirma que el delta se aplica de
-    # nuevo (no se duplica lo ya movido).
+    # Segunda correccion: sube a 80.
     updated2 = production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("80")), current_user)
     attempt_after2 = next(a for a in updated2.stage_attempts if a.id == attempt_id)
     assert attempt_after2.merma_weight == Decimal("79")
-    db_session.refresh(waste_item)
-    assert waste_item.current_stock == Decimal("79")
 
 
 def test_adding_admin_line_on_approved_attempt_recomputes_merma(
