@@ -96,10 +96,13 @@ export function ActaView({
 
               <div className="opBody">
                 <ActaSide
-                  // Nivel de orden: mover stock editando una linea enlazada a
-                  // inventario es admin-only en el backend, asi que el lapiz
-                  // solo aparece si de verdad lo es.
-                  canEditInventoryLines={isAdmin}
+                  // Por fila, no en bloque: esta acta puede mezclar lineas de
+                  // NIVEL DE ORDEN (solo admin puede mover ese stock) con
+                  // lineas de un intento de etapa (cualquiera del rol
+                  // fusionado, ver update_acta_line/delete_acta_line) -- una
+                  // sola bandera para toda la vista le quitaba el lapiz a un
+                  // no-admin incluso en su propia linea de etapa.
+                  canEditInventoryLines={(line) => isAdmin || Boolean(line.stage_attempt_id)}
                   actions={
                     <AdminAddActaLineControl
                       isAdmin={isAdmin}
@@ -122,7 +125,7 @@ export function ActaView({
                 />
                 <div className="opDivider" aria-hidden="true" />
                 <ActaSide
-                  canEditInventoryLines={isAdmin}
+                  canEditInventoryLines={(line) => isAdmin || Boolean(line.stage_attempt_id)}
                   fecha={sides.recepcionFecha}
                   footer={
                     <AdminAddActaLineControl

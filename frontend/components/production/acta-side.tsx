@@ -66,14 +66,17 @@ export function ActaSide({
     onQuantityChange: (value: string) => void;
     disabled?: boolean;
   };
-  // false: las filas enlazadas a un item de inventario se muestran sin lapiz
-  // ni papelera. Editarlas mueve stock real y a NIVEL DE ORDEN el backend solo
-  // se lo permite al admin (update_acta_line/delete_acta_line) -- ofrecer el
-  // icono a quien va a recibir "Solo el administrador..." es peor que no
-  // mostrarlo. Las filas libres (sin item_id) las sigue editando cualquiera.
-  // El acta de un intento de etapa no pasa por aca: ahi cualquiera del rol
-  // fusionado opera, y por eso el default es true.
-  canEditInventoryLines?: boolean;
+  // false (o una funcion que devuelve false para esa fila): las filas
+  // enlazadas a un item de inventario se muestran sin lapiz ni papelera.
+  // Editarlas mueve stock real, y el backend solo exige admin cuando la linea
+  // es de NIVEL DE ORDEN (stage_attempt_id nulo) -- una linea de un intento de
+  // etapa la opera cualquiera del rol fusionado (update_acta_line/
+  // delete_acta_line). Una acta puede mezclar los dos tipos de fila (ej. el
+  // modal de "Ver reporte de etapas"), asi que se acepta tambien una funcion
+  // por fila ademas del booleano de siempre -- quien arma la acta decide
+  // segun stage_attempt_id de cada linea. Las filas libres (sin item_id) las
+  // sigue editando cualquiera sin importar este valor.
+  canEditInventoryLines?: boolean | ((line: Extract<ActaSideLine, { kind: "row" }>) => boolean);
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<string>("MANUAL");
@@ -240,7 +243,12 @@ export function ActaSide({
                     <span className="actaDocDetail">
                       {wrap(<span>{line.label}</span>)}
                       {line.editable
-                      && (canEditInventoryLines || !line.item_id)
+                      && (
+                        !line.item_id
+                        || (typeof canEditInventoryLines === "function"
+                          ? canEditInventoryLines(line)
+                          : canEditInventoryLines)
+                      )
                       && (onEditLine || onDeleteLine) ? (
                         <span className="actaDocRowActions">
                           <button aria-label={`Editar ${line.label}`} className="iconOnlyButton" disabled={isSaving} onClick={() => startEdit(line)} type="button">

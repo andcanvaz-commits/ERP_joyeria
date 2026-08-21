@@ -860,6 +860,40 @@ class ProductionService:
         except InventoryDomainError as exc:
             raise ProductionDomainError(f"'{line.label}': {exc}") from exc
 
+    def _ensure_acta_line_stock_edit_allowed(self, line: ProductionRunActaLine) -> None:
+        """Guarda de estado para update_acta_line/delete_acta_line: se llama
+        SOLO para lineas con item_id (las de puro texto libre, MANUAL sin
+        item_id, nunca mueven stock y siguen editables/borrables sin importar
+        el estado -- lo unico que cambia ahi es una etiqueta). Rechaza antes
+        de tocar _apply_admin_acta_line_delta si:
+
+        - La orden ya esta CANCELADA o RECIBIDA: una orden cancelada ya
+          revirtio a cero (via _revert_admin_stock_lines) todo lo que sus
+          lineas movieron, asi que "editar la cantidad" ahi no corrige nada
+          -- emite un consumo/devolucion FRESCO y real sobre una orden
+          muerta. Alcanzable desde el modal de acta de "Ver reporte de
+          etapas" en un intento pasado, que pasa onEditLine sin mirar el
+          estado de la orden.
+        - La linea pertenece a un intento de etapa (stage_attempt_id) que ya
+          no esta EN_PROCESO (fue aprobado): approve_stage_attempt ya sumo
+          la merma de ESTE intento (merma_weight/merma_percent) y, si hubo
+          perdida, ya creo el item de merma correspondiente -- editar una
+          linea del intento despues desincroniza esos totales del acta real
+          sin volver a calcular nada."""
+        if line.item_id is None:
+            return
+        run = line.run
+        if run.status in (ProductionRunStatus.CANCELLED, ProductionRunStatus.RECEIVED):
+            raise ProductionDomainError(
+                f"'{line.label}': no se puede editar esta linea -- la orden ya esta cancelada o recibida."
+            )
+        if line.stage_attempt_id is not None:
+            attempt = self.repository.session.get(ProductionRunStageAttempt, line.stage_attempt_id)
+            if attempt is not None and attempt.status != StageAttemptStatus.IN_PROGRESS:
+                raise ProductionDomainError(
+                    f"'{line.label}': no se puede editar esta linea -- la etapa ya fue aprobada."
+                )
+
     def _line_has_own_movements(self, line: ProductionRunActaLine) -> bool:
         """¿Esta linea puntual tiene movimientos propios, referenciados por
         production_run_acta_line + su id? Es la senal exacta de "el stock de
@@ -906,7 +940,14 @@ class ProductionService:
         legacy_consumption = session.execute(
             select(InventoryMovement.id).where(
                 InventoryMovement.item_id == line.item_id,
-                InventoryMovement.movement_type.in_(["CONSUMO_PRODUCCION", "REVERSION_PRODUCCION"]),
+                # DEVOLUCION_PRODUCCION: return_material_from_production del
+                # flujo viejo tambien referenciaba la ORDEN (no la linea) --
+                # una linea cuyo unico rastro sea una devolucion de sobrante
+                # tiene que detectarse como legacy igual que un consumo, mismo
+                # riesgo de doble movimiento (ver Fix 4 del review anterior).
+                InventoryMovement.movement_type.in_(
+                    ["CONSUMO_PRODUCCION", "REVERSION_PRODUCCION", "DEVOLUCION_PRODUCCION"]
+                ),
                 InventoryMovement.reference_type == "production_run",
                 InventoryMovement.reference_id == line.run_id,
             )
@@ -1093,6 +1134,7 @@ class ProductionService:
 
         if line.item_id is not None:
             if payload.quantity is not None:
+                self._ensure_acta_line_stock_edit_allowed(line)
                 if self._line_stock_lives_in_legacy_reference(line):
                     raise ProductionDomainError(
                         f"'{line.label}': esta linea pertenece a una orden del flujo viejo -- su consumo real "
@@ -1139,6 +1181,7 @@ class ProductionService:
             # admin-only sin importar el source.
             if line.stage_attempt_id is None and current_user.role not in {"admin", "Admin"}:
                 raise ProductionDomainError("Solo el administrador puede borrar una linea enlazada a inventario.")
+            self._ensure_acta_line_stock_edit_allowed(line)
             self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
         run = line.run
         run.acta_lines.remove(line)

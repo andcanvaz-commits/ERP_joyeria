@@ -305,3 +305,204 @@ def test_update_acta_line_allows_new_flow_line_of_the_same_item(
 
     db_session.refresh(raw_material)
     assert raw_material.current_stock == Decimal("20")  # 100 - 80, un solo consumo neto
+
+
+# ---------------------------------------------------------------------------
+# Fix A (review final, ronda 2): update_acta_line/delete_acta_line no
+# miraban el estado de la orden ni del intento de etapa antes de mover stock
+# real -- alcanzable desde "Ver reporte de etapas" -> abrir un intento pasado,
+# cuyo modal de acta pasa onEditLine sin chequear nada. Dos escenarios reales:
+#
+# 1. Orden ya CANCELADA: cancel_run ya reverto a cero (via
+#    _revert_admin_stock_lines) todo lo que las lineas con item_id movieron,
+#    asi que el neto vuelve a leerse como 0 -- editar la cantidad ahi emite un
+#    consumo/devolucion FRESCO y real sobre una orden muerta.
+# 2. Intento de etapa ya APROBADA: approve_stage_attempt ya calculo la merma
+#    de ESE intento y, si hubo perdida, ya creo el item de merma -- editar una
+#    linea del intento despues desincroniza esos totales sin recalcular nada.
+# ---------------------------------------------------------------------------
+
+
+def test_update_acta_line_rejects_on_cancelled_order(
+    db_session, production_service, current_user, admin_user, process
+):
+    supply = _supply(db_session, "Insumo orden cancelada")
+    run, line = _order_level_line_with_item(
+        db_session, production_service, current_user, ActaLineSource.PLAN, supply
+    )
+
+    cancelled = production_service.cancel_run(run.id, current_user, "motivo")
+    assert cancelled.status == "CANCELADA"
+
+    with pytest.raises(ProductionDomainError, match="cancelada"):
+        production_service.update_acta_line(line.id, ActaLineUpdate(quantity=Decimal("8")), admin_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("50")  # nada se movio de mas
+
+
+def test_delete_acta_line_rejects_on_cancelled_order(
+    db_session, production_service, current_user, admin_user, process
+):
+    """delete_acta_line solo borra MANUAL/ADMIN_STOCK (una PLAN se rechaza
+    antes, por un motivo distinto -- "Solo se pueden borrar lineas agregadas a
+    mano"), asi que esta linea tiene que ser MANUAL para probar de verdad la
+    guarda nueva de estado."""
+    supply = _supply(db_session, "Insumo borrar orden cancelada")
+    run, line = _order_level_line_with_item(
+        db_session, production_service, current_user, ActaLineSource.MANUAL, supply
+    )
+
+    cancelled = production_service.cancel_run(run.id, current_user, "motivo")
+    assert cancelled.status == "CANCELADA"
+
+    with pytest.raises(ProductionDomainError, match="cancelada"):
+        production_service.delete_acta_line(line.id, admin_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("50")
+    assert production_service.repository.get_acta_line(line.id) is not None  # no se borro
+
+
+def _started_attempt(db_session, production_service, current_user, process, raw_material, target_complement):
+    from backend.modules.production.schemas import StageAttemptCreate, StageAttemptMaterialLine, StageAttemptProductLine
+
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden etapa aprobada"), current_user)
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("50"))],
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("1"))],
+        ),
+        current_user,
+    )
+    attempt_id = result.stage_attempts[0].id
+    entrega_line = next(l for l in result.stage_attempts[0].acta_lines if l.side == "ENTREGA")
+    recepcion_line = next(l for l in result.stage_attempts[0].acta_lines if l.side == "RECEPCION")
+    return order.id, attempt_id, entrega_line, recepcion_line
+
+
+def test_update_acta_line_rejects_on_approved_stage_attempt(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    _run_id, attempt_id, entrega_line, _recepcion_line = _started_attempt(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("50")  # 100 - 50 entregado
+
+    production_service.approve_stage_attempt(attempt_id, current_user)
+
+    with pytest.raises(ProductionDomainError, match="etapa ya fue aprobada"):
+        production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("70")), current_user)
+
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("50")  # nada se movio de mas
+
+
+def test_delete_acta_line_rejects_on_approved_stage_attempt(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """delete_acta_line solo borra MANUAL/ADMIN_STOCK -- la linea PLAN que crea
+    start_stage_attempt no serviria para probar esta guarda (se rechaza antes,
+    por "Solo se pueden borrar lineas agregadas a mano"). Se agrega una
+    ADMIN_STOCK enlazada al mismo intento, todavia EN_PROCESO, y recien
+    despues se aprueba el intento para probar el bloqueo nuevo."""
+    from backend.modules.production.schemas import AdminActaLineCreate
+
+    run_id, attempt_id, _entrega_line, _recepcion_line = _started_attempt(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    supply = _supply(db_session, "Insumo etapa aprobada", stock="20")
+    admin_result = production_service.add_admin_acta_line(
+        run_id,
+        AdminActaLineCreate(
+            side="ENTREGA", item_id=supply.id, quantity=Decimal("3"),
+            stage_attempt_id=attempt_id, note="ajuste de prueba",
+        ),
+        current_user,
+    )
+    admin_line = next(l for l in admin_result.acta_lines if l.item_id == supply.id)
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("17")  # 20 - 3, movio stock al agregarla
+
+    production_service.approve_stage_attempt(attempt_id, current_user)
+
+    with pytest.raises(ProductionDomainError, match="etapa ya fue aprobada"):
+        production_service.delete_acta_line(admin_line.id, current_user)
+
+    db_session.refresh(supply)
+    assert supply.current_stock == Decimal("17")  # nada se revirtio
+    assert production_service.repository.get_acta_line(admin_line.id) is not None
+
+
+# ---------------------------------------------------------------------------
+# Fix B (review final, ronda 2): _line_stock_lives_in_legacy_reference solo
+# miraba CONSUMO_PRODUCCION/REVERSION_PRODUCCION referenciados por la orden --
+# el flujo viejo tambien podia devolver sobrante con
+# return_material_from_production (DEVOLUCION_PRODUCCION, misma referencia a
+# nivel de orden). Una linea cuyo UNICO rastro sea esa devolucion se le
+# escapaba al chequeo, dejando pasar la edicion (mismo riesgo de doble
+# movimiento que el Fix 4 original evitaba para el consumo).
+# ---------------------------------------------------------------------------
+
+
+def test_update_acta_line_refuses_legacy_return_only_line(
+    db_session, production_service, current_user, process, complement_item
+):
+    from backend.modules.production.models import (
+        ActaLineSide,
+        ProductionRun,
+        ProductionRunActaLine,
+        ProductionRunStageAttempt,
+        ProductionRunStatus,
+        StageAttemptStatus,
+    )
+
+    complement_item.current_stock = Decimal("2")
+    db_session.flush()
+
+    run = ProductionRun(
+        process_id=process.id, process_name=process.name,
+        status=ProductionRunStatus.IN_PROGRESS, created_by_user_id=current_user.id,
+    )
+    db_session.add(run)
+    db_session.flush()
+    run.production_code = f"OP-TEST-{uuid.uuid4().hex[:6]}"
+    db_session.flush()
+
+    # Unico movimiento run-referenciado de esta linea: una devolucion, no un
+    # consumo -- exactamente el caso que el chequeo viejo dejaba pasar.
+    production_service.inventory_service.return_material_from_production(
+        item_id=complement_item.id, quantity=Decimal("2"), production_run_id=run.id, user_id=current_user.id,
+    )
+    db_session.refresh(complement_item)
+    assert complement_item.current_stock == Decimal("4")
+
+    attempt = ProductionRunStageAttempt(
+        run_id=run.id, process_id=process.id, process_name=process.name,
+        sequence_order=1, attempt_no_for_process=1, code="FUN-OP0001-01",
+        status=StageAttemptStatus.IN_PROGRESS, unit_code="und",
+    )
+    run.stage_attempts.append(attempt)
+    db_session.flush()
+
+    line = ProductionRunActaLine(
+        side=ActaLineSide.RECEPCION, label=complement_item.name, quantity=Decimal("2"),
+        unit_code=complement_item.unit_code, item_id=complement_item.id, source=ActaLineSource.PLAN,
+        line_order=0, stage_attempt_id=attempt.id, created_by_user_id=current_user.id,
+    )
+    run.acta_lines.append(line)
+    db_session.flush()
+
+    with pytest.raises(ProductionDomainError, match="flujo viejo"):
+        production_service.update_acta_line(line.id, ActaLineUpdate(quantity=Decimal("5")), current_user)
+
+    db_session.refresh(complement_item)
+    assert complement_item.current_stock == Decimal("4")  # nada se movio de mas
+    refreshed = production_service.repository.get_acta_line(line.id)
+    assert refreshed.quantity == Decimal("2")  # el campo tampoco se toco
