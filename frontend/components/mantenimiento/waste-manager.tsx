@@ -10,12 +10,13 @@ import { confirmDelete, useConfirm } from "@/components/ui/confirm-dialog";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { Pager, usePagination } from "@/components/shared/pager";
 
-// Mantenimiento de mermas (Rodrigo, 2026-08-20): produccion ya las crea
-// solas al finalizar una etapa con merma real (InventoryService.
-// get_or_create_waste_item, nombradas "Merma {proceso}"), pero tambien
-// deben poder crearse/editarse a mano aca, igual que materia prima/insumo/
-// complemento. Material y ley se guardan porque la merma de oro y plata no
-// son lo mismo (mismo criterio del resto del sistema).
+// Mantenimiento de Desperdicios (Rodrigo, 2026-08-20, renombrado 2026-08-21):
+// hasta el 2026-08-21 produccion los creaba solos al finalizar una etapa con
+// merma real; desde entonces la merma calculada desaparece y ya NO se da de
+// alta aca sola -- este manager queda solo para crearlos/editarlos a mano,
+// igual que materia prima/insumo/complemento. Material y ley se guardan
+// porque el desperdicio de oro y plata no son lo mismo (mismo criterio del
+// resto del sistema).
 export function WasteManager({
   mode,
   onClose,
@@ -34,6 +35,16 @@ export function WasteManager({
   });
   const itemsPager = usePagination(items, 6);
   const { data: units = [] } = useQuery({ queryKey: ["units"], queryFn: listUnits });
+  // El material de un desperdicio se elige de las materias primas ya
+  // cargadas (Rodrigo, 2026-08-21) -- nunca texto libre: si el material no
+  // existe todavia, primero se crea como materia prima. Evita que
+  // Desperdicios acumule variantes del mismo material por typos ("Oro" vs
+  // "oro" vs "ORO 18k") que despues las sub-pestañas del picker de actas no
+  // pueden agrupar bien.
+  const { data: rawMaterials = [] } = useQuery({
+    queryKey: ["raw-materials"],
+    queryFn: () => listInventoryItems("RAW_MATERIAL"),
+  });
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -45,6 +56,16 @@ export function WasteManager({
   const [success, setSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const { confirm, dialog } = useConfirm();
+
+  const materialOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const item of rawMaterials) names.add(item.material_type || item.name);
+    // Un desperdicio en edicion puede tener un material que ya no esta entre
+    // las materias primas activas (se borro, o quedo de antes de este
+    // cambio) -- se agrega igual para no perder/pisar el valor guardado.
+    if (materialType.trim()) names.add(materialType.trim());
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [rawMaterials, materialType]);
 
   useEffect(() => {
     if (!success) return;
@@ -82,10 +103,10 @@ export function WasteManager({
     setError(null);
     try {
       await deleteInventoryItem(item.id);
-      setSuccess("Merma eliminada.");
+      setSuccess("Desperdicio eliminado.");
       invalidate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo eliminar la merma.");
+      setError(err instanceof Error ? err.message : "No se pudo eliminar el desperdicio.");
     }
   }
 
@@ -98,7 +119,7 @@ export function WasteManager({
     event.preventDefault();
     setError(null);
     if (!name.trim()) {
-      setError("Escribe el nombre de la merma.");
+      setError("Escribe el nombre del desperdicio.");
       return;
     }
     const unit = unitCode || unitOptions[0]?.value || "g";
@@ -114,28 +135,28 @@ export function WasteManager({
     try {
       if (editingId) {
         await updateInventoryItem(editingId, payload);
-        setSuccess("Merma actualizada.");
+        setSuccess("Desperdicio actualizado.");
       } else {
         const created = await createInventoryItem(payload);
-        setSuccess("Merma creada.");
+        setSuccess("Desperdicio creado.");
         onCreated?.(created);
       }
       resetForm();
       invalidate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo guardar la merma.");
+      setError(err instanceof Error ? err.message : "No se pudo guardar el desperdicio.");
     } finally {
       setIsSaving(false);
     }
   }
 
   return (
-    <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Mermas">
+    <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Desperdicios">
       <section className="modalWindow">
         <div className="modalHeader">
           <div>
-            <h2>{mode === "create" ? "Crear merma" : "Mermas"}</h2>
-            <p className="panelText">Merma real acumulada por material (nombre, ley y unidad).</p>
+            <h2>{mode === "create" ? "Crear desperdicio" : "Desperdicios"}</h2>
+            <p className="panelText">Desperdicio real acumulado por material (nombre, ley y unidad).</p>
           </div>
           <button aria-label="Cerrar" className="iconOnlyButton" onClick={onClose} type="button">
             <X aria-hidden="true" size={18} />
@@ -156,11 +177,16 @@ export function WasteManager({
           <div className="materialRow">
             <label className="fieldGroup">
               <span>Nombre</span>
-              <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setName(e.target.value)} placeholder="Ej. Merma Fundición" value={name} />
+              <input className="field" disabled={isSaving} maxLength={180} onChange={(e) => setName(e.target.value)} placeholder="Ej. Desperdicio Fundición" value={name} />
             </label>
             <label className="fieldGroup">
               <span>Material</span>
-              <input className="field" disabled={isSaving} maxLength={80} onChange={(e) => setMaterialType(e.target.value)} placeholder="Ej. Oro, Plata" value={materialType} />
+              <select className="field" disabled={isSaving} onChange={(e) => setMaterialType(e.target.value)} value={materialType}>
+                <option value="">No aplica</option>
+                {materialOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="materialRow">
@@ -189,7 +215,7 @@ export function WasteManager({
             ) : null}
             <button className="button buttonPrimary" disabled={isSaving} type="submit">
               {editingId ? <Save aria-hidden="true" size={14} /> : <Plus aria-hidden="true" size={14} />}
-              {editingId ? " Guardar cambios" : " Crear merma"}
+              {editingId ? " Guardar cambios" : " Crear desperdicio"}
             </button>
           </div>
         </form>
@@ -244,7 +270,7 @@ export function WasteManager({
               ))}
               {!isLoading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={7}><div className="emptyState">Sin mermas. Se crean solas al finalizar una etapa con merma, o crea una a mano.</div></td>
+                  <td colSpan={7}><div className="emptyState">Sin desperdicios. Crea uno a mano.</div></td>
                 </tr>
               ) : null}
             </tbody>

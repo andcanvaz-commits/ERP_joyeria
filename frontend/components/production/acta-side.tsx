@@ -297,7 +297,7 @@ export function ActaSide({
             ) : null}
             {totals.map((row, i) => (
               <tr
-                className={`opSubtotalRow ${row.kind === "merma" ? "opSubtotalRowMerma" : "opSubtotalRowTotal"}`}
+                className={`opSubtotalRow ${row.kind === "merma" && row.quantity > 0 ? "opSubtotalRowMerma" : row.kind === "extra" ? "opSubtotalRowExtra" : "opSubtotalRowTotal"}`}
                 key={`total-${i}`}
               >
                 <td> </td>

@@ -2419,6 +2419,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
+  color: var(--text);
   box-shadow: 0 22px 48px rgba(28, 26, 23, 0.26);
   padding: 18px;
 }
@@ -5137,6 +5138,19 @@ textarea:disabled {
   color: var(--danger, #b42318);
 }
 
+/* Extra recibido (se recibio MAS de lo entregado, ver computeStageAttemptTotals
+   en orden-produccion.ts) -- mismo verde que .stockBadge--ok, para no inventar
+   un color nuevo en el sistema. */
+.opSubtotalRowExtra td {
+  background: rgba(39, 174, 96, 0.12);
+  border-top-color: #1e8449;
+}
+
+.opSubtotalRowExtra td.opTdGramos,
+.opSubtotalRowExtra td:last-child {
+  color: #1e8449;
+}
+
 .opTotal {
   text-align: right;
   font-weight: 800;
@@ -5210,13 +5224,6 @@ textarea:disabled {
   display: inline-flex;
   gap: 2px;
   flex-shrink: 0;
-  opacity: 0.35;
-  transition: opacity 0.12s ease;
-}
-
-.actaDocRow:hover .actaDocRowActions,
-.actaDocRow:focus-within .actaDocRowActions {
-  opacity: 1;
 }
 
 .actaDocRowActions .iconOnlyButton,

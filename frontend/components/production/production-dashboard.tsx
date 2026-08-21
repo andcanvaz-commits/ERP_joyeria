@@ -62,7 +62,7 @@ import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ToastNotice } from "@/components/ui/toast-notice";
 import { StatusPunch } from "@/components/ui/status-punch";
-import { buildOrdenProduccion, getRunFamily, groupRunFamilies } from "@/lib/orden-produccion";
+import { buildOrdenProduccion, getRunFamily, groupRunFamilies, stageAttemptBalance } from "@/lib/orden-produccion";
 import { useCountUp } from "@/hooks/use-count-up";
 
 // Banco de procesos (docs/cambios-sistema-produccion.md seccion 3): un paso
@@ -81,7 +81,7 @@ const SYSTEM_ROLES = ["Admin", "Producción/Inventario"];
 const MATERIAL_TYPE_LABEL: Record<string, string> = {
   RAW_MATERIAL: "Materia prima",
   COMPLEMENT: "Complemento",
-  WASTE: "Merma",
+  WASTE: "Desperdicio",
   SUPPLY: "Insumo",
 };
 
@@ -228,6 +228,14 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     queryFn: listCatalogSegments,
     enabled: Boolean(currentUser),
   });
+  const activeCatalogMaterials = catalogMaterials.filter((segment) => segment.kind === "MATERIAL" && segment.is_active);
+  // Rodrigo, 2026-08-21: "todos los productos existentes ahora mismo son de
+  // plata... actualiza eso" -- precargar PLATA en vez de dejar el select en
+  // blanco (bloqueando "Agregar producto" hasta elegir a mano). Sigue siendo
+  // editable para la pieza de oro ocasional.
+  const defaultMaterialCode = activeCatalogMaterials.find((segment) => segment.label.trim().toUpperCase() === "PLATA")?.code
+    ?? activeCatalogMaterials[0]?.code
+    ?? "";
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
   const users = bundle?.users ?? EMPTY_USERS;
   const runs = bundle?.runs ?? EMPTY_RUNS;
@@ -467,6 +475,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     if (value === null || value === undefined || value === "") return "0";
     const number = Number(value);
     return Number.isFinite(number) ? number.toLocaleString("es-EC", { maximumFractionDigits: 4 }) : String(value);
+  }
+
+  // Celda "Balance" del listado de etapas: -X para merma, +X en verde para
+  // extra (Rodrigo, 2026-08-21: "en los que haya extra debe salir tambien,
+  // en lugar de merma pon otro nombre en la columna y abajo pon - para
+  // merma y + para extras"). stageAttemptBalance ya filtra por intento
+  // aprobado -- null (en curso/rechazada, o sin entrega) muestra "—".
+  function balanceCell(run: ProductionRun, attemptId: string) {
+    const balance = stageAttemptBalance(run, attemptId);
+    if (!balance) return "—";
+    // Cero no es perdida ni sobrante -- sin signo, sin color (Rodrigo,
+    // 2026-08-21: "cuando sean cero gramos no debe poner en rojo ni el
+    // menos debe quedar en negro").
+    if (balance.quantity === 0) return `0 ${balance.unit}`;
+    const text = `${balance.kind === "extra" ? "+" : "-"}${numericText(balance.quantity)} ${balance.unit}`;
+    return balance.kind === "extra" ? <span style={{ color: "#1e8449" }}>{text}</span> : <span className="dangerText">{text}</span>;
   }
 
   // Porcentajes: 2 decimales, no los 4 de los gramos (16,6667% es ilegible).
@@ -2014,7 +2038,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                         <th>Proceso</th>
                         <th>Responsable</th>
                         <th>Estado</th>
-                        <th className="num">Merma</th>
+                        <th className="num">Balance</th>
                         <th aria-label="Ver acta"></th>
                       </tr>
                     </thead>
@@ -2025,7 +2049,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <td>{attempt.process_name}</td>
                           <td>{attempt.responsable_name ?? "—"}</td>
                           <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : "Rechazada"}</span></td>
-                          <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
+                          <td className="num">{balanceCell(dynamicOrderRun, attempt.id)}</td>
                           <td><Eye aria-hidden="true" size={15} /></td>
                         </tr>
                       ))}
@@ -2126,13 +2150,48 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         );
       })() : null}
 
-      {/* Picker de pieza terminada (o complemento) para el producto único de
-          la orden (producto resultante obligatorio al iniciar etapa, o
-          Editar producto del flujo viejo). "Crear producto nuevo" pasa al
-          picker de tipo del catálogo, para productos que aún no tienen
-          piezas. Se muestran dos pestañas: productos terminados y
-          complementos (la joyeria fabrica sus propios complementos). */}
-      {itemPickerFor && isCreatingNewItem ? (
+      {/* Producto resultante al iniciar una etapa (flujo nuevo): mismo picker
+          que "Agregar" usa dentro del acta (Rodrigo, 2026-08-21: "deberias
+          reutilizar ese modal para todos los casos de agregar, tanto para
+          dentro del acta o fuera a la hora de crear lo inicial") -- ya trae
+          agrupado por categoria/tipo, sub-pestañas por material, "Crear en
+          el mantenimiento" y el hueco para una pieza sin stock todavia
+          (allowProductTypeCreation). El material para una pieza nueva viene
+          precargado en PLATA (ver defaultMaterialCode) en vez de forzar un
+          select vacio -- casi todo lo que hay hoy es plata. */}
+      {itemPickerFor === "create" ? (
+        <MaterialCategoryPicker
+          allowProductTypeCreation
+          // Rodrigo, 2026-08-21: "todos los agregar de donde sea deben
+          // permitir eso" -- mismos tipos que el resto de los pickers de
+          // acta (Entrada de la etapa, AdminAddActaLineControl). Solo
+          // RAW_MATERIAL queda afuera: el backend lo rechaza como producto
+          // resultante (start_stage_attempt, "la materia prima nunca es el
+          // producto de una etapa -- ya paso a formar parte de el").
+          allowedTypes={["SUPPLY", "COMPLEMENT", "WASTE", "FINISHED_PRODUCT"]}
+          description="Elige el item de inventario que resulta de esta etapa"
+          items={[...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems]}
+          onClose={() => setItemPickerFor(null)}
+          onSelect={(item) => {
+            setPendingProducto({
+              targetItemId: item.id,
+              label: item.item_type === "FINISHED_PRODUCT" ? (item.description ?? "").trim() || item.name : item.name,
+              unitCode: item.unit_code,
+            });
+            setPendingProductoQuantity("");
+            setPendingProductoMaterialCode("");
+            setItemPickerFor(null);
+          }}
+          onSelectProductType={(type) => {
+            const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
+            setPendingProducto({ productTypeId: type.id, label });
+            setPendingProductoQuantity("");
+            setPendingProductoMaterialCode(defaultMaterialCode);
+            setItemPickerFor(null);
+          }}
+          title="Elegir producto"
+        />
+      ) : itemPickerFor === "edit" && isCreatingNewItem ? (
         <CreateItemTabs
           initialTab="COMPLEMENT"
           onClose={() => setIsCreatingNewItem(false)}
@@ -2140,22 +2199,10 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             setIsCreatingNewItem(false);
             if (result.kind === "productType") {
               const label = result.productType.name?.trim() || `${result.productType.category_code}${result.productType.model_code}`;
-              if (itemPickerFor === "create") {
-                setPendingProducto({ productTypeId: result.productType.id, label });
-                setPendingProductoQuantity("");
-                setPendingProductoMaterialCode("");
-              } else {
-                applyProductChoice(itemPickerFor, { productTypeId: result.productType.id, label });
-              }
+              applyProductChoice("edit", { productTypeId: result.productType.id, label });
               setItemPickerFor(null);
             } else if (result.item.item_type === "COMPLEMENT") {
-              if (itemPickerFor === "create") {
-                setPendingProducto({ targetItemId: result.item.id, label: result.item.name, unitCode: result.item.unit_code });
-                setPendingProductoQuantity("");
-                setPendingProductoMaterialCode("");
-              } else {
-                applyProductChoice(itemPickerFor, { targetItemId: result.item.id, label: result.item.name });
-              }
+              applyProductChoice("edit", { targetItemId: result.item.id, label: result.item.name });
               setItemPickerFor(null);
             } else {
               // Materia prima/insumo/merma: no son destino valido de una
@@ -2165,7 +2212,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             }
           }}
         />
-      ) : itemPickerFor ? (() => {
+      ) : itemPickerFor === "edit" ? (() => {
         const tabsBar = (
           <div className="materialRow" style={{ gap: 8, flexWrap: "wrap" }}>
             <button
@@ -2195,13 +2242,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               items={complementItems}
               onClose={() => setItemPickerFor(null)}
               onSelect={(item) => {
-                if (itemPickerFor === "create") {
-                  setPendingProducto({ targetItemId: item.id, label: item.name, unitCode: item.unit_code });
-                  setPendingProductoQuantity("");
-                  setPendingProductoMaterialCode("");
-                } else {
-                  applyProductChoice(itemPickerFor, { targetItemId: item.id, label: item.name });
-                }
+                applyProductChoice("edit", { targetItemId: item.id, label: item.name });
                 setItemPickerFor(null);
               }}
               tabs={tabsBar}
@@ -2212,17 +2253,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
 
         return (
           <CatalogProductPicker
-            allowedTypeIds={allowedTypeIdsForPicker(itemPickerFor)}
+            allowedTypeIds={allowedTypeIdsForPicker("edit")}
             onClose={() => setItemPickerFor(null)}
             onSelect={(type) => {
               const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
-              if (itemPickerFor === "create") {
-                setPendingProducto({ productTypeId: type.id, label });
-                setPendingProductoQuantity("");
-                setPendingProductoMaterialCode("");
-              } else {
-                applyProductChoice(itemPickerFor, { productTypeId: type.id, label });
-              }
+              applyProductChoice("edit", { productTypeId: type.id, label });
               setItemPickerFor(null);
             }}
             subtitle="Tipos de producto terminado · elige uno"
@@ -2697,7 +2732,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       <th>Proceso</th>
                       <th>Responsable</th>
                       <th>Estado</th>
-                      <th className="num">Merma</th>
+                      <th className="num">Balance</th>
                       <th aria-label="Ver acta"></th>
                     </tr>
                   </thead>
@@ -2710,7 +2745,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                           <td>{attempt.process_name}</td>
                           <td>{attempt.started_by_name ?? "—"}</td>
                           <td><span className="statusBadge">{attempt.status === "APROBADA" ? "Aprobada" : attempt.status === "RECHAZADA" ? "Rechazada" : "En proceso"}</span></td>
-                          <td className="num">{attempt.merma_weight ? `${numericText(attempt.merma_weight)} ${attempt.unit_code ?? ""}` : "—"}</td>
+                          <td className="num">{balanceCell(selectedStatsRun, attempt.id)}</td>
                           <td><Eye aria-hidden="true" size={15} /></td>
                         </tr>
                       ))}

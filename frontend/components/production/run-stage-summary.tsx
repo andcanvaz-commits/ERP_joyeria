@@ -1,7 +1,7 @@
 "use client";
 
 import { Pager, usePagination } from "@/components/shared/pager";
-import { buildOrdenProduccion } from "@/lib/orden-produccion";
+import { buildOrdenProduccion, stageAttemptBalance } from "@/lib/orden-produccion";
 import type { ProductionRun } from "@/types/production";
 
 function num(value: string | number | null | undefined) {
@@ -34,6 +34,7 @@ type WasteRow = {
   final: number;
   hasFinal: boolean;
   waste: number;
+  wasteKind: "merma" | "extra";
   wastePercent: number;
   decisionLabel: "Aprobada" | "Rechazada" | null;
   decisionBy: string | null;
@@ -64,6 +65,7 @@ function rowsFromOldStages(run: ProductionRun): WasteRow[] {
       final,
       hasFinal,
       waste: Number(stage.waste_weight ?? 0),
+      wasteKind: "merma",
       wastePercent: Number(stage.waste_percent ?? 0),
       decisionLabel: decision ? (decision.decision === "APPROVED" ? "Aprobada" : "Rechazada") : null,
       decisionBy: decision?.decided_by_name ?? null,
@@ -79,8 +81,15 @@ function rowsFromStageAttempts(run: ProductionRun): WasteRow[] {
     const model = buildOrdenProduccion([run], attempt.id);
     const initialRow = model.entregaTotalRows[0];
     const initial = initialRow ? initialRow.quantity : 0;
-    const hasFinal = attempt.peso_al_finalizar !== null && attempt.peso_al_finalizar !== undefined;
-    const final = hasFinal ? Number(attempt.peso_al_finalizar) : initial;
+    // Peso final = Total recibido real de ESTE intento (misma fila que
+    // muestra el acta) -- Rodrigo, 2026-08-21: "con datos que ya no tienen
+    // sentido estar aqui". attempt.peso_al_finalizar es un campo muerto del
+    // flujo viejo (nunca lo escribe approve_stage_attempt del flujo actual),
+    // asi que salia siempre igual al peso inicial.
+    const finalRow = model.recepcionTotalRows.find((row) => row.kind === "total");
+    const hasFinal = Boolean(finalRow) && attempt.status !== "EN_PROCESO";
+    const final = finalRow ? finalRow.quantity : initial;
+    const balance = stageAttemptBalance(run, attempt.id);
     return {
       id: attempt.id,
       order: attempt.sequence_order,
@@ -91,8 +100,9 @@ function rowsFromStageAttempts(run: ProductionRun): WasteRow[] {
       hasInitial: Boolean(initialRow),
       final,
       hasFinal,
-      waste: Number(attempt.merma_weight ?? 0),
-      wastePercent: Number(attempt.merma_percent ?? 0),
+      waste: balance ? balance.quantity : 0,
+      wasteKind: balance?.kind ?? "merma",
+      wastePercent: balance && initial > 0 ? (balance.quantity / initial) * 100 : 0,
       decisionLabel: attempt.status === "APROBADA" ? "Aprobada" : attempt.status === "RECHAZADA" ? "Rechazada" : null,
       decisionBy: attempt.finished_by_name ?? null,
       decisionNote: attempt.rejection_reason ?? null,
@@ -114,7 +124,9 @@ function wasteRows(run: ProductionRun): WasteRow[] {
 export function RunWasteHero({ run }: { run: ProductionRun }) {
   const unit = run.raw_material_unit_code || "g";
   const rows = wasteRows(run);
-  const stagesWithWaste = rows.filter((row) => row.waste > 0);
+  // Solo merma real -- una etapa con extra (se recibio de mas) no es una
+  // perdida, no debe sumar aca como si lo fuera.
+  const stagesWithWaste = rows.filter((row) => row.wasteKind === "merma" && row.waste > 0);
   const totalWaste = stagesWithWaste.reduce((total, row) => total + row.waste, 0);
   const averageWaste = stagesWithWaste.length > 0 ? totalWaste / stagesWithWaste.length : 0;
   const worstStage = stagesWithWaste.reduce<WasteRow | null>(
@@ -175,7 +187,7 @@ export function RunStageSummaryTable({ run, pageSize = 5, print = false }: { run
             <th style={{ width: "24%" }}>Etapa</th>
             <th className="num" style={{ width: "13%" }}>Peso inicial</th>
             <th className="num" style={{ width: "13%" }}>Peso final</th>
-            <th className="num" style={{ width: "18%" }}>Merma</th>
+            <th className="num" style={{ width: "18%" }}>Balance</th>
             <th style={{ width: "32%" }}>Decisión</th>
           </tr>
         </thead>
@@ -187,7 +199,17 @@ export function RunStageSummaryTable({ run, pageSize = 5, print = false }: { run
               </td>
               <td className="num" style={row.hasInitial ? oneLine : { ...oneLine, ...muted }}>{row.pending ? "—" : `${num(row.initial)} ${unit}`}</td>
               <td className="num" style={row.hasFinal ? oneLine : { ...oneLine, ...muted }}>{row.pending ? "—" : `${num(row.final)} ${unit}`}</td>
-              <td className="num" style={oneLine}>{row.pending ? "—" : `${num(row.waste)} ${unit} · ${percentText(row.wastePercent)}%`}</td>
+              <td className="num" style={oneLine}>
+                {row.pending ? (
+                  "—"
+                ) : row.waste === 0 ? (
+                  `0 ${unit} · ${percentText(row.wastePercent)}%`
+                ) : (
+                  <span style={row.wasteKind === "extra" ? { color: "#1e8449" } : { color: "var(--danger)" }}>
+                    {row.wasteKind === "extra" ? "+" : "-"}{num(row.waste)} {unit} · {percentText(row.wastePercent)}%
+                  </span>
+                )}
+              </td>
               <td style={oneLine}>
                 {row.decisionLabel ? (
                   <span title={`${row.decisionLabel}${row.decisionBy ? ` · ${row.decisionBy}` : ""}${row.decisionNote ? ` — ${row.decisionNote}` : ""}`}>

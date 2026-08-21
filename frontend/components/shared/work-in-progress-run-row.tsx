@@ -1,6 +1,6 @@
 import { Eye } from "lucide-react";
 import type { ProductionRun } from "@/types/production";
-import { runCurrentStage, runCurrentWaste, runCurrentWeight } from "@/lib/production-run-helpers";
+import { runCurrentBalance, runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 
 function numText(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "0";
@@ -15,6 +15,14 @@ function dateLabel(value: string | null | undefined): string {
   return date.toLocaleString("es-EC", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+// -X (rojo) para merma, +X (verde) para extra, "0" neutro -- misma logica
+// que el resto de las vistas de balance (Rodrigo, 2026-08-21).
+function balanceText(balance: { quantity: number; kind: "merma" | "extra" }) {
+  if (balance.quantity === 0) return "0";
+  const text = `${balance.kind === "extra" ? "+" : "-"}${numText(balance.quantity)}`;
+  return balance.kind === "extra" ? <span style={{ color: "#1e8449" }}>{text}</span> : <span className="dangerText">{text}</span>;
+}
+
 /** Encabezado de la tabla "productos en proceso" compartido entre inventario
  * y produccion. */
 export function WorkInProgressTableHead() {
@@ -24,7 +32,7 @@ export function WorkInProgressTableHead() {
       <th>Proceso</th>
       <th className="num">Cantidad</th>
       <th className="num">Peso actual</th>
-      <th className="num">Merma actual</th>
+      <th className="num">Balance actual</th>
       <th>Etapa actual</th>
       <th>Fecha de inicio</th>
       <th aria-label="Acciones" />
@@ -58,7 +66,7 @@ export function WorkInProgressRunRow({
   onOpenFamily?: () => void;
 }) {
   const currentStage = runCurrentStage(run);
-  const currentWaste = runCurrentWaste(run);
+  const currentBalance = runCurrentBalance(run);
   const rootCode = run.root_production_code && run.root_production_code !== run.production_code
     ? run.root_production_code
     : null;
@@ -81,20 +89,20 @@ export function WorkInProgressRunRow({
       <td className="num">
         {onWasteHistory ? (
           <button className="iconTextButton" onClick={() => onWasteHistory(run)} title="Ver merma por fase" type="button">
-            {numText(String(currentWaste))} {run.raw_material_unit_code}
+            {balanceText(currentBalance)} {run.raw_material_unit_code}
           </button>
         ) : (
-          <>{numText(String(currentWaste))} {run.raw_material_unit_code}</>
+          <>{balanceText(currentBalance)} {run.raw_material_unit_code}</>
         )}
       </td>
       <td>
         {currentStage ? (
           onStageInfo ? (
             <button className="iconTextButton" onClick={() => onStageInfo(run)} title="Ver quien avanzo a esta etapa" type="button">
-              {currentStage.stage_name} ({currentStage.stage_order}/{run.stages.length})
+              {currentStage.name} ({currentStage.order}/{currentStage.total})
             </button>
           ) : (
-            <>{currentStage.stage_name} ({currentStage.stage_order}/{run.stages.length})</>
+            <>{currentStage.name} ({currentStage.order}/{currentStage.total})</>
           )
         ) : (
           "—"

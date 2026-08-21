@@ -45,6 +45,7 @@ export function ComplementsManager({
   const [newTypeName, setNewTypeName] = useState("");
   const [complTypeId, setComplTypeId] = useState("");
   const [complName, setComplName] = useState("");
+  const [complMaterial, setComplMaterial] = useState("");
   const [unitCode, setUnitCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -152,10 +153,11 @@ export function ComplementsManager({
         unit_code: unit,
         complement_type_id: complTypeId,
         description: null,
-        material_type: null,
+        material_type: complMaterial.trim() || null,
         purity: null,
       });
       setComplName("");
+      setComplMaterial("");
       setSuccess(`Complemento ${created.name} creado.`);
       invalidate();
       onCreated?.(created);
@@ -242,6 +244,10 @@ export function ComplementsManager({
             </div>
             <div className="formStepGrid colsPairAction">
               <label className="fieldGroup">
+                <span>Material</span>
+                <input className="field" disabled={isSaving} maxLength={80} onChange={(e) => setComplMaterial(e.target.value)} placeholder="Ej. Oro, Plata (opcional)" value={complMaterial} />
+              </label>
+              <label className="fieldGroup">
                 <span>Unidad</span>
                 <select className="field" disabled={isSaving} onChange={(e) => setUnitCode(e.target.value)} value={unitCode || unitOptions[0]?.value || ""}>
                   {unitOptions.map((unit) => (
@@ -279,6 +285,7 @@ export function ComplementsManager({
                   <tr>
                     <th style={{ width: 110 }}>SKU</th>
                     <th>Nombre</th>
+                    <th>Material</th>
                     <th>Unidad</th>
                     <th className="num">Stock</th>
                     <th aria-label="Acciones" />
@@ -289,6 +296,7 @@ export function ComplementsManager({
                     <tr key={item.id}>
                       <td><span className="orderCodeTag">{item.sku}</span></td>
                       <td>{item.name}</td>
+                      <td>{item.material_type ?? "—"}</td>
                       <td>{item.unit_code}</td>
                       <td className="num">{stockText(item.current_stock)}</td>
                       <td style={{ textAlign: "right" }}>
@@ -306,7 +314,7 @@ export function ComplementsManager({
                     </tr>
                   ))}
                   {!isLoading && drilledType.count === 0 ? (
-                    <tr><td colSpan={5}><div className="emptyState">Sin complementos en este tipo.</div></td></tr>
+                    <tr><td colSpan={6}><div className="emptyState">Sin complementos en este tipo.</div></td></tr>
                   ) : null}
                 </tbody>
               </table>

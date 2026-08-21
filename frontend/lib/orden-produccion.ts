@@ -28,8 +28,9 @@ export type ActaSideLine =
 // Fila de total/balance: mismo lugar que una fila real, con su propia
 // etiqueta ("Total entregado", "Total recibido", "Merma total") y un color
 // distinto segun el tipo -- un total no es lo mismo que una merma, no deben
-// leerse igual.
-export type ActaSideTotal = { label: string; quantity: number; unit: string; kind: "total" | "merma" };
+// leerse igual. "extra" (Rodrigo, 2026-08-21): se recibio MAS de lo
+// entregado -- verde, para distinguirlo de "merma" (rojo) a simple vista.
+export type ActaSideTotal = { label: string; quantity: number; unit: string; kind: "total" | "merma" | "extra" };
 
 /** ¿Esta fila del acta muestra el lápiz de editar? PLAN entra desde la
  * unificación (docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md,
@@ -42,13 +43,15 @@ export function isActaLineEditable(source: string): boolean {
   return source === "MANUAL" || source === "ADMIN_STOCK" || source === "PLAN";
 }
 
-/** ¿Esta fila se puede BORRAR? Más estrecho que editarla: el backend
- * (`delete_acta_line`) solo deja borrar `MANUAL` y `ADMIN_STOCK` -- una línea
- * `PLAN` es el rastro de lo que la etapa declaró, se corrige editándola o
- * revirtiendo la etapa entera. Sin este filtro el botón de borrar aparecía
- * junto al lápiz y solo servía para dar un error rojo. */
+/** ¿Esta fila se puede BORRAR? Rodrigo, 2026-08-21: "todas las filas que
+ * existan en el acta deben permitir editar o eliminar, mientras no se
+ * finalice un proceso" -- el backend (`delete_acta_line`) ahora borra
+ * `MANUAL`, `ADMIN_STOCK` y `PLAN` (antes una `PLAN` solo se podía editar).
+ * `AUTO` se queda afuera: es el rastro de un evento real ya ocurrido
+ * (histórico importado de papel, o flujo viejo a nivel de orden), no algo
+ * que se pueda deshacer sin mentir sobre lo que de verdad pasó. */
 export function isActaLineDeletable(source: string): boolean {
-  return source === "MANUAL" || source === "ADMIN_STOCK";
+  return source === "MANUAL" || source === "ADMIN_STOCK" || source === "PLAN";
 }
 
 export type OrdenProduccionModel = {
@@ -276,10 +279,10 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
 // Totales de UN intento de etapa: a diferencia de computeRunTotals (que
 // depende de materials_approved_at, un campo del flujo viejo que las
 // ordenes nuevas nunca setean), usa el propio intento -- attempt.unit_code
-// es la unidad de la materia prima de ESTA etapa, y attempt.merma_weight ya
-// viene calculado por el backend (finish_stage_attempt), no se recalcula
-// aca para no divergir de la regla real (Rodrigo, 2026-08-20: "misma
-// cantidad de gramos para el producto").
+// es la unidad de la materia prima de ESTA etapa. La fila de merma/extra solo
+// se muestra una vez APROBADO el intento (mismo momento en que el backend la
+// calcula de verdad, finish_stage_attempt) -- mientras sigue en curso no hay
+// nada definitivo que mostrar todavia.
 function computeStageAttemptTotals(
   attempt: StageAttempt | undefined,
   entregaLines: ActaSideLine[],
@@ -294,8 +297,20 @@ function computeStageAttemptTotals(
   const recepcionTotalRows: ActaSideTotal[] = recepcionUnit
     ? [{ label: "Total recibido", quantity: sumRowsByUnit(recepcionLines, recepcionUnit), unit: recepcionUnit, kind: "total" }]
     : [];
-  if (attempt?.merma_weight != null) {
-    recepcionTotalRows.push({ label: "Merma", quantity: num(attempt.merma_weight), unit: entregaUnit, kind: "merma" });
+  if (attempt?.status === "APROBADA") {
+    // Merma = entregado - recibido, en la MISMA unidad (la de la materia
+    // prima de la etapa) -- literal de las filas YA mostradas, no de
+    // attempt.merma_weight (que el backend guarda con floor en 0 y pierde el
+    // signo). Rodrigo, 2026-08-21: "hay casos donde no existe merma sino al
+    // contrario, se recibe mas de lo que se entrego" -- antes salia "Merma
+    // 0,00 g" sin explicar el sobrante real; ahora se muestra como "Extra
+    // recibido", en verde, en vez de esconderlo detras del floor.
+    const diff = entregaTotal - sumRowsByUnit(recepcionLines, entregaUnit);
+    recepcionTotalRows.push(
+      diff >= 0
+        ? { label: "Merma", quantity: diff, unit: entregaUnit, kind: "merma" }
+        : { label: "Extra recibido", quantity: -diff, unit: entregaUnit, kind: "extra" }
+    );
   }
 
   return {
@@ -337,6 +352,23 @@ export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemp
     entregaTotalRows,
     recepcionTotalRows,
   };
+}
+
+export type StageAttemptBalance = { quantity: number; unit: string; kind: "merma" | "extra" };
+
+/** Balance real (merma o extra) de UN intento de etapa -- misma fuente que la
+ * fila de totales del acta (buildRunActaSidesForStageAttempt), reusada para
+ * columnas resumen (ej. "Reporte de etapas" en production-dashboard.tsx) sin
+ * repetir la resta a mano ni arriesgar que diverjan. Rodrigo, 2026-08-21: "en
+ * los que haya extra debe salir tambien" -- ese listado solo leia
+ * attempt.merma_weight (que el backend guarda con floor en 0), asi que una
+ * etapa con extra salia con "0 g" en vez del sobrante real. null si el
+ * intento no esta aprobado o no hay nada que balancear todavia. */
+export function stageAttemptBalance(run: ProductionRun, attemptId: string): StageAttemptBalance | null {
+  const sides = buildRunActaSidesForStageAttempt(run, attemptId);
+  const row = sides.recepcionTotalRows.find((r) => r.kind === "merma" || r.kind === "extra");
+  if (!row) return null;
+  return { quantity: row.quantity, unit: row.unit, kind: row.kind as "merma" | "extra" };
 }
 
 /** Clave de familia: el folio raiz si esta corrida es parte de un split,

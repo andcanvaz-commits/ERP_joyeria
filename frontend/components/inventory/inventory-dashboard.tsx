@@ -50,11 +50,11 @@ import type { ProductionRun } from "@/types/production";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { RunStageSummaryTable, RunWasteHero } from "@/components/production/run-stage-summary";
 import { WorkInProgressRunRow, WorkInProgressTableHead, WORK_IN_PROGRESS_COLUMN_COUNT } from "@/components/shared/work-in-progress-run-row";
-import { runCurrentStage, runCurrentWaste, runCurrentWeight } from "@/lib/production-run-helpers";
+import { runCurrentBalance, runCurrentStage, runCurrentWeight } from "@/lib/production-run-helpers";
 
 const ITEM_TYPES: Array<{ value: InventoryItemType | "TODOS" | "ORDENES_TERMINADAS"; label: string }> = [
   { value: "RAW_MATERIAL", label: "Materia prima" },
-  { value: "WASTE", label: "Merma" },
+  { value: "WASTE", label: "Desperdicios" },
   { value: "SUPPLY", label: "Insumos" },
   { value: "COMPLEMENT", label: "Complementos" },
   { value: "WORK_IN_PROGRESS", label: "Productos en proceso" },
@@ -453,7 +453,7 @@ export function InventoryDashboard() {
   const [viewingMovement, setViewingMovement] = useState<InventoryMovement | null>(null);
   const [viewingRun, setViewingRun] = useState<ProductionRun | null>(null);
   const [printPreview, setPrintPreview] = useState<{ family: ProductionRun[]; mode: DocMode } | null>(null);
-  // Reclasificar merma ya recibida: mueve cantidad de un movimiento
+  // Reclasificar desperdicio ya recibido: mueve cantidad de un movimiento
   // INGRESO_PRODUCCION de item WASTE hacia otro item WASTE.
   const [reclassifyConfirm, setReclassifyConfirm] = useState<{ movement: InventoryMovement } | null>(null);
   const [reclassifyTargetId, setReclassifyTargetId] = useState<string | null>(null);
@@ -901,6 +901,21 @@ export function InventoryDashboard() {
   function runFinalWeight(run: ProductionRun): number | null {
     const actual = Number(run.actual_finished_weight ?? 0);
     if (actual > 0) return actual;
+    // Flujo nuevo (run.name presente): total_required_material/stages son
+    // del flujo viejo y siempre estan vacios aca (Rodrigo, 2026-08-21, daba
+    // "Cantidad —") -- el peso mientras esta en curso (o recien terminado,
+    // antes de que finish_order sete actual_finished_weight) es lo REAL
+    // recibido en la ultima etapa aprobada, misma fuente que Reporte de
+    // etapas (buildOrdenProduccion).
+    if (run.name) {
+      const approved = [...(run.stage_attempts ?? [])]
+        .filter((a) => a.status === "APROBADA")
+        .sort((a, b) => a.sequence_order - b.sequence_order);
+      const last = approved[approved.length - 1];
+      if (!last) return null;
+      const finalRow = buildOrdenProduccion([run], last.id).recepcionTotalRows.find((row) => row.kind === "total");
+      return finalRow && finalRow.quantity > 0 ? finalRow.quantity : null;
+    }
     const weighed = [...run.stages]
       .sort((left, right) => left.stage_order - right.stage_order)
       .filter((stage) => Number(stage.final_weight ?? 0) > 0);
@@ -914,6 +929,16 @@ export function InventoryDashboard() {
   function runQuantityText(run: ProductionRun) {
     const total = runFinalWeight(run);
     return total ? `${numericText(String(total))} g` : "—";
+  }
+
+  // Balance final del lote recibido: -X (rojo) para merma, +X (verde) para
+  // extra, "0 g" neutro -- misma logica que la columna "Balance" de Reporte
+  // de etapas y la fila de totales del acta (Rodrigo, 2026-08-21: "en los
+  // que haya extra debe salir tambien").
+  function balanceText(balance: { quantity: number; kind: "merma" | "extra" }) {
+    if (balance.quantity === 0) return "0 g";
+    const text = `${balance.kind === "extra" ? "+" : "-"}${numericText(String(balance.quantity))} g`;
+    return balance.kind === "extra" ? <span style={{ color: "#1e8449" }}>{text}</span> : <span className="dangerText">{text}</span>;
   }
 
   function archiveSuggestion(item: InventoryItem) {
@@ -1042,12 +1067,12 @@ export function InventoryDashboard() {
         reclassifyTargetId,
         reclassifyQuantity.trim() ? reclassifyQuantity.trim() : undefined,
       );
-      setSuccess("Merma reclasificada.");
+      setSuccess("Desperdicio reclasificado.");
       setReclassifyConfirm(null);
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["production"] });
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo reclasificar la merma.");
+      setError(nextError instanceof Error ? nextError.message : "No se pudo reclasificar el desperdicio.");
     } finally {
       setIsReclassifying(false);
     }
@@ -1355,7 +1380,7 @@ export function InventoryDashboard() {
   // propio lote real (stock, merma, conversion al catalogo), por eso se
   // reutiliza igual en la tabla principal y dentro de la ventana de partes.
   function renderReceivedRow(run: ProductionRun) {
-    const finalWaste = run.waste_weight ? Number(run.waste_weight) : runCurrentWaste(run);
+    const finalBalance = run.waste_weight ? { quantity: Number(run.waste_weight), kind: "merma" as const } : runCurrentBalance(run);
     const lotItem = items.find((item) => item.sku === run.production_code) ?? null;
     const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
     return (
@@ -1379,7 +1404,7 @@ export function InventoryDashboard() {
             title="Ver historial de merma por fase"
             type="button"
           >
-            {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
+            {balanceText(finalBalance)}
             {run.waste_percent ? ` · ${percentText(run.waste_percent)}%` : ""}
           </button>
         </td>
@@ -1869,10 +1894,10 @@ export function InventoryDashboard() {
         </article>
         <article
           className="card metric kpiCard"
-          {...openableProps(() => setItemFilter("WASTE"), "Ver merma")}
+          {...openableProps(() => setItemFilter("WASTE"), "Ver desperdicios")}
         >
           <Trash2 aria-hidden="true" size={22} />
-          <span className="metricLabel">Merma</span>
+          <span className="metricLabel">Desperdicios</span>
           <strong className="metricValue">{wasteCount}</strong>
         </article>
         <article
@@ -1934,7 +1959,7 @@ export function InventoryDashboard() {
                         : itemFilter === "ORDENES_TERMINADAS"
                           ? "Ordenes de produccion recibidas en inventario"
                           : itemFilter === "WASTE"
-                            ? "Merma recuperada de produccion, reclasificable entre items"
+                            ? "Desperdicios de produccion, reclasificables entre items"
                             : "Seguimiento de productos en proceso"}
               </p>
             </div>
@@ -2553,7 +2578,7 @@ export function InventoryDashboard() {
                     <th>#</th>
                     <th>Proceso</th>
                     <th className="num">Stock</th>
-                    <th className="num">Merma final</th>
+                    <th className="num">Balance final</th>
                     <th>Fecha de recepción</th>
                     <th aria-label="Acciones" />
                   </tr>
@@ -2567,7 +2592,7 @@ export function InventoryDashboard() {
                     }
                     // Familia con partes recibidas por separado: fila raiz
                     // colapsada, "+N partes" abre la ventana con cada lote.
-                    const finalWaste = root.waste_weight ? Number(root.waste_weight) : runCurrentWaste(root);
+                    const finalBalance = root.waste_weight ? { quantity: Number(root.waste_weight), kind: "merma" as const } : runCurrentBalance(root);
                     const lotItem = items.find((item) => item.sku === root.production_code) ?? null;
                     const lotStock = lotItem ? Number(lotItem.current_stock) : 0;
                     return (
@@ -2587,7 +2612,7 @@ export function InventoryDashboard() {
                           return `${numericText(String(units))} und${grams !== null ? ` · ${numericText(String(grams))} g` : ""}`;
                         })()}</td>
                         <td className="num">
-                          {finalWaste > 0 ? `${numericText(String(finalWaste))} g` : "0 g"}
+                          {balanceText(finalBalance)}
                           {root.waste_percent ? ` · ${percentText(root.waste_percent)}%` : ""}
                         </td>
                         <td>{root.received_at ? new Date(root.received_at).toLocaleDateString("es-EC", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
@@ -2614,7 +2639,7 @@ export function InventoryDashboard() {
                 <thead>
                   <tr>
                     <th className="num" style={{ width: 40 }}>#</th>
-                    <th>Merma</th>
+                    <th>Desperdicio</th>
                     <th className="num">Stock</th>
                     <th>Estado</th>
                     <th aria-label="Acciones" />
@@ -2640,7 +2665,7 @@ export function InventoryDashboard() {
                     );
                   })}
                   {!isLoading && displayItems.length === 0 ? (
-                    <tr><td colSpan={5}><div className="emptyState">Sin merma registrada.</div></td></tr>
+                    <tr><td colSpan={5}><div className="emptyState">Sin desperdicios registrados.</div></td></tr>
                   ) : null}
                   {isLoading ? (
                     <tr><td colSpan={5}><div className="emptyState">Cargando inventario...</div></td></tr>
@@ -3308,7 +3333,7 @@ export function InventoryDashboard() {
                     <th>#</th>
                     <th>Proceso</th>
                     <th className="num">Stock</th>
-                    <th className="num">Merma final</th>
+                    <th className="num">Balance final</th>
                     <th>Fecha de recepción</th>
                     <th aria-label="Acciones" />
                   </tr>
@@ -3437,25 +3462,63 @@ export function InventoryDashboard() {
       ) : null}
 
       {stageInfoRun ? (() => {
+        // Flujo nuevo (stageInfoRun.name presente): "etapa" = intento de
+        // etapa (stage_attempts), no ProductionRunStage -- Rodrigo,
+        // 2026-08-21: stageInfoRun.stages siempre vacio aca daba "etapa —
+        // de 0" y "Pendiente" para ordenes nuevas.
+        if (stageInfoRun.name) {
+          const attempts = [...(stageInfoRun.stage_attempts ?? [])].sort((a, b) => a.sequence_order - b.sequence_order);
+          const activeIndex = attempts.findIndex((a) => a.status === "EN_PROCESO");
+          const active = activeIndex >= 0 ? attempts[activeIndex] : null;
+          const previous = activeIndex > 0 ? attempts[activeIndex - 1] : null;
+          const advancedBy = previous ? previous.finished_by_name : stageInfoRun.started_by_name;
+          const advancedAt = active?.started_at ?? previous?.finished_at ?? stageInfoRun.started_at;
+          return (
+            <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de etapa actual">
+              <section className="modalWindow processViewWindow">
+                <div className="modalHeader">
+                  <div>
+                    <h2>{active?.process_name ?? "Etapa actual"}</h2>
+                    <p>
+                      {stageInfoRun.production_code ?? stageInfoRun.process_name} · etapa {active?.sequence_order ?? "—"} de {attempts.length}
+                    </p>
+                  </div>
+                  <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setStageInfoRun(null)} type="button">
+                    <X aria-hidden="true" size={18} />
+                  </button>
+                </div>
+                <div className="userPreviewGrid">
+                  <span><strong>Avanzó a esta etapa</strong>{advancedBy ?? "—"}</span>
+                  <span><strong>Cuándo</strong>{advancedAt ? productionTimeLabel(advancedAt) : "—"}</span>
+                  <span><strong>Estado</strong>{active ? "En proceso" : "—"}</span>
+                  {previous ? (
+                    <span><strong>Etapa anterior</strong>{previous.process_name}{previous.finished_by_name ? ` · finalizó ${previous.finished_by_name}` : ""}</span>
+                  ) : null}
+                </div>
+              </section>
+            </div>
+          );
+        }
         const stage = runCurrentStage(stageInfoRun);
         const previousStage = stage
           ? [...stageInfoRun.stages]
               .sort((left, right) => left.stage_order - right.stage_order)
-              .filter((candidate) => candidate.stage_order < stage.stage_order)
+              .filter((candidate) => candidate.stage_order < stage.order)
               .pop() ?? null
           : null;
         // Quien avanzo: el que finalizo la etapa anterior; en la primera etapa,
         // quien inicio la produccion.
         const advancedBy = previousStage ? previousStage.finished_by_name : stageInfoRun.started_by_name;
-        const advancedAt = stage?.started_at ?? previousStage?.finished_at ?? stageInfoRun.started_at;
+        const rawStage = stageInfoRun.stages.find((s) => s.stage_order === stage?.order) ?? null;
+        const advancedAt = rawStage?.started_at ?? previousStage?.finished_at ?? stageInfoRun.started_at;
         return (
           <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Detalle de etapa actual">
             <section className="modalWindow processViewWindow">
               <div className="modalHeader">
                 <div>
-                  <h2>{stage?.stage_name ?? "Etapa actual"}</h2>
+                  <h2>{stage?.name ?? "Etapa actual"}</h2>
                   <p>
-                    {stageInfoRun.production_code ?? stageInfoRun.process_name} · etapa {stage?.stage_order ?? "—"} de {stageInfoRun.stages.length}
+                    {stageInfoRun.production_code ?? stageInfoRun.process_name} · etapa {stage?.order ?? "—"} de {stageInfoRun.stages.length}
                   </p>
                 </div>
                 <button aria-label="Cerrar" className="iconOnlyButton" onClick={() => setStageInfoRun(null)} type="button">
@@ -3465,7 +3528,7 @@ export function InventoryDashboard() {
               <div className="userPreviewGrid">
                 <span><strong>Avanzó a esta etapa</strong>{advancedBy ?? "—"}</span>
                 <span><strong>Cuándo</strong>{advancedAt ? productionTimeLabel(advancedAt) : "—"}</span>
-                <span><strong>Estado</strong>{stage?.status === "EN_PROCESO" ? "En proceso" : stage?.status === "PENDIENTE" ? "Pendiente" : stage?.status ?? "—"}</span>
+                <span><strong>Estado</strong>{rawStage?.status === "EN_PROCESO" ? "En proceso" : rawStage?.status === "PENDIENTE" ? "Pendiente" : rawStage?.status ?? "—"}</span>
                 {previousStage ? (
                   <span><strong>Etapa anterior</strong>{previousStage.stage_name}{previousStage.finished_by_name ? ` · finalizó ${previousStage.finished_by_name}` : ""}</span>
                 ) : null}
@@ -4506,9 +4569,25 @@ export function InventoryDashboard() {
               </button>
             </div>
             {(() => {
+              // Flujo nuevo (viewingRun.name presente, mismo discriminador
+              // que usa run-stage-summary.tsx) usa stage_attempts -- viewingRun.stages
+              // es del flujo viejo y siempre esta vacio aca, daba "0 de 0"
+              // (Rodrigo, 2026-08-21: "con datos que ya no tienen sentido
+              // estar aqui... revisa para que vayan acorde a la nueva logica").
+              const isNewFlow = Boolean(viewingRun.name);
+              const attempts = [...(viewingRun.stage_attempts ?? [])].sort((a, b) => a.sequence_order - b.sequence_order);
               const stages = [...viewingRun.stages].sort((a, b) => a.stage_order - b.stage_order);
-              const current = stages.find((s) => s.status === "EN_PROCESO") ?? stages.find((s) => s.status === "PENDIENTE") ?? null;
-              const done = stages.filter((s) => s.status === "FINALIZADA").length;
+              const currentLabel = isNewFlow
+                ? (() => {
+                    const current = attempts.find((a) => a.status === "EN_PROCESO") ?? null;
+                    const done = attempts.filter((a) => a.status === "APROBADA").length;
+                    return current ? `Etapa ${current.sequence_order}. ${current.process_name}` : `${done} de ${attempts.length}`;
+                  })()
+                : (() => {
+                    const current = stages.find((s) => s.status === "EN_PROCESO") ?? stages.find((s) => s.status === "PENDIENTE") ?? null;
+                    const done = stages.filter((s) => s.status === "FINALIZADA").length;
+                    return current ? `Etapa ${current.stage_order}. ${current.stage_name}` : `${done} de ${stages.length}`;
+                  })();
               return (
                 <>
                   {viewingRun.status === "RECIBIDA" ? (
@@ -4525,7 +4604,7 @@ export function InventoryDashboard() {
                       <span><strong>Proceso</strong>{viewingRun.process_name}</span>
                       <span><strong>Cantidad</strong>{runQuantityText(viewingRun)}</span>
                       <span><strong>Creado por</strong>{viewingRun.created_by_name ?? "—"}{viewingRun.requested_at ? ` · ${productionTimeLabel(viewingRun.requested_at)}` : ""}</span>
-                      <span><strong>Etapas</strong>{current ? `Etapa ${current.stage_order}. ${current.stage_name}` : `${done} de ${stages.length}`}</span>
+                      <span><strong>Etapas</strong>{currentLabel}</span>
                     </div>
                   )}
                   {viewingRun.status !== "RECIBIDA" ? (
@@ -4607,11 +4686,11 @@ export function InventoryDashboard() {
       ) : null}
 
       {reclassifyConfirm ? (
-        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Reclasificar merma">
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Reclasificar desperdicio">
           <section className="modalWindow">
             <div className="modalHeader">
               <div>
-                <h2>Reclasificar merma</h2>
+                <h2>Reclasificar desperdicio</h2>
                 <p>
                   {numericText(reclassifyConfirm.movement.quantity)} {reclassifyConfirm.movement.unit_code} en{" "}
                   {reclassifyConfirm.movement.item.name}

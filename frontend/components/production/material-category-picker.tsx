@@ -2,25 +2,45 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { listComplementTypes } from "@/lib/inventory-api";
 import { listCatalogSegments } from "@/lib/catalog-api";
 import { listProductTypes, type ProductType } from "@/lib/product-types-api";
 import { Pager, usePagination } from "@/components/shared/pager";
 import { ToastNotice } from "@/components/ui/toast-notice";
+import { CreateItemTabs, type CreateItemTab } from "@/components/mantenimiento/create-item-tabs";
 import type { InventoryItem, InventoryItemType } from "@/types/inventory";
 
 const PAGE_SIZE = 10;
 const SIN_TIPO = "__sin_tipo__";
 const SIN_CATEGORIA = "__sin_categoria__";
+const TODOS_MATERIALES = "__todos__";
+const SIN_MATERIAL = "__sin_material__";
+// Tabs de tipo que tienen material_type con sentido para filtrar por
+// sub-pestaña de material (Rodrigo, 2026-08-21) -- RAW_MATERIAL/SUPPLY no
+// (son materiales en si mismos) y FINISHED_PRODUCT/WORK_IN_PROGRESS ya
+// muestran su material en columna propia.
+const MATERIAL_TAB_TYPES: InventoryItemType[] = ["WASTE", "COMPLEMENT"];
 
 const TAB_LABEL: Record<InventoryItemType, string> = {
   RAW_MATERIAL: "Materia prima",
   SUPPLY: "Insumos",
   COMPLEMENT: "Complementos",
-  WASTE: "Merma",
+  WASTE: "Desperdicios",
   WORK_IN_PROGRESS: "En proceso",
   FINISHED_PRODUCT: "Terminados",
+};
+
+// A que pestaña de CreateItemTabs manda "Crear en el mantenimiento" segun el
+// tab activo del picker -- Terminados no tiene alta manual directa de stock,
+// crea un Tipo de producto (igual que el picker de destino de la orden). En
+// proceso no tiene formulario: solo lo genera produccion.
+const CREATE_TAB_FOR_TYPE: Partial<Record<InventoryItemType, CreateItemTab>> = {
+  RAW_MATERIAL: "RAW_MATERIAL",
+  SUPPLY: "SUPPLY",
+  COMPLEMENT: "COMPLEMENT",
+  WASTE: "WASTE",
+  FINISHED_PRODUCT: "PRODUCT_TYPE",
 };
 
 /**
@@ -101,6 +121,8 @@ export function MaterialCategoryPicker({
   const [activeTab, setActiveTab] = useState<InventoryItemType>(allowedTypes[0]);
   const [search, setSearch] = useState("");
   const [drillType, setDrillType] = useState<string | null>(null);
+  const [activeMaterial, setActiveMaterial] = useState<string>(TODOS_MATERIALES);
+  const [isCreatingNewItem, setIsCreatingNewItem] = useState(false);
   const { data: complementTypes = [] } = useQuery({ queryKey: ["complement-types"], queryFn: listComplementTypes });
   const { data: segments = [] } = useQuery({ queryKey: ["catalog-segments"], queryFn: listCatalogSegments });
   const { data: productTypes = [] } = useQuery({
@@ -108,6 +130,32 @@ export function MaterialCategoryPicker({
     queryFn: listProductTypes,
     enabled: allowProductTypeCreation,
   });
+
+  const isMaterialTab = MATERIAL_TAB_TYPES.includes(activeTab);
+
+  // Items del tipo activo, sin filtrar por busqueda ni material todavia --
+  // base para calcular que sub-pestañas de material tiene sentido mostrar
+  // (Rodrigo, 2026-08-21: "solo si existe al menos uno" de ese material, y
+  // nada si todo es del mismo material o ninguno tiene).
+  const typeItems = useMemo(
+    () => items.filter((item) => item.item_type === activeTab && !item.archived_at && !(excludeIds ?? []).includes(item.id)),
+    [items, activeTab, excludeIds],
+  );
+
+  const materialTabs = useMemo(() => {
+    if (!isMaterialTab) return { options: [] as string[], hasSinMaterial: false };
+    const materials = new Set<string>();
+    let hasSinMaterial = false;
+    for (const item of typeItems) {
+      const material = (item.material_type ?? "").trim();
+      if (material) materials.add(material);
+      else hasSinMaterial = true;
+    }
+    return { options: [...materials].sort((a, b) => a.localeCompare(b)), hasSinMaterial };
+  }, [isMaterialTab, typeItems]);
+  // +1 por "Todos" (siempre presente) -- si con eso no hay mas de 2 pestañas
+  // en total, no hay nada real que filtrar.
+  const showMaterialTabs = materialTabs.options.length + (materialTabs.hasSinMaterial ? 1 : 0) > 1;
 
   const candidates = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -117,12 +165,17 @@ export function MaterialCategoryPicker({
           item.item_type === activeTab &&
           !item.archived_at &&
           !(excludeIds ?? []).includes(item.id) &&
+          (!showMaterialTabs || activeMaterial === TODOS_MATERIALES
+            ? true
+            : activeMaterial === SIN_MATERIAL
+              ? !(item.material_type ?? "").trim()
+              : (item.material_type ?? "").trim() === activeMaterial) &&
           (term === "" || item.name.toLowerCase().includes(term) || item.sku.toLowerCase().includes(term)),
       )
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, activeTab, excludeIds, search]);
+  }, [items, activeTab, excludeIds, search, showMaterialTabs, activeMaterial]);
 
-  const pager = usePagination(candidates, PAGE_SIZE, `${activeTab}-${search}`);
+  const pager = usePagination(candidates, PAGE_SIZE, `${activeTab}-${search}-${activeMaterial}`);
 
   // Complementos se agrupan por tipo (broches, cadenas base, etc.) y
   // terminados por categoria del catalogo -- una lista plana de piezas que
@@ -206,6 +259,29 @@ export function MaterialCategoryPicker({
   const typesPager = usePagination(typeGroups, PAGE_SIZE, activeTab);
   const piecesPager = usePagination(drilledGroup?.pieces ?? [], PAGE_SIZE, drillType ?? "");
 
+  // "Crear en el mantenimiento" (Rodrigo, 2026-08-21): el item que se busca
+  // agregar a la acta puede no existir todavia -- reemplaza el picker entero
+  // por CreateItemTabs (mismo patron que el picker de producto de la orden en
+  // production-dashboard.tsx) en vez de anidarlo, porque CreateItemTabs ya es
+  // su propio modalBackdrop a pantalla completa. Un item recien creado se
+  // selecciona solo de vuelta; un Tipo de producto (Terminados) solo si el
+  // llamador acepta ese resultado (onSelectProductType) -- si no, igual queda
+  // creado en Mantenimiento para usarse despues.
+  const createTab = CREATE_TAB_FOR_TYPE[activeTab];
+  if (isCreatingNewItem && createTab) {
+    return (
+      <CreateItemTabs
+        initialTab={createTab}
+        onClose={() => setIsCreatingNewItem(false)}
+        onCreated={(result) => {
+          setIsCreatingNewItem(false);
+          if (result.kind === "item") onSelect(result.item);
+          else onSelectProductType?.(result.productType);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label={title}>
       <section className="modalWindow">
@@ -280,21 +356,70 @@ export function MaterialCategoryPicker({
           <div style={{ marginTop: 10 }}>{extraStep}</div>
         ) : (
           <>
-            {allowedTypes.length > 1 ? (
-              <div className="rowActions" style={{ marginTop: 10 }}>
-                {allowedTypes.map((type) => (
+            {allowedTypes.length > 1 || createTab ? (
+              <div className="rowActions" style={{ justifyContent: "space-between", marginTop: 10 }}>
+                {allowedTypes.length > 1 ? (
+                  <div className="rowActions">
+                    {allowedTypes.map((type) => (
+                      <button
+                        className={`button${activeTab === type ? " buttonPrimary" : ""}`}
+                        key={type}
+                        onClick={() => {
+                          setActiveTab(type);
+                          setDrillType(null);
+                          setActiveMaterial(TODOS_MATERIALES);
+                        }}
+                        type="button"
+                      >
+                        {TAB_LABEL[type]}
+                      </button>
+                    ))}
+                  </div>
+                ) : <span />}
+                {createTab ? (
+                  // Chico y al margen derecho, misma fila que las pestañas de
+                  // tipo -- para que no se confunda con otra opcion de
+                  // inventario (Rodrigo, 2026-08-21).
                   <button
-                    className={`button${activeTab === type ? " buttonPrimary" : ""}`}
-                    key={type}
-                    onClick={() => {
-                      setActiveTab(type);
-                      setDrillType(null);
-                    }}
+                    className="button"
+                    onClick={() => setIsCreatingNewItem(true)}
+                    style={{ minHeight: 28, padding: "4px 10px" }}
                     type="button"
                   >
-                    {TAB_LABEL[type]}
+                    <Plus aria-hidden="true" size={12} /> Crear
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {showMaterialTabs ? (
+              <div className="rowActions" style={{ marginTop: 8 }}>
+                <button
+                  className={`button${activeMaterial === TODOS_MATERIALES ? " buttonPrimary" : ""}`}
+                  onClick={() => { setActiveMaterial(TODOS_MATERIALES); setDrillType(null); }}
+                  type="button"
+                >
+                  Todos
+                </button>
+                {materialTabs.options.map((material) => (
+                  <button
+                    className={`button${activeMaterial === material ? " buttonPrimary" : ""}`}
+                    key={material}
+                    onClick={() => { setActiveMaterial(material); setDrillType(null); }}
+                    type="button"
+                  >
+                    {material}
                   </button>
                 ))}
+                {materialTabs.hasSinMaterial ? (
+                  <button
+                    className={`button${activeMaterial === SIN_MATERIAL ? " buttonPrimary" : ""}`}
+                    onClick={() => { setActiveMaterial(SIN_MATERIAL); setDrillType(null); }}
+                    type="button"
+                  >
+                    Sin material
+                  </button>
+                ) : null}
               </div>
             ) : null}
 

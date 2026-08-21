@@ -20,7 +20,7 @@ const INVENTORY_TYPE_LABELS: Record<InventoryItemType, string> = {
   COMPLEMENT: "Complementos",
   WORK_IN_PROGRESS: "En proceso",
   FINISHED_PRODUCT: "Terminados",
-  WASTE: "Merma",
+  WASTE: "Desperdicios",
 };
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {

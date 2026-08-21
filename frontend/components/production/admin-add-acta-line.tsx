@@ -261,6 +261,9 @@ export function AdminAddActaLineControl({
   }
 
   const materials = segments.filter((s) => s.kind === "MATERIAL" && s.is_active);
+  // Rodrigo, 2026-08-21: "todos los productos existentes ahora mismo son de
+  // plata... actualiza eso" -- precargar PLATA en vez de un select vacio.
+  const defaultMaterialCode = materials.find((m) => m.label.trim().toUpperCase() === "PLATA")?.code ?? materials[0]?.code ?? "";
 
   return (
     <div className="actaDocAction">
@@ -280,7 +283,7 @@ export function AdminAddActaLineControl({
         }}
         onSelectProductType={(productType) => {
           setPendingProductType(productType);
-          setMaterialCode("");
+          setMaterialCode(defaultMaterialCode);
           setNewPieceUnit("");
           setQuantity("");
           setLocalError(null);

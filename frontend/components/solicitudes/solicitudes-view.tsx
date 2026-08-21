@@ -264,7 +264,16 @@ export function MessagesPanel({
 
   const resolvedTitle =
     title === null ? null : title ?? (role === "admin" ? "Mensajes con Producción/Inventario" : "Mensajes del Admin");
-  const allGroups = groupMessagesByDay(messages);
+  // Rodrigo, 2026-08-21: "cuando se aprueba o deniega un mensaje ya no
+  // aparece listado ahi sino se va directamente a historial, para mantener
+  // un orden visual mas limpio" -- la lista de arriba solo muestra pendientes
+  // (sin reply); una vez respondida, desaparece de aca y solo se ve
+  // navegando el calendario de Historial (que si sigue trayendo todo, ver
+  // calendarDayEntries/calendarSearchResults mas abajo). Al elegir una fecha
+  // desde el calendario esta lista pasa a mostrar TODO ese dia (pendientes y
+  // ya respondidas) -- ahi si es historial, no bandeja activa.
+  const pendingMessages = useMemo(() => messages.filter((m) => m.replies.length === 0), [messages]);
+  const allGroups = groupMessagesByDay(selectedDate ? messages : pendingMessages);
   const groups = selectedDate ? allGroups.filter((group) => group.key === selectedDate) : allGroups;
 
   return (
@@ -277,7 +286,13 @@ export function MessagesPanel({
         </div>
       ) : null}
       {localError ? <div className="alert alertError">{localError}</div> : null}
-      {role === "admin" ? (
+      {/* Enviar una solicitud nueva SOLO existe en la bandeja real del admin
+          (scope="solicitudes", esta pantalla) -- Rodrigo, 2026-08-21: "el
+          inventario no puede enviar solicitudes, eso solo desde el apartado
+          bandeja de mensajes que tiene el administrador". El panel embebido
+          en Inventario (scope="inventario") es solo para responder
+          (Aprobar/Rechazar), aunque quien lo abra sea la cuenta admin. */}
+      {role === "admin" && scope === "solicitudes" ? (
         <div className="messageComposer">
           <textarea
             className="field"

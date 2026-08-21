@@ -13,12 +13,13 @@ export type CreateItemResult =
   | { kind: "item"; item: InventoryItem }
   | { kind: "productType"; productType: ProductType };
 
-type Tab = "RAW_MATERIAL" | "SUPPLY" | "WASTE" | "COMPLEMENT" | "PRODUCT_TYPE";
+export type CreateItemTab = "RAW_MATERIAL" | "SUPPLY" | "WASTE" | "COMPLEMENT" | "PRODUCT_TYPE";
+type Tab = CreateItemTab;
 
 const TAB_LABEL: Record<Tab, string> = {
   RAW_MATERIAL: "Materia prima",
   SUPPLY: "Insumo",
-  WASTE: "Merma",
+  WASTE: "Desperdicios",
   COMPLEMENT: "Complemento",
   PRODUCT_TYPE: "Producto terminado",
 };
