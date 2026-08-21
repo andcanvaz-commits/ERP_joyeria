@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Boxes, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Hourglass, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CalendarDays, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, Eye, Factory, FileText, FlaskConical, Pencil, Play, Plus, Printer, Puzzle, Ruler, Save, Trash2, UserPlus, Users, X } from "lucide-react";
 import { ProductTypesManager } from "@/components/mantenimiento/product-types-manager";
 import { UnitsManager } from "@/components/mantenimiento/units-manager";
 import { RawMaterialsManager } from "@/components/mantenimiento/raw-materials-manager";
@@ -34,9 +34,10 @@ import {
 import { listInventoryItems } from "@/lib/inventory-api";
 import { listProductTypes } from "@/lib/product-types-api";
 import { listUnits } from "@/lib/units-api";
+import { listCatalogSegments } from "@/lib/catalog-api";
 import {
   addAdminActaLine,
-  allocateStageAttemptMaterial,
+  approveStageAttempt,
   cancelProductionRun,
   cancelProductionRunFamily,
   createProcess,
@@ -44,9 +45,9 @@ import {
   deleteActaLine,
   deleteProcess,
   finishOrder,
-  finishStageAttempt,
   listProcesses,
   listProductionRuns,
+  rejectStageAttempt,
   revertStageAttempt,
   startStageAttempt,
   updateActaLine,
@@ -70,7 +71,6 @@ import { useCountUp } from "@/hooks/use-count-up";
 type ProcessForm = {
   name: string;
   description: string;
-  qualityControl: boolean;
 };
 
 type FormMode = "create" | "edit";
@@ -102,7 +102,6 @@ const stageTypeLabel = (value: string): string =>
 const emptyProcessForm = (): ProcessForm => ({
   name: "",
   description: "",
-  qualityControl: false,
 });
 
 const emptyUserForm = () => ({
@@ -115,7 +114,6 @@ function processToForm(process: ProductionProcess): ProcessForm {
   return {
     name: process.name,
     description: process.description ?? "",
-    qualityControl: process.quality_control,
   };
 }
 
@@ -221,6 +219,15 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     refetchInterval: 30000,
     refetchOnWindowFocus: true,
   });
+  // Materiales del catalogo (oro/plata/etc.): mismo picker que ya usa
+  // AdminAddActaLineControl para crear una pieza de producto resultante que
+  // todavia no tiene item de inventario (elige material, la unidad la fija
+  // el backend en "g").
+  const { data: catalogMaterials = [] } = useQuery({
+    queryKey: ["catalog-segments"],
+    queryFn: listCatalogSegments,
+    enabled: Boolean(currentUser),
+  });
   const processes = bundle?.processes ?? EMPTY_PROCESSES;
   const users = bundle?.users ?? EMPTY_USERS;
   const runs = bundle?.runs ?? EMPTY_RUNS;
@@ -275,10 +282,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // banco al iniciar un intento de etapa -- ya no hay wizard de creacion con
   // proceso+material+insumos de un tiron.
   const [selectedProcessId, setSelectedProcessId] = useState("");
-  // Cantidad real del producto resultante, llenada a mano al FINALIZAR la
-  // etapa (Rodrigo, 2026-08-20 -- no debe salir pre-llena, el picker de
-  // iniciar etapa solo elige el destino, no la cantidad).
-  const [runQuantity, setRunQuantity] = useState("");
   const [isRunStagesOpen, setIsRunStagesOpen] = useState(false);
   // Reporte de etapas ya terminadas de la orden (codigo/proceso/responsable/
   // estado/merma) -- ventana aparte, ya no ocupa espacio arriba del acta.
@@ -303,22 +306,31 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   // Orden del flujo nuevo cuyo panel de etapas/acta esta abierto.
   const [dynamicOrderRun, setDynamicOrderRun] = useState<ProductionRun | null>(null);
   const [stageResponsableName, setStageResponsableName] = useState("");
-  // Materia prima + cantidad de la etapa que se esta por iniciar: sale
-  // directo como linea ENTREGA del acta apenas se crea el intento (Rodrigo:
-  // "eso sale directo en el entregados del acta").
-  const [isStageMaterialPickerOpen, setIsStageMaterialPickerOpen] = useState(false);
-  const [stagePickerPendingItem, setStagePickerPendingItem] = useState<InventoryItem | null>(null);
-  const [stagePickerQuantity, setStagePickerQuantity] = useState("");
-  const [stageMaterialItem, setStageMaterialItem] = useState<InventoryItem | null>(null);
-  const [stageMaterialQuantity, setStageMaterialQuantity] = useState("");
+  // Entrada de la etapa que se esta por iniciar: lista editable de items +
+  // cantidad -- cada fila sale directo como linea ENTREGA del acta apenas se
+  // crea el intento (Rodrigo: "eso sale directo en el entregados del acta").
+  const [entradaLines, setEntradaLines] = useState<Array<{ item: InventoryItem; quantity: string }>>([]);
+  const [isEntradaPickerOpen, setIsEntradaPickerOpen] = useState(false);
+  const [entradaPendingItem, setEntradaPendingItem] = useState<InventoryItem | null>(null);
+  const [entradaPendingQuantity, setEntradaPendingQuantity] = useState("");
   // El motivo de rechazo solo se pide cuando de verdad se va a rechazar (✘):
   // mientras tanto no hay decision tomada, no tiene sentido mostrarlo.
   const [isRejectingStage, setIsRejectingStage] = useState(false);
   const [stageAttemptRejectReason, setStageAttemptRejectReason] = useState("");
-  // Producto único elegido con los pickers (pieza o tipo de catálogo). "create"
-  // ahora alimenta "Asignar a producto terminado" del flujo nuevo (disponible
-  // en cualquier momento de la orden, seccion 4.3) -- ya no hay wizard.
-  const [orderProduct, setOrderProduct] = useState<ProductChoice | null>(null);
+  // Producto resultante de la etapa que se esta por iniciar: lista editable,
+  // igual que Entrada -- cada fila es una pieza real (targetItemId) o un tipo
+  // del catalogo sin stock todavia (productTypeId + materialCode, la unidad
+  // la fija el backend en "g"). "create" alimenta esta lista; "edit" sigue
+  // siendo el flujo viejo de "Editar producto resultante" (ProductChoice
+  // unico, sin cambios en este task).
+  const [productoLines, setProductoLines] = useState<
+    Array<{ targetItemId?: string; productTypeId?: string; materialCode?: string; label: string; unitCode?: string; quantity: string }>
+  >([]);
+  const [pendingProducto, setPendingProducto] = useState<
+    { targetItemId?: string; productTypeId?: string; label: string; unitCode?: string } | null
+  >(null);
+  const [pendingProductoQuantity, setPendingProductoQuantity] = useState("");
+  const [pendingProductoMaterialCode, setPendingProductoMaterialCode] = useState("");
   const [editPlanRun, setEditPlanRun] = useState<ProductionRun | null>(null);
   const [editPlanProduct, setEditPlanProduct] = useState<ProductChoice | null>(null);
   // Picker de pieza abierto: "create" = modal Asignar a producto terminado
@@ -821,7 +833,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       // siempre activo; si algun proceso viejo quedo inactivo, guardarlo de
       // nuevo lo reactiva (no hay otra forma de tocarlo sin este checkbox).
       is_active: true,
-      quality_control: form.qualityControl,
+      // El checkbox "Control de calidad" se quito del formulario (Rodrigo,
+      // 2026-08-20): ahora TODA etapa siempre tiene Aprobar/Rechazar, asi que
+      // se manda fijo en true para que los procesos nuevos queden
+      // consistentes con los viejos que ya lo tenian en true.
+      quality_control: true,
     };
   }
 
@@ -872,16 +888,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     );
   }
 
-  // Convierte el producto elegido al shape que espera el backend: solo se
-  // manda la clave del identificador realmente elegido (nunca ambas, nunca
-  // undefined) para no pisar la regla del backend de una sola referencia por fila.
-  function productRowToTarget(product: ProductChoice) {
-    const payload: { product_type_id?: string; target_item_id?: string } = {};
-    if (product.targetItemId) payload.target_item_id = product.targetItemId;
-    else if (product.productTypeId) payload.product_type_id = product.productTypeId;
-    return payload;
-  }
-
   // --- Flujo dinamico de produccion (docs/cambios-sistema-produccion.md seccion 4) ---
 
   async function handleCreateOrder() {
@@ -907,17 +913,48 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  function closeStageMaterialPicker() {
-    setIsStageMaterialPickerOpen(false);
-    setStagePickerPendingItem(null);
-    setStagePickerQuantity("");
+  function closeEntradaPicker() {
+    setIsEntradaPickerOpen(false);
+    setEntradaPendingItem(null);
+    setEntradaPendingQuantity("");
   }
 
-  function confirmStageMaterial() {
-    if (!stagePickerPendingItem || !stagePickerQuantity || Number(stagePickerQuantity) <= 0) return;
-    setStageMaterialItem(stagePickerPendingItem);
-    setStageMaterialQuantity(stagePickerQuantity);
-    closeStageMaterialPicker();
+  function confirmEntradaLine() {
+    if (!entradaPendingItem || !entradaPendingQuantity || Number(entradaPendingQuantity) <= 0) return;
+    setEntradaLines((prev) => [...prev, { item: entradaPendingItem, quantity: entradaPendingQuantity }]);
+    closeEntradaPicker();
+  }
+
+  function removeEntradaLine(index: number) {
+    setEntradaLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function closePendingProducto() {
+    setPendingProducto(null);
+    setPendingProductoQuantity("");
+    setPendingProductoMaterialCode("");
+  }
+
+  function confirmProductoLine() {
+    if (!pendingProducto) return;
+    if (!pendingProductoQuantity || Number(pendingProductoQuantity) <= 0) return;
+    if (pendingProducto.productTypeId && !pendingProductoMaterialCode) return;
+    setProductoLines((prev) => [
+      ...prev,
+      {
+        targetItemId: pendingProducto.targetItemId,
+        productTypeId: pendingProducto.productTypeId,
+        materialCode: pendingProducto.productTypeId ? pendingProductoMaterialCode : undefined,
+        label: pendingProducto.label,
+        unitCode: pendingProducto.unitCode,
+        quantity: pendingProductoQuantity,
+      },
+    ]);
+    closePendingProducto();
+  }
+
+  function removeProductoLine(index: number) {
+    setProductoLines((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleStartStageAttempt() {
@@ -930,54 +967,42 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       setError("Escribe el nombre del responsable.");
       return;
     }
-    if (!stageMaterialItem || !stageMaterialQuantity || Number(stageMaterialQuantity) <= 0) {
-      setError("Elige la materia prima de esta etapa.");
+    if (entradaLines.length === 0) {
+      setError("Agrega al menos una entrada para esta etapa.");
       return;
     }
-    if (!orderProduct || (!orderProduct.targetItemId && !orderProduct.productTypeId)) {
-      setError("Elige el producto resultante de esta etapa.");
+    if (productoLines.length === 0) {
+      setError("Agrega al menos un producto resultante de esta etapa.");
       return;
     }
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
-      // El backend valida stock disponible y hace split automatico si no
-      // alcanza (ver start_stage_attempt) -- ya no se fuerza el movimiento a
-      // mano con addAdminActaLine.
-      const materials = [{ item_id: stageMaterialItem.id, quantity: stageMaterialQuantity }];
+      // El backend valida stock disponible: si una entrada pide mas de lo
+      // que hay, rechaza la llamada entera (nada queda a medias, ver
+      // start_stage_attempt -- ya no hay split automatico).
+      const materials = entradaLines.map((line) => ({ item_id: line.item.id, quantity: line.quantity }));
+      const products = productoLines.map((line) => ({
+        target_item_id: line.targetItemId,
+        product_type_id: line.productTypeId,
+        material_code: line.materialCode,
+        quantity: line.quantity,
+      }));
       const started = await startStageAttempt(dynamicOrderRun.id, {
         process_id: selectedProcessId,
         responsable_name: stageResponsableName.trim(),
         materials,
-        product: productRowToTarget(orderProduct),
+        products,
       });
       setDynamicOrderRun(started);
       setSelectedProcessId("");
       setStageResponsableName("");
-      setStageMaterialItem(null);
-      setStageMaterialQuantity("");
-      setOrderProduct(null);
+      setEntradaLines([]);
+      setProductoLines([]);
       await reload();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "No se pudo iniciar la etapa.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleAllocateStageAttemptMaterial(attemptId: string) {
-    if (!dynamicOrderRun) return;
-    setError(null);
-    setSuccess(null);
-    setIsSaving(true);
-    try {
-      const updated = await allocateStageAttemptMaterial(attemptId);
-      setDynamicOrderRun(updated);
-      setSuccess("Material asignado.");
-      await reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo asignar el material.");
     } finally {
       setIsSaving(false);
     }
@@ -1022,28 +1047,40 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
     }
   }
 
-  async function handleFinishStageAttempt(attemptId: string, decision: "APROBADA" | "RECHAZADA") {
-    if (!runQuantity || Number(runQuantity) <= 0) {
-      setError("Ingresa la cantidad real del producto resultante.");
-      return;
-    }
+  // Aprobar CIERRA el intento (calcula la merma con los totales del acta) y
+  // Rechazar solo registra la decision con un motivo opcional -- el intento
+  // sigue abierto/editable, no navega afuera de la vista de la etapa
+  // (Rodrigo, 2026-08-20: el split automatico por falta de stock desaparecio,
+  // asi que ya no hace falta pedir la cantidad final aparte).
+  async function handleApproveStageAttempt(attemptId: string) {
     setError(null);
     setSuccess(null);
     setIsSaving(true);
     try {
-      const updated = await finishStageAttempt(attemptId, {
-        product_quantity: runQuantity,
-        decision,
-        rejection_reason: decision === "RECHAZADA" ? stageAttemptRejectReason.trim() || null : null,
-      });
+      const updated = await approveStageAttempt(attemptId);
       setDynamicOrderRun(updated);
-      setRunQuantity("");
-      setStageAttemptRejectReason("");
-      setIsRejectingStage(false);
-      setSuccess(decision === "APROBADA" ? "Etapa aprobada." : "Etapa rechazada.");
+      setSuccess("Etapa aprobada.");
       await reload();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo terminar la etapa.");
+      setError(nextError instanceof Error ? nextError.message : "No se pudo aprobar la etapa.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRejectStageAttempt(attemptId: string) {
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      const updated = await rejectStageAttempt(attemptId, { reason: stageAttemptRejectReason.trim() || null });
+      setDynamicOrderRun(updated);
+      setStageAttemptRejectReason("");
+      setIsRejectingStage(false);
+      setSuccess("Etapa rechazada.");
+      await reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "No se pudo rechazar la etapa.");
     } finally {
       setIsSaving(false);
     }
@@ -1171,14 +1208,11 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   // Aplica la selección de un picker (pieza o tipo) al producto único de la
-  // modal correspondiente ("create" = producto resultante obligatorio al
-  // iniciar una etapa, "edit" = Editar producto resultante del flujo viejo).
-  function applyProductChoice(kind: "create" | "edit", patch: ProductChoice) {
-    if (kind === "create") {
-      setOrderProduct(patch);
-    } else {
-      setEditPlanProduct(patch);
-    }
+  // modal "edit" (Editar producto resultante del flujo viejo) -- "create"
+  // (producto resultante al iniciar una etapa) ya no pasa por aca, alimenta
+  // directo la lista de producto resultante (ver pendingProducto).
+  function applyProductChoice(kind: "edit", patch: ProductChoice) {
+    setEditPlanProduct(patch);
   }
 
   // Ids de tipos permitidos para el CatalogProductPicker según modal. El
@@ -1189,12 +1223,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
   }
 
   // Contadores animados de la barra de metricas de produccion.
-  const waitingMaterialCount = useCountUp(
-    runs.reduce(
-      (total, run) => total + (run.stage_attempts ?? []).filter((a) => a.status === "PENDIENTE_MATERIAL").length,
-      0,
-    ),
-  );
   const inProgressCount = useCountUp(countOrders(inProgressRuns));
   const finishedCount = useCountUp(countOrders(finishedRuns));
 
@@ -1349,13 +1377,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
         <>
           {/* Stats bar */}
           <section className="productionStatsRow" aria-label="Metricas de produccion">
-            {waitingMaterialCount > 0 ? (
-              <div className="productionStatCard">
-                <Hourglass aria-hidden="true" size={20} />
-                <strong>{waitingMaterialCount}</strong>
-                <span>Etapas esperando material</span>
-              </div>
-            ) : null}
             <div className="productionStatCard">
               <Play aria-hidden="true" size={20} />
               <strong>{inProgressCount}</strong>
@@ -1632,9 +1653,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           proceso + producto resultante obligatorio (seccion 4). */}
       {dynamicOrderRun ? (() => {
         const runningAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.status === "EN_PROCESO") ?? null;
-        const waitingMaterialAttempts = (dynamicOrderRun.stage_attempts ?? []).filter(
-          (a) => a.status === "PENDIENTE_MATERIAL",
-        );
         const pastAttempts = (dynamicOrderRun.stage_attempts ?? [])
           .filter((a) => a.id !== runningAttempt?.id && a.status !== "PENDIENTE_MATERIAL")
           .sort((a, b) => a.sequence_order - b.sequence_order);
@@ -1673,38 +1691,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                   </button>
                 </div>
               </div>
-
-              {waitingMaterialAttempts.length > 0 ? (
-                <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-                  {waitingMaterialAttempts.map((attempt) => (
-                    <div className="solicitudCard" key={attempt.id}>
-                      <div className="solicitudCardHead">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <strong>
-                            {attempt.code ? <span className="orderCodeTag">{attempt.code}</span> : null}
-                            {attempt.process_name} · Falta material
-                          </strong>
-                          <span style={{ display: "block", color: "var(--muted)", fontSize: 13 }}>
-                            {attempt.materials
-                              .filter((m) => Number(m.quantity_pending) > 0)
-                              .map((m) => `${m.name ?? m.item_id}: faltan ${numericText(m.quantity_pending)} ${m.unit_code}`)
-                              .join(" · ")}
-                          </span>
-                        </div>
-                        <button
-                          className="button buttonPrimary"
-                          disabled={isSaving}
-                          onClick={() => void handleAllocateStageAttemptMaterial(attempt.id)}
-                          style={{ flexShrink: 0 }}
-                          type="button"
-                        >
-                          Asignar material disponible
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
 
               {runningAttempt ? (() => {
                 const orderId = dynamicOrderRun.id;
@@ -1766,40 +1752,16 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                             stageAttemptId={runningAttempt.id}
                           />
                         }
-                        recepcionPendingRow={
-                          runningAttempt.target_label
-                            ? {
-                                label: runningAttempt.target_label,
-                                onQuantityChange: setRunQuantity,
-                                quantity: runQuantity,
-                                disabled: isSaving,
-                              }
-                            : undefined
-                        }
                       />
                     </div>
 
                     {(() => {
-                      const attemptProcess = processes.find((p) => p.id === runningAttempt.process_id);
-                      const requiresQuality = attemptProcess?.quality_control ?? false;
-                      if (!requiresQuality) {
-                        return (
-                          <div className="modalActions">
-                            <button
-                              className="button buttonPrimary"
-                              disabled={isSaving}
-                              onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
-                              type="button"
-                            >
-                              Finalizar etapa
-                            </button>
-                          </div>
-                        );
-                      }
                       return (
                         <>
                           {/* Motivo de rechazo: solo aparece despues de tocar ✘, nunca antes
-                              (Rodrigo: "motivo de rechazo solo debe salir si se pone la x"). */}
+                              (Rodrigo: "motivo de rechazo solo debe salir si se pone la x").
+                              Rechazar NO cierra el intento (sigue EN_PROCESO, editable) --
+                              solo Aprobar lo cierra y calcula la merma con los totales del acta. */}
                           {isRejectingStage ? (
                             <label className="fieldGroup">
                               <span>Motivo de rechazo (opcional)</span>
@@ -1831,7 +1793,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                   aria-label="Confirmar rechazo"
                                   className="iconOnlyButton dangerIconButton"
                                   disabled={isSaving}
-                                  onClick={() => void handleFinishStageAttempt(runningAttempt.id, "RECHAZADA")}
+                                  onClick={() => void handleRejectStageAttempt(runningAttempt.id)}
                                   type="button"
                                 >
                                   <X aria-hidden="true" size={18} />
@@ -1852,7 +1814,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                                   aria-label="Aprobar etapa"
                                   className="iconOnlyButton successIconButton"
                                   disabled={isSaving}
-                                  onClick={() => void handleFinishStageAttempt(runningAttempt.id, "APROBADA")}
+                                  onClick={() => void handleApproveStageAttempt(runningAttempt.id)}
                                   type="button"
                                 >
                                   <Check aria-hidden="true" size={18} />
@@ -1897,16 +1859,43 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       value={stageResponsableName}
                     />
                   </label>
-                  <label className="fieldGroup">
-                    <span>Materia prima</span>
-                    <button className="button" disabled={isSaving} onClick={() => setIsStageMaterialPickerOpen(true)} type="button">
-                      {stageMaterialItem
-                        ? `${stageMaterialItem.name} · ${numericText(stageMaterialQuantity)} ${stageMaterialItem.unit_code}`
-                        : "Elegir..."}
+                  <div className="fieldGroup">
+                    <span>Entrada</span>
+                    {entradaLines.length > 0 ? (
+                      <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
+                        {entradaLines.map((line, index) => (
+                          <div className="materialRow" key={`${line.item.id}-${index}`} style={{ alignItems: "center", gap: 8 }}>
+                            <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                              {line.item.name} · {numericText(line.quantity)} {line.item.unit_code}
+                            </div>
+                            <button className="button" disabled={isSaving} onClick={() => removeEntradaLine(index)} type="button">
+                              Quitar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <button className="button" disabled={isSaving} onClick={() => setIsEntradaPickerOpen(true)} type="button">
+                      <Plus aria-hidden="true" size={14} />
+                      Agregar entrada
                     </button>
-                  </label>
-                  <label className="fieldGroup">
+                  </div>
+                  <div className="fieldGroup">
                     <span>Producto resultante</span>
+                    {productoLines.length > 0 ? (
+                      <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
+                        {productoLines.map((line, index) => (
+                          <div className="materialRow" key={`${line.targetItemId ?? line.productTypeId}-${index}`} style={{ alignItems: "center", gap: 8 }}>
+                            <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                              {line.label} · {numericText(line.quantity)} {line.unitCode ?? "g"}
+                            </div>
+                            <button className="button" disabled={isSaving} onClick={() => removeProductoLine(index)} type="button">
+                              Quitar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     <button
                       className="button"
                       disabled={isSaving}
@@ -1916,39 +1905,40 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                       }}
                       type="button"
                     >
-                      {orderProduct ? orderProduct.label : "Elegir..."}
+                      <Plus aria-hidden="true" size={14} />
+                      Agregar producto
                     </button>
-                  </label>
+                  </div>
                   <div className="modalActions">
                     <button className="button buttonPrimary" disabled={isSaving} onClick={() => void handleStartStageAttempt()} type="button">
                       Iniciar etapa
                     </button>
                   </div>
 
-                  {isStageMaterialPickerOpen ? (
+                  {isEntradaPickerOpen ? (
                     <MaterialCategoryPicker
                       allowedTypes={["RAW_MATERIAL", "SUPPLY", "COMPLEMENT", "WASTE", "FINISHED_PRODUCT"]}
                       description="Elige la materia prima o cualquier item de inventario que entra a esta etapa"
                       items={[...rawMaterials, ...orderSupplyItems, ...complementItems, ...wasteItems, ...finishedItems]}
-                      onClose={closeStageMaterialPicker}
+                      onClose={closeEntradaPicker}
                       onSelect={(item) => {
-                        setStagePickerPendingItem(item);
-                        setStagePickerQuantity("");
+                        setEntradaPendingItem(item);
+                        setEntradaPendingQuantity("");
                       }}
                       quantityStep={
-                        stagePickerPendingItem
+                        entradaPendingItem
                           ? {
-                              confirmLabel: "Elegir",
+                              confirmLabel: "Agregar entrada",
                               isSaving: false,
-                              item: stagePickerPendingItem,
-                              onBack: () => setStagePickerPendingItem(null),
-                              onConfirm: confirmStageMaterial,
-                              onQuantityChange: setStagePickerQuantity,
-                              quantity: stagePickerQuantity,
+                              item: entradaPendingItem,
+                              onBack: () => setEntradaPendingItem(null),
+                              onConfirm: confirmEntradaLine,
+                              onQuantityChange: setEntradaPendingQuantity,
+                              quantity: entradaPendingQuantity,
                             }
                           : undefined
                       }
-                      title="Materia prima o insumo de la etapa"
+                      title="Entrada de la etapa"
                     />
                   ) : null}
                 </section>
@@ -2151,10 +2141,22 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             setIsCreatingNewItem(false);
             if (result.kind === "productType") {
               const label = result.productType.name?.trim() || `${result.productType.category_code}${result.productType.model_code}`;
-              applyProductChoice(itemPickerFor, { productTypeId: result.productType.id, label });
+              if (itemPickerFor === "create") {
+                setPendingProducto({ productTypeId: result.productType.id, label });
+                setPendingProductoQuantity("");
+                setPendingProductoMaterialCode("");
+              } else {
+                applyProductChoice(itemPickerFor, { productTypeId: result.productType.id, label });
+              }
               setItemPickerFor(null);
             } else if (result.item.item_type === "COMPLEMENT") {
-              applyProductChoice(itemPickerFor, { targetItemId: result.item.id, label: result.item.name });
+              if (itemPickerFor === "create") {
+                setPendingProducto({ targetItemId: result.item.id, label: result.item.name, unitCode: result.item.unit_code });
+                setPendingProductoQuantity("");
+                setPendingProductoMaterialCode("");
+              } else {
+                applyProductChoice(itemPickerFor, { targetItemId: result.item.id, label: result.item.name });
+              }
               setItemPickerFor(null);
             } else {
               // Materia prima/insumo/merma: no son destino valido de una
@@ -2194,7 +2196,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
               items={complementItems}
               onClose={() => setItemPickerFor(null)}
               onSelect={(item) => {
-                applyProductChoice(itemPickerFor, { targetItemId: item.id, label: item.name });
+                if (itemPickerFor === "create") {
+                  setPendingProducto({ targetItemId: item.id, label: item.name, unitCode: item.unit_code });
+                  setPendingProductoQuantity("");
+                  setPendingProductoMaterialCode("");
+                } else {
+                  applyProductChoice(itemPickerFor, { targetItemId: item.id, label: item.name });
+                }
                 setItemPickerFor(null);
               }}
               tabs={tabsBar}
@@ -2209,7 +2217,13 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
             onClose={() => setItemPickerFor(null)}
             onSelect={(type) => {
               const label = type.name?.trim() || `${type.category_code}${type.model_code}`;
-              applyProductChoice(itemPickerFor, { productTypeId: type.id, label });
+              if (itemPickerFor === "create") {
+                setPendingProducto({ productTypeId: type.id, label });
+                setPendingProductoQuantity("");
+                setPendingProductoMaterialCode("");
+              } else {
+                applyProductChoice(itemPickerFor, { productTypeId: type.id, label });
+              }
               setItemPickerFor(null);
             }}
             subtitle="Tipos de producto terminado · elige uno"
@@ -2218,6 +2232,64 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
           />
         );
       })() : null}
+
+      {/* Confirmar cantidad (y material, si es un tipo del catalogo sin
+          stock todavia) del producto resultante recien elegido -- se agrega
+          a la lista al confirmar, no antes (Rodrigo, 2026-08-20: la cantidad
+          real de cada producto se declara al iniciar la etapa, ya no al
+          finalizarla). */}
+      {pendingProducto ? (
+        <div className="modalBackdrop modalBackdropTop" role="dialog" aria-modal="true" aria-label="Cantidad del producto resultante">
+          <section className="modalWindow">
+            <div className="modalHeader">
+              <div>
+                <h2>Producto resultante</h2>
+                <p className="panelText">{pendingProducto.label}</p>
+              </div>
+              <button aria-label="Cerrar" className="iconOnlyButton" onClick={closePendingProducto} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            {pendingProducto.productTypeId ? (
+              <label className="fieldGroup">
+                <span>Material</span>
+                <select
+                  className="field"
+                  onChange={(event) => setPendingProductoMaterialCode(event.target.value)}
+                  value={pendingProductoMaterialCode}
+                >
+                  <option value="">Material...</option>
+                  {catalogMaterials
+                    .filter((segment) => segment.kind === "MATERIAL" && segment.is_active)
+                    .map((segment) => (
+                      <option key={segment.id} value={segment.code}>{segment.label}</option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="fieldGroup">
+              <span>Cantidad{pendingProducto.unitCode ? ` (${pendingProducto.unitCode})` : pendingProducto.productTypeId ? " (g)" : ""}</span>
+              <input
+                autoFocus
+                className="field"
+                min="0.0001"
+                onChange={(event) => setPendingProductoQuantity(event.target.value)}
+                step="0.0001"
+                type="number"
+                value={pendingProductoQuantity}
+              />
+            </label>
+            <div className="modalActions">
+              <button className="button" onClick={closePendingProducto} type="button">
+                Cancelar
+              </button>
+              <button className="button buttonPrimary" onClick={confirmProductoLine} type="button">
+                Agregar producto
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {isRunStagesOpen && selectedRunForStages ? (
         <div className="modalBackdrop modalBackdropAnchor modalBackdropTop" role="dialog" aria-modal="true">
@@ -2836,16 +2908,6 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
                 onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
                 value={form.description}
               />
-            </label>
-
-            <label className="checkboxRow">
-              <input
-                checked={form.qualityControl}
-                disabled={isSaving}
-                onChange={(event) => setForm((current) => ({ ...current, qualityControl: event.target.checked }))}
-                type="checkbox"
-              />
-              <span>Control de calidad</span>
             </label>
 
             <div className="modalActions">
