@@ -31,6 +31,27 @@ def current_user(db_session) -> CurrentUser:
 
 
 @pytest.fixture()
+def admin_user(db_session) -> CurrentUser:
+    """Admin real: el unico que puede mover stock editando/borrando una linea
+    de acta enlazada a inventario a NIVEL DE ORDEN (ver update_acta_line/
+    delete_acta_line). Las lineas de un intento de etapa no piden admin."""
+    from backend.modules.auth.models import AuthUser
+
+    user_id = uuid.uuid4()
+    auth_user = AuthUser(
+        id=user_id,
+        username="admin_test",
+        email="admin@test.local",
+        password_hash="mock_hashed",
+        role="admin",
+    )
+    db_session.add(auth_user)
+    db_session.flush()
+
+    return CurrentUser(id=user_id, username="admin_test", role="admin", permissions=frozenset())
+
+
+@pytest.fixture()
 def production_service(db_session) -> ProductionService:
     return ProductionService(
         repository=ProductionProcessRepository(db_session),

@@ -140,7 +140,7 @@ def test_update_missing_line_raises_not_found(production_service, current_user):
 
 
 def test_update_recepcion_line_with_item_moves_stock_no_cap(
-    db_session, production_service, current_user, process, raw_material, target_complement
+    db_session, production_service, current_user, admin_user, process, raw_material, target_complement
 ):
     """Reemplaza al viejo test_update_recepcion_line_rejects_quantity_above_
     what_the_item_delivered: el tope "no mas de lo entregado"
@@ -149,7 +149,9 @@ def test_update_recepcion_line_with_item_moves_stock_no_cap(
     punto 1) -- mismo criterio que add_admin_acta_line, que ya no lo tenia.
     Editar una linea RECEPCION con item_id (aunque su source sea MANUAL)
     ahora mueve inventario real por el delta via _apply_admin_acta_line_delta,
-    sin techo."""
+    sin techo. Justamente porque mueve stock real, a nivel de orden
+    (stage_attempt_id nulo) la edicion es admin-only -- de ahi el admin_user
+    (Fix 2 del review final)."""
     from backend.modules.inventory.models import InventoryItem
 
     run = _create_run(production_service, current_user, process, raw_material, target_complement)
@@ -169,7 +171,7 @@ def test_update_recepcion_line_with_item_moves_stock_no_cap(
     db_session.refresh(supply)
     assert supply.current_stock == Decimal("0")  # add_acta_line (MANUAL) no mueve stock al crear
 
-    updated = production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("25")), current_user)
+    updated = production_service.update_acta_line(line_id, ActaLineUpdate(quantity=Decimal("25")), admin_user)
 
     edited = next(line for line in updated.acta_lines if line.id == line_id)
     assert edited.quantity == Decimal("25")

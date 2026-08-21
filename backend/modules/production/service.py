@@ -865,6 +865,72 @@ class ProductionService:
         except InventoryDomainError as exc:
             raise ProductionDomainError(f"'{line.label}': {exc}") from exc
 
+    def _line_has_own_movements(self, line: ProductionRunActaLine) -> bool:
+        """¿Esta linea puntual tiene movimientos propios, referenciados por
+        production_run_acta_line + su id? Es la senal exacta de "el stock de
+        esta linea se movio con el mecanismo NUEVO
+        (_apply_admin_acta_line_delta)", que es el unico que sabe revertir/
+        ajustar por delta. Una linea sin movimientos propios o nunca movio
+        nada, o lo movio con el mecanismo VIEJO (referencia a nivel de orden),
+        y ahi _apply_admin_acta_line_delta calcula net_so_far=0 -- que es
+        correcto en el primer caso y peligroso en el segundo (ver
+        _line_stock_lives_in_legacy_reference)."""
+        if line.item_id is None:
+            return False
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryMovement
+
+        return self.repository.session.execute(
+            select(InventoryMovement.id).where(
+                InventoryMovement.reference_type == "production_run_acta_line",
+                InventoryMovement.reference_id == line.id,
+            )
+        ).first() is not None
+
+    def _line_stock_lives_in_legacy_reference(self, line: ProductionRunActaLine) -> bool:
+        """¿El stock que muestra esta linea se movio de verdad, pero bajo la
+        referencia VIEJA (a nombre de la ORDEN, no de la linea)? Pasa con las
+        ordenes anteriores a este rediseno: la linea PLAN de materia prima
+        dice 100 g y esos 100 g se consumieron de verdad, pero el movimiento
+        lo emitio consume_material_for_production con
+        reference_type="production_run" + run.id (ver
+        InventoryService.reverse_production_consumption), o la conversion por
+        lote con reference_type="production_order".
+
+        Para _apply_admin_acta_line_delta esa linea "nunca movio nada"
+        (net_so_far=0), asi que editarle la cantidad emitiria un consumo
+        FRESCO por el total nuevo ENCIMA del original -- doble consumo de oro
+        real en una orden viva. Sin forma de conciliar los dos esquemas de
+        referencia, la edicion se rechaza."""
+        if line.item_id is None or self._line_has_own_movements(line):
+            return False
+        from sqlalchemy import select
+        from backend.modules.inventory.models import InventoryMovement
+
+        session = self.repository.session
+        legacy_consumption = session.execute(
+            select(InventoryMovement.id).where(
+                InventoryMovement.item_id == line.item_id,
+                InventoryMovement.movement_type.in_(["CONSUMO_PRODUCCION", "REVERSION_PRODUCCION"]),
+                InventoryMovement.reference_type == "production_run",
+                InventoryMovement.reference_id == line.run_id,
+            )
+        ).first()
+        if legacy_consumption is not None:
+            return True
+        # Lado RECEPCION del flujo viejo: el producto resultante no salio de
+        # esta linea sino del lote intermedio de la orden
+        # (get_or_create_finished_product_lot + convert_lot_to_product), con
+        # reference_type="production_order".
+        legacy_lot = session.execute(
+            select(InventoryMovement.id).where(
+                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
+                InventoryMovement.reference_type == "production_order",
+                InventoryMovement.reference_id == line.run_id,
+            )
+        ).first()
+        return legacy_lot is not None and line.side == ActaLineSide.RECEPCION
+
     def _resolve_or_create_finished_item(
         self, product_type_id: UUID, material_code: str | None, unit_code: str | None
     ) -> "InventoryItem":
@@ -1009,13 +1075,22 @@ class ProductionService:
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
 
+        # Gate admin-only: cualquier linea enlazada a inventario a NIVEL DE
+        # ORDEN (stage_attempt_id nulo), sin importar su source. Desde la
+        # unificacion (addendum, punto 1) editar la cantidad de una linea PLAN
+        # o MANUAL con item_id tambien mueve stock real -- dejar el gate solo
+        # en ADMIN_STOCK permitia mover inventario real a cualquiera con
+        # production.runs.update. Las lineas de un intento de etapa (flujo
+        # nuevo) siguen exentas a proposito: cualquiera del rol fusionado
+        # opera el acta de la etapa (seccion 2.3).
+        if (
+            line.item_id is not None
+            and line.stage_attempt_id is None
+            and current_user.role not in {"admin", "Admin"}
+        ):
+            raise ProductionDomainError("Solo el administrador puede editar una linea enlazada a inventario.")
+
         if line.source == ActaLineSource.ADMIN_STOCK:
-            # Lineas de un intento de etapa (flujo nuevo) mueven inventario
-            # directo sin ser admin-only (seccion 2.3: cualquiera del rol
-            # fusionado opera el acta). El gate admin sigue aplicando solo al
-            # boton "+" viejo (lineas de nivel de orden, stage_attempt_id nulo).
-            if line.stage_attempt_id is None and current_user.role not in {"admin", "Admin"}:
-                raise ProductionDomainError("Solo el administrador puede editar una linea enlazada a inventario.")
             if payload.label is not None or payload.unit_code is not None:
                 raise ProductionDomainError(
                     "Esta linea esta enlazada a un item de inventario: el detalle y la unidad no se editan a mano."
@@ -1023,6 +1098,13 @@ class ProductionService:
 
         if line.item_id is not None:
             if payload.quantity is not None:
+                if self._line_stock_lives_in_legacy_reference(line):
+                    raise ProductionDomainError(
+                        f"'{line.label}': esta linea pertenece a una orden del flujo viejo -- su consumo real "
+                        "quedo registrado a nombre de la orden, no de la linea, asi que editar la cantidad aca "
+                        "duplicaria el movimiento de inventario. Corrige el peso final de la etapa en su lugar, "
+                        "o cancela la orden si el dato esta mal de raiz."
+                    )
                 self._apply_admin_acta_line_delta(line, payload.quantity, current_user)
                 line.quantity = payload.quantity
             if payload.note is not None:
@@ -1045,14 +1127,21 @@ class ProductionService:
         """Borra una linea agregada a mano (libre o enlazada a inventario).
         Las lineas planeadas o generadas automaticamente por un evento real
         no se borran -- son el rastro de lo que de verdad paso; si estan
-        mal, se editan, no se esconden. Si la linea esta enlazada a
-        inventario (ADMIN_STOCK), revierte el stock neto antes de borrarla."""
+        mal, se editan, no se esconden. Si la linea esta enlazada a un item de
+        inventario (cualquier source), revierte el stock neto que esa linea
+        haya movido antes de borrarla -- desde la unificacion (addendum, punto
+        1) una linea MANUAL con item_id tambien mueve stock al editarle la
+        cantidad, asi que revertir solo las ADMIN_STOCK dejaba stock creado de
+        la nada al borrarla."""
         line = self.repository.get_acta_line(line_id)
         if line is None:
             raise ProductionNotFoundError("Linea de acta no encontrada.")
         if line.source not in (ActaLineSource.MANUAL, ActaLineSource.ADMIN_STOCK):
             raise ProductionDomainError("Solo se pueden borrar lineas agregadas a mano.")
-        if line.source == ActaLineSource.ADMIN_STOCK:
+        if line.item_id is not None:
+            # Mismo gate que update_acta_line: borrar una linea enlazada a
+            # inventario a nivel de orden mueve stock real, asi que es
+            # admin-only sin importar el source.
             if line.stage_attempt_id is None and current_user.role not in {"admin", "Admin"}:
                 raise ProductionDomainError("Solo el administrador puede borrar una linea enlazada a inventario.")
             self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
