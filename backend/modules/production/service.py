@@ -935,33 +935,48 @@ class ProductionService:
         if delta == 0:
             return
 
-        first_entrega = next((l for l in entrega_lines if l.item_id is not None), None)
-        raw_material = (
-            self.repository.session.get(InventoryItem, first_entrega.item_id)
-            if first_entrega is not None else None
-        )
-        material_type = (raw_material.material_type or raw_material.name) if raw_material else None
-        name = f"Merma {attempt.process_name}".strip()
-        item = self.repository.session.execute(
-            _select(InventoryItem).where(
-                InventoryItem.item_type == "WASTE",
-                InventoryItem.name == name,
-                InventoryItem.material_type == material_type,
+        # Si ESTE intento ya genero merma antes, el item real es el que ya
+        # recibio esos movimientos -- usarlo directo, nunca volver a adivinar
+        # el material_type a partir de entrega_lines[0] (que puede cambiar de
+        # orden o de item si se agregaron/editaron lineas despues de aprobar,
+        # y silenciosamente apuntar a OTRO item de merma con distinto
+        # material -- fantasma real: merma_weight se actualizaba pero el
+        # stock de Inventario > Merma quedaba huerfano en el item viejo).
+        if existing:
+            item = self.repository.session.get(InventoryItem, existing[0].item_id)
+            if item is None:
+                raise ProductionDomainError(
+                    f"No se pudo recalcular la merma de la etapa {attempt.code or attempt.id}: "
+                    "el item de merma que ya tenia movimientos ya no existe en inventario."
+                )
+        else:
+            first_entrega = next((l for l in entrega_lines if l.item_id is not None), None)
+            raw_material = (
+                self.repository.session.get(InventoryItem, first_entrega.item_id)
+                if first_entrega is not None else None
             )
-        ).scalar_one_or_none()
-        if item is None:
-            if delta <= 0:
-                return
-            item = InventoryItem(
-                item_type="WASTE",
-                name=name,
-                sku=self.inventory_service._generate_sku("WASTE"),
-                material_type=material_type,
-                purity=raw_material.purity if raw_material else None,
-                unit_code=attempt.unit_code or "g",
-            )
-            self.repository.add_item(item)
-            self.repository.flush()
+            material_type = (raw_material.material_type or raw_material.name) if raw_material else None
+            name = f"Merma {attempt.process_name}".strip()
+            item = self.repository.session.execute(
+                _select(InventoryItem).where(
+                    InventoryItem.item_type == "WASTE",
+                    InventoryItem.name == name,
+                    InventoryItem.material_type == material_type,
+                )
+            ).scalar_one_or_none()
+            if item is None:
+                if delta <= 0:
+                    return
+                item = InventoryItem(
+                    item_type="WASTE",
+                    name=name,
+                    sku=self.inventory_service._generate_sku("WASTE"),
+                    material_type=material_type,
+                    purity=raw_material.purity if raw_material else None,
+                    unit_code=attempt.unit_code or "g",
+                )
+                self.repository.add_item(item)
+                self.repository.flush()
 
         self.inventory_service.create_movement(
             InventoryMovementCreate(
