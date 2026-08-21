@@ -1102,6 +1102,11 @@ class ProductionService:
             )
             run.acta_lines.append(line)
             self.repository.flush()
+            if payload.stage_attempt_id is not None:
+                attempt = self.repository.session.get(ProductionRunStageAttempt, payload.stage_attempt_id)
+                if attempt is not None:
+                    self._recompute_stage_attempt_merma(attempt, current_user)
+                    self.repository.flush()
             return self._read_with_names(run)
 
         if self.inventory_service is None:
@@ -1155,6 +1160,11 @@ class ProductionService:
         self._apply_admin_acta_line_delta(line, payload.quantity, current_user)
         line.quantity = payload.quantity
         self.repository.flush()
+        if payload.stage_attempt_id is not None:
+            attempt = self.repository.session.get(ProductionRunStageAttempt, payload.stage_attempt_id)
+            if attempt is not None:
+                self._recompute_stage_attempt_merma(attempt, current_user)
+                self.repository.flush()
         return self._read_with_names(run)
 
     def add_acta_line(self, run_id: UUID, payload: ActaLineCreate, current_user: CurrentUser) -> ProductionRunRead:

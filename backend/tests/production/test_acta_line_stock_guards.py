@@ -551,3 +551,31 @@ def test_editing_entrega_line_on_approved_attempt_recomputes_merma(
     assert attempt_after2.merma_weight == Decimal("79")
     db_session.refresh(waste_item)
     assert waste_item.current_stock == Decimal("79")
+
+
+def test_adding_admin_line_on_approved_attempt_recomputes_merma(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """El mismo hueco que la edicion, pero por el boton Agregar
+    (add_admin_acta_line) en vez de update_acta_line -- tambien tiene que
+    recalcular la merma de un intento ya aprobado."""
+    from backend.modules.production.schemas import AdminActaLineCreate
+
+    run_id, attempt_id, _entrega_line, _recepcion_line = _started_attempt(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    result = production_service.approve_stage_attempt(attempt_id, current_user)
+    attempt = result.stage_attempts[0]
+    assert attempt.merma_weight == Decimal("49")  # 50 entregado - 1 producto
+
+    supply = _supply(db_session, "Insumo agregado tras aprobar", stock="30")
+    updated = production_service.add_admin_acta_line(
+        run_id,
+        AdminActaLineCreate(
+            side="RECEPCION", item_id=supply.id, quantity=Decimal("10"),
+            stage_attempt_id=attempt_id,
+        ),
+        current_user,
+    )
+    attempt_after = next(a for a in updated.stage_attempts if a.id == attempt_id)
+    assert attempt_after.merma_weight == Decimal("39")  # 49 - 10 recibido de mas
