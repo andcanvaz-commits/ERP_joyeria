@@ -96,6 +96,10 @@ export function ActaView({
 
               <div className="opBody">
                 <ActaSide
+                  // Nivel de orden: mover stock editando una linea enlazada a
+                  // inventario es admin-only en el backend, asi que el lapiz
+                  // solo aparece si de verdad lo es.
+                  canEditInventoryLines={isAdmin}
                   actions={
                     <AdminAddActaLineControl
                       isAdmin={isAdmin}
@@ -118,6 +122,7 @@ export function ActaView({
                 />
                 <div className="opDivider" aria-hidden="true" />
                 <ActaSide
+                  canEditInventoryLines={isAdmin}
                   fecha={sides.recepcionFecha}
                   footer={
                     <AdminAddActaLineControl

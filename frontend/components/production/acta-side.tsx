@@ -37,6 +37,7 @@ export function ActaSide({
   onDeleteLine,
   onError,
   pendingRow,
+  canEditInventoryLines = true,
 }: {
   title: string;
   lines: ActaSideLine[];
@@ -65,6 +66,14 @@ export function ActaSide({
     onQuantityChange: (value: string) => void;
     disabled?: boolean;
   };
+  // false: las filas enlazadas a un item de inventario se muestran sin lapiz
+  // ni papelera. Editarlas mueve stock real y a NIVEL DE ORDEN el backend solo
+  // se lo permite al admin (update_acta_line/delete_acta_line) -- ofrecer el
+  // icono a quien va a recibir "Solo el administrador..." es peor que no
+  // mostrarlo. Las filas libres (sin item_id) las sigue editando cualquiera.
+  // El acta de un intento de etapa no pasa por aca: ahi cualquiera del rol
+  // fusionado opera, y por eso el default es true.
+  canEditInventoryLines?: boolean;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSource, setEditingSource] = useState<string>("MANUAL");
@@ -230,7 +239,9 @@ export function ActaSide({
                   <td>
                     <span className="actaDocDetail">
                       {wrap(<span>{line.label}</span>)}
-                      {line.editable && (onEditLine || onDeleteLine) ? (
+                      {line.editable
+                      && (canEditInventoryLines || !line.item_id)
+                      && (onEditLine || onDeleteLine) ? (
                         <span className="actaDocRowActions">
                           <button aria-label={`Editar ${line.label}`} className="iconOnlyButton" disabled={isSaving} onClick={() => startEdit(line)} type="button">
                             <Pencil aria-hidden="true" size={12} />

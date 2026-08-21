@@ -237,7 +237,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   const entregaLines: ActaSideLine[] = sortRowsByFecha(
     lines
       .filter((l) => l.side === "ENTREGA")
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at }))
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at, item_id: l.item_id }))
   );
   // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
   // crear la orden) no es un recibo real -- se queda fuera de las filas
@@ -250,7 +250,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code ?? "", run.received_at),
     ...lines
       .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.stage_id == null)
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at })),
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at, item_id: l.item_id })),
   ]);
 
   const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run, entregaLines, recepcionLines);
@@ -386,7 +386,7 @@ function entregaRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "r
   return sortRowsByFecha(
     (run.acta_lines ?? [])
       .filter((line) => line.side === "ENTREGA")
-      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: isActaLineEditable(line.source), source: line.source, fecha: line.created_at }))
+      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: isActaLineEditable(line.source), source: line.source, fecha: line.created_at, item_id: line.item_id }))
   );
 }
 
@@ -413,7 +413,7 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
   return sortRowsByFecha(
     (run.acta_lines ?? [])
       .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null)
-      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: isActaLineEditable(line.source), source: line.source, fecha: line.created_at }))
+      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: isActaLineEditable(line.source), source: line.source, fecha: line.created_at, item_id: line.item_id }))
   );
 }
 
