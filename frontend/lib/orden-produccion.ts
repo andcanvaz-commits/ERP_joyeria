@@ -25,6 +25,26 @@ export type ActaSideLine =
 // leerse igual.
 export type ActaSideTotal = { label: string; quantity: number; unit: string; kind: "total" | "merma" };
 
+/** ¿Esta fila del acta muestra el lápiz de editar? PLAN entra desde la
+ * unificación (docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md,
+ * addendum punto 1): Entrada y Producto resultante se guardan como líneas
+ * `PLAN` y el backend ya las edita moviendo stock por el delta, igual que a
+ * una `ADMIN_STOCK`. Sin esto no aparecía el ícono y el usuario nunca podía
+ * corregir una cantidad mal cargada. `AUTO` (evento real ya ocurrido) sigue
+ * fuera: eso es rastro de lo que pasó, se corrige revirtiendo la etapa. */
+export function isActaLineEditable(source: string): boolean {
+  return source === "MANUAL" || source === "ADMIN_STOCK" || source === "PLAN";
+}
+
+/** ¿Esta fila se puede BORRAR? Más estrecho que editarla: el backend
+ * (`delete_acta_line`) solo deja borrar `MANUAL` y `ADMIN_STOCK` -- una línea
+ * `PLAN` es el rastro de lo que la etapa declaró, se corrige editándola o
+ * revirtiendo la etapa entera. Sin este filtro el botón de borrar aparecía
+ * junto al lápiz y solo servía para dar un error rojo. */
+export function isActaLineDeletable(source: string): boolean {
+  return source === "MANUAL" || source === "ADMIN_STOCK";
+}
+
 export type OrdenProduccionModel = {
   folio: string;
   procesoNombre: string;
@@ -217,7 +237,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
   const entregaLines: ActaSideLine[] = sortRowsByFecha(
     lines
       .filter((l) => l.side === "ENTREGA")
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at }))
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at }))
   );
   // La linea RECEPCION "PLAN" (producto resultante planeado, sembrada al
   // crear la orden) no es un recibo real -- se queda fuera de las filas
@@ -230,7 +250,7 @@ export function buildRunActaSides(run: ProductionRun): RunActaSides {
     ...productoRealLines(realProductsForRun(run), run.raw_material_unit_code ?? "", run.received_at),
     ...lines
       .filter((l) => l.side === "RECEPCION" && l.source !== "PLAN" && l.stage_id == null)
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at })),
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at })),
   ]);
 
   const { entregaTotalRows, recepcionTotalRows } = computeRunTotals(run, entregaLines, recepcionLines);
@@ -290,12 +310,12 @@ export function buildRunActaSidesForStageAttempt(run: ProductionRun, stageAttemp
   const entregaLines: ActaSideLine[] = sortRowsByFecha(
     lines
       .filter((l) => l.side === "ENTREGA")
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at, item_id: l.item_id }))
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at, item_id: l.item_id }))
   );
   const recepcionLines: ActaSideLine[] = sortRowsByFecha(
     lines
       .filter((l) => l.side === "RECEPCION")
-      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: l.source === "MANUAL" || l.source === "ADMIN_STOCK", source: l.source, fecha: l.created_at, item_id: l.item_id }))
+      .map((l) => ({ kind: "row" as const, id: l.id, label: l.label, quantity: l.quantity, unit_code: l.unit_code, editable: isActaLineEditable(l.source), source: l.source, fecha: l.created_at, item_id: l.item_id }))
   );
   const { entregaTotalRows, recepcionTotalRows } = computeStageAttemptTotals(attempt, entregaLines, recepcionLines);
   return {
@@ -366,7 +386,7 @@ function entregaRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: "r
   return sortRowsByFecha(
     (run.acta_lines ?? [])
       .filter((line) => line.side === "ENTREGA")
-      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source, fecha: line.created_at }))
+      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: isActaLineEditable(line.source), source: line.source, fecha: line.created_at }))
   );
 }
 
@@ -393,7 +413,7 @@ function recepcionRowsForRun(run: ProductionRun): Extract<ActaSideLine, { kind: 
   return sortRowsByFecha(
     (run.acta_lines ?? [])
       .filter((line) => line.side === "RECEPCION" && line.source !== "PLAN" && line.stage_id == null)
-      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: line.source === "MANUAL" || line.source === "ADMIN_STOCK", source: line.source, fecha: line.created_at }))
+      .map((line) => ({ kind: "row" as const, id: line.id, label: line.label, quantity: line.quantity, unit_code: line.unit_code, editable: isActaLineEditable(line.source), source: line.source, fecha: line.created_at }))
   );
 }
 

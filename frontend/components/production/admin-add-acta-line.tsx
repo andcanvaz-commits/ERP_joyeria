@@ -54,6 +54,7 @@ export function AdminAddActaLineControl({
   const [manualLabel, setManualLabel] = useState("");
   const [manualUnit, setManualUnit] = useState("");
   const [newPieceUnit, setNewPieceUnit] = useState("");
+  const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const { data: units = [] } = useQuery({
@@ -69,6 +70,16 @@ export function AdminAddActaLineControl({
 
   if (!isAdmin && !stageAttemptId) return null;
 
+  // Motivo obligatorio (auditoria): agregar algo del lado ENTREGA a una etapa
+  // que YA arranco es el caso "se me olvido la materia prima" -- el backend
+  // (add_admin_acta_line) rechaza la llamada sin `note`. RECEPCION nunca lo
+  // pide, y a nivel de orden (sin stage_attempt_id) tampoco: ahi no hay una
+  // etapa en curso que auditar. Ver
+  // docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md, punto 7.
+  const requiresNote = side === "ENTREGA" && Boolean(stageAttemptId);
+  const NOTE_LABEL = "Motivo";
+  const NOTE_MISSING = "Indica el motivo: esta línea se agrega después de haber iniciado la etapa.";
+
   function reset() {
     setMode("closed");
     setPendingItem(null);
@@ -78,6 +89,7 @@ export function AdminAddActaLineControl({
     setManualLabel("");
     setManualUnit("");
     setNewPieceUnit("");
+    setNote("");
     setLocalError(null);
   }
 
@@ -86,9 +98,19 @@ export function AdminAddActaLineControl({
       setLocalError("Elige el item y su cantidad.");
       return;
     }
+    if (requiresNote && !note.trim()) {
+      setLocalError(NOTE_MISSING);
+      return;
+    }
     setIsSaving(true);
     try {
-      await addAdminActaLine(runId, { side, item_id: pendingItem.id, quantity, stage_attempt_id: stageAttemptId });
+      await addAdminActaLine(runId, {
+        side,
+        item_id: pendingItem.id,
+        quantity,
+        stage_attempt_id: stageAttemptId,
+        note: note.trim() || null,
+      });
       // Espera a que la orden este al dia ANTES de cerrar/avisar (Rodrigo,
       // 2026-08-20: la suma no se veia actualizada antes de poder finalizar
       // etapa) -- si no se espera, el usuario puede seguir de largo con
@@ -138,9 +160,20 @@ export function AdminAddActaLineControl({
       setLocalError("Completa detalle, cantidad y unidad.");
       return;
     }
+    if (requiresNote && !note.trim()) {
+      setLocalError(NOTE_MISSING);
+      return;
+    }
     setIsSaving(true);
     try {
-      await addAdminActaLine(runId, { side, label: manualLabel.trim(), quantity, unit_code: manualUnit, stage_attempt_id: stageAttemptId });
+      await addAdminActaLine(runId, {
+        side,
+        label: manualLabel.trim(),
+        quantity,
+        unit_code: manualUnit,
+        stage_attempt_id: stageAttemptId,
+        note: note.trim() || null,
+      });
       await onChanged();
       reset();
       onSuccess("Línea agregada. No se descontó del inventario (es texto libre).");
@@ -207,6 +240,20 @@ export function AdminAddActaLineControl({
           <button className="button" disabled={isSaving} onClick={reset} type="button">Cancelar</button>
           <button className="button buttonPrimary" disabled={isSaving} onClick={() => void submitManual()} type="button">Agregar</button>
         </div>
+        {requiresNote ? (
+          <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 8 }}>
+            <input
+              aria-label={NOTE_LABEL}
+              className="field"
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={submitOnEnter}
+              placeholder="Motivo (por qué se agrega con la etapa ya iniciada)"
+              style={{ flex: 1 }}
+              type="text"
+              value={note}
+            />
+          </div>
+        ) : null}
         <p className="panelText">Esta línea no descuenta del inventario real.</p>
         {localError ? <p className="panelText" style={{ color: "var(--danger, #b3261e)" }}>{localError}</p> : null}
       </div>
@@ -228,6 +275,7 @@ export function AdminAddActaLineControl({
         onSelect={(item) => {
           setPendingItem(item);
           setQuantity("");
+          setNote("");
           setLocalError(null);
         }}
         onSelectProductType={(productType) => {
@@ -253,6 +301,17 @@ export function AdminAddActaLineControl({
                   setLocalError(null);
                 },
                 quantity,
+                note: requiresNote
+                  ? {
+                      label: NOTE_LABEL,
+                      onChange: (value) => {
+                        setNote(value);
+                        setLocalError(null);
+                      },
+                      placeholder: "Motivo (por qué se agrega con la etapa ya iniciada)",
+                      value: note,
+                    }
+                  : undefined,
               }
             : undefined
         }

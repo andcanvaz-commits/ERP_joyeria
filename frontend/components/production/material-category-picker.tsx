@@ -66,6 +66,17 @@ export function MaterialCategoryPicker({
     onBack: () => void;
     confirmLabel?: string;
     isSaving?: boolean;
+    // Campo extra obligatorio para auditoria (motivo de un agregado hecho
+    // DESPUES de que la etapa ya arranco -- ver AdminAddActaLineControl). Va
+    // aca adentro y no como hermano del picker porque este es un modal
+    // position:fixed: cualquier cosa renderizada afuera queda tapada por el
+    // overlay y el usuario nunca la ve.
+    note?: {
+      value: string;
+      onChange: (value: string) => void;
+      label: string;
+      placeholder?: string;
+    };
   };
   // Paso alternativo controlado enteramente por el llamador (ej. elegir
   // material+unidad+cantidad para una pieza de catalogo sin stock todavia):
@@ -215,34 +226,55 @@ export function MaterialCategoryPicker({
         ) : null}
 
         {quantityStep ? (
-          <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 10 }}>
-            <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
-              {quantityStep.item.name} · {quantityStep.item.unit_code}
+          <div style={{ marginTop: 10 }}>
+            <div className="materialRow" style={{ alignItems: "flex-start", gap: 8 }}>
+              <div className="field" style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                {quantityStep.item.name} · {quantityStep.item.unit_code}
+              </div>
+              <input
+                aria-label="Cantidad"
+                autoFocus
+                className="field"
+                min="0.0001"
+                onChange={(e) => quantityStep.onQuantityChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !quantityStep.isSaving) {
+                    e.preventDefault();
+                    quantityStep.onConfirm();
+                  }
+                }}
+                placeholder={quantityStep.item.unit_code}
+                step="0.0001"
+                style={{ width: 110 }}
+                type="number"
+                value={quantityStep.quantity}
+              />
+              <button className="button" disabled={quantityStep.isSaving} onClick={quantityStep.onBack} type="button">
+                Elegir otro
+              </button>
+              <button className="button buttonPrimary" disabled={quantityStep.isSaving} onClick={quantityStep.onConfirm} type="button">
+                {quantityStep.confirmLabel ?? "Confirmar"}
+              </button>
             </div>
-            <input
-              aria-label="Cantidad"
-              autoFocus
-              className="field"
-              min="0.0001"
-              onChange={(e) => quantityStep.onQuantityChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !quantityStep.isSaving) {
-                  e.preventDefault();
-                  quantityStep.onConfirm();
-                }
-              }}
-              placeholder={quantityStep.item.unit_code}
-              step="0.0001"
-              style={{ width: 110 }}
-              type="number"
-              value={quantityStep.quantity}
-            />
-            <button className="button" disabled={quantityStep.isSaving} onClick={quantityStep.onBack} type="button">
-              Elegir otro
-            </button>
-            <button className="button buttonPrimary" disabled={quantityStep.isSaving} onClick={quantityStep.onConfirm} type="button">
-              {quantityStep.confirmLabel ?? "Confirmar"}
-            </button>
+            {quantityStep.note ? (
+              <div className="materialRow" style={{ alignItems: "flex-start", gap: 8, marginTop: 8 }}>
+                <input
+                  aria-label={quantityStep.note.label}
+                  className="field"
+                  onChange={(e) => quantityStep.note?.onChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !quantityStep.isSaving) {
+                      e.preventDefault();
+                      quantityStep.onConfirm();
+                    }
+                  }}
+                  placeholder={quantityStep.note.placeholder ?? quantityStep.note.label}
+                  style={{ flex: 1 }}
+                  type="text"
+                  value={quantityStep.note.value}
+                />
+              </div>
+            ) : null}
           </div>
         ) : extraStep ? (
           <div style={{ marginTop: 10 }}>{extraStep}</div>

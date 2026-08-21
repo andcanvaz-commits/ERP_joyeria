@@ -1654,7 +1654,7 @@ export function ProductionDashboard({ variant = "production" }: { variant?: "pro
       {dynamicOrderRun ? (() => {
         const runningAttempt = (dynamicOrderRun.stage_attempts ?? []).find((a) => a.status === "EN_PROCESO") ?? null;
         const pastAttempts = (dynamicOrderRun.stage_attempts ?? [])
-          .filter((a) => a.id !== runningAttempt?.id && a.status !== "PENDIENTE_MATERIAL")
+          .filter((a) => a.id !== runningAttempt?.id)
           .sort((a, b) => a.sequence_order - b.sequence_order);
         const isTerminada = dynamicOrderRun.status === "TERMINADA" || dynamicOrderRun.status === "CANCELADA";
         return (

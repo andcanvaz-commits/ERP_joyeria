@@ -8,6 +8,7 @@ import {
   buildFechaRowSpans,
   formatDocDate,
   formatGramos,
+  isActaLineDeletable,
 } from "@/lib/orden-produccion";
 
 const DASH = "—";
@@ -71,6 +72,12 @@ export function ActaSide({
   const [editQuantity, setEditQuantity] = useState("");
   const [editUnit, setEditUnit] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  // Lineas enlazadas a un item de inventario (ADMIN_STOCK del boton "+", y
+  // PLAN: Entrada/Producto resultante de la etapa): solo se edita la
+  // cantidad. El detalle y la unidad los manda el item real -- el backend los
+  // rechaza (ADMIN_STOCK) o los ignora (PLAN con item_id), asi que ofrecer
+  // esos campos seria mentirle al usuario.
+  const quantityOnlyEdit = editingSource === "ADMIN_STOCK" || editingSource === "PLAN";
 
   function startEdit(line: Extract<ActaSideLine, { kind: "row" }>) {
     setEditingId(line.id);
@@ -85,13 +92,13 @@ export function ActaSide({
       onError?.("Indica la cantidad de la linea.");
       return;
     }
-    if (editingSource !== "ADMIN_STOCK" && (!editLabel.trim() || !editUnit.trim())) {
+    if (!quantityOnlyEdit && (!editLabel.trim() || !editUnit.trim())) {
       onError?.("Completa detalle, cantidad y unidad de la linea.");
       return;
     }
     setIsSaving(true);
     try {
-      const patch = editingSource === "ADMIN_STOCK"
+      const patch = quantityOnlyEdit
         ? { quantity: editQuantity }
         : { label: editLabel.trim(), quantity: editQuantity, unit_code: editUnit.trim() };
       await onEditLine?.(lineId, patch);
@@ -173,7 +180,7 @@ export function ActaSide({
                         type="number"
                         value={editQuantity}
                       />
-                      {editingSource === "ADMIN_STOCK" ? (
+                      {quantityOnlyEdit ? (
                         <span>{editUnit}</span>
                       ) : (
                         <input
@@ -187,7 +194,7 @@ export function ActaSide({
                   </td>
                   <td>
                     <span className="actaDocInputs">
-                      {editingSource === "ADMIN_STOCK" ? (
+                      {quantityOnlyEdit ? (
                         <span style={{ flex: 1 }}>{editLabel}</span>
                       ) : (
                         <input
@@ -228,15 +235,17 @@ export function ActaSide({
                           <button aria-label={`Editar ${line.label}`} className="iconOnlyButton" disabled={isSaving} onClick={() => startEdit(line)} type="button">
                             <Pencil aria-hidden="true" size={12} />
                           </button>
-                          <button
-                            aria-label={`Borrar ${line.label}`}
-                            className="iconOnlyButton dangerIconButton"
-                            disabled={isSaving}
-                            onClick={() => void handleDelete(line.id)}
-                            type="button"
-                          >
-                            <Trash2 aria-hidden="true" size={12} />
-                          </button>
+                          {isActaLineDeletable(line.source) ? (
+                            <button
+                              aria-label={`Borrar ${line.label}`}
+                              className="iconOnlyButton dangerIconButton"
+                              disabled={isSaving}
+                              onClick={() => void handleDelete(line.id)}
+                              type="button"
+                            >
+                              <Trash2 aria-hidden="true" size={12} />
+                            </button>
+                          ) : null}
                         </span>
                       ) : null}
                     </span>

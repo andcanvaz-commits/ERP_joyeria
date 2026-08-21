@@ -33,9 +33,12 @@ export type StageAttempt = {
   attempt_no_for_process: number;
   code?: string | null;
   responsable_name?: string | null;
-  // PENDIENTE_MATERIAL: split automatico por falta de stock al iniciar la
-  // etapa -- ver allocate_stage_attempt_material para asignarle el resto.
-  status: "EN_PROCESO" | "APROBADA" | "RECHAZADA" | "PENDIENTE_MATERIAL";
+  // Ya no existe PENDIENTE_MATERIAL: el split automatico por falta de stock
+  // se elimino (docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md)
+  // y no queda ningun intento en ese estado en la base real. La constante sigue
+  // definida en el backend (StageAttemptStatus.WAITING_MATERIAL) solo como red
+  // de seguridad para datos historicos.
+  status: "EN_PROCESO" | "APROBADA" | "RECHAZADA";
   rejection_reason?: string | null;
   peso_al_finalizar?: string | null;
   unit_code?: string | null;

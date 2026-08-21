@@ -123,7 +123,6 @@ export function startStageAttempt(
     process_id: string;
     responsable_name: string;
     materials?: Array<{ item_id: string; quantity: string }>;
-    // Solo el destino -- la cantidad real se llena al finalizar (Rodrigo, 2026-08-20).
     products: Array<{ product_type_id?: string | null; target_item_id?: string | null; material_code?: string | null; quantity: string }>;
   },
 ) {

@@ -7,7 +7,6 @@ import { useQuery } from "@tanstack/react-query";
 import { BarChart3, Boxes, ChevronUp, ClipboardList, Factory, FileText, KeyRound, LayoutDashboard, LogOut, Menu, UserCircle, Wrench } from "lucide-react";
 import { isAuthenticated } from "@/lib/api";
 import { getCurrentUser, logout } from "@/lib/auth-api";
-import { listProductionRuns } from "@/lib/production-api";
 import { listMessages } from "@/lib/messages-api";
 import { countUnreadMessages, lastSeenQueryFn, lastSeenQueryKey } from "@/lib/messages-read-state";
 import { allowedRoutes, canAccess, homeRoute, normalizeRole } from "@/lib/roles";
@@ -76,29 +75,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const role = normalizeRole(currentUser?.role);
   const visibleNav = currentUser ? navItems.filter((item) => allowedRoutes(role).includes(item.href)) : [];
 
-  // Ordenes de produccion (cache compartida con Solicitudes). Se refresca sola
-  // cada 30s para que el punto rojo del menu no quede desactualizado.
-  const { data: navRuns = [] } = useQuery({
-    queryKey: ["solicitudes"],
-    queryFn: listProductionRuns,
-    enabled: isAuthenticated() && Boolean(currentUser),
-    refetchInterval: 10000,
-    refetchOnWindowFocus: true,
-  });
-
-  // Pendientes de produccion: etapas que quedaron PENDIENTE_MATERIAL por un
-  // split automatico (ver allocate_stage_attempt_material). El punto rojo
-  // aparece donde hay accion.
-  const pendingStageMaterial = navRuns.reduce(
-    (total, run) => total + (run.stage_attempts ?? []).filter((attempt) => attempt.status === "PENDIENTE_MATERIAL").length,
-    0,
-  );
-  const prodPending = pendingStageMaterial;
-  // El punto rojo de "hay que actuar" es de Produccion: Bandeja de mensajes
-  // ya es solo mensajeria, no hereda ese aviso.
-  const navBadges: Record<string, number> = {
-    "/produccion": prodPending,
-  };
+  // El punto rojo de "hay que actuar" en Produccion contaba las etapas
+  // PENDIENTE_MATERIAL que dejaba el split automatico por falta de stock. Ese
+  // split ya no existe (docs/superpowers/specs/2026-08-20-acta-v2-sin-splits-design.md:
+  // una Entrada que supera el stock se rechaza entera, no parte la etapa), asi
+  // que ningun intento puede quedar en ese estado y el contador era siempre 0.
+  // Se quito junto con la consulta de ordenes que lo alimentaba.
 
   // Punto azul-verdoso de mensajes sin leer (distinto del rojo de pendientes,
   // que es "hay que actuar"): junto a Inventario y Comunicados, desaparece en
@@ -207,7 +189,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {visibleNav.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-            const badge = navBadges[item.href] ?? 0;
             const messageBadge = messageBadges[item.href] ?? 0;
             return (
               <Link
@@ -218,14 +199,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon aria-hidden="true" size={18} />
                 <span>{item.label}</span>
-                {badge > 0 || messageBadge > 0 ? (
+                {messageBadge > 0 ? (
                   <span className="navBadges">
-                    {badge > 0 ? (
-                      <span className="navBadge" aria-label={`${badge} pendientes`}>{badge > 9 ? "9+" : badge}</span>
-                    ) : null}
-                    {messageBadge > 0 ? (
-                      <span className="navBadgeInfo" aria-label={`${messageBadge} mensajes sin leer`}>{messageBadge > 9 ? "9+" : messageBadge}</span>
-                    ) : null}
+                    <span className="navBadgeInfo" aria-label={`${messageBadge} mensajes sin leer`}>{messageBadge > 9 ? "9+" : messageBadge}</span>
                   </span>
                 ) : null}
               </Link>
