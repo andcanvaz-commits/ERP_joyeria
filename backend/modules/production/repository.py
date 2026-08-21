@@ -92,6 +92,24 @@ class ProductionProcessRepository:
         )
         return list(self.session.execute(statement).scalars().all())
 
+    def list_stage_attempt_decisions_by_attempt(
+        self, attempt_ids: list[UUID]
+    ) -> dict[UUID, list[ProductionRunStageAttemptDecision]]:
+        """La version por lote de list_stage_attempt_decisions, para armar la
+        lista completa de ordenes sin una consulta por intento (N+1) -- mismo
+        criterio que el resto de los lookups agrupados de _attach_*."""
+        if not attempt_ids:
+            return {}
+        statement = (
+            select(ProductionRunStageAttemptDecision)
+            .where(ProductionRunStageAttemptDecision.stage_attempt_id.in_(attempt_ids))
+            .order_by(ProductionRunStageAttemptDecision.decided_at.asc())
+        )
+        grouped: dict[UUID, list[ProductionRunStageAttemptDecision]] = {}
+        for decision in self.session.execute(statement).scalars().all():
+            grouped.setdefault(decision.stage_attempt_id, []).append(decision)
+        return grouped
+
     def get_acta_line(self, line_id: UUID) -> ProductionRunActaLine | None:
         statement = (
             select(ProductionRunActaLine)

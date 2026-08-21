@@ -467,3 +467,45 @@ def test_revert_stage_attempt_uses_ledger_not_stale_quantity_field(
     # en 10 -- 1 unidad de menos que nunca se devolvio.
     assert target_complement.current_stock == Decimal("0")
     assert raw_material.current_stock == Decimal("100")
+
+
+def test_revert_stage_attempt_entrega_side_uses_ledger_not_stale_quantity_field(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Espejo del test de arriba, pero del lado ENTREGA (review final, Fix 8):
+    la rama de ENTREGA seguia revirtiendo con un REVERSION_PRODUCCION por
+    line.quantity para toda linea PLAN/AUTO, aunque su movimiento real ya
+    viviera en el ledger por linea. Si el campo esta desalineado, devolvia de
+    menos (o de mas) materia prima real."""
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden entrega ledger"), current_user)
+    started = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id, responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("90"))],
+        ),
+        current_user,
+    )
+    attempt_id = started.stage_attempts[0].id
+    run = production_service.repository.get_run(order.id)
+    entrega_line = next(
+        line for line in run.acta_lines
+        if line.stage_attempt_id == attempt_id and line.side == "ENTREGA"
+    )
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("0")  # se consumieron los 100 de verdad
+
+    # Desalinea el campo a mano (sin pasar por update_acta_line): el ledger
+    # real sigue en 100, el campo dice 40.
+    entrega_line.quantity = Decimal("40")
+    db_session.flush()
+
+    production_service.approve_stage_attempt(attempt_id, current_user)
+    production_service.revert_stage_attempt(attempt_id, current_user, "corrijo etapa")
+
+    db_session.refresh(raw_material)
+    # Revirtiendo por line.quantity (40) quedarian 60 g de oro real perdidos.
+    assert raw_material.current_stock == Decimal("100")

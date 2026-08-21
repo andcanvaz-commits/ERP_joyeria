@@ -351,6 +351,20 @@ class ProductionService:
         # dar el mismo mensaje "No se puede cancelar" sin importar la causa.
         try:
             self._revert_admin_stock_lines(run, current_user)
+            # La merma real que cada etapa aprobada sumo a Inventario > Merma
+            # (get_or_create_waste_item en approve_stage_attempt) tambien se
+            # devuelve: si no, cancelar la orden dejaba stock de merma
+            # huerfano, sin ninguna etapa real detras. Misma simetria que ya
+            # hace revert_stage_attempt para una etapa sola; no-op para las
+            # etapas que no generaron merma.
+            for attempt in run.stage_attempts:
+                self.inventory_service.reverse_waste_item(
+                    stage_attempt_id=attempt.id, reason=revert_reason, user_id=current_user.id
+                )
+        except InventoryDomainError as exc:
+            raise ProductionDomainError(
+                f"No se puede cancelar: {exc} Parte de lo que esta orden movio ya no esta disponible."
+            ) from exc
         except ProductionDomainError as exc:
             raise ProductionDomainError(
                 f"No se puede cancelar: {exc} Parte de lo que esta orden movio ya no esta disponible."
@@ -616,13 +630,10 @@ class ProductionService:
         cada linea -- aca solo se filtra por intento)."""
         from sqlalchemy import select
         from backend.modules.inventory.models import InventoryItem
-        from backend.modules.product_types.models import ProductType
 
-        attempt_decisions: dict = {
-            attempt.id: self.repository.list_stage_attempt_decisions(attempt.id)
-            for run in runs
-            for attempt in run.stage_attempts
-        }
+        attempt_decisions = self.repository.list_stage_attempt_decisions_by_attempt(
+            [attempt.id for run in runs for attempt in run.stage_attempts]
+        )
         user_ids = [
             uid
             for run in runs
@@ -639,24 +650,12 @@ class ProductionService:
                 select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(material_item_ids))
             ).all()
             material_item_names = {row[0]: row[1] for row in rows}
-        target_item_ids = list({
-            a.target_item_id for run in runs for a in run.stage_attempts if a.target_item_id
-        })
-        target_item_names: dict = {}
-        if target_item_ids:
-            rows = self.repository.session.execute(
-                select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id.in_(target_item_ids))
-            ).all()
-            target_item_names = {row[0]: row[1] for row in rows}
-        target_type_ids = list({
-            a.target_product_type_id for run in runs for a in run.stage_attempts if a.target_product_type_id
-        })
-        target_type_names: dict = {}
-        if target_type_ids:
-            rows = self.repository.session.execute(
-                select(ProductType.id, ProductType.name).where(ProductType.id.in_(target_type_ids))
-            ).all()
-            target_type_names = {row[0]: row[1] for row in rows}
+        # target_item_id/target_product_type_id ya no se escriben (el producto
+        # resultante vive como linea RECEPCION del acta desde el rediseno sin
+        # splits), y nada en el frontend lee target_label -- resolver esos dos
+        # nombres costaba dos consultas mas por GET /runs para siempre devolver
+        # null. Las columnas quedan (dato historico) y se siguen exponiendo tal
+        # cual, sin nombre resuelto.
         for read, run in zip(reads, runs):
             acta_lines_by_read = {line.id: line for line in read.acta_lines}
             read.stage_attempts = [
@@ -677,11 +676,7 @@ class ProductionService:
                     merma_percent=attempt.merma_percent,
                     target_product_type_id=attempt.target_product_type_id,
                     target_item_id=attempt.target_item_id,
-                    target_label=(
-                        target_item_names.get(attempt.target_item_id)
-                        if attempt.target_item_id
-                        else target_type_names.get(attempt.target_product_type_id)
-                    ),
+                    target_label=None,
                     started_by_name=(
                         user_names.get(str(attempt.started_by_user_id)) if attempt.started_by_user_id else None
                     ),
@@ -1234,6 +1229,13 @@ class ProductionService:
                     raise ProductionNotFoundError("Un producto resultante declarado no existe en inventario.")
             else:
                 item = self._resolve_or_create_finished_item(line.product_type_id, line.material_code, "g")
+            # Misma regla que add_admin_acta_line del lado RECEPCION: la
+            # materia prima nunca es el producto de una etapa -- ya paso a
+            # formar parte de el.
+            if item.item_type == "RAW_MATERIAL":
+                raise ProductionDomainError(
+                    f"'{item.name}' es materia prima: no puede ser el producto resultante de una etapa."
+                )
             resolved_products.append((item, line.quantity))
 
         sequence_order = len(run.stage_attempts) + 1
@@ -1242,6 +1244,15 @@ class ProductionService:
         )
         order_code = run.production_code or run.root_production_code
         attempt_code = _stage_attempt_code_for(order_code, process.name, attempt_no) if order_code else None
+
+        # La merma se calcula como una resta PLANA de los totales del acta
+        # (entrega - recepcion), sin conversion de unidades -- asi que las dos
+        # columnas tienen que hablar la misma unidad. La del material de la
+        # etapa (la primera Entrada, o gramos si no hay ninguna) manda: sin
+        # esto, un producto contado en "und" contra una materia prima en "g"
+        # daba una merma sin significado (regla previa al rediseno, confirmada
+        # por Rodrigo el 2026-08-20).
+        material_unit = resolved_materials[0][0].unit_code if resolved_materials else "g"
 
         # Fase 2: crear el intento y aplicar cada linea dentro de un
         # SAVEPOINT -- si una entrada no alcanza el stock disponible
@@ -1258,6 +1269,7 @@ class ProductionService:
                 code=attempt_code,
                 responsable_name=payload.responsable_name.strip(),
                 status=StageAttemptStatus.IN_PROGRESS,
+                unit_code=material_unit,
                 started_by_user_id=current_user.id,
                 started_at=datetime.utcnow(),
             )
@@ -1269,7 +1281,11 @@ class ProductionService:
                     side=side,
                     label=item.name,
                     quantity=Decimal("0"),
-                    unit_code=item.unit_code,
+                    # Entrada: la unidad real del item (es lo que de verdad
+                    # sale de inventario). Producto resultante: la unidad del
+                    # material de la etapa, para que la merma sume en una sola
+                    # unidad (ver material_unit arriba).
+                    unit_code=item.unit_code if side == ActaLineSide.ENTREGA else material_unit,
                     item_id=item.id,
                     source=ActaLineSource.PLAN,
                     line_order=sum(1 for l in run.acta_lines if l.side == side),
@@ -1416,23 +1432,13 @@ class ProductionService:
         )
         lines = [line for line in run.acta_lines if line.stage_attempt_id == attempt.id]
 
-        # Un run o tiene lote (flujo VIEJO: finish_stage_attempt, ya borrado,
-        # era lo unico que llamaba get_or_create_finished_product_lot) o no
-        # lo tiene (flujo NUEVO: start_stage_attempt mueve stock directo al
-        # destino, nunca crea lote) -- no hay mezcla de mecanismos dentro de
-        # una misma corrida, asi que este chequeo alcanza para decidir como
-        # revertir TODAS las lineas RECEPCION/PLAN de este intento.
-        from sqlalchemy import select
-        from backend.modules.inventory.models import InventoryMovement
-
-        has_lot = self.repository.session.execute(
-            select(InventoryMovement.id).where(
-                InventoryMovement.movement_type == "INGRESO_PRODUCCION",
-                InventoryMovement.reference_type == "production_order",
-                InventoryMovement.reference_id == run.id,
-            )
-        ).first() is not None
-
+        # Como revertir cada linea se decide POR LINEA, no por corrida: la
+        # senal es si ESA linea tiene movimientos propios
+        # (reference_type="production_run_acta_line" + su id, el mecanismo
+        # NUEVO de _apply_admin_acta_line_delta). Un flag a nivel de corrida
+        # ("¿esta orden tiene lote?") no dice con que mecanismo se movio esta
+        # linea concreta -- y una orden legacy sobre la que despues se inicio
+        # una etapa del flujo nuevo tiene lineas de los dos tipos conviviendo.
         try:
             # Dos pasadas: primero ENTREGA (devuelve stock a su item), recien
             # despues RECEPCION (lo resta del suyo) -- mismo motivo que en
@@ -1444,9 +1450,17 @@ class ProductionService:
             for line in lines:
                 if line.item_id is None or line.side != ActaLineSide.ENTREGA:
                     continue
-                if line.source == ActaLineSource.ADMIN_STOCK:
+                if self._line_has_own_movements(line):
+                    # Flujo NUEVO (o linea vieja ya editada con el mecanismo
+                    # nuevo): se revierte por su propio ledger, no por
+                    # line.quantity -- ese campo puede estar desalineado de lo
+                    # que de verdad se movio.
                     self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
                 elif line.source in (ActaLineSource.PLAN, ActaLineSource.AUTO):
+                    # Flujo VIEJO: el consumo lo emitio
+                    # consume_material_for_production a nombre de la ORDEN, y
+                    # reverse_production_consumption netea contra esa misma
+                    # referencia -- hay que devolverlo por ahi.
                     self.inventory_service.create_movement(
                         InventoryMovementCreate(
                             item_id=line.item_id,
@@ -1461,35 +1475,25 @@ class ProductionService:
             for line in lines:
                 if line.item_id is None or line.side != ActaLineSide.RECEPCION:
                     continue
-                if line.source == ActaLineSource.ADMIN_STOCK:
+                if self._line_has_own_movements(line):
                     self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
                 elif line.source == ActaLineSource.PLAN:
-                    if has_lot:
-                        # Flujo VIEJO: el producto resultante paso por el
-                        # lote de la orden (convert_lot_to_product/
-                        # convert_lot_to_complement) -- revertirlo con un
-                        # AJUSTE_NEGATIVO plano (reference_type=
-                        # "production_run") bypasea por completo la
-                        # referencia "production_order" que
-                        # reverse_finished_product_lot necesita para no
-                        # duplicar la resta si despues se cancela la orden
-                        # entera. reverse_stage_attempt_product usa esa
-                        # MISMA referencia a proposito.
-                        self.inventory_service.reverse_stage_attempt_product(
-                            run_id=run.id,
-                            target_id=line.item_id,
-                            quantity=line.quantity,
-                            user_id=current_user.id,
-                            reason=revert_reason,
-                        )
-                    else:
-                        # Flujo NUEVO: la linea movio stock directo al
-                        # destino via _apply_admin_acta_line_delta -- se
-                        # revierte por su propio ledger
-                        # (reference_type="production_run_acta_line"), no por
-                        # line.quantity (puede estar desactualizado si la
-                        # linea se edito despues via update_acta_line).
-                        self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
+                    # Flujo VIEJO: el producto resultante paso por el lote de
+                    # la orden (convert_lot_to_product/
+                    # convert_lot_to_complement) -- revertirlo con un
+                    # AJUSTE_NEGATIVO plano (reference_type="production_run")
+                    # bypasea por completo la referencia "production_order"
+                    # que reverse_finished_product_lot necesita para no
+                    # duplicar la resta si despues se cancela la orden entera.
+                    # reverse_stage_attempt_product usa esa MISMA referencia a
+                    # proposito.
+                    self.inventory_service.reverse_stage_attempt_product(
+                        run_id=run.id,
+                        target_id=line.item_id,
+                        quantity=line.quantity,
+                        user_id=current_user.id,
+                        reason=revert_reason,
+                    )
             # La merma real que esta etapa haya sumado a Inventario > Merma
             # tambien se revierte (simetria con get_or_create_waste_item en
             # approve_stage_attempt) -- si no, revertir dejaba stock de merma

@@ -111,12 +111,17 @@ def test_cancel_from_in_progress_restores_consumed_stock(
     # reversion de cancel_run sigue esa misma referencia y usa
     # DEVOLUCION_PRODUCCION (el "decrease_type" del lado ENTREGA), no
     # REVERSION_PRODUCCION (eso es solo del mecanismo del flujo viejo).
+    entrega_line_ids = {
+        line.id for line in run.acta_lines
+        if line.side == "ENTREGA" and line.item_id == raw_material.id
+    }
     reversions = [
         m for m in raw_material.movements
-        if m.movement_type == "DEVOLUCION_PRODUCCION" and m.reference_type == "production_run_acta_line"
+        if m.movement_type == "DEVOLUCION_PRODUCCION"
+        and m.reference_type == "production_run_acta_line"
+        and m.reference_id in entrega_line_ids
     ]
     assert len(reversions) == 1
-    assert reversions[0].quantity == Decimal("100")
     assert reversions[0].quantity == Decimal("100")
 
 
@@ -296,3 +301,40 @@ def test_cancel_run_blocks_when_converted_stock_already_moved(
 
     reloaded = production_service.repository.get_run(run.id)
     assert reloaded.status == "TERMINADA"
+
+
+def test_cancel_run_reverts_the_waste_stock_of_every_approved_stage(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Review final: aprobar una etapa con merma da de alta esa merma en
+    Inventario > Merma (get_or_create_waste_item). Cancelar la orden entera
+    tiene que devolverla, igual que ya hacia revert_stage_attempt para una
+    etapa sola -- si no, queda stock de merma sin ninguna etapa real detras."""
+    from sqlalchemy import select
+
+    from backend.modules.inventory.models import InventoryItem
+
+    run = _run_with_consumed_material(
+        db_session, production_service, current_user, process, raw_material, target_complement,
+        quantity=Decimal("100"), product_quantity=Decimal("90"),
+    )
+    attempt_id = run.stage_attempts[0].id
+    production_service.approve_stage_attempt(attempt_id, current_user)
+
+    waste_item = db_session.execute(
+        select(InventoryItem).where(
+            InventoryItem.item_type == "WASTE",
+            InventoryItem.name == f"Merma {process.name}",
+        )
+    ).scalar_one_or_none()
+    assert waste_item is not None
+    assert waste_item.current_stock == Decimal("10")  # 100 entregados - 90 producidos
+
+    production_service.cancel_run(run.id, current_user, "la etapa estaba mal cargada")
+
+    db_session.refresh(waste_item)
+    assert waste_item.current_stock == Decimal("0")
+    db_session.refresh(raw_material)
+    assert raw_material.current_stock == Decimal("100")
+    db_session.refresh(target_complement)
+    assert target_complement.current_stock == Decimal("0")

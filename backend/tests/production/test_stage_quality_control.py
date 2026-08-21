@@ -153,3 +153,69 @@ def test_merma_real_se_guarda_en_inventario_como_waste(
     ).scalar_one_or_none()
     assert waste_item is not None
     assert waste_item.current_stock == Decimal("10")
+
+
+def test_producto_resultante_line_is_stamped_with_the_material_unit(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    """Rodrigo, confirmado 2026-08-20: la merma es una resta plana de
+    ENTREGA menos RECEPCION, SIN conversion de unidades -- si la Entrada esta
+    en gramos y el producto resultante en "und", sumar las dos columnas da un
+    numero sin significado. La linea RECEPCION del Producto resultante se
+    sella con la unidad del material de la etapa (la de la primera Entrada, o
+    "g" si no hay ninguna), no con la unidad propia del item de catalogo.
+    Regla vieja que se perdio en la reescritura sin splits."""
+    from backend.modules.production.schemas import StageAttemptMaterialLine
+
+    assert raw_material.unit_code == "g"
+    assert target_complement.unit_code == "und"  # su unidad de catalogo, distinta a proposito
+    raw_material.current_stock = Decimal("100")
+    db_session.flush()
+    order = production_service.create_order(ProductionOrderCreate(name="Orden unidad merma"), current_user)
+
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            materials=[StageAttemptMaterialLine(item_id=raw_material.id, quantity=Decimal("100"))],
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("90"))],
+        ),
+        current_user,
+    )
+
+    attempt = result.stage_attempts[0]
+    recepcion = next(l for l in attempt.acta_lines if l.side == "RECEPCION")
+    assert recepcion.unit_code == "g"
+    entrega = next(l for l in attempt.acta_lines if l.side == "ENTREGA")
+    assert entrega.unit_code == "g"  # la Entrada si conserva la unidad real de su item
+    assert attempt.unit_code == "g"
+
+    approved = production_service.approve_stage_attempt(attempt.id, current_user)
+
+    done = approved.stage_attempts[0]
+    assert done.merma_weight == Decimal("10")  # 100 g - 90 g, una sola unidad
+    assert done.merma_percent == Decimal("10")
+    assert done.unit_code == "g"
+
+
+def test_producto_resultante_unit_falls_back_to_grams_without_entrada(
+    db_session, production_service, current_user, process, target_complement
+):
+    """Sin Entrada no hay unidad de material que heredar: se usa "g", nunca
+    la unidad propia del producto (misma regla que el default de
+    approve_stage_attempt/get_or_create_waste_item)."""
+    order = production_service.create_order(ProductionOrderCreate(name="Orden sin entrada"), current_user)
+
+    result = production_service.start_stage_attempt(
+        order.id,
+        StageAttemptCreate(
+            process_id=process.id,
+            responsable_name="Ana",
+            products=[StageAttemptProductLine(target_item_id=target_complement.id, quantity=Decimal("3"))],
+        ),
+        current_user,
+    )
+
+    recepcion = next(l for l in result.stage_attempts[0].acta_lines if l.side == "RECEPCION")
+    assert recepcion.unit_code == "g"
