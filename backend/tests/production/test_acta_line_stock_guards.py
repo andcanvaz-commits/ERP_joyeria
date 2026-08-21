@@ -386,9 +386,12 @@ def _started_attempt(db_session, production_service, current_user, process, raw_
     return order.id, attempt_id, entrega_line, recepcion_line
 
 
-def test_update_acta_line_rejects_on_approved_stage_attempt(
+def test_update_acta_line_allows_editing_on_approved_stage_attempt(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
+    """Rodrigo, 2026-08-20: corregir una etapa YA aprobada es un caso real --
+    solo se bloquea sobre una orden cancelada/recibida (esa si ya reverti
+    todo a cero, editar ahi emitiria un movimiento fantasma)."""
     _run_id, attempt_id, entrega_line, _recepcion_line = _started_attempt(
         db_session, production_service, current_user, process, raw_material, target_complement
     )
@@ -397,21 +400,20 @@ def test_update_acta_line_rejects_on_approved_stage_attempt(
 
     production_service.approve_stage_attempt(attempt_id, current_user)
 
-    with pytest.raises(ProductionDomainError, match="etapa ya fue aprobada"):
-        production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("70")), current_user)
+    production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("70")), current_user)
 
     db_session.refresh(raw_material)
-    assert raw_material.current_stock == Decimal("50")  # nada se movio de mas
+    assert raw_material.current_stock == Decimal("30")  # 100 - 70, se movio el delta
 
 
-def test_delete_acta_line_rejects_on_approved_stage_attempt(
+def test_delete_acta_line_allows_deleting_on_approved_stage_attempt(
     db_session, production_service, current_user, process, raw_material, target_complement
 ):
     """delete_acta_line solo borra MANUAL/ADMIN_STOCK -- la linea PLAN que crea
     start_stage_attempt no serviria para probar esta guarda (se rechaza antes,
     por "Solo se pueden borrar lineas agregadas a mano"). Se agrega una
-    ADMIN_STOCK enlazada al mismo intento, todavia EN_PROCESO, y recien
-    despues se aprueba el intento para probar el bloqueo nuevo."""
+    ADMIN_STOCK enlazada al mismo intento y se aprueba el intento: borrarla
+    debe seguir funcionando y revertir el stock."""
     from backend.modules.production.schemas import AdminActaLineCreate
 
     run_id, attempt_id, _entrega_line, _recepcion_line = _started_attempt(
@@ -432,12 +434,11 @@ def test_delete_acta_line_rejects_on_approved_stage_attempt(
 
     production_service.approve_stage_attempt(attempt_id, current_user)
 
-    with pytest.raises(ProductionDomainError, match="etapa ya fue aprobada"):
-        production_service.delete_acta_line(admin_line.id, current_user)
+    production_service.delete_acta_line(admin_line.id, current_user)
 
     db_session.refresh(supply)
-    assert supply.current_stock == Decimal("17")  # nada se revirtio
-    assert production_service.repository.get_acta_line(admin_line.id) is not None
+    assert supply.current_stock == Decimal("20")  # revertido
+    assert production_service.repository.get_acta_line(admin_line.id) is None
 
 
 # ---------------------------------------------------------------------------

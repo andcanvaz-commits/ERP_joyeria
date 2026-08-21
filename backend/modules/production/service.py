@@ -874,12 +874,9 @@ class ProductionService:
           muerta. Alcanzable desde el modal de acta de "Ver reporte de
           etapas" en un intento pasado, que pasa onEditLine sin mirar el
           estado de la orden.
-        - La linea pertenece a un intento de etapa (stage_attempt_id) que ya
-          no esta EN_PROCESO (fue aprobado): approve_stage_attempt ya sumo
-          la merma de ESTE intento (merma_weight/merma_percent) y, si hubo
-          perdida, ya creo el item de merma correspondiente -- editar una
-          linea del intento despues desincroniza esos totales del acta real
-          sin volver a calcular nada."""
+        Una etapa ya aprobada SI se puede seguir editando (Rodrigo, 2026-08-20:
+        corregir una etapa aprobada es un caso real -- la merma/residuo no se
+        recalculan solos, pero eso es aceptable, no un motivo para bloquear)."""
         if line.item_id is None:
             return
         run = line.run
@@ -887,12 +884,6 @@ class ProductionService:
             raise ProductionDomainError(
                 f"'{line.label}': no se puede editar esta linea -- la orden ya esta cancelada o recibida."
             )
-        if line.stage_attempt_id is not None:
-            attempt = self.repository.session.get(ProductionRunStageAttempt, line.stage_attempt_id)
-            if attempt is not None and attempt.status != StageAttemptStatus.IN_PROGRESS:
-                raise ProductionDomainError(
-                    f"'{line.label}': no se puede editar esta linea -- la etapa ya fue aprobada."
-                )
 
     def _line_has_own_movements(self, line: ProductionRunActaLine) -> bool:
         """¿Esta linea puntual tiene movimientos propios, referenciados por
