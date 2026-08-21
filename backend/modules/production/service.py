@@ -885,6 +885,96 @@ class ProductionService:
                 f"'{line.label}': no se puede editar esta linea -- la orden ya esta cancelada o recibida."
             )
 
+    def _recompute_stage_attempt_merma(self, attempt: "ProductionRunStageAttempt", current_user: CurrentUser) -> None:
+        """Recalcula merma_weight/merma_percent y el stock real de Inventario >
+        Merma de un intento YA APROBADO, despues de editar/borrar una de sus
+        lineas (Rodrigo, 2026-08-20: "edite pero nunca se actualizo la merma
+        con respecto a si cambio algun total" -- corregir una etapa aprobada
+        es un caso real, permitido, pero la merma no se recalculaba sola).
+        Aplica solo el DELTA contra lo que ya se movio a Inventario > Merma
+        para este intento puntual (mismo criterio que _apply_admin_acta_line_delta):
+        nunca un ingreso de la cantidad completa de nuevo, que duplicaria
+        stock si se edita mas de una vez."""
+        if attempt.status != StageAttemptStatus.APPROVED:
+            return
+        run = attempt.run
+        entrega_lines = [
+            line for line in run.acta_lines
+            if line.stage_attempt_id == attempt.id and line.side == ActaLineSide.ENTREGA
+        ]
+        recepcion_lines = [
+            line for line in run.acta_lines
+            if line.stage_attempt_id == attempt.id and line.side == ActaLineSide.RECEPCION
+        ]
+        entrega_total = sum((l.quantity for l in entrega_lines), Decimal("0"))
+        recepcion_total = sum((l.quantity for l in recepcion_lines), Decimal("0"))
+
+        if entrega_total <= 0:
+            attempt.merma_weight = None
+            attempt.merma_percent = None
+            new_loss = Decimal("0")
+        else:
+            new_loss = max(Decimal("0"), entrega_total - recepcion_total)
+            attempt.merma_weight = new_loss
+            attempt.merma_percent = new_loss / entrega_total * Decimal("100")
+
+        from sqlalchemy import select as _select
+        from backend.modules.inventory.models import InventoryItem, InventoryMovement
+
+        existing = self.repository.session.execute(
+            _select(InventoryMovement).where(
+                InventoryMovement.reference_type == "production_stage_attempt",
+                InventoryMovement.reference_id == attempt.id,
+            )
+        ).scalars().all()
+        net_so_far = sum(
+            (m.quantity if m.movement_type == "INGRESO_PRODUCCION" else -m.quantity for m in existing),
+            Decimal("0"),
+        )
+        delta = new_loss - net_so_far
+        if delta == 0:
+            return
+
+        first_entrega = next((l for l in entrega_lines if l.item_id is not None), None)
+        raw_material = (
+            self.repository.session.get(InventoryItem, first_entrega.item_id)
+            if first_entrega is not None else None
+        )
+        material_type = (raw_material.material_type or raw_material.name) if raw_material else None
+        name = f"Merma {attempt.process_name}".strip()
+        item = self.repository.session.execute(
+            _select(InventoryItem).where(
+                InventoryItem.item_type == "WASTE",
+                InventoryItem.name == name,
+                InventoryItem.material_type == material_type,
+            )
+        ).scalar_one_or_none()
+        if item is None:
+            if delta <= 0:
+                return
+            item = InventoryItem(
+                item_type="WASTE",
+                name=name,
+                sku=self.inventory_service._generate_sku("WASTE"),
+                material_type=material_type,
+                purity=raw_material.purity if raw_material else None,
+                unit_code=attempt.unit_code or "g",
+            )
+            self.repository.add_item(item)
+            self.repository.flush()
+
+        self.inventory_service.create_movement(
+            InventoryMovementCreate(
+                item_id=item.id,
+                movement_type="INGRESO_PRODUCCION" if delta > 0 else "AJUSTE_NEGATIVO",
+                quantity=abs(delta),
+                reason=f"Recalculo de merma tras editar el acta de la etapa {attempt.code or attempt.id}.",
+                reference_type="production_stage_attempt",
+                reference_id=attempt.id,
+            ),
+            user_id=current_user.id,
+        )
+
     def _line_has_own_movements(self, line: ProductionRunActaLine) -> bool:
         """¿Esta linea puntual tiene movimientos propios, referenciados por
         production_run_acta_line + su id? Es la senal exacta de "el stock de
@@ -1135,6 +1225,10 @@ class ProductionService:
                     )
                 self._apply_admin_acta_line_delta(line, payload.quantity, current_user)
                 line.quantity = payload.quantity
+                if line.stage_attempt_id is not None:
+                    attempt = self.repository.session.get(ProductionRunStageAttempt, line.stage_attempt_id)
+                    if attempt is not None:
+                        self._recompute_stage_attempt_merma(attempt, current_user)
             if payload.note is not None:
                 line.note = payload.note.strip() or None
             self.repository.flush()
@@ -1175,9 +1269,15 @@ class ProductionService:
             self._ensure_acta_line_stock_edit_allowed(line)
             self._apply_admin_acta_line_delta(line, Decimal("0"), current_user)
         run = line.run
+        deleted_stage_attempt_id = line.stage_attempt_id
         run.acta_lines.remove(line)
         self.repository.session.delete(line)
         self.repository.flush()
+        if deleted_stage_attempt_id is not None:
+            attempt = self.repository.session.get(ProductionRunStageAttempt, deleted_stage_attempt_id)
+            if attempt is not None:
+                self._recompute_stage_attempt_merma(attempt, current_user)
+                self.repository.flush()
         return self._read_with_names(run)
 
     def _read_with_names(self, run: ProductionRun) -> ProductionRunRead:

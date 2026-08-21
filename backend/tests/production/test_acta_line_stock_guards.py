@@ -507,3 +507,47 @@ def test_update_acta_line_refuses_legacy_return_only_line(
     assert complement_item.current_stock == Decimal("4")  # nada se movio de mas
     refreshed = production_service.repository.get_acta_line(line.id)
     assert refreshed.quantity == Decimal("2")  # el campo tampoco se toco
+
+
+# ---------------------------------------------------------------------------
+# Fix (Rodrigo, 2026-08-21): "edite pero nunca se actualizo la merma con
+# respecto a si cambio algun total" -- ahora que editar/borrar una linea de
+# una etapa ya APROBADA esta permitido, la merma (attempt.merma_weight/
+# merma_percent) y el stock real de Inventario > Merma se recalculan solos.
+# ---------------------------------------------------------------------------
+
+
+def test_editing_entrega_line_on_approved_attempt_recomputes_merma(
+    db_session, production_service, current_user, process, raw_material, target_complement
+):
+    from backend.modules.inventory.models import InventoryItem as _InventoryItem
+    from sqlalchemy import select
+
+    _run_id, attempt_id, entrega_line, _recepcion_line = _started_attempt(
+        db_session, production_service, current_user, process, raw_material, target_complement
+    )
+    # 50 entregado (_started_attempt), 1 se convirtio en producto -> merma inicial 49.
+    result = production_service.approve_stage_attempt(attempt_id, current_user)
+    attempt = result.stage_attempts[0]
+    assert attempt.merma_weight == Decimal("49")
+
+    waste_item = db_session.execute(
+        select(_InventoryItem).where(_InventoryItem.item_type == "WASTE", _InventoryItem.name == f"Merma {process.name}")
+    ).scalar_one()
+    assert waste_item.current_stock == Decimal("49")
+
+    # Se corrige la entrada real: en realidad solo se entregaron 60, no 100.
+    updated = production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("60")), current_user)
+    attempt_after = next(a for a in updated.stage_attempts if a.id == attempt_id)
+
+    assert attempt_after.merma_weight == Decimal("59")  # 60 - 1
+    db_session.refresh(waste_item)
+    assert waste_item.current_stock == Decimal("59")  # se ajusto el delta, no se sumo de nuevo
+
+    # Segunda correccion: sube a 80 -- confirma que el delta se aplica de
+    # nuevo (no se duplica lo ya movido).
+    updated2 = production_service.update_acta_line(entrega_line.id, ActaLineUpdate(quantity=Decimal("80")), current_user)
+    attempt_after2 = next(a for a in updated2.stage_attempts if a.id == attempt_id)
+    assert attempt_after2.merma_weight == Decimal("79")
+    db_session.refresh(waste_item)
+    assert waste_item.current_stock == Decimal("79")
